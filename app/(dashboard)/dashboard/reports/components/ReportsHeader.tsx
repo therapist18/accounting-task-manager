@@ -14,7 +14,7 @@ import {
   Loader2, LayoutGrid, FileText, ChevronDown, Clock, User,
   EyeOff, Eye, Filter, RotateCcw, X, TableProperties, Download,
   Search, Send, Shield, Users, Building2, ChevronRight, ChevronLeft,
-  Layers, Sparkles, Briefcase, Settings2, CheckCircle2
+  Layers, Sparkles, Briefcase, Settings2, CheckCircle2, Check, ListChecks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReportColumnVisibilityDialog } from "./ReportColumnVisibilityDialog";
@@ -26,18 +26,29 @@ interface ReportsSidebarProps {
   activeDeptId: string;
   setActiveDeptId: (id: string) => void;
   activeSubDepartments: any[];
-  activeSubDeptId: string;
-  setActiveSubDeptId: (id: string) => void;
+  activeSubDeptIds: string[];
+  setActiveSubDeptIds: (ids: string[]) => void;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  activeDepartment: any;
+  activeSubDepartments: any[];
+  activeSubDeptIds: string[];
 }
 
 export function ReportsSidebar({
   departments, activeDeptId, setActiveDeptId,
-  activeSubDepartments, activeSubDeptId, setActiveSubDeptId,
+  activeSubDepartments, activeSubDeptIds, setActiveSubDeptIds,
   isCollapsed = false, onToggleCollapse,
 }: ReportsSidebarProps) {
   const [sidebarSearch, setSidebarSearch] = React.useState("");
+
+  const toggleSubDept = (id: string) => {
+    setActiveSubDeptIds(
+      activeSubDeptIds.includes(id)
+        ? activeSubDeptIds.filter(x => x !== id)
+        : [...activeSubDeptIds, id]
+    );
+  };
 
   const getInitials = (name: string) => {
     if (!name) return "";
@@ -110,7 +121,7 @@ export function ReportsSidebar({
               return (
                 <button
                   key={dept.id}
-                  onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptId('all'); }}
+                  onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
                   className={cn(
                     "w-12 h-12 mx-auto mb-3 flex items-center justify-center rounded-2xl text-xs font-bold transition-all duration-300 relative group",
                     isActive
@@ -130,7 +141,7 @@ export function ReportsSidebar({
             return (
               <div key={dept.id} className="group/dept">
                 <button
-                  onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptId('all'); }}
+                  onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
                   className={cn(
                     "w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all duration-200 mb-1",
                     isActive
@@ -152,30 +163,62 @@ export function ReportsSidebar({
                   {isActive && <div className="h-1.5 w-1.5 rounded-full bg-indigo-600 shadow-[0_0_8px_rgba(79,70,229,0.6)]" />}
                 </button>
 
-                {/* Sub-departments Nested */}
+                {/* Sub-departments — multi-select checklist */}
                 {isActive && activeSubDepartments.length > 0 && (
-                  <div className="ml-7 pl-4 border-l-2 border-slate-100 space-y-1 my-2">
+                  <div className="ml-7 pl-4 border-l-2 border-indigo-100 space-y-1 my-2">
+                    <div className="flex items-center justify-between px-3 pb-1">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                        Sub-departments
+                      </span>
+                      {activeSubDeptIds.length > 0 && (
+                        <button
+                          onClick={() => setActiveSubDeptIds([])}
+                          className="text-[9px] font-bold text-indigo-500 hover:text-indigo-700 uppercase tracking-wide"
+                        >
+                          Clear ({activeSubDeptIds.length})
+                        </button>
+                      )}
+                    </div>
+
+                    {/* "All" pseudo-option — clears the selection */}
                     <button
-                      onClick={() => setActiveSubDeptId('all')}
+                      onClick={() => setActiveSubDeptIds([])}
                       className={cn(
-                        "w-full text-left px-3 py-1.5 text-xs rounded-lg transition-all font-medium",
-                        activeSubDeptId === 'all' ? "text-indigo-600 bg-indigo-50/50" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                        "w-full flex items-center gap-2 text-left px-3 py-1.5 text-xs rounded-lg transition-all font-semibold",
+                        activeSubDeptIds.length === 0
+                          ? "text-indigo-700 bg-indigo-50 ring-1 ring-indigo-200"
+                          : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
                       )}
                     >
-                      Overview
+                      <ListChecks className={cn("h-3.5 w-3.5 shrink-0", activeSubDeptIds.length === 0 ? "text-indigo-500" : "text-slate-400")} />
+                      <span className="flex-1 truncate">All Sub-departments</span>
+                      {activeSubDeptIds.length === 0 && <Check className="h-3.5 w-3.5 text-indigo-500 shrink-0" />}
                     </button>
-                    {activeSubDepartments.map((sub) => (
-                      <button
-                        key={sub.id}
-                        onClick={() => setActiveSubDeptId(sub.id.toString())}
-                        className={cn(
-                          "w-full text-left px-3 py-1.5 text-xs rounded-lg transition-all font-medium truncate",
-                          activeSubDeptId === sub.id.toString() ? "text-indigo-600 bg-indigo-50/50" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
-                        )}
-                      >
-                        {sub.name}
-                      </button>
-                    ))}
+
+                    {activeSubDepartments.map((sub) => {
+                      const id = sub.id.toString();
+                      const checked = activeSubDeptIds.includes(id);
+                      return (
+                        <button
+                          key={sub.id}
+                          onClick={() => toggleSubDept(id)}
+                          className={cn(
+                            "w-full flex items-center gap-2 text-left px-3 py-1.5 text-xs rounded-lg transition-all font-medium truncate",
+                            checked
+                              ? "text-indigo-700 bg-indigo-50 ring-1 ring-indigo-200 font-semibold"
+                              : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                          )}
+                        >
+                          <span className={cn(
+                            "h-3.5 w-3.5 rounded-[5px] border flex items-center justify-center shrink-0 transition-colors",
+                            checked ? "bg-indigo-600 border-indigo-600" : "border-slate-300 bg-white group-hover:border-slate-400"
+                          )}>
+                            {checked && <Check className="h-2.5 w-2.5 text-white" strokeWidth={3} />}
+                          </span>
+                          <span className="flex-1 truncate">{sub.name}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -192,66 +235,160 @@ export function ReportsSidebar({
   );
 }
 
-// ─── Main Toolbar ─────────────────────────────────────────────────────────────
-
-// ─── Main Toolbar ─────────────────────────────────────────────────────────────
-
-export function ReportsToolbar({
-  activeReport, setIsReportDialogOpen,
-  activePerspective, setActivePerspective,
-  allTasksCount, officerTaskCounts, taskManagerTaskCounts, clientTaskCounts,
-  columns, visibleColumnIds, setVisibleColumnIds,
-  showTimeTrackingColumns, setShowTimeTrackingColumns,
-  showDocRequirementsColumns, setShowDocRequirementsColumns,
-  view, setView,
-  handleSendReport,
-  showTimeStatuses, setShowTimeStatuses,
-  showNARows, setShowNARows,
-  handleExport, refreshData, loading,
-  jobLevelLabel,
-}: ReportsToolbarProps) {
-  const perspectiveCounts: Record<string, number> = {
-    overview: allTasksCount,
-    officers: officerTaskCounts.all,
-    managers: taskManagerTaskCounts.all,
-    clients: clientTaskCounts.all,
-  };
+export function ReportsToolbar({ activeReport, setIsReportDialogOpen, columns, visibleColumnIds, setVisibleColumnIds, showTimeTrackingColumns, setShowTimeTrackingColumns, showDocRequirementsColumns, setShowDocRequirementsColumns, view, setView, handleSendReport, refreshData, loading, activeDepartment, activeSubDepartments, activeSubDeptIds }: ReportsToolbarProps) {
+  const selectedSubDeptText = React.useMemo(() => {
+    if (activeSubDeptIds.length === 0) return "All Sub-departments";
+    if (activeSubDeptIds.length === 1) {
+      return activeSubDepartments.find(s => s.id.toString() === activeSubDeptIds[0])?.name || "Selected Sub-department";
+    }
+    return `${activeSubDeptIds.length} Sub-departments`;
+  }, [activeSubDeptIds, activeSubDepartments]);
 
   return (
-    <div className="bg-white border-b border-slate-200 px-6 py-5 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-30">
-      <div className="flex items-center gap-8">
-        {/* LARGE REPORT TITLE SELECTOR */}
+    <div className="bg-white border-b border-slate-200 sticky top-0 z-30">
+      <div className="max-w-[1600px] mx-auto py-5 flex items-center justify-between gap-8">
+        {/* LEFT: REPORT IDENTITY - Now has much more room */}
         <div
           onClick={() => setIsReportDialogOpen(true)}
-          className="group cursor-pointer flex flex-col"
+          className="group cursor-pointer flex items-center gap-4 transition-all"
         >
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-[0.2em]">Active Report</span>
-            <div className="h-px w-8 bg-indigo-100" />
-          </div>
-          <div className="flex items-center gap-3">
-             <h1 className="text-3xl font-black text-slate-900 tracking-tight group-hover:text-indigo-600 transition-colors">
-               {activeReport?.name || "Select Report"}
-             </h1>
-             <div className="p-1.5 rounded-lg bg-slate-50 border border-slate-200 group-hover:bg-indigo-50 group-hover:border-indigo-200 transition-all">
-               <Settings2 className="h-5 w-5 text-slate-400 group-hover:text-indigo-600" />
-             </div>
+          <h1 className="text-4xl font-black text-slate-900 tracking-tight leading-none group-hover:text-indigo-600 transition-colors truncate uppercase">
+            {activeReport?.name || "Select Report"}
+          </h1>
+          <div className="flex-shrink-0 p-1.5 rounded-lg bg-slate-50 border border-slate-200 group-hover:bg-indigo-50 group-hover:border-indigo-200 transition-all">
+            <Settings2 className="h-5 w-5 text-slate-400 group-hover:text-indigo-600" />
           </div>
         </div>
-
-        {/* Active Job Level */}
-        {jobLevelLabel && (
-          <div className="flex items-center gap-3 px-4 py-2 rounded-2xl bg-amber-50/50 border border-amber-100 text-amber-700">
-            <Layers className="h-5 w-5 text-amber-500" />
-            <div className="flex flex-col border-l border-amber-200 pl-3">
-              <span className="text-[9px] font-bold uppercase tracking-widest text-amber-500/80">Job Level</span>
-              <span className="text-sm font-extrabold">{jobLevelLabel}</span>
-            </div>
+        <div className="flex items-center gap-2 mb-1.5 overflow-hidden">
+          <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">
+            <Building2 className="h-3 w-3" />
+            <span>{activeDepartment?.name || "All Departments"}</span>
           </div>
-        )}
+          <ChevronRight className="h-3 w-3 text-slate-300 shrink-0" />
+          <div className="flex items-center gap-1 text-[10px] font-bold text-indigo-500 uppercase tracking-wider whitespace-nowrap">
+            <Layers className="h-3 w-3" />
+            <span>{selectedSubDeptText}</span>
+          </div>
+        </div>
+        {/* RIGHT: ACTION BUTTONS */}
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2 pr-3 border-r border-slate-200">
+            <ReportColumnVisibilityDialog
+              columns={columns}
+              visibleColumnIds={visibleColumnIds}
+              setVisibleColumnIds={setVisibleColumnIds}
+              showTimeTrackingColumns={showTimeTrackingColumns}
+              setShowTimeTrackingColumns={setShowTimeTrackingColumns}
+              showDocRequirementsColumns={showDocRequirementsColumns}
+              setShowDocRequirementsColumns={setShowDocRequirementsColumns}
+            />
 
-        {/* Perspective Switcher */}
-        <div className="hidden lg:flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+            <Button
+              variant="outline"
+              className={cn(
+                "h-10 px-4 text-xs font-bold rounded-xl border-slate-200 hover:bg-slate-50 transition-all",
+                view === 'transposed' && "bg-indigo-50 border-indigo-200 text-indigo-600"
+              )}
+              onClick={() => setView(view === 'standard' ? 'transposed' : 'standard')}
+            >
+              {view === 'standard' ? (
+                <><LayoutGrid className="h-4 w-4 mr-2 text-indigo-500" />Transpose</>
+              ) : (
+                <><TableProperties className="h-4 w-4 mr-2 text-indigo-500" />Standard</>
+              )}
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button className="h-10 px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg shadow-indigo-100 gap-2 font-bold transition-all">
+                  <Send className="h-4 w-4" />
+                  Send Report
+                  <ChevronDown className="h-3 w-3 opacity-50" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 p-1.5 rounded-xl shadow-xl border-slate-200">
+                <div className="px-2 py-1.5 mb-1">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Delivery Options</p>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex flex-col gap-1 p-2 bg-slate-50 rounded-lg">
+                    <div className="flex items-center gap-2 px-1 mb-1">
+                      <Shield className="h-3 w-3 text-blue-500" />
+                      <span className="text-[10px] font-bold text-slate-600">OFFICER EXPORT</span>
+                    </div>
+                    <div className="flex gap-1">
+                      <button onClick={() => handleSendReport('officer', 'excel')} className="flex-1 bg-white hover:bg-blue-50 border border-slate-200 py-1.5 rounded-md text-[10px] font-bold transition-colors">Excel</button>
+                      <button onClick={() => handleSendReport('officer', 'pdf')} className="flex-1 bg-white hover:bg-blue-50 border border-slate-200 py-1.5 rounded-md text-[10px] font-bold transition-colors">PDF</button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1 p-2 bg-slate-50 rounded-lg">
+                    <div className="flex items-center gap-2 px-1 mb-1">
+                      <User className="h-3 w-3 text-violet-500" />
+                      <span className="text-[10px] font-bold text-slate-600">MANAGER EXPORT</span>
+                    </div>
+                    <div className="flex gap-1">
+                      <button onClick={() => handleSendReport('manager', 'excel')} className="flex-1 bg-white hover:bg-violet-50 border border-slate-200 py-1.5 rounded-md text-[10px] font-bold transition-colors">Excel</button>
+                      <button onClick={() => handleSendReport('manager', 'pdf')} className="flex-1 bg-white hover:bg-violet-50 border border-slate-200 py-1.5 rounded-md text-[10px] font-bold transition-colors">PDF</button>
+                    </div>
+                  </div>
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <Button
+              variant="outline"
+              onClick={refreshData}
+              disabled={loading}
+              className="h-9 w-9 p-0 border-slate-200 rounded-lg hover:bg-slate-50"
+            >
+              <RotateCcw className={cn('h-3.5 w-3.5 text-slate-500', loading && 'animate-spin')} />
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function PersonFilterStrip({
+  activePerspective, setActivePerspective,
+  allTasksCount = 0,
+  officerTaskCounts = { all: 0 },
+  taskManagerTaskCounts = { all: 0 },
+  clientTaskCounts = { all: 0 },
+  availableOfficers = [], activeOfficerTab, setActiveOfficerTab, officerFilterMode, setOfficerFilterMode,
+  availableTaskManagers = [], activeTaskManagerTab, setActiveTaskManagerTab,
+  taskManagerFilterMode, setTaskManagerFilterMode,
+}: any) {
+
+  // Defensive mapping to ensure .all exists
+  const perspectiveCounts: Record<string, number> = {
+    overview: allTasksCount || 0,
+    officers: officerTaskCounts?.all || 0,
+    managers: taskManagerTaskCounts?.all || 0,
+    clients: clientTaskCounts?.all || 0,
+  };
+
+  const isOfficer = activePerspective === 'officers';
+  const isManager = activePerspective === 'managers';
+  const showPersonList = isOfficer || isManager;
+
+  const data = isOfficer ? availableOfficers : availableTaskManagers;
+  const activeTab = isOfficer ? activeOfficerTab : activeTaskManagerTab;
+  const setActiveTab = isOfficer ? setActiveOfficerTab : setActiveTaskManagerTab;
+  const counts = isOfficer ? officerTaskCounts : taskManagerTaskCounts;
+  const mode = isOfficer ? officerFilterMode : taskManagerFilterMode;
+  const setMode = isOfficer ? setOfficerFilterMode : setTaskManagerFilterMode;
+
+  return (
+    <div className="bg-slate-50/50 border-b border-slate-200 flex flex-col">
+      {/* ROW 1: PRIMARY PERSPECTIVE TABS */}
+      <div className="px-6 py-3 flex items-center justify-between border-b border-slate-200/60 bg-white">
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
           {PERSPECTIVE_TABS.map(p => {
             const active = activePerspective === p.value;
             const count = perspectiveCounts[p.value];
@@ -260,9 +397,9 @@ export function ReportsToolbar({
                 key={p.value}
                 onClick={() => setActivePerspective(p.value)}
                 className={cn(
-                  'px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2',
+                  'px-5 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2.5',
                   active
-                    ? 'bg-white text-indigo-600 shadow-sm'
+                    ? 'bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200'
                     : 'text-slate-500 hover:text-slate-700'
                 )}
               >
@@ -276,189 +413,70 @@ export function ReportsToolbar({
             );
           })}
         </div>
-      </div>
 
-      {/* Action Buttons */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2 border-r border-slate-200 pr-3">
-          <ReportColumnVisibilityDialog
-            columns={columns}
-            visibleColumnIds={visibleColumnIds}
-            setVisibleColumnIds={setVisibleColumnIds}
-            showTimeTrackingColumns={showTimeTrackingColumns}
-            setShowTimeTrackingColumns={setShowTimeTrackingColumns}
-            showDocRequirementsColumns={showDocRequirementsColumns}
-            setShowDocRequirementsColumns={setShowDocRequirementsColumns}
-          />
-
-          <Button
-            variant="outline"
-            className="h-10 px-4 text-xs font-bold border-slate-200 rounded-xl hover:bg-slate-50"
-            onClick={() => setView(view === 'standard' ? 'transposed' : 'standard')}
-          >
-            {view === 'standard' ? (
-              <><LayoutGrid className="h-4 w-4 mr-2 text-indigo-500" />Transpose</>
-            ) : (
-              <><TableProperties className="h-4 w-4 mr-2 text-indigo-500" />Standard</>
-            )}
-          </Button>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="h-10 px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg shadow-indigo-100 gap-2 font-bold transition-all hover:-translate-y-0.5">
-                <Send className="h-4 w-4" />
-                Send Report
-                <ChevronDown className="h-3 w-3 opacity-50" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64 p-2 rounded-2xl">
-              {/* Officer */}
-              <div className="px-2 pt-2 pb-1 flex items-center gap-2">
-                <Shield className="h-3.5 w-3.5 text-blue-500" />
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Officer</span>
+        {showPersonList && (
+          <Select value={mode} onValueChange={setMode}>
+            <SelectTrigger className="w-44 h-9 bg-white border-slate-200 rounded-lg text-xs font-bold shadow-sm">
+              <div className="flex items-center gap-2">
+                <Clock className="h-3.5 w-3.5 text-indigo-500" />
+                <SelectValue />
               </div>
-              <div className="flex gap-1.5 px-2 pb-2">
-                <button onClick={() => handleSendReport('officer', 'excel')} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-semibold transition-colors">
-                  <Download className="h-3.5 w-3.5" /> Excel
-                </button>
-                <button onClick={() => handleSendReport('officer', 'pdf')} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-semibold transition-colors">
-                  <FileText className="h-3.5 w-3.5" /> PDF
-                </button>
-              </div>
-              <DropdownMenuSeparator className="my-1" />
-              {/* Manager */}
-              <div className="px-2 pt-2 pb-1 flex items-center gap-2">
-                <User className="h-3.5 w-3.5 text-violet-500" />
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Manager</span>
-              </div>
-              <div className="flex gap-1.5 px-2 pb-2">
-                <button onClick={() => handleSendReport('manager', 'excel')} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-violet-50 hover:bg-violet-100 border border-violet-200 text-violet-700 text-xs font-semibold transition-colors">
-                  <Download className="h-3.5 w-3.5" /> Excel
-                </button>
-                <button onClick={() => handleSendReport('manager', 'pdf')} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-violet-50 hover:bg-violet-100 border border-violet-200 text-violet-700 text-xs font-semibold transition-colors">
-                  <FileText className="h-3.5 w-3.5" /> PDF
-                </button>
-              </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <Button variant="outline" onClick={refreshData} disabled={loading} className="h-10 w-10 p-0 border-slate-200 rounded-xl hover:bg-slate-50">
-             <RotateCcw className={cn('h-4 w-4 text-slate-500', loading && 'animate-spin')} />
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Person Filter Strip (Officer / Manager) ──────────────────────────────────
-
-export function PersonFilterStrip({
-  activePerspective,
-  availableOfficers, activeOfficerTab, setActiveOfficerTab, officerTaskCounts, officerFilterMode, setOfficerFilterMode,
-  availableTaskManagers, activeTaskManagerTab, setActiveTaskManagerTab, taskManagerTaskCounts, taskManagerFilterMode, setTaskManagerFilterMode,
-}: PersonFilterStripProps) {
-  if (activePerspective !== 'officers' && activePerspective !== 'managers') return null;
-
-  const isOfficer = activePerspective === 'officers';
-  const data = isOfficer ? availableOfficers : availableTaskManagers;
-  const activeTab = isOfficer ? activeOfficerTab : activeTaskManagerTab;
-  const setActiveTab = isOfficer ? setActiveOfficerTab : setActiveTaskManagerTab;
-  const counts = isOfficer ? officerTaskCounts : taskManagerTaskCounts;
-  const mode = isOfficer ? officerFilterMode : taskManagerFilterMode;
-  const setMode = isOfficer ? setOfficerFilterMode : setTaskManagerFilterMode;
-
-  const gradientClasses = isOfficer 
-    ? "data-[active=true]:bg-gradient-to-r data-[active=true]:from-blue-600 data-[active=true]:to-blue-700" 
-    : "data-[active=true]:bg-gradient-to-r data-[active=true]:from-violet-600 data-[active=true]:to-violet-700";
-
-  return (
-    <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-4">
-      {/* Icon Label */}
-      <div className={cn(
-        "flex items-center gap-2 px-3 py-2 rounded-xl border font-black text-[10px] uppercase tracking-tighter shadow-sm shrink-0",
-        isOfficer ? "bg-blue-50 border-blue-100 text-blue-700" : "bg-violet-50 border-violet-100 text-violet-700"
-      )}>
-        {isOfficer ? <Shield className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
-        {isOfficer ? "Officer Filter" : "Manager Filter"}
-      </div>
-
-      {/* Updated Tabs List Styling for Persons */}
-      <div className="flex-1 flex items-center gap-1 p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200 rounded-lg overflow-x-auto no-scrollbar">
-        <button
-          onClick={() => setActiveTab('all')}
-          data-active={activeTab === 'all'}
-          className={cn(
-            "px-4 h-8 rounded-md text-xs gap-2 font-bold transition-all duration-200 flex items-center whitespace-nowrap",
-            activeTab === 'all'
-              ? `${isOfficer ? 'bg-gradient-to-r from-blue-600 to-blue-700' : 'bg-gradient-to-r from-violet-600 to-violet-700'} text-white shadow-md`
-              : "text-slate-600 hover:bg-slate-200/50"
-          )}
-        >
-          All {isOfficer ? "Officers" : "Managers"}
-          <Badge variant="secondary" className={cn("ml-1 px-1.5 py-0 text-[10px]", activeTab === 'all' ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600")}>
-            {counts.all}
-          </Badge>
-        </button>
-
-        {data.map((p: any) => {
-          const isActive = activeTab === p.id.toString();
-          const count = counts[p.id] || 0;
-          return (
-            <button
-              key={p.id}
-              onClick={() => setActiveTab(isActive ? 'all' : p.id.toString())}
-              data-active={isActive}
-              className={cn(
-                "px-4 h-8 rounded-md text-xs gap-2 font-bold transition-all duration-200 flex items-center whitespace-nowrap",
-                isActive
-                  ? `${isOfficer ? 'bg-gradient-to-r from-blue-600 to-blue-700' : 'bg-gradient-to-r from-violet-600 to-violet-700'} text-white shadow-md`
-                  : "text-slate-600 hover:bg-slate-200/50"
-              )}
-            >
-              {p.full_name || p.name || p.displayName}
-              {count > 0 && (
-                <Badge variant="secondary" className={cn("ml-1 px-1.5 py-0 text-[10px]", isActive ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600")}>
-                  {count}
-                </Badge>
-              )}
-            </button>
-          );
-        })}
-
-        {counts.__unallocated__ > 0 && (
-           <button
-            onClick={() => setActiveTab('__unallocated__')}
-            className={cn(
-              "px-4 h-8 rounded-md text-xs gap-2 font-bold transition-all duration-200 flex items-center whitespace-nowrap ml-2",
-              activeTab === '__unallocated__'
-                ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-md"
-                : "text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-100"
-            )}
-           >
-             Unallocated
-             <Badge variant="secondary" className={cn("ml-1 px-1.5 py-0 text-[10px]", activeTab === '__unallocated__' ? "bg-white/20 text-white" : "bg-amber-200 text-amber-800")}>
-               {counts.__unallocated__}
-             </Badge>
-           </button>
+            </SelectTrigger>
+            <SelectContent className="rounded-xl">
+              <SelectItem value="current" className="text-xs font-bold">Current Assignments</SelectItem>
+              <SelectItem value="history" className="text-xs font-bold">Historical Activity</SelectItem>
+            </SelectContent>
+          </Select>
         )}
       </div>
 
-      {/* Perspective Mode Toggle */}
-      <Select value={mode} onValueChange={setMode}>
-        <SelectTrigger className="w-40 h-10 bg-white border-slate-200 rounded-xl text-xs font-bold shadow-sm">
-          <div className="flex items-center gap-2">
-            <Clock className="h-3.5 w-3.5 text-slate-400" />
-            <SelectValue />
+      {/* ROW 2: SECONDARY PERSON TABS (Only shown for Officers/Managers) */}
+      {showPersonList && (
+        <div className="px-6 py-3 flex items-center gap-4 animate-in fade-in slide-in-from-top-1 duration-200">
+          <div className={cn(
+            "flex items-center gap-2 px-3 py-1.5 rounded-lg border font-black text-[10px] uppercase tracking-tighter shadow-sm shrink-0",
+            isOfficer ? "bg-blue-50 border-blue-100 text-blue-700" : "bg-violet-50 border-violet-100 text-violet-700"
+          )}>
+            {isOfficer ? <Shield className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+            Select {isOfficer ? "Officer" : "Manager"}
           </div>
-        </SelectTrigger>
-        <SelectContent className="rounded-xl">
-          <SelectItem value="current" className="text-xs font-bold">Current Basket</SelectItem>
-          <SelectItem value="history" className="text-xs font-bold">Historical View</SelectItem>
-        </SelectContent>
-      </Select>
+
+          <div className="flex-1 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+            <button
+              onClick={() => setActiveTab('all')}
+              className={cn(
+                "px-4 h-8 rounded-lg text-xs font-bold transition-all flex items-center whitespace-nowrap border",
+                activeTab === 'all'
+                  ? (isOfficer ? "bg-blue-600 border-blue-600 text-white shadow-md" : "bg-violet-600 border-violet-600 text-white shadow-md")
+                  : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+              )}
+            >
+              All {isOfficer ? "Officers" : "Managers"}
+              <span className={cn("ml-2 opacity-70 text-[10px]", activeTab === 'all' ? "text-white" : "text-slate-400")}>{counts.all}</span>
+            </button>
+
+            {data.map((p: any) => {
+              const isActive = activeTab === p.id.toString();
+              const count = counts[p.id] || 0;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => setActiveTab(isActive ? 'all' : p.id.toString())}
+                  className={cn(
+                    "px-4 h-8 rounded-lg text-xs font-bold transition-all flex items-center whitespace-nowrap border",
+                    isActive
+                      ? (isOfficer ? "bg-blue-600 border-blue-600 text-white shadow-md" : "bg-violet-600 border-violet-600 text-white shadow-md")
+                      : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                  )}
+                >
+                  {p.full_name || p.name || p.displayName}
+                  {count > 0 && <span className={cn("ml-2 opacity-70 text-[10px]", isActive ? "text-white" : "text-slate-400")}>{count}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -497,7 +515,7 @@ export function StatusFilterBar({
   allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount,
   searchQuery, setSearchQuery,
   activeClassId, setActiveClassId, activeSubClassId, setActiveSubClassId,
-  activeSubDeptId, activeSubDepartments,
+  activeSubDeptIds, activeSubDepartments,
   isFiltersDropdownOpen, setIsFiltersDropdownOpen,
 }: any) {
   const counts = {
@@ -508,8 +526,10 @@ export function StatusFilterBar({
     cancelled: cancelledCount
   };
 
+  // Class/Sub-class filter options derive from a single sub-department — fall back to
+  // the first selected (or first available) one when the user has multi-selected several.
   const currentSubDept = activeSubDepartments.find((s: any) =>
-    s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId)
+    s.id.toString() === (activeSubDeptIds[0] || activeSubDepartments[0]?.id.toString())
   );
 
   return (

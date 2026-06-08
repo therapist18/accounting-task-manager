@@ -139,7 +139,7 @@ export default function ReportsPage() {
   const [unifiedAssistants, setUnifiedAssistants] = useState<any[]>([]);
   const [availableJobLevels, setAvailableJobLevels] = useState<any[]>([]);
   const [activeDeptId, setActiveDeptId] = useState<string>("");
-  const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
+  const [activeSubDeptIds, setActiveSubDeptIds] = useState<string[]>([]);
   const [activeClassId, setActiveClassId] = useState<string>("all");
   const [activeSubClassId, setActiveSubClassId] = useState<string>("all");
   const [activeStatus, setActiveStatus] = useState<string>("wip");
@@ -432,7 +432,7 @@ export default function ReportsPage() {
     const departmentUsers = userService.getDepartmentUsers(
       allUsers,
       activeDeptId,
-      activeSubDeptId === 'all' ? undefined : activeSubDeptId
+      activeSubDeptIds.length === 1 ? activeSubDeptIds[0] : undefined
     );
 
     const allowedIds = new Set(departmentUsers.officers.map(o => o.id));
@@ -441,7 +441,7 @@ export default function ReportsPage() {
     setAvailableOfficers(final);
     setSelectedOfficers(prev => prev.filter(id => final.some(o => o.id === id)));
     setActiveOfficerTab(prev => (prev === 'all' || final.some(o => o.id === prev) ? prev : 'all'));
-  }, [activeDeptId, activeSubDeptId, unifiedOfficers, activeSubDepartments]);
+  }, [activeDeptId, activeSubDeptIds, unifiedOfficers, activeSubDepartments]);
 
   useEffect(() => {
     if (!activeDeptId) {
@@ -453,7 +453,7 @@ export default function ReportsPage() {
     const departmentUsers = userService.getDepartmentUsers(
       [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants],
       activeDeptId,
-      activeSubDeptId === 'all' ? undefined : activeSubDeptId
+      activeSubDeptIds.length === 1 ? activeSubDeptIds[0] : undefined
     );
 
     const allowedIds = new Set(departmentUsers.managers.map(m => m.id));
@@ -461,7 +461,7 @@ export default function ReportsPage() {
     const final = unifiedManagers.filter(m => allowedIds.has(m.id));
     setAvailableManagers(final);
     setSelectedManagers(prev => prev.filter(id => final.some(m => m.id === id)));
-  }, [activeDeptId, activeSubDeptId, unifiedManagers, activeSubDepartments]);
+  }, [activeDeptId, activeSubDeptIds, unifiedManagers, activeSubDepartments]);
 
   useEffect(() => {
     if (!activeDeptId) {
@@ -473,7 +473,7 @@ export default function ReportsPage() {
     const departmentUsers = userService.getDepartmentUsers(
       [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants],
       activeDeptId,
-      activeSubDeptId === 'all' ? undefined : activeSubDeptId
+      activeSubDeptIds.length === 1 ? activeSubDeptIds[0] : undefined
     );
 
     const allowedIds = new Set(departmentUsers.assistants.map(a => a.id));
@@ -481,7 +481,7 @@ export default function ReportsPage() {
     const final = unifiedAssistants.filter(a => allowedIds.has(a.id));
     setAvailableAssistants(final);
     setSelectedAssistants(prev => prev.filter(id => final.some(a => a.id === id)));
-  }, [activeDeptId, activeSubDeptId, unifiedAssistants, activeSubDepartments]);
+  }, [activeDeptId, activeSubDeptIds, unifiedAssistants, activeSubDepartments]);
 
   // Populate availableTaskManagers (same as availableManagers)
   useEffect(() => {
@@ -626,7 +626,7 @@ export default function ReportsPage() {
   const tasksByFilters = useMemo(() => {
     return tasks.filter(task => {
       if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
-      if (activeSubDeptId !== 'all' && task.subdepartment_id?.toString() !== activeSubDeptId) return false;
+      if (activeSubDeptIds.length > 0 && !activeSubDeptIds.includes(task.subdepartment_id?.toString())) return false;
       if (activeClassId !== 'all' && task.class_id?.toString() !== activeClassId) return false;
       if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
 
@@ -668,18 +668,18 @@ export default function ReportsPage() {
 
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activePerspective, activeOfficerTab, activeTaskManagerTab, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, effectiveClientIds, clientFilterMode, stages, getCurrentStageTracking, taskHasStageOfficer, isTaskWithClient, getTaskCompanyParticipant, getStageOfficerIds]);
+  }, [tasks, activeDeptId, activeSubDeptIds, activeClassId, activeSubClassId, activePerspective, activeOfficerTab, activeTaskManagerTab, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, effectiveClientIds, clientFilterMode, stages, getCurrentStageTracking, taskHasStageOfficer, isTaskWithClient, getTaskCompanyParticipant, getStageOfficerIds]);
 
   // Dept/subdept/class filter only — used for stable status tab counts (unaffected by officer/TM/BCL tabs)
   const tasksByDeptFilter = useMemo(() => {
     return tasks.filter(task => {
       if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
-      if (activeSubDeptId !== 'all' && task.subdepartment_id?.toString() !== activeSubDeptId) return false;
+      if (activeSubDeptIds.length > 0 && !activeSubDeptIds.includes(task.subdepartment_id?.toString())) return false;
       if (activeClassId !== 'all' && task.class_id?.toString() !== activeClassId) return false;
       if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId]);
+  }, [tasks, activeDeptId, activeSubDeptIds, activeClassId, activeSubClassId]);
 
   const allTasksCount = useMemo(() => tasksByFilters.length, [tasksByFilters]);
   const wipTasksCount = useMemo(() => {
@@ -760,7 +760,7 @@ export default function ReportsPage() {
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
       if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
-      if (activeSubDeptId !== 'all' && task.subdepartment_id?.toString() !== activeSubDeptId) return false;
+      if (activeSubDeptIds.length > 0 && !activeSubDeptIds.includes(task.subdepartment_id?.toString())) return false;
       if (activeClassId !== 'all' && task.class_id?.toString() !== activeClassId) return false;
       if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
 
@@ -810,7 +810,7 @@ export default function ReportsPage() {
 
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activeStatus, activePerspective, activeOfficerTab, activeTaskManagerTab, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, stages, getCurrentStageTracking, taskHasStageOfficer, isTaskWithClient, getStageOfficerIds]);
+  }, [tasks, activeDeptId, activeSubDeptIds, activeClassId, activeSubClassId, activeStatus, activePerspective, activeOfficerTab, activeTaskManagerTab, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, stages, getCurrentStageTracking, taskHasStageOfficer, isTaskWithClient, getStageOfficerIds]);
 
   const searchedTasks = useMemo(() => {
     if (!searchQuery) return filteredTasks;
@@ -889,8 +889,8 @@ export default function ReportsPage() {
     if (!activeDeptId || activeDeptId === 'all') return true;
     const dept = departments.find(d => d.id.toString() === activeDeptId);
     if (!dept) return true;
-    const subdept = activeSubDeptId && activeSubDeptId !== 'all'
-      ? dept.tm_subdepartments?.find((s: any) => s.id.toString() === activeSubDeptId)
+    const subdept = activeSubDeptIds.length === 1
+      ? dept.tm_subdepartments?.find((s: any) => s.id.toString() === activeSubDeptIds[0])
       : null;
 
     if (!subdept) {
@@ -927,7 +927,7 @@ export default function ReportsPage() {
     if (subdeptStage && typeof subdeptStage.applicable === 'boolean') return subdeptStage.applicable;
 
     return true;
-  }, [activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, departments]);
+  }, [activeDeptId, activeSubDeptIds, activeClassId, activeSubClassId, departments]);
 
   const getSortableValue = useCallback((task: any, col: any) => {
     if (!col) return '';
@@ -1900,21 +1900,21 @@ export default function ReportsPage() {
     );
   }, [sortedTasks, showNARows, stageOnlyColumns, stages, checkStageApplicableForTask]);
 
-const handleSendReport = useCallback(async (reportType: 'officer' | 'manager' | 'client', exportFormat: 'excel' | 'pdf') => {
+  const handleSendReport = useCallback(async (reportType: 'officer' | 'manager' | 'client', exportFormat: 'excel' | 'pdf') => {
     const deptName = activeDepartment?.name || 'All Departments';
-    const subdeptLabel = activeSubDeptId !== 'all'
-      ? activeSubDepartments.find((s: any) => s.id.toString() === activeSubDeptId)?.name || 'All'
+    const subdeptLabel = activeSubDeptIds.length > 0
+      ? activeSubDeptIds.map(id => activeSubDepartments.find((s: any) => s.id.toString() === id)?.name).filter(Boolean).join(', ') || 'Selected Subdepartments'
       : 'All Subdepartments';
     const statusLabel = activeStatus === 'all' ? 'All Statuses'
       : activeStatus === 'wip' ? 'WIP'
-      : activeStatus === 'write_up_completed' ? 'Write-Up Completed'
-      : activeStatus === 'endorsed' ? 'Endorsed'
-      : activeStatus === 'cancelled' ? 'Cancelled'
-      : activeStatus;
+        : activeStatus === 'write_up_completed' ? 'Write-Up Completed'
+          : activeStatus === 'endorsed' ? 'Endorsed'
+            : activeStatus === 'cancelled' ? 'Cancelled'
+              : activeStatus;
     const dateStr = format(new Date(), 'dd MMM yyyy');
     const reportTitle = reportType === 'officer' ? 'Officer Report'
       : reportType === 'manager' ? 'Manager Report'
-      : 'Client Follow-Up Report';
+        : 'Client Follow-Up Report';
     const accentHex = reportType === 'officer' ? '2563EB' : reportType === 'manager' ? '7C3AED' : 'EA580C';
 
     type Group = { name: string; tasks: any[] };
@@ -2133,9 +2133,9 @@ const handleSendReport = useCallback(async (reportType: 'officer' | 'manager' | 
     }
 
     toast({ title: 'Report Downloaded', description: `${reportTitle} exported as ${exportFormat.toUpperCase()}.` });
-  }, [activeDepartment, activeSubDeptId, activeSubDepartments, activeStatus, filteredColumns, filteredByNARows, availableOfficers, availableTaskManagers, getStageOfficerIds, isTaskWithClient, getExportCellValue]);
+  }, [activeDepartment, activeSubDeptIds, activeSubDepartments, activeStatus, filteredColumns, filteredByNARows, availableOfficers, availableTaskManagers, getStageOfficerIds, isTaskWithClient, getExportCellValue]);
 
-    const columnGroups = useMemo(() => {
+  const columnGroups = useMemo(() => {
     if (!filteredColumns.length) return [];
     const groups: any[] = [];
     const taskCols = filteredColumns.filter(c => c.type === 'task');
@@ -2203,32 +2203,47 @@ const handleSendReport = useCallback(async (reportType: 'officer' | 'manager' | 
     return rows;
   }, [activeReport, filteredColumns, expandedSections, stages, isStageApplicableToCurrentFilter]);
 
-  const jobLevelLabel = useMemo(() => {
+  // Full hierarchy path (Department → Sub-department → Class) for the report's configured job level
+  const jobLevelPath = useMemo(() => {
     if (!activeReport?.job_level) return null;
     const jl = activeReport.job_level;
+
+    let dept: any = null;
+    let subdept: any = null;
+    let cls: any = null;
+
     if (jl.class_id) {
-      const allClasses = departments.flatMap((d: any) => (d.tm_subdepartments || []).flatMap((s: any) => s.classes || []));
-      const cls = allClasses.find((c: any) => c.id.toString() === jl.class_id.toString());
-      return cls?.name || `Class ${jl.class_id}`;
+      outer: for (const d of departments) {
+        for (const s of (d.tm_subdepartments || [])) {
+          const c = (s.classes || []).find((c: any) => c.id.toString() === jl.class_id.toString());
+          if (c) { dept = d; subdept = s; cls = c; break outer; }
+        }
+      }
+      if (!cls) return [`Class ${jl.class_id}`];
+    } else if (jl.subdepartment_id) {
+      for (const d of departments) {
+        const s = (d.tm_subdepartments || []).find((s: any) => s.id.toString() === jl.subdepartment_id.toString());
+        if (s) { dept = d; subdept = s; break; }
+      }
+      if (!subdept) return [`Subdept ${jl.subdepartment_id}`];
+    } else if (jl.department_id) {
+      dept = departments.find((d: any) => d.id.toString() === jl.department_id.toString());
+      if (!dept) return [`Dept ${jl.department_id}`];
+    } else {
+      return null;
     }
-    if (jl.subdepartment_id) {
-      const allSubs = departments.flatMap((d: any) => d.tm_subdepartments || []);
-      const sub = allSubs.find((s: any) => s.id.toString() === jl.subdepartment_id.toString());
-      return sub?.name || `Subdept ${jl.subdepartment_id}`;
-    }
-    if (jl.department_id) {
-      const dept = departments.find((d: any) => d.id.toString() === jl.department_id.toString());
-      return dept?.name || `Dept ${jl.department_id}`;
-    }
-    return null;
+
+    return [dept?.name, subdept?.name, cls?.name].filter(Boolean);
   }, [activeReport, departments]);
 
   const breadcrumbParts = [
     activeReport?.name,
     activeDepartment?.name,
-    activeSubDeptId !== 'all' ? activeSubDepartments.find(s => s.id.toString() === activeSubDeptId)?.name : 'All Subdepartments',
+    activeSubDeptIds.length > 0
+      ? activeSubDeptIds.map(id => activeSubDepartments.find(s => s.id.toString() === id)?.name).filter(Boolean).join(', ')
+      : 'All Subdepartments',
     activeStatus === 'all' ? 'All Statuses' : activeStatus.replace(/_/g, ' ').toUpperCase(),
-    activeClassId !== 'all' ? `Class: ${activeSubDepartments.find(s => s.id.toString() === activeSubDeptId)?.classes?.find((c: any) => c.id.toString() === activeClassId)?.name || activeClassId}` : null
+    activeClassId !== 'all' ? `Class: ${activeSubDepartments.flatMap((s: any) => s.classes || []).find((c: any) => c.id.toString() === activeClassId)?.name || activeClassId}` : null
   ].filter(Boolean);
 
   if (reportLoading) {
@@ -2250,8 +2265,8 @@ const handleSendReport = useCallback(async (reportType: 'officer' | 'manager' | 
         activeDeptId={activeDeptId}
         setActiveDeptId={setActiveDeptId}
         activeSubDepartments={activeSubDepartments}
-        activeSubDeptId={activeSubDeptId}
-        setActiveSubDeptId={setActiveSubDeptId}
+        activeSubDeptIds={activeSubDeptIds}
+        setActiveSubDeptIds={setActiveSubDeptIds}
         isCollapsed={sidebarCollapsed}
         onToggleCollapse={handleSidebarToggle}
       />
@@ -2263,12 +2278,6 @@ const handleSendReport = useCallback(async (reportType: 'officer' | 'manager' | 
         <ReportsToolbar
           activeReport={activeReport}
           setIsReportDialogOpen={setIsReportDialogOpen}
-          activePerspective={activePerspective}
-          setActivePerspective={setActivePerspective}
-          allTasksCount={allTasksCount}
-          officerTaskCounts={officerTaskCounts}
-          taskManagerTaskCounts={taskManagerTaskCounts}
-          clientTaskCounts={clientTaskCounts}
           columns={columns}
           visibleColumnIds={visibleColumnIds}
           setVisibleColumnIds={setVisibleColumnIds}
@@ -2279,29 +2288,29 @@ const handleSendReport = useCallback(async (reportType: 'officer' | 'manager' | 
           view={view}
           setView={setView}
           handleSendReport={handleSendReport}
-          showTimeStatuses={showTimeStatuses}
-          setShowTimeStatuses={setShowTimeStatuses}
-          showNARows={showNARows}
-          setShowNARows={setShowNARows}
-          handleExport={handleExport}
           refreshData={refreshData}
           loading={loading}
-          jobLevelLabel={jobLevelLabel}
+          activeDepartment={activeDepartment}
+          activeSubDepartments={activeSubDepartments}
+          activeSubDeptIds={activeSubDeptIds}
         />
 
         {/* Second Row: Person Specific Filters (Conditional based on perspective) */}
         <PersonFilterStrip
           activePerspective={activePerspective}
+          setActivePerspective={setActivePerspective} // Added
+          allTasksCount={allTasksCount}                 // Added
+          officerTaskCounts={officerTaskCounts}
+          taskManagerTaskCounts={taskManagerTaskCounts}
+          clientTaskCounts={clientTaskCounts}           // Added
           availableOfficers={availableOfficers}
           activeOfficerTab={activeOfficerTab}
           setActiveOfficerTab={setActiveOfficerTab}
-          officerTaskCounts={officerTaskCounts}
           officerFilterMode={officerFilterMode}
           setOfficerFilterMode={setOfficerFilterMode}
           availableTaskManagers={availableTaskManagers}
           activeTaskManagerTab={activeTaskManagerTab}
           setActiveTaskManagerTab={setActiveTaskManagerTab}
-          taskManagerTaskCounts={taskManagerTaskCounts}
           taskManagerFilterMode={taskManagerFilterMode}
           setTaskManagerFilterMode={setTaskManagerFilterMode}
         />
@@ -2321,7 +2330,7 @@ const handleSendReport = useCallback(async (reportType: 'officer' | 'manager' | 
           setActiveClassId={setActiveClassId}
           activeSubClassId={activeSubClassId}
           setActiveSubClassId={setActiveSubClassId}
-          activeSubDeptId={activeSubDeptId}
+          activeSubDeptIds={activeSubDeptIds}
           activeSubDepartments={activeSubDepartments}
           isFiltersDropdownOpen={isFiltersDropdownOpen}
           setIsFiltersDropdownOpen={setIsFiltersDropdownOpen}
