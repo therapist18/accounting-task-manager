@@ -58,7 +58,9 @@
       "Bash(node -e \"const icons = require\\('lucide-react'\\); console.log\\('ListChecks:', typeof icons.ListChecks\\); console.log\\('Check:', typeof icons.Check\\);\")",
       "Bash(cat next.config.js)",
       "Bash(cat next.config.ts)",
-      "Bash(cat next.config.mjs)"
+      "Bash(cat next.config.mjs)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }
