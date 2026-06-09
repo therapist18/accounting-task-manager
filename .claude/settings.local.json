@@ -55,7 +55,10 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/dashboard/reports)",
       "Bash(curl -s http://localhost:3000/dashboard/reports -o /tmp/reports_resp.html -D /tmp/reports_headers.txt)",
       "Bash(curl -s http://localhost:3000/api/auth/session)",
-      "Bash(node -e \"const icons = require\\('lucide-react'\\); console.log\\('ListChecks:', typeof icons.ListChecks\\); console.log\\('Check:', typeof icons.Check\\);\")"
+      "Bash(node -e \"const icons = require\\('lucide-react'\\); console.log\\('ListChecks:', typeof icons.ListChecks\\); console.log\\('Check:', typeof icons.Check\\);\")",
+      "Bash(cat next.config.js)",
+      "Bash(cat next.config.ts)",
+      "Bash(cat next.config.mjs)"
     ]
   }
 }

@@ -246,7 +246,7 @@ export function ReportsToolbar({ activeReport, setIsReportDialogOpen, columns, v
 
   return (
     <div className="bg-white border-b border-slate-200 sticky top-0 z-30">
-      <div className="max-w-[1600px] mx-auto py-5 flex items-center justify-between gap-8">
+      <div className="px-2 max-w-[1600px] mx-auto py-5 flex items-center justify-between gap-8">
         {/* LEFT: REPORT IDENTITY - Now has much more room */}
         <div
           onClick={() => setIsReportDialogOpen(true)}
