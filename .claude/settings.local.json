@@ -60,7 +60,10 @@
       "Bash(cat next.config.ts)",
       "Bash(cat next.config.mjs)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(Get-Content \"e:\\\\GitHub\\\\accounting-task-manager\\\\app\\\\\\(dashboard\\)\\\\dashboard\\\\tasks\\\\components\\\\AutomationMappingDialog.tsx\")",
+      "Bash(Measure-Object -Line)",
+      "Bash(./gradlew :app:compileDebugKotlin)"
     ]
   }
 }

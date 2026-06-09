@@ -14,7 +14,7 @@ import {
   Loader2, LayoutGrid, FileText, ChevronDown, Clock, User,
   EyeOff, Eye, Filter, RotateCcw, X, TableProperties, Download,
   Search, Send, Shield, Users, Building2, ChevronRight, ChevronLeft,
-  Layers, Sparkles, Briefcase, Settings2, CheckCircle2, Check, ListChecks,
+  Layers, Sparkles, Briefcase, Settings2, CheckCircle2, Check, ListChecks, AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReportColumnVisibilityDialog } from "./ReportColumnVisibilityDialog";
@@ -474,6 +474,28 @@ export function PersonFilterStrip({
                 </button>
               );
             })}
+
+            {/* Unallocated tab — separated by a divider, only shown when there are unallocated tasks */}
+            {(counts.__unallocated__ ?? 0) > 0 && (
+              <>
+                <div className="h-5 w-px bg-slate-200 shrink-0 mx-1" />
+                <button
+                  onClick={() => setActiveTab(activeTab === '__unallocated__' ? 'all' : '__unallocated__')}
+                  className={cn(
+                    "px-3 h-8 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap border",
+                    activeTab === '__unallocated__'
+                      ? "bg-red-600 border-red-600 text-white shadow-md"
+                      : "bg-red-50 text-red-600 border-red-200 hover:bg-red-100 hover:border-red-300"
+                  )}
+                >
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  Unallocated
+                  <span className={cn("opacity-80 text-[10px]", activeTab === '__unallocated__' ? "text-white" : "text-red-500")}>
+                    {counts.__unallocated__}
+                  </span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
