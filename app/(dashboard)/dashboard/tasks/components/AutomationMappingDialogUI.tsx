@@ -9,7 +9,7 @@ import {
   Loader2, Zap, Database, FileText, Webhook, ChevronRight, AlertCircle,
   CheckCircle2, Edit3, X, Paperclip, ArrowUpDown, Filter, Check,
   List, ChevronDown, HelpCircle, Eye, Lock, Search, Settings, Calculator,
-  Info
+  Info, Terminal
 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -24,10 +24,10 @@ import { isValidValue, ETA_SCREENSHOT_DOCUMENT_ID } from '../utils/AutomationMap
 import supabase from '@/lib/supabase/client';
 
 const ENTITY_TYPE_COLORS: Record<string, string> = {
-  principal: 'bg-blue-100 text-blue-700 border-blue-200',
-  dependant: 'bg-purple-100 text-purple-700 border-purple-200',
+  principal: 'bg-indigo-100 text-indigo-700 border-indigo-200',
+  dependant: 'bg-sky-100 text-sky-700 border-sky-200',
   sponsor: 'bg-amber-100 text-amber-700 border-amber-200',
-  director: 'bg-green-100 text-green-700 border-green-200',
+  director: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   company: 'bg-slate-100 text-slate-700 border-slate-200',
   understudy: 'bg-teal-100 text-teal-700 border-teal-200',
 };
@@ -131,25 +131,25 @@ export const AutomationMappingDialogUI = ({
   const renderDataSource = (field: any) => {
     if (field.fieldType === 'array') {
       return (
-        <div className="flex items-center gap-1.5 text-blue-600">
+        <div className="flex items-center gap-1.5 text-blue-500">
           <List className="h-3.5 w-3.5 shrink-0" />
-          <span className="text-xs font-medium">Array</span>
+          <span className="text-xs">Array</span>
         </div>
       );
     }
     if (field.fieldType === 'document') {
       return (
-        <div className="flex items-center gap-1.5 text-amber-600">
+        <div className="flex items-center gap-1.5 text-amber-500">
           <Paperclip className="h-3.5 w-3.5 shrink-0" />
-          <span className="text-xs font-medium">Document</span>
+          <span className="text-xs">Document</span>
         </div>
       );
     }
     if (field.fieldType === 'computed') {
       return (
-        <div className="flex items-center gap-1.5 text-purple-600">
+        <div className="flex items-center gap-1.5 text-purple-500">
           <Calculator className="h-3.5 w-3.5 shrink-0" />
-          <span className="text-xs font-medium">Computed</span>
+          <span className="text-xs">Computed</span>
         </div>
       );
     }
@@ -157,30 +157,30 @@ export const AutomationMappingDialogUI = ({
       return (
         <div className="flex items-center gap-1.5 text-slate-400">
           <Lock className="h-3.5 w-3.5 shrink-0" />
-          <span className="text-xs font-medium">Preset Default</span>
+          <span className="text-xs">Preset Default</span>
         </div>
       );
     }
     if (field.linkedMasterFields?.length > 0) {
       return (
-        <div className="flex items-center gap-1.5 text-slate-600">
+        <div className="flex items-center gap-1.5 text-slate-500">
           <Database className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-          <span className="text-xs font-medium">Master: {field.linkedMasterFields[0]}</span>
+          <span className="text-xs">Master: {field.linkedMasterFields[0]}</span>
         </div>
       );
     }
     if (field.linkedJobQuestionIds?.length > 0) {
       return (
-        <div className="flex items-center gap-1.5 text-violet-600">
+        <div className="flex items-center gap-1.5 text-violet-500">
           <HelpCircle className="h-3.5 w-3.5 shrink-0" />
-          <span className="text-xs font-medium">Job Question</span>
+          <span className="text-xs">Job Question</span>
         </div>
       );
     }
     return (
       <div className="flex items-center gap-1.5 text-slate-400">
         <Settings className="h-3.5 w-3.5 shrink-0" />
-        <span className="text-xs font-medium">Direct Entry</span>
+        <span className="text-xs">Direct Entry</span>
       </div>
     );
   };
@@ -197,13 +197,13 @@ export const AutomationMappingDialogUI = ({
       const foundDoc = documentFiles.find(d => field.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(field.targetId));
       return foundDoc ? (
         <div className="flex items-center gap-1.5 justify-end">
-          <span className="text-[10px] font-medium text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">Available</span>
-          <Button size="sm" variant="ghost" onClick={() => handlePreviewDocument(foundDoc)} className="h-6 px-1.5 text-[10px] text-slate-500">
+          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">Available</span>
+          <Button size="sm" variant="ghost" onClick={() => handlePreviewDocument(foundDoc)} className="h-6 px-1.5 text-[10px] text-slate-500 hover:text-slate-700">
             <Eye className="h-3 w-3 mr-0.5" /> Preview
           </Button>
         </div>
       ) : (
-        <span className="text-[10px] font-medium text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">Missing</span>
+        <span className="text-[10px] font-semibold text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">Missing</span>
       );
     }
 
@@ -238,7 +238,7 @@ export const AutomationMappingDialogUI = ({
           ) : (
             <Input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }} className="h-7 text-xs w-36 border-indigo-300" />
           )}
-          <Button size="icon" onClick={() => saveEdit(isDropdown, normalizedOptions)} className="h-6 w-6 bg-green-600 hover:bg-green-700 shrink-0"><Check className="h-3 w-3" /></Button>
+          <Button size="icon" onClick={() => saveEdit(isDropdown, normalizedOptions)} className="h-6 w-6 bg-emerald-600 hover:bg-emerald-700 shrink-0"><Check className="h-3 w-3" /></Button>
           <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-6 w-6 text-red-500 shrink-0"><X className="h-3 w-3" /></Button>
         </div>
       );
@@ -277,7 +277,7 @@ export const AutomationMappingDialogUI = ({
           <PopoverTrigger asChild>
             <div className={cn(
               "text-sm flex items-center justify-end gap-1 px-2 py-1 rounded cursor-pointer hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-colors ml-auto",
-              isValueMissing ? "text-slate-400 italic" : "text-slate-800"
+              isValueMissing ? "text-slate-400 italic" : "text-slate-700"
             )}>
               <span className="truncate max-w-[180px]">{isValueMissing ? '—' : field.resolvedValue}</span>
               <ChevronDown className="h-3 w-3 text-slate-400 shrink-0" />
@@ -335,7 +335,7 @@ export const AutomationMappingDialogUI = ({
         className={cn(
           "text-sm flex items-center justify-end gap-1 px-2 py-1 rounded transition-colors group/val relative",
           persistenceSource ? "cursor-pointer hover:bg-slate-50 hover:border hover:border-slate-200 border border-transparent" : "cursor-default",
-          isValueMissing ? "text-slate-400 italic" : "text-slate-800"
+          isValueMissing ? "text-slate-300 italic" : "text-slate-700 font-medium"
         )}
         onClick={() => {
           if (!persistenceSource) return;
@@ -367,17 +367,17 @@ export const AutomationMappingDialogUI = ({
     return (
       <div className="space-y-4">
         {savedScreenshotDoc && (
-          <Card className="border-green-300 bg-green-50/40 shadow-sm">
+          <Card className="border-emerald-200 bg-emerald-50/40 shadow-sm">
             <CardContent className="p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-green-100 text-green-600"><CheckCircle2 className="h-5 w-5" /></div>
+                <div className="p-2 rounded-lg bg-emerald-100 text-emerald-600"><CheckCircle2 className="h-5 w-5" /></div>
                 <div>
                   <h4 className="font-bold text-sm text-slate-900">eTA Kenya Confirmation Screenshot</h4>
                   <p className="text-[10px] text-slate-500">{savedScreenshotDoc.file_name}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-medium text-green-700 bg-green-100 border border-green-200 rounded-full px-2 py-0.5">Saved</span>
+                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 border border-emerald-200 rounded-full px-2 py-0.5">Saved</span>
                 <Button size="sm" variant="outline" className="h-8 px-2 text-xs" onClick={() => {
                   setPreviewingDocuments({ document_display_name: 'eTA Kenya Confirmation Screenshot', documents: [savedScreenshotDoc], person_full_name: individualName || getPrimaryTargetEntityId(), requirementId: ETA_SCREENSHOT_DOCUMENT_ID });
                   setShowPreviewModal(true);
@@ -399,10 +399,10 @@ export const AutomationMappingDialogUI = ({
               ? `${req.arrayFieldName} - ${req.displayName || req.name || req.variableName}`
               : req.displayName || req.efnsDisplayName || req.variableName;
             return (
-              <Card key={idx} className={cn("overflow-hidden border transition-all", foundDoc ? "border-green-200 shadow-sm" : "border-red-200 bg-red-50/10")}>
+              <Card key={idx} className={cn("overflow-hidden border transition-all", foundDoc ? "border-emerald-200 shadow-sm" : "border-red-200 bg-red-50/10")}>
                 <CardContent className="p-4 flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className={cn("p-2 rounded-lg", foundDoc ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600")}><Paperclip className="h-4 w-4" /></div>
+                    <div className={cn("p-2 rounded-lg", foundDoc ? "bg-emerald-100 text-emerald-600" : "bg-red-100 text-red-600")}><Paperclip className="h-4 w-4" /></div>
                     <div className="flex-1">
                       <h4 className="font-bold text-sm text-slate-900">{displayName}</h4>
                       <p className="text-[10px] text-slate-500">Target: {req.isFromArray ? `${req.arrayVariableName}.${req.variableName}` : req.variableName}</p>
@@ -415,10 +415,10 @@ export const AutomationMappingDialogUI = ({
                         <Button size="sm" variant="outline" onClick={() => handlePreviewDocument(foundDoc)} className="h-8 px-2 text-xs">
                           <Eye className="h-3 w-3 mr-1" /> Preview
                         </Button>
-                        <span className="text-[10px] font-medium text-green-700 bg-green-100 border border-green-200 rounded-full px-2 py-0.5">Available</span>
+                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 border border-emerald-200 rounded-full px-2 py-0.5">Available</span>
                       </>
                     ) : (
-                      <span className="text-[10px] font-medium text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">Missing</span>
+                      <span className="text-[10px] font-semibold text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">Missing</span>
                     )}
                   </div>
                 </CardContent>
@@ -433,27 +433,28 @@ export const AutomationMappingDialogUI = ({
   return (
     <>
       <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-        <DialogContent className="max-w-[95vw] w-[1400px] h-[90vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl bg-white">
+        <DialogContent className="max-w-[95vw] w-[1400px] h-[90vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl bg-white rounded-xl">
 
           {/* ── HEADER ───────────────────────────────────────────────────── */}
-          <div className="flex items-center justify-between px-5 py-3.5 bg-slate-900 shrink-0">
-            <div className="flex items-center gap-3.5">
-              <div className="h-9 w-9 bg-indigo-600 rounded-lg flex items-center justify-center shrink-0">
-                <Zap className="h-5 w-5 text-white fill-white" />
+          <div className="flex items-center justify-between px-5 py-3 bg-[#1C1C2E] shrink-0 rounded-t-xl">
+            <div className="flex items-center gap-3">
+              {/* Logo mark */}
+              <div className="h-8 w-8 bg-indigo-500 rounded-lg flex items-center justify-center shrink-0 shadow-lg shadow-indigo-500/30">
+                <Zap className="h-4.5 w-4.5 text-white fill-white" style={{ height: '18px', width: '18px' }} />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-white font-bold text-sm tracking-tight">Automation Engine</span>
-                  <span className="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded font-mono">v2.4.0</span>
+                  <span className="text-white font-semibold text-sm tracking-tight">Automation Engine</span>
+                  <span className="text-[10px] bg-white/10 text-slate-400 px-1.5 py-0.5 rounded font-mono">v2.4.0</span>
                 </div>
-                <div className="text-slate-400 text-xs flex items-center gap-1.5 mt-0.5">
-                  <span className="font-medium text-slate-300">{individualName || task?.applicant_details?.name || 'Applicant'}</span>
-                  <span className="text-slate-600">|</span>
-                  <span>Task #{task?.id}</span>
-                  <span className="text-slate-600">|</span>
-                  <span>♦ {getPrimaryTargetEntityId() || '—'}</span>
+                <div className="text-slate-400 text-[11px] flex items-center gap-1.5 mt-0.5">
+                  <span className="font-medium text-slate-300 uppercase tracking-wide text-[10px]">{individualName || task?.applicant_details?.name || 'Applicant'}</span>
+                  <span className="text-slate-600">·</span>
+                  <span className="text-slate-400">Task #{task?.id}</span>
+                  <span className="text-slate-600">·</span>
+                  <span className="text-slate-400">♦ {getPrimaryTargetEntityId() || '—'}</span>
                   {savedScreenshotDoc && (
-                    <span className="flex items-center gap-1 bg-green-500/20 border border-green-500/30 px-2 py-0.5 rounded-full text-green-300 text-[10px] ml-1">
+                    <span className="flex items-center gap-1 bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded-full text-emerald-300 text-[10px] ml-1">
                       <CheckCircle2 className="h-2.5 w-2.5" /> Screenshot Saved
                     </span>
                   )}
@@ -466,84 +467,86 @@ export const AutomationMappingDialogUI = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
               <SearchableSelect
                 value={selectedAutomationId}
                 onValueChange={setSelectedAutomationId}
                 options={entityAutomationMappings.map(m => ({ value: m.automationId, label: m.automation?.name || 'Unnamed Flow' }))}
                 placeholder="Select Workflow"
-                buttonClassName="w-[200px] bg-slate-800 border-slate-700 text-white h-9 text-sm"
+                buttonClassName="w-[200px] bg-white/10 border-white/10 text-white h-8 text-sm hover:bg-white/15"
                 emptyMessage="No workflows found"
               />
               <button
                 onClick={onClose}
-                className="text-slate-400 hover:text-white transition-colors rounded p-1 hover:bg-slate-700 ml-1"
+                className="text-slate-500 hover:text-slate-300 transition-colors rounded-lg p-1.5 hover:bg-white/10"
               >
-                <X className="h-5 w-5" />
+                <X className="h-4 w-4" />
                 <span className="sr-only">Close</span>
               </button>
             </div>
-            {/* Hidden title for accessibility */}
             <DialogTitle className="sr-only">
               Automation Engine — {task?.applicant_details?.name || individualName || 'Applicant'}
             </DialogTitle>
           </div>
 
           {/* ── BODY: sidebar + main ──────────────────────────────────────── */}
-          <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 flex overflow-hidden bg-[#F8F9FC]">
 
             {/* SIDEBAR */}
-            <div className="w-52 shrink-0 border-r border-slate-200 bg-white flex flex-col overflow-y-auto">
+            <div className="w-52 shrink-0 border-r border-slate-200/80 bg-white flex flex-col overflow-y-auto">
 
               {/* Readiness Score */}
-              <div className="p-4 border-b border-slate-100">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2.5">Readiness Score</p>
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-sm font-bold text-slate-800">{readinessPct}% Complete</span>
-                  <span className="text-[11px] text-slate-500">{filledCount}/{totalCount} Fields</span>
+              <div className="px-4 pt-5 pb-4 border-b border-slate-100">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-3">Readiness Score</p>
+                <div className="flex items-end justify-between mb-1.5">
+                  <div>
+                    <span className={cn("text-2xl font-bold tabular-nums", readinessPct === 100 ? "text-emerald-600" : "text-slate-800")}>{readinessPct}%</span>
+                    <span className="text-xs text-slate-400 ml-1">Complete</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 pb-0.5">{filledCount}/{totalCount}</span>
                 </div>
-                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
                   <div
-                    className={cn("h-full rounded-full transition-all duration-500", readinessPct === 100 ? "bg-green-500" : "bg-indigo-500")}
+                    className={cn("h-full rounded-full transition-all duration-700", readinessPct === 100 ? "bg-emerald-500" : "bg-indigo-500")}
                     style={{ width: `${readinessPct}%` }}
                   />
                 </div>
               </div>
 
               {/* Navigation */}
-              <div className="p-3 border-b border-slate-100">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-2">Navigation</p>
+              <div className="p-3">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2 px-2">Navigation</p>
                 <nav className="space-y-0.5">
                   <button
                     onClick={() => { setShowMissingOnly(false); if (isDocumentsView) setActiveTab('fields'); }}
                     className={cn(
-                      "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left",
+                      "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors text-left",
                       !isDocumentsView && !showMissingOnly
-                        ? "bg-indigo-50 text-indigo-700"
-                        : "text-slate-600 hover:bg-slate-50"
+                        ? "bg-indigo-50 text-indigo-700 font-semibold"
+                        : "text-slate-500 hover:bg-slate-50 font-medium"
                     )}
                   >
                     <span>All Fields</span>
                     <span className={cn(
-                      "text-[11px] font-bold px-1.5 py-0.5 rounded",
-                      !isDocumentsView && !showMissingOnly ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"
+                      "text-[10px] font-bold px-1.5 py-0.5 rounded-md min-w-[22px] text-center",
+                      !isDocumentsView && !showMissingOnly ? "bg-indigo-100 text-indigo-600" : "bg-slate-100 text-slate-400"
                     )}>{totalCount}</span>
                   </button>
 
                   <button
                     onClick={() => { setShowMissingOnly(true); if (isDocumentsView) setActiveTab('fields'); }}
                     className={cn(
-                      "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left",
+                      "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors text-left",
                       !isDocumentsView && showMissingOnly
-                        ? "bg-red-50 text-red-700"
-                        : "text-slate-600 hover:bg-slate-50"
+                        ? "bg-red-50 text-red-700 font-semibold"
+                        : "text-slate-500 hover:bg-slate-50 font-medium"
                     )}
                   >
                     <span>Missing Data</span>
                     {missingCount > 0 && (
                       <span className={cn(
-                        "text-[11px] font-bold px-1.5 py-0.5 rounded",
-                        !isDocumentsView && showMissingOnly ? "bg-red-100 text-red-700" : "bg-red-50 text-red-500"
+                        "text-[10px] font-bold px-1.5 py-0.5 rounded-md min-w-[22px] text-center",
+                        !isDocumentsView && showMissingOnly ? "bg-red-100 text-red-600" : "bg-red-50 text-red-400"
                       )}>{missingCount}</span>
                     )}
                   </button>
@@ -551,26 +554,37 @@ export const AutomationMappingDialogUI = ({
                   <button
                     onClick={() => setActiveTab('documents')}
                     className={cn(
-                      "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left",
+                      "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors text-left",
                       isDocumentsView
-                        ? "bg-indigo-50 text-indigo-700"
-                        : "text-slate-600 hover:bg-slate-50"
+                        ? "bg-indigo-50 text-indigo-700 font-semibold"
+                        : "text-slate-500 hover:bg-slate-50 font-medium"
                     )}
                   >
                     <span>Documents</span>
-                    {savedScreenshotDoc && <span className="h-2 w-2 rounded-full bg-green-500 inline-block shrink-0" />}
+                    {savedScreenshotDoc && <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block shrink-0" />}
                   </button>
                 </nav>
               </div>
 
+              {/* Divider */}
+              <div className="mx-4 border-t border-slate-100 my-1" />
+
+              {/* Show Console */}
+              <div className="p-3">
+                <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors font-medium">
+                  <Terminal className="h-3.5 w-3.5 shrink-0" />
+                  <span>Show Console</span>
+                </button>
+              </div>
+
               {/* Pro Tip */}
               <div className="p-3 mt-auto">
-                <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-3">
                   <div className="flex items-start gap-2">
-                    <Info className="h-3.5 w-3.5 text-blue-500 mt-0.5 shrink-0" />
+                    <Info className="h-3.5 w-3.5 text-indigo-400 mt-0.5 shrink-0" />
                     <div>
-                      <p className="text-[10px] font-bold text-blue-700 mb-0.5 uppercase tracking-wide">Pro Tip</p>
-                      <p className="text-[10px] text-blue-600 leading-relaxed">
+                      <p className="text-[10px] font-bold text-indigo-600 mb-1 uppercase tracking-wide">Pro Tip</p>
+                      <p className="text-[10px] text-indigo-500/80 leading-relaxed">
                         Fields marked with <Lock className="inline h-2.5 w-2.5" /> are automation defaults and cannot be edited.
                       </p>
                     </div>
@@ -580,44 +594,44 @@ export const AutomationMappingDialogUI = ({
             </div>
 
             {/* MAIN CONTENT */}
-            <div className="flex-1 flex flex-col overflow-hidden bg-white">
+            <div className="flex-1 flex flex-col overflow-hidden">
 
               {/* Automation progress banner */}
               {automationProgress && (
-                <div className="px-5 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-200 shrink-0">
+                <div className="px-5 py-3 bg-white border-b border-slate-200 shrink-0">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2.5">
-                      <div className={cn("p-1.5 rounded-full", automationProgress.isRunning ? "bg-blue-100" : automationProgress.error ? "bg-red-100" : "bg-green-100")}>
-                        {automationProgress.isRunning ? <Loader2 className="h-4 w-4 animate-spin text-blue-600" /> : automationProgress.error ? <AlertCircle className="h-4 w-4 text-red-500" /> : <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                      <div className={cn("p-1.5 rounded-full", automationProgress.isRunning ? "bg-indigo-100" : automationProgress.error ? "bg-red-100" : "bg-emerald-100")}>
+                        {automationProgress.isRunning ? <Loader2 className="h-4 w-4 animate-spin text-indigo-600" /> : automationProgress.error ? <AlertCircle className="h-4 w-4 text-red-500" /> : <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-slate-800">{automationProgress.isRunning ? 'Automation in Progress' : automationProgress.error ? 'Automation Failed' : 'Automation Complete'}</p>
-                        <p className="text-[10px] text-slate-500">{automationProgress.currentStep || 'Processing…'}</p>
+                        <p className="text-[10px] text-slate-400">{automationProgress.currentStep || 'Processing…'}</p>
                       </div>
                     </div>
                     <span className="text-lg font-bold text-indigo-600">{automationProgress.progress}%</span>
                   </div>
-                  <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden mb-2">
+                  <div className="h-1 bg-slate-100 rounded-full overflow-hidden mb-2">
                     <div
-                      className={cn("h-full rounded-full transition-all duration-500", automationProgress.error ? "bg-red-500" : automationProgress.isRunning ? "bg-indigo-500" : "bg-green-500")}
+                      className={cn("h-full rounded-full transition-all duration-500", automationProgress.error ? "bg-red-500" : automationProgress.isRunning ? "bg-indigo-500" : "bg-emerald-500")}
                       style={{ width: `${automationProgress.progress}%` }}
                     />
                   </div>
-                  <p className="text-xs text-slate-600">{automationProgress.message}</p>
+                  <p className="text-xs text-slate-500">{automationProgress.message}</p>
                   {automationProgress.error && (
                     <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">Error: {automationProgress.error}</div>
                   )}
                   {automationJobId && <p className="text-[10px] text-slate-400 mt-1">Job ID: {automationJobId}</p>}
                   {automationProgress.logs?.length > 0 && (
-                    <div className="mt-2 rounded-lg overflow-hidden border border-slate-700">
-                      <div className="flex items-center justify-between px-3 py-1 bg-slate-800">
+                    <div className="mt-2 rounded-lg overflow-hidden border border-slate-200">
+                      <div className="flex items-center justify-between px-3 py-1.5 bg-[#1C1C2E]">
                         <span className="text-[10px] font-mono font-bold text-slate-300 uppercase tracking-wider">Automation Logs</span>
                         <span className="text-[10px] text-slate-500">{automationProgress.logs.length} lines</span>
                       </div>
                       <ScrollArea className="h-40 bg-slate-950">
                         <div className="p-3 space-y-px font-mono">
                           {automationProgress.logs.map((log: any, i: number) => (
-                            <div key={i} className={cn("text-[10px] leading-relaxed whitespace-pre-wrap break-all", log.level === 'error' ? 'text-red-400' : log.level === 'warn' ? 'text-yellow-400' : 'text-green-300')}>
+                            <div key={i} className={cn("text-[10px] leading-relaxed whitespace-pre-wrap break-all", log.level === 'error' ? 'text-red-400' : log.level === 'warn' ? 'text-yellow-400' : 'text-emerald-300')}>
                               <span className="text-slate-600 mr-2 select-none">{new Date(log.timestamp).toLocaleTimeString()}</span>
                               {log.message}
                             </div>
@@ -632,8 +646,11 @@ export const AutomationMappingDialogUI = ({
 
               {!selectedAutomationId ? (
                 <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
-                  <Webhook className="h-16 w-16 mb-4 opacity-20" />
-                  <p className="text-base font-medium">Select a workflow to begin</p>
+                  <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                    <Webhook className="h-8 w-8 text-slate-300" />
+                  </div>
+                  <p className="text-sm font-medium text-slate-400">Select a workflow to begin</p>
+                  <p className="text-xs text-slate-300 mt-1">Use the dropdown in the header</p>
                 </div>
               ) : isDocumentsView ? (
                 <div className="flex-1 overflow-auto p-6">
@@ -642,23 +659,23 @@ export const AutomationMappingDialogUI = ({
               ) : (
                 <>
                   {/* Search + Sort bar */}
-                  <div className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-100 bg-white shrink-0">
+                  <div className="flex items-center gap-3 px-4 py-2.5 bg-white border-b border-slate-200/80 shrink-0">
                     <div className="flex-1 relative">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
                       <input
                         value={searchQuery}
                         onChange={e => setSearchQuery(e.target.value)}
                         placeholder="Search field or variable..."
-                        className="w-full pl-8 pr-3 h-8 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-1 focus:ring-indigo-300 focus:bg-white placeholder:text-slate-400 transition-colors"
+                        className="w-full pl-9 pr-3 h-8 text-sm border border-slate-200 rounded-lg bg-slate-50/80 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 focus:bg-white placeholder:text-slate-400 transition-all"
                       />
                     </div>
-                    <div className="flex items-center gap-1.5 text-xs text-slate-500 shrink-0">
-                      <span className="font-medium text-slate-400">Sort by:</span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-[11px] text-slate-400 font-medium mr-0.5">Sort by:</span>
                       <button
                         onClick={() => setEntitySort(prev => prev === 'asc' ? 'desc' : prev === 'desc' ? null : 'asc')}
                         className={cn(
-                          "flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border transition-colors",
-                          entitySort ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                          "flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors",
+                          entitySort ? "border-indigo-200 bg-indigo-50 text-indigo-600" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                         )}
                       >
                         Entity <ArrowUpDown className="h-3 w-3" />
@@ -666,8 +683,8 @@ export const AutomationMappingDialogUI = ({
                       <button
                         onClick={() => setSortMissingFirst(!sortMissingFirst)}
                         className={cn(
-                          "flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border transition-colors",
-                          sortMissingFirst ? "border-amber-200 bg-amber-50 text-amber-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                          "flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors",
+                          sortMissingFirst ? "border-amber-200 bg-amber-50 text-amber-600" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                         )}
                       >
                         Status <Filter className="h-3 w-3" />
@@ -679,22 +696,22 @@ export const AutomationMappingDialogUI = ({
                   {/* Fields Table */}
                   {isLoading ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-                      <Loader2 className="h-7 w-7 animate-spin mb-2" />
+                      <Loader2 className="h-7 w-7 animate-spin mb-2 text-indigo-400" />
                       <p className="text-sm">Loading configuration…</p>
                     </div>
                   ) : !activeWebEntry?.fields?.length ? (
                     <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">No fields configured for this automation.</div>
                   ) : (
-                    <div className="flex-1 overflow-hidden">
+                    <div className="flex-1 overflow-hidden bg-white">
                       <ScrollArea className="h-full">
                         <Table>
-                          <TableHeader className="sticky top-0 z-10 bg-white border-b border-slate-100">
-                            <TableRow className="hover:bg-transparent">
-                              <TableHead className="w-10 px-3 py-3 text-center text-[10px] font-bold text-slate-400 uppercase tracking-wide">#</TableHead>
-                              <TableHead className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wide">Field Details</TableHead>
-                              <TableHead className="w-52 px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wide">Entity Context</TableHead>
-                              <TableHead className="w-44 px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wide">Data Source</TableHead>
-                              <TableHead className="w-56 px-4 py-3 text-right text-[10px] font-bold text-slate-500 uppercase tracking-wide">Mapped Value</TableHead>
+                          <TableHeader className="sticky top-0 z-10 bg-white">
+                            <TableRow className="hover:bg-transparent border-b border-slate-200">
+                              <TableHead className="w-10 px-3 py-3 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">#</TableHead>
+                              <TableHead className="px-4 py-3 text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest">Field Details</TableHead>
+                              <TableHead className="w-52 px-4 py-3 text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest">Entity Context</TableHead>
+                              <TableHead className="w-44 px-4 py-3 text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest">Data Source</TableHead>
+                              <TableHead className="w-56 px-4 py-3 text-right text-[10px] font-bold text-slate-400 uppercase tracking-widest">Mapped Value</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -710,31 +727,31 @@ export const AutomationMappingDialogUI = ({
                                 return (
                                   <React.Fragment key={`arr-${fIdx}`}>
                                     <TableRow
-                                      className="border-b border-slate-100 bg-blue-50/30 hover:bg-blue-50/60 cursor-pointer transition-colors"
+                                      className="border-b border-slate-100 bg-blue-50/20 hover:bg-blue-50/40 cursor-pointer transition-colors"
                                       onClick={() => toggleArrayFieldExpansion(field.variableName)}
                                     >
-                                      <TableCell className="px-3 py-3 text-center text-xs font-mono text-slate-400">
-                                        {isExpanded ? <ChevronDown className="h-3.5 w-3.5 mx-auto text-blue-500" /> : <ChevronRight className="h-3.5 w-3.5 mx-auto text-slate-400" />}
+                                      <TableCell className="px-3 py-3 text-center">
+                                        {isExpanded ? <ChevronDown className="h-3.5 w-3.5 mx-auto text-blue-400" /> : <ChevronRight className="h-3.5 w-3.5 mx-auto text-slate-300" />}
                                       </TableCell>
                                       <TableCell className="px-4 py-3">
                                         <div className="flex items-center gap-2">
-                                          <div className="p-1 bg-blue-100 rounded text-blue-600"><List className="h-3.5 w-3.5" /></div>
+                                          <div className="p-1 bg-blue-100 rounded-md text-blue-500"><List className="h-3.5 w-3.5" /></div>
                                           <div>
                                             <p className="text-sm font-semibold text-slate-800">{field.efnsDisplayName || field.variableName}</p>
-                                            <p className="text-[10px] text-slate-400 font-mono">{field.variableName}</p>
+                                            <p className="text-[10px] text-slate-400 font-mono mt-0.5">{field.variableName}</p>
                                           </div>
                                         </div>
                                       </TableCell>
                                       <TableCell className="px-4 py-3">
                                         <div className="flex flex-wrap gap-1">
                                           {(field.entityTypes || []).map(type => (
-                                            <span key={type} className={cn("text-[9px] px-2 py-0.5 rounded-full uppercase font-semibold border", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-600 border-slate-200')}>{type}</span>
+                                            <span key={type} className={cn("text-[9px] px-2 py-0.5 rounded-full uppercase font-bold border tracking-wide", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-600 border-slate-200')}>{type}</span>
                                           ))}
                                         </div>
                                       </TableCell>
                                       <TableCell className="px-4 py-3">{renderDataSource(field)}</TableCell>
                                       <TableCell className="px-4 py-3 text-right">
-                                        <span className="text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">{arrayData.length} items</span>
+                                        <span className="text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">{arrayData.length} items</span>
                                       </TableCell>
                                     </TableRow>
 
@@ -762,19 +779,19 @@ export const AutomationMappingDialogUI = ({
                                         }
 
                                         return (
-                                          <TableRow key={uniqueKey} className={cn("group border-b border-slate-100", isItemEditing ? "bg-blue-50" : "hover:bg-slate-50/60")}>
+                                          <TableRow key={uniqueKey} className={cn("group border-b border-slate-100", isItemEditing ? "bg-indigo-50/30" : "hover:bg-slate-50/60")}>
                                             <TableCell className="px-3 py-2.5 text-center text-[10px] font-mono text-slate-300">{rowIndex + 1}.{colIndex + 1}</TableCell>
                                             <TableCell className="px-4 py-2.5">
                                               <div className="flex items-center gap-2 pl-5 relative">
                                                 <div className="absolute left-2 top-0 bottom-0 w-px bg-blue-100" />
                                                 <div className="absolute left-2 top-1/2 w-2.5 h-px bg-blue-200" />
-                                                <span className="text-xs text-slate-700 font-medium">{colItem.displayName || colItem.variableName}</span>
+                                                <span className="text-xs text-slate-600 font-medium">{colItem.displayName || colItem.variableName}</span>
                                               </div>
                                             </TableCell>
                                             <TableCell className="px-4 py-2.5">
                                               <div className="flex flex-wrap gap-1">
                                                 {(colItem.entityTypes || field.entityTypes || []).map(type => (
-                                                  <span key={type} className={cn("text-[9px] px-2 py-0.5 rounded-full uppercase font-semibold border", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-600 border-slate-200')}>{type}</span>
+                                                  <span key={type} className={cn("text-[9px] px-2 py-0.5 rounded-full uppercase font-bold border tracking-wide", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-600 border-slate-200')}>{type}</span>
                                                 ))}
                                               </div>
                                             </TableCell>
@@ -789,7 +806,7 @@ export const AutomationMappingDialogUI = ({
                                                   ) : (
                                                     <Input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }} className="h-7 text-xs w-32 border-indigo-300" />
                                                   )}
-                                                  <Button size="icon" onClick={() => saveEdit(isDropdown, normalizedOptions)} className="h-6 w-6 bg-green-600 hover:bg-green-700 shrink-0"><Check className="h-3 w-3" /></Button>
+                                                  <Button size="icon" onClick={() => saveEdit(isDropdown, normalizedOptions)} className="h-6 w-6 bg-emerald-600 hover:bg-emerald-700 shrink-0"><Check className="h-3 w-3" /></Button>
                                                   <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-6 w-6 text-red-500 shrink-0"><X className="h-3 w-3" /></Button>
                                                 </div>
                                               ) : (() => {
@@ -801,7 +818,7 @@ export const AutomationMappingDialogUI = ({
                                                   return (
                                                     <Popover>
                                                       <PopoverTrigger asChild>
-                                                        <div className={cn("text-xs flex items-center justify-end gap-1 px-2 py-1 rounded cursor-pointer border border-dashed border-blue-200 hover:bg-blue-50/30 ml-auto", isItemMissing ? "text-slate-400 italic" : "text-slate-800")}>
+                                                        <div className={cn("text-xs flex items-center justify-end gap-1 px-2 py-1 rounded cursor-pointer border border-dashed border-blue-200 hover:bg-blue-50/30 ml-auto", isItemMissing ? "text-slate-300 italic" : "text-slate-700 font-medium")}>
                                                           <span className="truncate max-w-[140px]">{isItemMissing ? '—' : rawValue}</span>
                                                           <ChevronDown className="h-3 w-3 text-blue-400 shrink-0" />
                                                         </div>
@@ -855,7 +872,7 @@ export const AutomationMappingDialogUI = ({
                                                   <div
                                                     className={cn("text-xs flex items-center justify-end gap-1 px-2 py-1 rounded group/av transition-colors",
                                                       arrayPersist ? "cursor-pointer hover:bg-slate-50 border border-transparent hover:border-slate-200" : "cursor-default",
-                                                      isItemMissing ? "text-slate-400 italic" : "text-slate-800")}
+                                                      isItemMissing ? "text-slate-300 italic" : "text-slate-700 font-medium")}
                                                     onClick={() => { if (!arrayPersist) return; startEditing(uniqueKey, 0, arrayPersist.table, arrayPersist.path, isItemMissing ? '' : rawValue, String(arrayEditId), arrayPersist.linking_variable || 'id'); }}
                                                   >
                                                     <span className="truncate max-w-[140px]">{isItemMissing ? '—' : rawValue}</span>
@@ -878,27 +895,29 @@ export const AutomationMappingDialogUI = ({
                                   key={`row-${fIdx}`}
                                   className={cn(
                                     "border-b border-slate-100 transition-colors group",
-                                    field.isDefault ? "bg-slate-50/40" : isEditing ? "bg-indigo-50/30" : "hover:bg-slate-50/50"
+                                    field.isDefault ? "bg-slate-50/50" : isEditing ? "bg-indigo-50/20" : "hover:bg-slate-50/60"
                                   )}
                                 >
-                                  <TableCell className="px-3 py-3 text-center text-xs font-mono text-slate-400">{fIdx + 1}</TableCell>
+                                  <TableCell className="px-3 py-3.5 text-center">
+                                    <span className="text-xs font-mono text-slate-300">{fIdx + 1}</span>
+                                  </TableCell>
 
-                                  <TableCell className="px-4 py-3">
+                                  <TableCell className="px-4 py-3.5">
                                     <div>
                                       <div className="flex items-center gap-1.5">
-                                        {field.isDefault && <Lock className="h-3 w-3 text-slate-400 shrink-0" />}
-                                        <span className={cn("text-sm font-semibold", field.isDefault ? "text-slate-500" : "text-slate-800")}>
+                                        {field.isDefault && <Lock className="h-3 w-3 text-slate-300 shrink-0" />}
+                                        <span className={cn("text-sm font-semibold", field.isDefault ? "text-slate-400" : "text-slate-800")}>
                                           {field.efnsDisplayName || field.variableName}
                                         </span>
                                       </div>
-                                      <span className="text-[10px] text-slate-400 font-mono">{field.variableName}</span>
+                                      <span className="text-[10px] text-slate-400 font-mono mt-0.5 block">{field.variableName}</span>
                                     </div>
                                   </TableCell>
 
-                                  <TableCell className="px-4 py-3">
+                                  <TableCell className="px-4 py-3.5">
                                     <div className="flex flex-wrap gap-1">
                                       {(field.entityTypes || []).map(type => (
-                                        <span key={type} className={cn("text-[9px] px-2 py-0.5 rounded-full uppercase font-semibold border", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-600 border-slate-200')}>
+                                        <span key={type} className={cn("text-[9px] px-2 py-0.5 rounded-full uppercase font-bold border tracking-wide", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-600 border-slate-200')}>
                                           {type}
                                         </span>
                                       ))}
@@ -908,9 +927,9 @@ export const AutomationMappingDialogUI = ({
                                     </div>
                                   </TableCell>
 
-                                  <TableCell className="px-4 py-3">{renderDataSource(field)}</TableCell>
+                                  <TableCell className="px-4 py-3.5">{renderDataSource(field)}</TableCell>
 
-                                  <TableCell className="px-4 py-3 text-right">{renderMappedValue(field, fIdx)}</TableCell>
+                                  <TableCell className="px-4 py-3.5 text-right">{renderMappedValue(field, fIdx)}</TableCell>
                                 </TableRow>
                               );
                             })}
@@ -925,24 +944,24 @@ export const AutomationMappingDialogUI = ({
           </div>
 
           {/* ── FOOTER ───────────────────────────────────────────────────── */}
-          <div className="px-6 py-4 border-t border-slate-200 bg-white flex justify-between items-center shrink-0">
+          <div className="px-6 py-3.5 border-t border-slate-200 bg-white flex justify-between items-center shrink-0">
             <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Automation Ready</p>
-              <p className="text-sm font-bold text-slate-900">{selectedMapping?.automation?.name || 'Select Workflow'}</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Automation Ready</p>
+              <p className="text-sm font-bold text-slate-800">{selectedMapping?.automation?.name || 'Select Workflow'}</p>
             </div>
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" onClick={onClose} className="text-slate-500 hover:text-slate-700 px-5">
+            <div className="flex items-center gap-2.5">
+              <Button variant="ghost" onClick={onClose} className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 px-5 h-9 text-sm">
                 Cancel
               </Button>
               {isAutomationRunning && automationJobId && (
-                <Button variant="destructive" onClick={stopAutomation} className="px-5">
+                <Button variant="destructive" onClick={stopAutomation} className="px-5 h-9">
                   <X className="mr-2 h-4 w-4" /> Stop
                 </Button>
               )}
               <Button
                 onClick={handleRunAutomation}
                 disabled={isAutomationRunning || isSavingScreenshot}
-                className="bg-green-600 hover:bg-green-700 text-white px-6 h-10 font-bold uppercase text-xs tracking-wide"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 h-9 font-bold text-xs tracking-wide rounded-lg shadow-sm shadow-emerald-600/20 transition-all"
               >
                 {(isAutomationRunning || isSavingScreenshot)
                   ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -958,15 +977,15 @@ export const AutomationMappingDialogUI = ({
 
       {/* ── DOCUMENT PREVIEW MODAL ───────────────────────────────────────── */}
       <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
-        <DialogContent className="max-w-[95vw] w-full max-h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-50">
+        <DialogContent className="max-w-[95vw] w-full max-h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-50 rounded-xl">
           {showPreviewModal && previewingDocuments && (
             <>
               <DialogHeader className="p-4 border-b bg-white shrink-0 relative">
                 <button
                   onClick={() => setShowPreviewModal(false)}
-                  className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-white transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
+                  className="absolute right-4 top-4 rounded-lg opacity-70 transition-opacity hover:opacity-100 p-1 hover:bg-slate-100"
                 >
-                  <X className="h-5 w-5 text-slate-600" />
+                  <X className="h-4 w-4 text-slate-600" />
                   <span className="sr-only">Close</span>
                 </button>
                 <div className="flex items-center justify-between pr-8">
@@ -974,14 +993,14 @@ export const AutomationMappingDialogUI = ({
                     <DialogTitle className="text-xl">
                       <div className="flex items-center gap-2 p-1">
                         <div className="bg-white p-2 rounded-lg border shadow-sm">
-                          <FileText className="h-5 w-5 text-blue-600" />
+                          <FileText className="h-5 w-5 text-indigo-500" />
                         </div>
                         <p className="text-xl font-bold text-slate-800 line-clamp-1">{previewingDocuments?.document_display_name || 'Document'}</p>
                       </div>
                     </DialogTitle>
                     <p className="text-sm text-muted-foreground pl-1">Target: {previewingDocuments?.person_full_name || 'Unknown'}</p>
                   </div>
-                  <div className="text-sm font-medium bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-100">
+                  <div className="text-sm font-medium bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full border border-indigo-100">
                     {previewingDocuments?.documents?.length || 0} File(s)
                   </div>
                 </div>
@@ -1018,10 +1037,10 @@ export const AutomationMappingDialogUI = ({
 
               <div className="p-5 border-t bg-white flex justify-between items-center shrink-0">
                 <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Document Preview</p>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Document Preview</p>
                   <p className="text-sm font-bold text-slate-800">{previewingDocuments?.document_display_name || 'Document'}</p>
                 </div>
-                <Button variant="outline" onClick={() => setShowPreviewModal(false)} className="px-6 text-slate-500">
+                <Button variant="outline" onClick={() => setShowPreviewModal(false)} className="px-6 text-slate-500 h-9 rounded-lg">
                   Close
                 </Button>
               </div>

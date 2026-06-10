@@ -63,7 +63,12 @@
       "Bash(git push *)",
       "Bash(Get-Content \"e:\\\\GitHub\\\\accounting-task-manager\\\\app\\\\\\(dashboard\\)\\\\dashboard\\\\tasks\\\\components\\\\AutomationMappingDialog.tsx\")",
       "Bash(Measure-Object -Line)",
-      "Bash(./gradlew :app:compileDebugKotlin)"
+      "Bash(./gradlew :app:compileDebugKotlin)",
+      "Bash(Get-ChildItem -Path \"e:\\\\GitHub\\\\Appointment-Booking\" -Recurse -Directory)",
+      "Bash(Select-Object FullName)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)",
+      "PowerShell(Get-ChildItem -Path \"e:\\\\GitHub\\\\Appointment-Booking\" -Directory | Where-Object {$_.Name -ne '.next'} | Select-Object -ExpandProperty FullName)"
     ]
   }
 }

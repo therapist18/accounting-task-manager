@@ -502,7 +502,7 @@ export default function DepartmentTasksManager({
         fetchAllDocuments(),
         fetchAllKycFields(),
         loadUserAssignmentData(),
-        activeDepartmentTab ? loadTasksData(activeDepartmentTab, activeSubdepartmentTab) : Promise.resolve(null),
+        activeDepartmentTab ? loadTasksData(activeDepartmentTab, activeSubdepartmentTab, false, true) : Promise.resolve(null),
         fetchTasksDuplicate(),
         fetchDocumentWorkflowLogs()
       ]);
@@ -520,7 +520,7 @@ export default function DepartmentTasksManager({
 
       if (tasksData === null && activeDepartmentTab) {
         // If tasks weren't loaded in the initial batch, load them now
-        await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+        await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, false, true);
       }
 
       toast({
@@ -2181,8 +2181,8 @@ export default function DepartmentTasksManager({
       // Close the preview
       setPreviewDocument(null);
 
-      // Refresh the tasks to update the UI
-      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+      // Refresh the tasks silently to update the UI without showing loading state
+      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true);
     } catch (error) {
       console.error('Error deleting document:', error);
       toast({
@@ -2366,9 +2366,9 @@ export default function DepartmentTasksManager({
         )
       );
 
-      // Clear cache and reload
+      // Clear cache and reload silently (local state already updated above)
       clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
-      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true);
+      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true);
 
       toast({
         title: 'Success',
@@ -2415,9 +2415,9 @@ export default function DepartmentTasksManager({
         )
       );
 
-      // Clear cache and reload
+      // Clear cache and reload silently (local state already updated above)
       clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
-      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true);
+      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true);
 
       toast({
         title: "Task reactivated successfully",
@@ -3277,17 +3277,27 @@ export default function DepartmentTasksManager({
               pending: 0, new: 0, enquiry: 0, in_progress: 1, write_up_completed: 2, endorsed: 3
             };
             // Merge DB columns into existing enriched task — no loading state.
-            // Preserve enriched fields (officer_ids, officer_id, participants_details)
-            // when the raw DB payload has null, to avoid dropping join-computed values.
-            // Also never downgrade status from a higher-priority local value.
+            // The raw DB payload lacks enriched fields (department_id/subdepartment_id are
+            // stored inside job_level jsonb, not as top-level columns; company_name is
+            // join-computed). Spreading newTask over t would overwrite those enriched fields
+            // with null, causing getFilteredTasks to drop the task. Re-apply enrichment here.
             setTasks(prevTasks => prevTasks.map(t => {
               if (t.id?.toString() !== newTask?.id?.toString()) return t;
               const existingPriority = REALTIME_STATUS_PRIORITY[t.status] ?? -1;
               const incomingPriority = REALTIME_STATUS_PRIORITY[newTask.status] ?? -1;
+              const jobLevel = newTask.job_level || t.job_level || {};
               return {
                 ...t,
                 ...newTask,
                 status: incomingPriority >= existingPriority ? newTask.status : t.status,
+                // Re-apply job_level-derived fields — raw DB column may be null
+                department_id: jobLevel.department_id ?? t.department_id,
+                subdepartment_id: jobLevel.subdepartment_id ?? t.subdepartment_id,
+                class_id: jobLevel.class_id ?? t.class_id,
+                subclass_id: jobLevel.subclass_id ?? t.subclass_id,
+                // Preserve enriched display fields that are not direct DB columns
+                company_name: t.company_name,
+                applicant_name: newTask.applicant_details?.name || newTask.applicant_name || t.applicant_name,
                 // Preserve enriched array/object fields when DB returns null
                 officer_ids: newTask.officer_ids ?? t.officer_ids,
                 officer_id: newTask.officer_id ?? t.officer_id,
