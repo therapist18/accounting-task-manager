@@ -1174,170 +1174,177 @@ export default function EditableStageCell({
       const showSkip = !isStageCompleted;
       const hasMoreActions = showAutomation || showSkip;
 
+      // Pre-compute officer slot to keep grid structure clean
+      let officerContent: React.ReactNode = null;
+      if (onOfficerChange && officers.length > 0 && stage.follow_up?.toLowerCase() === 'officer') {
+        const stageOfficerIds = new Set<string>();
+        if (Array.isArray(stage.officer_ids)) {
+          stage.officer_ids.forEach((id: any) => stageOfficerIds.add(id.toString()));
+        } else if (stage.officer_id) {
+          stageOfficerIds.add(stage.officer_id.toString());
+        }
+        const stageOfficers = officers.filter(o => stageOfficerIds.has(o.id.toString()));
+        if (stageOfficers.length > 0) {
+          const taskStageData = task.stages?.[stage.id];
+          const assignedOfficerId = taskStageData?.officer_ids?.[0] || taskStageData?.officer_id;
+          const assignedOfficer = assignedOfficerId ? officers.find(o => o.id === assignedOfficerId || o.id?.toString() === assignedOfficerId?.toString()) : null;
+          officerContent = (
+            <Select
+              value={assignedOfficerId || "unassigned"}
+              onValueChange={(val) => handleOfficerChange(val === "unassigned" ? null : val)}
+              open={isOfficerSelectOpen}
+              onOpenChange={setIsOfficerSelectOpen}
+            >
+              <SelectTrigger className={`h-8 w-8 p-1 border-0 ${assignedOfficer ? 'bg-green-100 hover:bg-green-200' : 'bg-transparent hover:bg-slate-100'}`} title={assignedOfficer ? `Assigned: ${assignedOfficer.displayName || assignedOfficer.name}` : "Assign officer"}>
+                <User className={`h-8 w-8 ${assignedOfficer ? 'text-green-700' : 'text-slate-600'}`} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unassigned">Unassigned</SelectItem>
+                {stageOfficers.map(officer => (
+                  <SelectItem key={officer.id} value={officer.id}>
+                    {officer.displayName || officer.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          );
+        }
+      }
+
       return (
-        <div className="flex items-center justify-center gap-1">
-          {/* Officer Selection - only for stages with officer follow-up */}
-          {onOfficerChange && officers.length > 0 && stage.follow_up?.toLowerCase() === 'officer' && (() => {
-            // Filter officers based on stage allocation
-            const stageOfficerIds = new Set<string>();
-            if (Array.isArray(stage.officer_ids)) {
-              stage.officer_ids.forEach((id: any) => stageOfficerIds.add(id.toString()));
-            } else if (stage.officer_id) {
-              stageOfficerIds.add(stage.officer_id.toString());
-            }
-            const stageOfficers = officers.filter(o => stageOfficerIds.has(o.id.toString()));
+        <div className="grid grid-cols-4 items-center justify-items-center w-full">
+          {/* Col 1: Officer */}
+          <div className="flex items-center justify-center w-8 h-8">
+            {officerContent}
+          </div>
 
-            if (stageOfficers.length === 0) return null;
-
-            // Get currently assigned officer for this stage - match by stage ID
-            const taskStageData = task.stages?.[stage.id];
-            const assignedOfficerId = taskStageData?.officer_ids?.[0] || taskStageData?.officer_id;
-
-            const assignedOfficer = assignedOfficerId ? officers.find(o => o.id === assignedOfficerId || o.id?.toString() === assignedOfficerId?.toString()) : null;
-
-            return (
-              <Select
-                value={assignedOfficerId || "unassigned"}
-                onValueChange={(val) => handleOfficerChange(val === "unassigned" ? null : val)}
-                open={isOfficerSelectOpen}
-                onOpenChange={setIsOfficerSelectOpen}
-              >
-                <SelectTrigger className={`h-10 w-10 p-2 border-0 ${assignedOfficer ? 'bg-green-100 hover:bg-green-200' : 'bg-transparent hover:bg-slate-100'}`} title={assignedOfficer ? `Assigned: ${assignedOfficer.displayName || assignedOfficer.name}` : "Assign officer"}>
-                  <User className={`h-6 w-6 ${assignedOfficer ? 'text-green-700' : 'text-slate-600'}`} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="unassigned">Unassigned</SelectItem>
-                  {stageOfficers.map(officer => (
-                    <SelectItem key={officer.id} value={officer.id}>
-                      {officer.displayName || officer.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            );
-          })()}
-
-          {/* View Document */}
-          {linkedDocument && (
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-green-600 hover:bg-green-50"
-                  title="View document details"
-                  onClick={handleViewDocument}
-                >
-                  <Eye className="h-3.5 w-3.5" />
-                </Button>
-              </DialogTrigger>
-
-              <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
-                <DialogHeader className="p-4 border-b">
-                  <DialogTitle className="text-lg">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        {stage?.name && <span>{stage.name}: </span>}
-                        {task?.name}
-                        {task?.client_name && ` - ${task.client_name}`}
-                      </div>
-                      <div className="text-sm font-normal text-muted-foreground">
-                        {previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''}
-                      </div>
-                    </div>
-                  </DialogTitle>
-                </DialogHeader>
-
-                <div className="flex-1 overflow-auto p-4">
-                  {previewDocuments.length > 0 ? (
-                    previewDocuments.map((doc) => (
-                      <div key={doc.documentId} className="border rounded-lg overflow-hidden mb-4">
-                        <div className="p-4 bg-gray-50 border-b">
-                          <h3 className="font-medium">
-                            {doc.documentName || 'Document'}
-                            <span className="text-muted-foreground text-sm font-normal ml-2">
-                              (Uploaded: {doc.created_at ? formatDateDisplay(doc.created_at) : 'N/A'})
-                            </span>
-                          </h3>
-                        </div>
-                        <div className="p-4">
-                          <ExtractionPreview
-                            documentId={doc.documentId}
-                            documentName={doc.documentName}
-                            extractedData={doc.extractedData || {}}
-                            fields={doc.fields || []}
-                            fileUrl={doc.fileUrl}
-                            fileName={doc.fileName}
-                            onSave={handlePreviewSave}
-                            onDelete={handleDeleteDocument}
-                            expanded={true}
-                            showSaveButton={!!onSave}
-                            readOnly={false}
-                            type={doc.type}
-                            file={doc.file}
-                            onDataChange={(fieldName, value) =>
-                              handlePreviewDataChange(doc.documentId, fieldName, value)
-                            }
-                          />
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="h-full flex items-center justify-center">
-                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                      <p className="ml-4 text-muted-foreground">Loading documents...</p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="p-4 border-t flex justify-end">
+          {/* Col 2: View Document */}
+          <div className="flex items-center justify-center w-8 h-8">
+            {linkedDocument && (
+              <Dialog>
+                <DialogTrigger asChild>
                   <Button
-                    variant="default"
-                    onClick={() => setIsPreviewOpen(false)}
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-green-600 hover:bg-green-50"
+                    title="View document details"
+                    onClick={handleViewDocument}
                   >
-                    Close
+                    <Eye className="h-3.5 w-3.5" />
                   </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-          )}
+                </DialogTrigger>
 
-          {/* Upload Document */}
-          {requiresUpload && (
-            <Button variant="ghost" size="icon" className={`h-7 w-7 ${hasLinkedDocument ? 'text-blue-400 hover:bg-blue-50' : 'text-blue-600 hover:bg-blue-50'}`} onClick={handleDocumentUpload} title={hasLinkedDocument ? 'Upload new document' : 'Upload document'}>
-              <Upload className="h-3.5 w-3.5" />
-            </Button>
-          )}
+                <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
+                  <DialogHeader className="p-4 border-b">
+                    <DialogTitle className="text-lg">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          {stage?.name && <span>{stage.name}: </span>}
+                          {task?.name}
+                          {task?.client_name && ` - ${task.client_name}`}
+                        </div>
+                        <div className="text-sm font-normal text-muted-foreground">
+                          {previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''}
+                        </div>
+                      </div>
+                    </DialogTitle>
+                  </DialogHeader>
 
-          {/* More Actions Dropdown */}
-          {hasMoreActions && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:bg-slate-100">
-                  <MoreHorizontal className="h-3.5 w-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {showAutomation && (
-                  <DropdownMenuItem onClick={handleTriggerAutomation} disabled={isAutomationRunning}>
-                    <Zap className="mr-2 h-3.5 w-3.5 text-blue-600 fill-blue-600" />
-                    <div className="flex flex-col">
-                      <span>Run Automation</span>
-                      <span className="text-[10px] text-muted-foreground leading-tight">
-                        via {currentAutomationConfig.docName}
-                      </span>
-                    </div>
-                  </DropdownMenuItem>
-                )}
-                {showSkip && (
-                  <DropdownMenuItem onClick={handleSkipClick}>
-                    <SkipForward className="mr-2 h-3.5 w-3.5" />
-                    Skip Stage
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+                  <div className="flex-1 overflow-auto p-4">
+                    {previewDocuments.length > 0 ? (
+                      previewDocuments.map((doc) => (
+                        <div key={doc.documentId} className="border rounded-lg overflow-hidden mb-4">
+                          <div className="p-4 bg-gray-50 border-b">
+                            <h3 className="font-medium">
+                              {doc.documentName || 'Document'}
+                              <span className="text-muted-foreground text-sm font-normal ml-2">
+                                (Uploaded: {doc.created_at ? formatDateDisplay(doc.created_at) : 'N/A'})
+                              </span>
+                            </h3>
+                          </div>
+                          <div className="p-4">
+                            <ExtractionPreview
+                              documentId={doc.documentId}
+                              documentName={doc.documentName}
+                              extractedData={doc.extractedData || {}}
+                              fields={doc.fields || []}
+                              fileUrl={doc.fileUrl}
+                              fileName={doc.fileName}
+                              onSave={handlePreviewSave}
+                              onDelete={handleDeleteDocument}
+                              expanded={true}
+                              showSaveButton={!!onSave}
+                              readOnly={false}
+                              type={doc.type}
+                              file={doc.file}
+                              onDataChange={(fieldName, value) =>
+                                handlePreviewDataChange(doc.documentId, fieldName, value)
+                              }
+                            />
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="h-full flex items-center justify-center">
+                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                        <p className="ml-4 text-muted-foreground">Loading documents...</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-4 border-t flex justify-end">
+                    <Button
+                      variant="default"
+                      onClick={() => setIsPreviewOpen(false)}
+                    >
+                      Close
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            )}
+          </div>
+
+          {/* Col 3: Upload Document */}
+          <div className="flex items-center justify-center w-8 h-8">
+            {requiresUpload && (
+              <Button variant="ghost" size="icon" className={`h-7 w-7 ${hasLinkedDocument ? 'text-blue-400 hover:bg-blue-50' : 'text-blue-600 hover:bg-blue-50'}`} onClick={handleDocumentUpload} title={hasLinkedDocument ? 'Upload new document' : 'Upload document'}>
+                <Upload className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+
+          {/* Col 4: More Actions */}
+          <div className="flex items-center justify-center w-8 h-8">
+            {hasMoreActions && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:bg-slate-100">
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {showAutomation && (
+                    <DropdownMenuItem onClick={handleTriggerAutomation} disabled={isAutomationRunning}>
+                      <Zap className="mr-2 h-3.5 w-3.5 text-blue-600 fill-blue-600" />
+                      <div className="flex flex-col">
+                        <span>Run Automation</span>
+                        <span className="text-[10px] text-muted-foreground leading-tight">
+                          via {currentAutomationConfig.docName}
+                        </span>
+                      </div>
+                    </DropdownMenuItem>
+                  )}
+                  {showSkip && (
+                    <DropdownMenuItem onClick={handleSkipClick}>
+                      <SkipForward className="mr-2 h-3.5 w-3.5" />
+                      Skip Stage
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         </div>
       );
     }
