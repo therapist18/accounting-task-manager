@@ -68,7 +68,8 @@
       "Bash(Select-Object FullName)",
       "Bash(Select-Object -ExpandProperty FullName)",
       "Bash(Sort-Object)",
-      "PowerShell(Get-ChildItem -Path \"e:\\\\GitHub\\\\Appointment-Booking\" -Directory | Where-Object {$_.Name -ne '.next'} | Select-Object -ExpandProperty FullName)"
+      "PowerShell(Get-ChildItem -Path \"e:\\\\GitHub\\\\Appointment-Booking\" -Directory | Where-Object {$_.Name -ne '.next'} | Select-Object -ExpandProperty FullName)",
+      "Bash(./gradlew :app:compileDebugKotlin --quiet)"
     ]
   }
 }

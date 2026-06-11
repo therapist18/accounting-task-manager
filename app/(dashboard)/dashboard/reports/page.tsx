@@ -2056,78 +2056,237 @@ export default function ReportsPage() {
       const pageW = doc.internal.pageSize.getWidth();
       const pageH = doc.internal.pageSize.getHeight();
 
-      // Only use task-type columns for PDF readability (landscape A4 fits ~8 cols nicely)
-      const pdfCols = filteredColumns.filter(c => c.type === 'task').slice(0, 9);
-      if (pdfCols.length === 0) pdfCols.push(...filteredColumns.slice(0, 6));
+      // Use ALL visible columns — autoTable handles row pagination; we split wide tables
+      // into column groups so every column is represented across pages.
+      const pdfCols = filteredColumns.length > 0 ? filteredColumns : [];
 
       const hexToRgb = (hex: string): [number, number, number] => [
         parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)
       ];
       const accent = hexToRgb(accentHex);
 
-      // Header block (first page)
-      doc.setFillColor(...accent);
-      doc.rect(0, 0, pageW, 18, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(15);
-      doc.setFont('helvetica', 'bold');
-      doc.text(reportTitle.toUpperCase(), pageW / 2, 11, { align: 'center' });
+      // ── Colour helpers ─────────────────────────────────────────────────────────
+      const GREY_DARK: [number, number, number] = [30, 41, 59];       // slate-800
+      const GREY_MID: [number, number, number] = [71, 85, 105];       // slate-600
+      const GREY_LIGHT: [number, number, number] = [226, 232, 240];   // slate-200
+      const WHITE: [number, number, number] = [255, 255, 255];
+      const ROW_ALT: [number, number, number] = [248, 250, 252];      // slate-50
+      const AMBER_BG: [number, number, number] = [255, 251, 235];     // amber-50
+      const AMBER_TEXT: [number, number, number] = [146, 64, 14];     // amber-800
+      const RED_TEXT: [number, number, number] = [220, 38, 38];
+      const ORANGE_TEXT: [number, number, number] = [234, 88, 12];
+      const SLATE_TEXT: [number, number, number] = [100, 116, 139];
 
-      doc.setFillColor(248, 250, 252);
-      doc.rect(0, 18, pageW, 9, 'F');
-      doc.setTextColor(71, 85, 105);
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'normal');
-      doc.text(
-        `${deptName}  ·  ${subdeptLabel}  ·  ${statusLabel}  ·  Generated: ${dateStr}  ·  Total: ${totalTasks} tasks`,
-        pageW / 2, 23, { align: 'center' }
-      );
+      // Column-type bucket for PDF styling
+      const pdfBucket = (type: string) => {
+        if (type === 'current_stage_age' || type === 'total_process_age') return 'duration';
+        if (type === 'task' || type === 'current_stage_officer') return 'task';
+        if (type === 'reference_requirement') return 'reference';
+        return 'stage';
+      };
 
-      let startY = 31;
+      // ── Page header painter (called once per page via didDrawPage) ─────────────
+      const paintPageHeader = (pageNum: number) => {
+        // Accent banner
+        doc.setFillColor(...accent);
+        doc.rect(0, 0, pageW, 16, 'F');
+        doc.setTextColor(...WHITE);
+        doc.setFontSize(13);
+        doc.setFont('helvetica', 'bold');
+        doc.text(reportTitle.toUpperCase(), pageW / 2, 10, { align: 'center' });
 
+        // Subtitle strip
+        doc.setFillColor(241, 245, 249); // slate-100
+        doc.rect(0, 16, pageW, 8, 'F');
+        doc.setTextColor(...GREY_MID);
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'normal');
+        doc.text(
+          `${deptName}  ·  ${subdeptLabel}  ·  ${statusLabel}  ·  Generated: ${dateStr}  ·  Total: ${totalTasks} tasks`,
+          pageW / 2, 21, { align: 'center' }
+        );
+
+        // Bottom border of header
+        doc.setDrawColor(...GREY_LIGHT);
+        doc.setLineWidth(0.3);
+        doc.line(0, 24, pageW, 24);
+      };
+
+      // ── Footer painter ─────────────────────────────────────────────────────────
+      const paintFooter = (pageNum: number) => {
+        doc.setFillColor(241, 245, 249);
+        doc.rect(0, pageH - 7, pageW, 7, 'F');
+        doc.setDrawColor(...GREY_LIGHT);
+        doc.line(0, pageH - 7, pageW, pageH - 7);
+        doc.setFontSize(6);
+        doc.setTextColor(...GREY_MID);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`${reportTitle}  ·  ${deptName}  ·  ${dateStr}`, 6, pageH - 2.5);
+        doc.text(`Page ${pageNum}`, pageW - 6, pageH - 2.5, { align: 'right' });
+      };
+
+      // Paint header on first page immediately
+      paintPageHeader(1);
+      let startY = 27;
+
+      // Split columns into chunks of 12 so wide tables paginate horizontally cleanly
+      const CHUNK = 12;
+      const colChunks: any[][] = [];
+      for (let i = 0; i < pdfCols.length; i += CHUNK) {
+        colChunks.push(pdfCols.slice(i, i + CHUNK));
+      }
+      if (colChunks.length === 0) colChunks.push([]);
+
+      // ── Per-group rendering ────────────────────────────────────────────────────
       for (const group of groups) {
         if (group.tasks.length === 0) continue;
         const isUnalloc = group.name === 'Unallocated';
         const gColor: [number, number, number] = isUnalloc ? [100, 116, 139] : accent;
 
-        if (startY > pageH - 35) { doc.addPage(); startY = 10; }
+        for (let ci = 0; ci < colChunks.length; ci++) {
+          const chunk = colChunks[ci];
+          const isFirstChunk = ci === 0;
 
-        // Group banner
-        doc.setFillColor(...gColor);
-        doc.rect(0, startY, pageW, 7, 'F');
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(9);
-        doc.setFont('helvetica', 'bold');
-        doc.text(`  ${group.name.toUpperCase()}   —   ${group.tasks.length} tasks`, 5, startY + 4.8);
-        startY += 9;
-
-        const headers = ['#', ...pdfCols.map(c => c.label)];
-        const rows = group.tasks.map((task, i) => [String(i + 1), ...pdfCols.map(col => getExportCellValue(task, col) || '—')]);
-
-        autoTable(doc, {
-          startY,
-          head: [headers],
-          body: rows,
-          styles: { fontSize: 7.5, cellPadding: 1.8, overflow: 'ellipsize', lineColor: [226, 232, 240], lineWidth: 0.15 },
-          headStyles: { fillColor: [226, 232, 240], textColor: [30, 41, 59], fontStyle: 'bold', fontSize: 8, halign: 'center' },
-          alternateRowStyles: { fillColor: [248, 250, 252] },
-          columnStyles: { 0: { halign: 'center', cellWidth: 8 } },
-          margin: { left: 4, right: 4 },
-          didParseCell: (data: any) => {
-            if (data.cell.raw === 'N/A') data.cell.styles.textColor = [239, 68, 68];
-            else if (data.cell.raw === 'Unallocated') data.cell.styles.textColor = [245, 158, 11];
-          },
-          didDrawPage: (data: any) => {
-            const pg = doc.getNumberOfPages();
-            doc.setFontSize(6.5);
-            doc.setTextColor(148, 163, 184);
-            doc.setFont('helvetica', 'normal');
-            doc.text(`${reportTitle}  ·  ${deptName}  ·  ${dateStr}  ·  Page ${data.pageNumber}`, pageW / 2, pageH - 3, { align: 'center' });
+          if (startY > pageH - 40) {
+            doc.addPage();
+            paintPageHeader(doc.getNumberOfPages());
+            startY = 27;
           }
-        });
 
-        startY = (doc as any).lastAutoTable.finalY + 8;
+          // ── Group banner ───────────────────────────────────────────────────────
+          if (isFirstChunk) {
+            // Rounded-look group banner
+            doc.setFillColor(...gColor);
+            doc.roundedRect(4, startY, pageW - 8, 8, 1, 1, 'F');
+            doc.setTextColor(...WHITE);
+            doc.setFontSize(8.5);
+            doc.setFont('helvetica', 'bold');
+            const groupLabel = group.name.toUpperCase();
+            const countLabel = `${group.tasks.length} task${group.tasks.length !== 1 ? 's' : ''}`;
+            doc.text(`  ${groupLabel}`, 6, startY + 5.5);
+            doc.text(countLabel, pageW - 6, startY + 5.5, { align: 'right' });
+            startY += 10;
+          } else {
+            // Continuation banner
+            doc.setFillColor(...gColor);
+            doc.setFillColor(gColor[0], gColor[1], gColor[2]);
+            const contBg: [number, number, number] = [gColor[0] + 40 > 255 ? 255 : gColor[0] + 40, gColor[1] + 40 > 255 ? 255 : gColor[1] + 40, gColor[2] + 40 > 255 ? 255 : gColor[2] + 40];
+            doc.setFillColor(...contBg);
+            doc.roundedRect(4, startY, pageW - 8, 6, 1, 1, 'F');
+            doc.setTextColor(...gColor);
+            doc.setFontSize(7);
+            doc.setFont('helvetica', 'italic');
+            doc.text(`  ${group.name} (cont.) — columns ${ci * CHUNK + 1}–${ci * CHUNK + chunk.length}`, 6, startY + 4);
+            startY += 8;
+          }
+
+          // ── Column-type headers ────────────────────────────────────────────────
+          // Build a colour header row above the data columns to replicate the
+          // table's visual column-group encoding
+          const colGroupLabels = chunk.map(col => {
+            const b = pdfBucket(col.type ?? 'stage');
+            return { label: col.label, bucket: b };
+          });
+
+          // Build colour map: head fill per column index (offset by 1 for # col)
+          const buildHeadStyle = (colIndex: number): any => {
+            if (colIndex === 0) return { fillColor: [15, 23, 42], textColor: WHITE }; // slate-950 for idx
+            const col = chunk[colIndex - 1];
+            if (!col) return { fillColor: GREY_DARK, textColor: WHITE };
+            const b = pdfBucket(col.type ?? 'stage');
+            if (b === 'duration') return { fillColor: [180, 83, 9], textColor: WHITE };    // amber-700
+            if (b === 'reference') return { fillColor: [6, 78, 59], textColor: WHITE };    // emerald-900
+            if (b === 'stage') return { fillColor: [55, 48, 163], textColor: WHITE };      // indigo-800
+            return { fillColor: [30, 58, 138], textColor: WHITE };                         // blue-900 (task)
+          };
+
+          const headers = ['#', ...chunk.map(c => c.label)];
+          const rows = group.tasks.map((task: any, i: number) => [
+            String(i + 1),
+            ...chunk.map((col: any) => {
+              const v = getExportCellValue(task, col);
+              return v || '—';
+            })
+          ]);
+
+          autoTable(doc, {
+            startY,
+            head: [headers],
+            body: rows,
+            styles: {
+              fontSize: 7,
+              cellPadding: { top: 1.8, right: 2.5, bottom: 1.8, left: 2.5 },
+              overflow: 'ellipsize',
+              lineColor: GREY_LIGHT,
+              lineWidth: 0.2,
+              valign: 'middle',
+            },
+            headStyles: {
+              fontStyle: 'bold',
+              fontSize: 7.5,
+              halign: 'center',
+              minCellHeight: 8,
+              lineWidth: 0.3,
+              lineColor: [255, 255, 255],
+            },
+            bodyStyles: {
+              textColor: GREY_DARK,
+            },
+            alternateRowStyles: { fillColor: ROW_ALT },
+            columnStyles: { 0: { halign: 'center', cellWidth: 9 } },
+            margin: { left: 4, right: 4, top: 27, bottom: 10 },
+            didParseCell: (data: any) => {
+              // Per-column head colour
+              if (data.section === 'head') {
+                const hs = buildHeadStyle(data.column.index);
+                data.cell.styles.fillColor = hs.fillColor;
+                data.cell.styles.textColor = hs.textColor;
+              }
+              // Semantic value colours
+              if (data.section === 'body') {
+                const raw = String(data.cell.raw ?? '');
+                if (raw === 'N/A' || raw === 'Missing') {
+                  data.cell.styles.textColor = RED_TEXT;
+                  data.cell.styles.fontStyle = 'italic';
+                } else if (raw === 'Unallocated') {
+                  data.cell.styles.textColor = ORANGE_TEXT;
+                } else if (raw.startsWith('Skipped')) {
+                  data.cell.styles.textColor = SLATE_TEXT;
+                  data.cell.styles.fontStyle = 'italic';
+                }
+                // Duration column tint in body
+                if (data.column.index > 0) {
+                  const col = chunk[data.column.index - 1];
+                  if (col && (col.type === 'current_stage_age' || col.type === 'total_process_age')) {
+                    data.cell.styles.fillColor = AMBER_BG;
+                    data.cell.styles.textColor = AMBER_TEXT;
+                  }
+                }
+              }
+            },
+            didDrawPage: (data: any) => {
+              // Re-paint header and footer on every new page
+              const pg = doc.getNumberOfPages();
+              paintPageHeader(pg);
+              paintFooter(pg);
+            },
+          });
+
+          startY = (doc as any).lastAutoTable.finalY + 6;
+
+          // If more chunks remain for this group, start a new page
+          if (ci < colChunks.length - 1) {
+            doc.addPage();
+            paintPageHeader(doc.getNumberOfPages());
+            startY = 27;
+          }
+        }
+
+        startY += 4; // spacing between groups
       }
+
+      // Paint footer on last page
+      paintFooter(doc.getNumberOfPages());
 
       doc.save(`${fileName}.pdf`);
     }
