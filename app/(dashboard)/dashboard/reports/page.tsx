@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
 import { ReportColumnVisibilityDialog } from "./components/ReportColumnVisibilityDialog";
-import { ReportsSidebar, ReportsToolbar, PersonFilterStrip, StatusFilterBar } from "./components/ReportsHeader";
+import { ReportsSidebar, ReportsToolbar, PersonFilterStrip, StatusFilterBar, ReportKpiCards } from "./components/ReportsHeader";
 
 const SPECIAL_STAGE_IDS = [
   '072b9710-45df-4a05-ba65-01b4ef29d61d',
@@ -1462,8 +1462,8 @@ export default function ReportsPage() {
           if (!linked || linked.indicator) continue;
           foundValue = isDateLike
             ? (findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId])
-               || linked.extracted_details?.[col.fieldName]
-               || linked.extracted_details?.[col.fieldId])
+              || linked.extracted_details?.[col.fieldName]
+              || linked.extracted_details?.[col.fieldId])
             : linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
           if (!foundValue && isDateTimeField) {
             foundValue = (Object.values(linked.extracted_details || {}) as any[]).find(
@@ -1492,8 +1492,8 @@ export default function ReportsPage() {
       const isDateLike2 = col.fieldType === 'date' || col.fieldType === 'Date' || isDateTimeField2;
       let val = isDateLike2
         ? (findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId])
-           || linked.extracted_details?.[col.fieldName]
-           || linked.extracted_details?.[col.fieldId])
+          || linked.extracted_details?.[col.fieldName]
+          || linked.extracted_details?.[col.fieldId])
         : linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
 
       // Pattern fallback: find any dd/MM/yyyy HH:mm value in extracted_details when key lookup failed
@@ -1717,8 +1717,8 @@ export default function ReportsPage() {
         if (!linked || linked.indicator) continue;
         foundValue = isDateLike
           ? (findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId])
-             || linked.extracted_details?.[col.fieldName]
-             || linked.extracted_details?.[col.fieldId])
+            || linked.extracted_details?.[col.fieldName]
+            || linked.extracted_details?.[col.fieldId])
           : linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
         if (!foundValue && isDateTimeFieldExport) {
           foundValue = (Object.values(linked.extracted_details || {}) as any[]).find(
@@ -1866,31 +1866,40 @@ export default function ReportsPage() {
       const { default: jsPDF } = await import('jspdf');
       const { default: autoTable } = await import('jspdf-autotable');
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
       const accentRgb: [number, number, number] = [79, 70, 229];
-      const darkRgb: [number, number, number] = [30, 27, 75];
+      const greyDark: [number, number, number] = [15, 23, 42];
+      const greyMid: [number, number, number] = [100, 116, 139];
+      const greyLight: [number, number, number] = [226, 232, 240];
 
-      // Cover accent bar
+      // Modern header
       doc.setFillColor(...accentRgb);
-      doc.rect(0, 0, 297, 18, 'F');
+      doc.rect(0, 0, pageW, 3, 'F');
+      doc.setFillColor(255, 255, 255);
+      doc.rect(0, 3, pageW, 18, 'F');
+      doc.setTextColor(...greyDark);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(14);
-      doc.setTextColor(255, 255, 255);
-      doc.text(reportName.toUpperCase(), 14, 12);
+      doc.text(reportName.toUpperCase(), 14, 14);
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.setTextColor(180, 174, 240);
-      doc.text(`${deptLabel}  ·  ${dateStr}  ·  ${searchedTasks.length} records`, 14, 16.5);
+      doc.setFontSize(7);
+      doc.setTextColor(...greyMid);
+      doc.text(`${deptLabel}  ·  ${dateStr}  ·  ${searchedTasks.length} records`, 14, 19.5);
+      doc.setDrawColor(...greyLight);
+      doc.setLineWidth(0.3);
+      doc.line(10, 22, pageW - 10, 22);
 
       autoTable(doc, {
-        startY: 24,
+        startY: 26,
         head: [['#', ...filteredColumns.map(c => c.label)]],
         body: searchedTasks.map((t, i) => [i + 1, ...filteredColumns.map(col => getExportCellValue(t, col))]),
-        theme: 'grid',
-        headStyles: { fillColor: darkRgb, textColor: [255, 255, 255], fontSize: 8, fontStyle: 'bold', cellPadding: 3 },
-        alternateRowStyles: { fillColor: [248, 249, 255] },
-        styles: { fontSize: 8, cellPadding: 2.5, textColor: [31, 41, 55], overflow: 'linebreak' },
-        columnStyles: { 0: { cellWidth: 8, halign: 'center' } },
-        margin: { left: 10, right: 10 },
+        headStyles: { fillColor: greyDark, textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold', halign: 'center', minCellHeight: 7, lineWidth: 0 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        bodyStyles: { textColor: [31, 41, 55], lineColor: [241, 245, 249] },
+        styles: { fontSize: 6.5, cellPadding: { top: 1.5, right: 2.5, bottom: 1.5, left: 2.5 }, textColor: [31, 41, 55], overflow: 'ellipsize', lineWidth: 0.15 },
+        columnStyles: { 0: { cellWidth: 7, halign: 'center' } },
+        margin: { left: 10, right: 10, top: 26, bottom: 12 },
         didParseCell: (data) => {
           if (data.section === 'body') {
             const v = String(data.cell.raw ?? '');
@@ -1901,11 +1910,15 @@ export default function ReportsPage() {
           }
         },
         didDrawPage: (data) => {
-          const pageCount = doc.internal.getNumberOfPages();
-          doc.setFontSize(7);
-          doc.setTextColor(156, 163, 175);
-          doc.text(`${reportName}  ·  Generated ${dateStr}`, 10, 208);
-          doc.text(`Page ${data.pageNumber} of ${pageCount}`, 287, 208, { align: 'right' });
+          const pg = doc.getNumberOfPages();
+          doc.setDrawColor(226, 232, 240);
+          doc.setLineWidth(0.3);
+          doc.line(10, pageH - 8, pageW - 10, pageH - 8);
+          doc.setFontSize(6.5);
+          doc.setTextColor(148, 163, 184);
+          doc.setFont('helvetica', 'normal');
+          doc.text(`${reportName}  ·  ${dateStr}`, 14, pageH - 3.5);
+          doc.text(`Page ${pg}`, pageW - 14, pageH - 3.5, { align: 'right' });
         }
       });
 
@@ -2097,8 +2110,6 @@ export default function ReportsPage() {
       const pageW = doc.internal.pageSize.getWidth();
       const pageH = doc.internal.pageSize.getHeight();
 
-      // Use ALL visible columns — autoTable handles row pagination; we split wide tables
-      // into column groups so every column is represented across pages.
       const pdfCols = filteredColumns.length > 0 ? filteredColumns : [];
 
       const hexToRgb = (hex: string): [number, number, number] => [
@@ -2107,7 +2118,7 @@ export default function ReportsPage() {
       const accent = hexToRgb(accentHex);
 
       // ── Colour helpers ─────────────────────────────────────────────────────────
-      const GREY_DARK: [number, number, number] = [30, 41, 59];       // slate-800
+      const GREY_DARK: [number, number, number] = [15, 23, 42];       // slate-950
       const GREY_MID: [number, number, number] = [71, 85, 105];       // slate-600
       const GREY_LIGHT: [number, number, number] = [226, 232, 240];   // slate-200
       const WHITE: [number, number, number] = [255, 255, 255];
@@ -2117,8 +2128,8 @@ export default function ReportsPage() {
       const RED_TEXT: [number, number, number] = [220, 38, 38];
       const ORANGE_TEXT: [number, number, number] = [234, 88, 12];
       const SLATE_TEXT: [number, number, number] = [100, 116, 139];
+      const GREEN_TEXT: [number, number, number] = [21, 128, 61];
 
-      // Column-type bucket for PDF styling
       const pdfBucket = (type: string) => {
         if (type === 'current_stage_age' || type === 'total_process_age') return 'duration';
         if (type === 'task' || type === 'current_stage_officer') return 'task';
@@ -2126,52 +2137,54 @@ export default function ReportsPage() {
         return 'stage';
       };
 
-      // ── Page header painter (called once per page via didDrawPage) ─────────────
+      // ── Modern page header ─────────────────────────────────────────────────────
       const paintPageHeader = (pageNum: number) => {
-        // Accent banner
+        // Thin accent top border
         doc.setFillColor(...accent);
-        doc.rect(0, 0, pageW, 16, 'F');
-        doc.setTextColor(...WHITE);
-        doc.setFontSize(13);
-        doc.setFont('helvetica', 'bold');
-        doc.text(reportTitle.toUpperCase(), pageW / 2, 10, { align: 'center' });
+        doc.rect(0, 0, pageW, 3, 'F');
 
-        // Subtitle strip
-        doc.setFillColor(241, 245, 249); // slate-100
-        doc.rect(0, 16, pageW, 8, 'F');
+        // White header area
+        doc.setFillColor(255, 255, 255);
+        doc.rect(0, 3, pageW, 20, 'F');
+
+        // Title
+        doc.setTextColor(...GREY_DARK);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text(reportTitle.toUpperCase(), 14, 15);
+
+        // Meta line
         doc.setTextColor(...GREY_MID);
         doc.setFontSize(7);
         doc.setFont('helvetica', 'normal');
         doc.text(
-          `${deptName}  ·  ${subdeptLabel}  ·  ${statusLabel}  ·  Generated: ${dateStr}  ·  Total: ${totalTasks} tasks`,
-          pageW / 2, 21, { align: 'center' }
+          `${deptName}  ·  ${subdeptLabel}  ·  ${statusLabel}  ·  ${dateStr}  ·  ${totalTasks} tasks`,
+          14, 20.5
         );
 
-        // Bottom border of header
+        // Subtle bottom line
         doc.setDrawColor(...GREY_LIGHT);
         doc.setLineWidth(0.3);
-        doc.line(0, 24, pageW, 24);
+        doc.line(10, 23, pageW - 10, 23);
       };
 
-      // ── Footer painter ─────────────────────────────────────────────────────────
+      // ── Footer ─────────────────────────────────────────────────────────────────
       const paintFooter = (pageNum: number) => {
-        doc.setFillColor(241, 245, 249);
-        doc.rect(0, pageH - 7, pageW, 7, 'F');
-        doc.setDrawColor(...GREY_LIGHT);
-        doc.line(0, pageH - 7, pageW, pageH - 7);
-        doc.setFontSize(6);
-        doc.setTextColor(...GREY_MID);
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.3);
+        doc.line(10, pageH - 8, pageW - 10, pageH - 8);
+        doc.setFontSize(6.5);
+        doc.setTextColor(148, 163, 184);
         doc.setFont('helvetica', 'normal');
-        doc.text(`${reportTitle}  ·  ${deptName}  ·  ${dateStr}`, 6, pageH - 2.5);
-        doc.text(`Page ${pageNum}`, pageW - 6, pageH - 2.5, { align: 'right' });
+        doc.text(`${reportTitle}  ·  ${deptName}  ·  ${dateStr}`, 14, pageH - 3.5);
+        doc.text(`Page ${pageNum}`, pageW - 14, pageH - 3.5, { align: 'right' });
       };
 
-      // Paint header on first page immediately
       paintPageHeader(1);
-      let startY = 27;
+      let startY = 26;
 
-      // Split columns into chunks of 12 so wide tables paginate horizontally cleanly
-      const CHUNK = 12;
+      // Wide landscape: fit ~18 columns per chunk
+      const CHUNK = 18;
       const colChunks: any[][] = [];
       for (let i = 0; i < pdfCols.length; i += CHUNK) {
         colChunks.push(pdfCols.slice(i, i + CHUNK));
@@ -2191,54 +2204,33 @@ export default function ReportsPage() {
           if (startY > pageH - 40) {
             doc.addPage();
             paintPageHeader(doc.getNumberOfPages());
-            startY = 27;
+            startY = 26;
           }
 
           // ── Group banner ───────────────────────────────────────────────────────
-          if (isFirstChunk) {
-            // Rounded-look group banner
-            doc.setFillColor(...gColor);
-            doc.roundedRect(4, startY, pageW - 8, 8, 1, 1, 'F');
-            doc.setTextColor(...WHITE);
-            doc.setFontSize(8.5);
-            doc.setFont('helvetica', 'bold');
-            const groupLabel = group.name.toUpperCase();
-            const countLabel = `${group.tasks.length} task${group.tasks.length !== 1 ? 's' : ''}`;
-            doc.text(`  ${groupLabel}`, 6, startY + 5.5);
-            doc.text(countLabel, pageW - 6, startY + 5.5, { align: 'right' });
-            startY += 10;
-          } else {
-            // Continuation banner
-            doc.setFillColor(...gColor);
-            doc.setFillColor(gColor[0], gColor[1], gColor[2]);
-            const contBg: [number, number, number] = [gColor[0] + 40 > 255 ? 255 : gColor[0] + 40, gColor[1] + 40 > 255 ? 255 : gColor[1] + 40, gColor[2] + 40 > 255 ? 255 : gColor[2] + 40];
-            doc.setFillColor(...contBg);
-            doc.roundedRect(4, startY, pageW - 8, 6, 1, 1, 'F');
-            doc.setTextColor(...gColor);
-            doc.setFontSize(7);
-            doc.setFont('helvetica', 'italic');
-            doc.text(`  ${group.name} (cont.) — columns ${ci * CHUNK + 1}–${ci * CHUNK + chunk.length}`, 6, startY + 4);
-            startY += 8;
-          }
+          doc.setFillColor(...gColor);
+          doc.roundedRect(8, startY, pageW - 16, 7, 1.5, 1.5, 'F');
+          doc.setTextColor(...WHITE);
+          doc.setFontSize(8);
+          doc.setFont('helvetica', 'bold');
+          const groupLabel = isFirstChunk
+            ? group.name.toUpperCase()
+            : `${group.name.toUpperCase()} (cont. — cols ${ci * CHUNK + 1}–${Math.min(ci * CHUNK + chunk.length, pdfCols.length)})`;
+          const countLabel = `${group.tasks.length} task${group.tasks.length !== 1 ? 's' : ''}`;
+          doc.text(`  ${groupLabel}`, 11, startY + 4.8);
+          if (isFirstChunk) doc.text(countLabel, pageW - 11, startY + 4.8, { align: 'right' });
+          startY += 9.5;
 
-          // ── Column-type headers ────────────────────────────────────────────────
-          // Build a colour header row above the data columns to replicate the
-          // table's visual column-group encoding
-          const colGroupLabels = chunk.map(col => {
-            const b = pdfBucket(col.type ?? 'stage');
-            return { label: col.label, bucket: b };
-          });
-
-          // Build colour map: head fill per column index (offset by 1 for # col)
+          // ── Build head styles per column ───────────────────────────────────────
           const buildHeadStyle = (colIndex: number): any => {
-            if (colIndex === 0) return { fillColor: [15, 23, 42], textColor: WHITE }; // slate-950 for idx
+            if (colIndex === 0) return { fillColor: GREY_DARK, textColor: WHITE };
             const col = chunk[colIndex - 1];
             if (!col) return { fillColor: GREY_DARK, textColor: WHITE };
             const b = pdfBucket(col.type ?? 'stage');
-            if (b === 'duration') return { fillColor: [180, 83, 9], textColor: WHITE };    // amber-700
-            if (b === 'reference') return { fillColor: [6, 78, 59], textColor: WHITE };    // emerald-900
-            if (b === 'stage') return { fillColor: [55, 48, 163], textColor: WHITE };      // indigo-800
-            return { fillColor: [30, 58, 138], textColor: WHITE };                         // blue-900 (task)
+            if (b === 'duration') return { fillColor: [180, 83, 9], textColor: WHITE };
+            if (b === 'reference') return { fillColor: [6, 78, 59], textColor: WHITE };
+            if (b === 'stage') return { fillColor: [55, 48, 163], textColor: WHITE };
+            return { fillColor: [30, 58, 138], textColor: WHITE };
           };
 
           const headers = ['#', ...chunk.map(c => c.label)];
@@ -2255,37 +2247,37 @@ export default function ReportsPage() {
             head: [headers],
             body: rows,
             styles: {
-              fontSize: 7,
-              cellPadding: { top: 1.8, right: 2.5, bottom: 1.8, left: 2.5 },
+              fontSize: 6.5,
+              cellPadding: { top: 1.5, right: 2, bottom: 1.5, left: 2 },
               overflow: 'ellipsize',
               lineColor: GREY_LIGHT,
-              lineWidth: 0.2,
+              lineWidth: 0.15,
               valign: 'middle',
             },
             headStyles: {
               fontStyle: 'bold',
-              fontSize: 7.5,
+              fontSize: 6.5,
               halign: 'center',
-              minCellHeight: 8,
-              lineWidth: 0.3,
-              lineColor: [255, 255, 255],
+              minCellHeight: 7,
+              lineWidth: 0,
             },
             bodyStyles: {
-              textColor: GREY_DARK,
+              textColor: [31, 41, 55],
+              lineColor: [241, 245, 249],
             },
             alternateRowStyles: { fillColor: ROW_ALT },
-            columnStyles: { 0: { halign: 'center', cellWidth: 9 } },
-            margin: { left: 4, right: 4, top: 27, bottom: 10 },
+            columnStyles: { 0: { halign: 'center', cellWidth: 7 } },
+            margin: { left: 8, right: 8, top: 26, bottom: 12 },
             didParseCell: (data: any) => {
-              // Per-column head colour
               if (data.section === 'head') {
                 const hs = buildHeadStyle(data.column.index);
                 data.cell.styles.fillColor = hs.fillColor;
                 data.cell.styles.textColor = hs.textColor;
               }
-              // Semantic value colours
               if (data.section === 'body') {
                 const raw = String(data.cell.raw ?? '');
+                const col = data.column.index > 0 ? chunk[data.column.index - 1] : null;
+
                 if (raw === 'N/A' || raw === 'Missing') {
                   data.cell.styles.textColor = RED_TEXT;
                   data.cell.styles.fontStyle = 'italic';
@@ -2294,39 +2286,36 @@ export default function ReportsPage() {
                 } else if (raw.startsWith('Skipped')) {
                   data.cell.styles.textColor = SLATE_TEXT;
                   data.cell.styles.fontStyle = 'italic';
+                } else if (raw.toLowerCase().includes('completed')) {
+                  data.cell.styles.textColor = GREEN_TEXT;
+                  data.cell.styles.fontStyle = 'bold';
                 }
-                // Duration column tint in body
-                if (data.column.index > 0) {
-                  const col = chunk[data.column.index - 1];
-                  if (col && (col.type === 'current_stage_age' || col.type === 'total_process_age')) {
-                    data.cell.styles.fillColor = AMBER_BG;
-                    data.cell.styles.textColor = AMBER_TEXT;
-                  }
+
+                if (col && (col.type === 'current_stage_age' || col.type === 'total_process_age')) {
+                  data.cell.styles.fillColor = AMBER_BG;
+                  data.cell.styles.textColor = AMBER_TEXT;
                 }
               }
             },
             didDrawPage: (data: any) => {
-              // Re-paint header and footer on every new page
               const pg = doc.getNumberOfPages();
               paintPageHeader(pg);
               paintFooter(pg);
             },
           });
 
-          startY = (doc as any).lastAutoTable.finalY + 6;
+          startY = (doc as any).lastAutoTable.finalY + 5;
 
-          // If more chunks remain for this group, start a new page
           if (ci < colChunks.length - 1) {
             doc.addPage();
             paintPageHeader(doc.getNumberOfPages());
-            startY = 27;
+            startY = 26;
           }
         }
 
-        startY += 4; // spacing between groups
+        startY += 3;
       }
 
-      // Paint footer on last page
       paintFooter(doc.getNumberOfPages());
 
       doc.save(`${fileName}.pdf`);
@@ -2458,130 +2447,137 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
-      {/* 1. Sidebar: Now sits to the left of the main content */}
-      <ReportsSidebar
-        departments={departments}
-        activeDeptId={activeDeptId}
-        setActiveDeptId={setActiveDeptId}
+    <div className="h-full w-full overflow-hidden">
+      {/* Top Row: Report Info & High-level Perspectives */}
+      <ReportsToolbar
+        activeReport={activeReport}
+        setIsReportDialogOpen={setIsReportDialogOpen}
+        columns={columns}
+        visibleColumnIds={visibleColumnIds}
+        setVisibleColumnIds={setVisibleColumnIds}
+        showTimeTrackingColumns={showTimeTrackingColumns}
+        setShowTimeTrackingColumns={setShowTimeTrackingColumns}
+        showDocRequirementsColumns={showDocRequirementsColumns}
+        setShowDocRequirementsColumns={setShowDocRequirementsColumns}
+        view={view}
+        setView={setView}
+        handleSendReport={handleSendReport}
+        refreshData={() => refreshData(true)}
+        loading={loading}
+        activeDepartment={activeDepartment}
         activeSubDepartments={activeSubDepartments}
         activeSubDeptIds={activeSubDeptIds}
-        setActiveSubDeptIds={setActiveSubDeptIds}
-        isCollapsed={sidebarCollapsed}
-        onToggleCollapse={handleSidebarToggle}
       />
 
       {/* 2. Main Content Area: Takes up remaining width */}
-      <div className="flex-1 flex flex-col min-w-0">
-
-        {/* Top Row: Report Info & High-level Perspectives */}
-        <ReportsToolbar
-          activeReport={activeReport}
-          setIsReportDialogOpen={setIsReportDialogOpen}
-          columns={columns}
-          visibleColumnIds={visibleColumnIds}
-          setVisibleColumnIds={setVisibleColumnIds}
-          showTimeTrackingColumns={showTimeTrackingColumns}
-          setShowTimeTrackingColumns={setShowTimeTrackingColumns}
-          showDocRequirementsColumns={showDocRequirementsColumns}
-          setShowDocRequirementsColumns={setShowDocRequirementsColumns}
-          view={view}
-          setView={setView}
-          handleSendReport={handleSendReport}
-          refreshData={() => refreshData(true)}
-          loading={loading}
-          activeDepartment={activeDepartment}
+      <div className="flex min-w-0">
+        {/* 1. Sidebar: Now sits to the left of the main content */}
+        <ReportsSidebar
+          departments={departments}
+          activeDeptId={activeDeptId}
+          setActiveDeptId={setActiveDeptId}
           activeSubDepartments={activeSubDepartments}
           activeSubDeptIds={activeSubDeptIds}
+          setActiveSubDeptIds={setActiveSubDeptIds}
+          isCollapsed={sidebarCollapsed}
+          onToggleCollapse={handleSidebarToggle}
         />
+        <div className="flex flex-col w-full overflow-hidden">
+          {/* KPI Cards */}
+          <ReportKpiCards
+            allTasksCount={allTasksCount}
+            wipTasksCount={wipTasksCount}
+            writeUpCompletedCount={writeUpCompletedCount}
+            endorsedCount={endorsedCount}
+            cancelledCount={cancelledCount}
+          />
+          {/* Second Row: Person Specific Filters (Conditional based on perspective) */}
+          <PersonFilterStrip
+            activePerspective={activePerspective}
+            setActivePerspective={setActivePerspective} // Added
+            allTasksCount={allTasksCount}                 // Added
+            officerTaskCounts={officerTaskCounts}
+            taskManagerTaskCounts={taskManagerTaskCounts}
+            clientTaskCounts={clientTaskCounts}           // Added
+            availableOfficers={availableOfficers}
+            activeOfficerTab={activeOfficerTab}
+            setActiveOfficerTab={setActiveOfficerTab}
+            officerFilterMode={officerFilterMode}
+            setOfficerFilterMode={setOfficerFilterMode}
+            availableTaskManagers={availableTaskManagers}
+            activeTaskManagerTab={activeTaskManagerTab}
+            setActiveTaskManagerTab={setActiveTaskManagerTab}
+            taskManagerFilterMode={taskManagerFilterMode}
+            setTaskManagerFilterMode={setTaskManagerFilterMode}
+          />
 
-        {/* Second Row: Person Specific Filters (Conditional based on perspective) */}
-        <PersonFilterStrip
-          activePerspective={activePerspective}
-          setActivePerspective={setActivePerspective} // Added
-          allTasksCount={allTasksCount}                 // Added
-          officerTaskCounts={officerTaskCounts}
-          taskManagerTaskCounts={taskManagerTaskCounts}
-          clientTaskCounts={clientTaskCounts}           // Added
-          availableOfficers={availableOfficers}
-          activeOfficerTab={activeOfficerTab}
-          setActiveOfficerTab={setActiveOfficerTab}
-          officerFilterMode={officerFilterMode}
-          setOfficerFilterMode={setOfficerFilterMode}
-          availableTaskManagers={availableTaskManagers}
-          activeTaskManagerTab={activeTaskManagerTab}
-          setActiveTaskManagerTab={setActiveTaskManagerTab}
-          taskManagerFilterMode={taskManagerFilterMode}
-          setTaskManagerFilterMode={setTaskManagerFilterMode}
-        />
-
-        {/* Third Row: Status, Search, and Category Filters */}
-        <StatusFilterBar
-          activeStatus={activeStatus}
-          setActiveStatus={setActiveStatus}
-          allTasksCount={allTasksCount}
-          wipTasksCount={wipTasksCount}
-          writeUpCompletedCount={writeUpCompletedCount}
-          endorsedCount={endorsedCount}
-          cancelledCount={cancelledCount}
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-          activeClassId={activeClassId}
-          setActiveClassId={setActiveClassId}
-          activeSubClassId={activeSubClassId}
-          setActiveSubClassId={setActiveSubClassId}
-          activeSubDeptIds={activeSubDeptIds}
-          activeSubDepartments={activeSubDepartments}
-          isFiltersDropdownOpen={isFiltersDropdownOpen}
-          setIsFiltersDropdownOpen={setIsFiltersDropdownOpen}
-        />
-        {/* Table Area */}
-        <div className="flex-1 overflow-hidden p-3">
-          {!activeReport ? (
-            <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200">
-              <FileText className="h-16 w-16 mb-4 opacity-20 text-blue-600" />
-              <p className="text-lg font-bold text-slate-600">No Report Selected</p>
-              <p className="text-sm text-slate-400 mt-1">Select a report template to view data</p>
-              <Button size="sm" className="mt-4" onClick={() => setIsReportDialogOpen(true)}>
-                <Filter className="h-3.5 w-3.5 mr-1.5" />Select Report
-              </Button>
-            </div>
-          ) : loading ? (
-            <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200">
-              <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-3" />
-              <p className="text-sm font-bold text-slate-500">Processing Report Data...</p>
-            </div>
-          ) : view === 'standard' ? (
-            <StandardReportView
-              allTasks={filteredByNARows}
-              filteredColumns={filteredColumns}
-              columnGroups={columnGroups}
-              sortConfig={sortConfig}
-              expandedStageColumns={expandedStageColumns}
-              renderCellValue={renderCellValue}
-              safeRender={safeRender}
-              handleSort={handleSort}
-              toggleStageColumns={toggleStageColumns}
-              isStageApplicableToCurrentFilter={isStageApplicableToCurrentFilter}
-              userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
-              departments={departments}
-              stages={stages}
-            />
-          ) : (
-            <TransposedReportView
-              paginatedTasks={filteredByNARows}
-              transposedRows={transposedRows}
-              currentPage={1}
-              itemsPerPage={filteredByNARows.length}
-              expandedSections={expandedSections}
-              renderCellValue={renderCellValue}
-              toggleSection={toggleSection}
-              userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
-              departments={departments}
-            />
-          )}
+          {/* Third Row: Status, Search, and Category Filters */}
+          <StatusFilterBar
+            activeStatus={activeStatus}
+            setActiveStatus={setActiveStatus}
+            allTasksCount={allTasksCount}
+            wipTasksCount={wipTasksCount}
+            writeUpCompletedCount={writeUpCompletedCount}
+            endorsedCount={endorsedCount}
+            cancelledCount={cancelledCount}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            activeClassId={activeClassId}
+            setActiveClassId={setActiveClassId}
+            activeSubClassId={activeSubClassId}
+            setActiveSubClassId={setActiveSubClassId}
+            activeSubDeptIds={activeSubDeptIds}
+            activeSubDepartments={activeSubDepartments}
+            isFiltersDropdownOpen={isFiltersDropdownOpen}
+            setIsFiltersDropdownOpen={setIsFiltersDropdownOpen}
+          />
+          {/* Table Area */}
+          <div className="flex-1 overflow-hidden p-2">
+            {!activeReport ? (
+              <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200">
+                <FileText className="h-16 w-16 mb-4 opacity-20 text-blue-600" />
+                <p className="text-lg font-bold text-slate-600">No Report Selected</p>
+                <p className="text-sm text-slate-400 mt-1">Select a report template to view data</p>
+                <Button size="sm" className="mt-4" onClick={() => setIsReportDialogOpen(true)}>
+                  <Filter className="h-3.5 w-3.5 mr-1.5" />Select Report
+                </Button>
+              </div>
+            ) : loading ? (
+              <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200">
+                <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-3" />
+                <p className="text-sm font-bold text-slate-500">Processing Report Data...</p>
+              </div>
+            ) : view === 'standard' ? (
+              <StandardReportView
+                allTasks={filteredByNARows}
+                filteredColumns={filteredColumns}
+                columnGroups={columnGroups}
+                sortConfig={sortConfig}
+                expandedStageColumns={expandedStageColumns}
+                renderCellValue={renderCellValue}
+                safeRender={safeRender}
+                handleSort={handleSort}
+                toggleStageColumns={toggleStageColumns}
+                isStageApplicableToCurrentFilter={isStageApplicableToCurrentFilter}
+                userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
+                departments={departments}
+                stages={stages}
+              />
+            ) : (
+              <TransposedReportView
+                paginatedTasks={filteredByNARows}
+                transposedRows={transposedRows}
+                currentPage={1}
+                itemsPerPage={filteredByNARows.length}
+                expandedSections={expandedSections}
+                renderCellValue={renderCellValue}
+                toggleSection={toggleSection}
+                userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
+                departments={departments}
+              />
+            )}
+          </div>
         </div>
-
       </div>
 
       <MemorizedReportDialog

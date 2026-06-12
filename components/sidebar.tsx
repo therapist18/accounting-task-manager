@@ -305,7 +305,7 @@ const AppSidebar = () => {
             <aside
                 className={cn(
                     "fixed inset-y-0 left-0 z-40 flex h-screen flex-col border-r border-blue-50 bg-blue-50 text-[hsl(var(--sidebar-foreground))] transition-all duration-300 ease-in-out lg:sticky lg:top-0 shadow-md",
-                    isCollapsed ? "w-[70px]" : "w-[260px]",
+                    isCollapsed ? "w-[70px]" : "w-[240px]",
                     isMobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
                 )}
             >

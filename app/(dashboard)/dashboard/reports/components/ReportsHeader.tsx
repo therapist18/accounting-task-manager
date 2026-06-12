@@ -59,7 +59,7 @@ export function ReportsSidebar({
 
   return (
     <div className={cn(
-      "border-r border-slate-200 bg-white flex flex-col h-full shrink-0 transition-all duration-300 ease-in-out z-20",
+      "border-r border-slate-100 bg-slate-50/80 flex flex-col h-full shrink-0 transition-all duration-300 ease-in-out z-20",
       isCollapsed ? "w-16" : "w-64"
     )}>
       {/* Header */}
@@ -69,14 +69,14 @@ export function ReportsSidebar({
       )}>
         {!isCollapsed && (
           <div>
-            <span className="text-[9px] font-black text-blue-600 uppercase tracking-[0.2em]">Workspace</span>
+            <span className="text-[9px] font-bold text-blue-500 uppercase tracking-[0.2em]">Workspace</span>
             <h2 className="text-base font-bold text-slate-900 leading-none mt-0.5">Departments</h2>
           </div>
         )}
         {onToggleCollapse && (
           <button
             onClick={onToggleCollapse}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
           >
             {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           </button>
@@ -93,7 +93,7 @@ export function ReportsSidebar({
               placeholder="Search departments..."
               value={sidebarSearch}
               onChange={e => setSidebarSearch(e.target.value)}
-              className="w-full pl-7 pr-7 h-8 text-xs rounded-lg bg-slate-50 border border-slate-200 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-all"
+              className="w-full pl-7 pr-7 h-8 text-xs rounded-lg bg-white border border-slate-200 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all"
             />
             {sidebarSearch && (
               <button onClick={() => setSidebarSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
@@ -106,7 +106,7 @@ export function ReportsSidebar({
 
       {/* Content */}
       <div className={cn(
-        "flex-1 overflow-y-auto py-3 space-y-1 scrollbar-thin",
+        "flex-1 overflow-y-auto py-4 space-y-1.5 scrollbar-thin",
         isCollapsed ? "px-2" : "px-3"
       )}>
         {filteredDepartments.map((dept) => {
@@ -120,8 +120,8 @@ export function ReportsSidebar({
                 className={cn(
                   "w-10 h-10 mx-auto flex items-center justify-center rounded-xl text-xs font-bold transition-all",
                   isActive
-                    ? "bg-blue-600 text-white shadow-md"
-                    : "bg-slate-100 text-slate-500 hover:bg-blue-50 hover:text-blue-600"
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "bg-white text-slate-400 hover:bg-blue-50 hover:text-blue-600"
                 )}
                 title={dept.name}
               >
@@ -135,30 +135,33 @@ export function ReportsSidebar({
               <button
                 onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
                 className={cn(
-                  "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all text-left",
+                  "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all text-left",
                   isActive
-                    ? "bg-blue-50 text-blue-700 border border-blue-100"
-                    : "text-slate-600 hover:bg-slate-50"
+                    ? "bg-gradient-to-r from-blue-50 to-white text-blue-600 border border-blue-200 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700 hover:bg-white hover:shadow-sm"
                 )}
               >
                 <div className={cn(
-                  "h-7 w-7 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0",
-                  isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-500"
+                  "h-8 w-8 rounded-lg flex items-center justify-center text-[11px] font-bold shrink-0 transition-all",
+                  isActive ? "bg-blue-600 text-white shadow-sm" : "bg-white text-slate-400 border border-slate-200"
                 )}>
                   {getInitials(dept.name)}
                 </div>
-                <span className={cn("text-xs font-semibold truncate", isActive ? "text-blue-700" : "text-slate-600")}>
-                  {dept.name}
-                </span>
-                {isActive && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-blue-600 shrink-0" />}
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className={cn("text-xs font-semibold truncate leading-tight", isActive ? "text-blue-600" : "text-slate-600")}>
+                    {dept.name}
+                  </span>
+                  <span className="text-[9px] text-slate-400 truncate leading-tight">{dept.tm_subdepartments?.length || 0} sub-depts</span>
+                </div>
+                {isActive && <Building2 className="h-3.5 w-3.5 text-blue-400 shrink-0" />}
               </button>
 
               {isActive && activeSubDepartments.length > 0 && (
-                <div className="ml-6 pl-3 border-l-2 border-blue-100 space-y-0.5 mt-1 mb-2">
-                  <div className="flex items-center justify-between px-2 pb-1">
+                <div className="ml-7 pl-4 border-l-2 border-slate-100 space-y-0.5 mt-2 mb-4">
+                  <div className="flex items-center justify-between px-2 pb-1.5">
                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sub-departments</span>
                     {activeSubDeptIds.length > 0 && (
-                      <button onClick={() => setActiveSubDeptIds([])} className="text-[9px] font-bold text-blue-500 hover:text-blue-700">
+                      <button onClick={() => setActiveSubDeptIds([])} className="text-[9px] font-semibold text-blue-500 hover:text-blue-700">
                         Clear ({activeSubDeptIds.length})
                       </button>
                     )}
@@ -167,15 +170,15 @@ export function ReportsSidebar({
                   <button
                     onClick={() => setActiveSubDeptIds([])}
                     className={cn(
-                      "w-full flex items-center gap-2 text-left px-2 py-1.5 text-xs rounded-md transition-all font-semibold",
+                      "w-full flex items-center gap-2.5 text-left px-3 py-2 text-xs rounded-lg transition-all font-semibold",
                       activeSubDeptIds.length === 0
-                        ? "text-blue-700 bg-blue-50"
-                        : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                        ? "bg-blue-50 text-blue-600"
+                        : "text-slate-500 hover:text-slate-700 hover:bg-white"
                     )}
                   >
-                    <ListChecks className="h-3 w-3 shrink-0" />
+                    <ListChecks className="h-3.5 w-3.5 shrink-0" />
                     <span className="flex-1 truncate">All Sub-departments</span>
-                    {activeSubDeptIds.length === 0 && <Check className="h-3 w-3 text-blue-500" />}
+                    {activeSubDeptIds.length === 0 && <Check className="h-3.5 w-3.5 text-blue-500" />}
                   </button>
 
                   {activeSubDepartments.map((sub) => {
@@ -186,15 +189,15 @@ export function ReportsSidebar({
                         key={sub.id}
                         onClick={() => toggleSubDept(id)}
                         className={cn(
-                          "w-full flex items-center gap-2 text-left px-2 py-1.5 text-xs rounded-md transition-all",
+                          "w-full flex items-center gap-2.5 text-left px-3 py-2 text-xs rounded-lg transition-all",
                           checked
-                            ? "text-blue-700 bg-blue-50 font-semibold"
-                            : "text-slate-500 hover:text-slate-700 hover:bg-slate-50 font-medium"
+                            ? "bg-blue-50 text-blue-600 font-semibold"
+                            : "text-slate-500 hover:text-slate-700 hover:bg-white font-medium"
                         )}
                       >
                         <span className={cn(
-                          "h-3.5 w-3.5 rounded border flex items-center justify-center shrink-0 transition-colors",
-                          checked ? "bg-blue-600 border-blue-600" : "border-slate-300 bg-white"
+                          "h-4 w-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors",
+                          checked ? "bg-blue-500 border-blue-500" : "border-slate-300 bg-white"
                         )}>
                           {checked && <Check className="h-2.5 w-2.5 text-white" strokeWidth={3} />}
                         </span>
@@ -232,30 +235,32 @@ export function ReportsToolbar({
     if (activeSubDeptIds.length === 1) {
       return activeSubDepartments.find((s: any) => s.id.toString() === activeSubDeptIds[0])?.name || "1 Sub-department";
     }
-    return `${activeSubDeptIds.length} Sub-departments`;
+    const names = activeSubDeptIds.map(id => activeSubDepartments.find((s: any) => s.id.toString() === id)?.name).filter(Boolean);
+    if (names.length <= 3) return names.join(", ");
+    return `${names.slice(0, 3).join(", ")} +${names.length - 3} more`;
   }, [activeSubDeptIds, activeSubDepartments]);
 
   return (
     <div className="bg-white border-b border-slate-200 sticky top-0 z-30">
-      <div className="px-6 py-4 flex items-center justify-between gap-6">
+      <div className="px-6 py-5 flex items-center justify-between gap-10">
         {/* LEFT: Title + breadcrumb stacked */}
         <div
           onClick={() => setIsReportDialogOpen(true)}
-          className="group cursor-pointer flex flex-col gap-1 min-w-0"
+          className="group cursor-pointer flex flex-col gap-1.5 min-w-0"
         >
           <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-none uppercase group-hover:text-blue-600 transition-colors truncate">
             {activeReport?.name || "Select Report"}
           </h1>
-          <div className="flex items-center gap-1 text-[11px] font-semibold text-blue-600">
-            <Building2 className="h-3 w-3 shrink-0" />
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-blue-600">
+            <Building2 className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">{activeDepartment?.name || "All Departments"}</span>
-            <span className="text-blue-300">›</span>
-            <span className="text-blue-500 truncate">{selectedSubDeptText}</span>
+            <span className="text-slate-300">›</span>
+            <span className="truncate">{selectedSubDeptText}</span>
           </div>
         </div>
 
         {/* RIGHT: Action buttons */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-3 shrink-0">
           {/* Columns visibility */}
           <ReportColumnVisibilityDialog
             columns={columns}
@@ -318,17 +323,51 @@ export function ReportsToolbar({
                 </div>
                 <div className="flex flex-col gap-1 p-2 bg-slate-50 rounded-lg">
                   <div className="flex items-center gap-2 px-1 mb-1">
-                    <User className="h-3 w-3 text-violet-500" />
+                    <User className="h-3 w-3 text-blue-500" />
                     <span className="text-[10px] font-bold text-slate-600">MANAGER EXPORT</span>
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => handleSendReport('manager', 'excel')} className="flex-1 bg-white hover:bg-violet-50 border border-slate-200 py-1.5 rounded-md text-[10px] font-bold transition-colors">Excel</button>
-                    <button onClick={() => handleSendReport('manager', 'pdf')} className="flex-1 bg-white hover:bg-violet-50 border border-slate-200 py-1.5 rounded-md text-[10px] font-bold transition-colors">PDF</button>
+                    <button onClick={() => handleSendReport('manager', 'excel')} className="flex-1 bg-white hover:bg-blue-50 border border-slate-200 py-1.5 rounded-md text-[10px] font-bold transition-colors">Excel</button>
+                    <button onClick={() => handleSendReport('manager', 'pdf')} className="flex-1 bg-white hover:bg-blue-50 border border-slate-200 py-1.5 rounded-md text-[10px] font-bold transition-colors">PDF</button>
                   </div>
                 </div>
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── KPI Cards ───────────────────────────────────────────────────────────────
+
+export function ReportKpiCards({
+  allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount
+}: any) {
+  const cards = [
+    { label: 'Total', value: allTasksCount, border: 'border-t-blue-500', sub: 'Applications' },
+    { label: 'WIP', value: wipTasksCount, border: 'border-t-amber-400', sub: 'In Progress' },
+    { label: 'Completed', value: writeUpCompletedCount, border: 'border-t-emerald-500', sub: 'Write Ups Done' },
+    { label: 'Endorsed', value: endorsedCount, border: 'border-t-violet-500', sub: 'Endorsed' },
+    { label: 'Cancelled', value: cancelledCount, border: 'border-t-red-400', sub: 'Cancelled' },
+  ];
+
+  return (
+    <div className="bg-white border-b border-slate-200">
+      <div className="px-6 py-4">
+        <div className="flex items-stretch gap-3">
+          {cards.map((card) => (
+            <div key={card.label} className={cn(
+              "flex-1 min-w-0 rounded-xl border px-4 py-3 flex flex-col border-t-[3px]",
+              "bg-white border-slate-200",
+              card.border
+            )}>
+              <span className="text-2xl font-black text-slate-900 leading-none">{card.value}</span>
+              <span className="text-[11px] font-semibold text-slate-500 mt-1.5">{card.label}</span>
+              <span className="text-[10px] text-slate-400 mt-0.5">{card.sub}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -413,30 +452,33 @@ export function PersonFilterStrip({
         )}
       </div>
 
-      {/* ROW 2: Person tabs — scrollable horizontal pills */}
+      {/* ROW 2: Person tabs — filled pill style for active */}
       {showPersonList && (
-        <div className="px-6 py-2.5 flex items-center gap-3">
-          <div className={cn(
-            "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wide shrink-0",
-            isOfficer ? "bg-blue-50 text-blue-600" : "bg-violet-50 text-violet-600"
-          )}>
-            {isOfficer ? <Shield className="h-3 w-3" /> : <User className="h-3 w-3" />}
-            {isOfficer ? "Officer" : "Manager"}
-          </div>
+        <div className="border-b border-slate-100">
+          <div className="px-6 py-2.5 flex items-center gap-2 overflow-x-auto no-scrollbar">
+            <div className={cn(
+              "shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[10px] font-black uppercase tracking-wide",
+              isOfficer ? "bg-blue-50 text-blue-600" : "bg-slate-100 text-slate-600"
+            )}>
+              {isOfficer ? <Shield className="h-3 w-3" /> : <User className="h-3 w-3" />}
+              {isOfficer ? "Officer" : "Manager"}
+            </div>
 
-          <div className="flex-1 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
             {/* All tab */}
             <button
               onClick={() => setActiveTab('all')}
               className={cn(
-                "shrink-0 flex items-center gap-1.5 h-7 px-3 rounded-full text-xs font-semibold transition-all border",
+                "shrink-0 flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg transition-all",
                 activeTab === 'all'
-                  ? (isOfficer ? "bg-blue-600 border-blue-600 text-white" : "bg-violet-600 border-violet-600 text-white")
-                  : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
               )}
             >
               All {isOfficer ? "Officers" : "Managers"}
-              <span className={cn("text-[10px]", activeTab === 'all' ? "text-white/80" : "text-slate-400")}>
+              <span className={cn(
+                "text-[10px] font-bold px-1.5 py-0.5 rounded",
+                activeTab === 'all' ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"
+              )}>
                 {counts.all}
               </span>
             </button>
@@ -449,15 +491,18 @@ export function PersonFilterStrip({
                   key={p.id}
                   onClick={() => setActiveTab(isActive ? 'all' : p.id.toString())}
                   className={cn(
-                    "shrink-0 flex items-center gap-1.5 h-7 px-3 rounded-full text-xs font-semibold transition-all border whitespace-nowrap",
+                    "shrink-0 flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg transition-all whitespace-nowrap",
                     isActive
-                      ? (isOfficer ? "bg-blue-600 border-blue-600 text-white" : "bg-violet-600 border-violet-600 text-white")
-                      : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
                   )}
                 >
                   {p.full_name || p.name || p.displayName}
                   {count > 0 && (
-                    <span className={cn("text-[10px]", isActive ? "text-white/80" : "text-slate-400")}>
+                    <span className={cn(
+                      "text-[10px] font-bold px-1.5 py-0.5 rounded",
+                      isActive ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"
+                    )}>
                       {count}
                     </span>
                   )}
@@ -467,19 +512,22 @@ export function PersonFilterStrip({
 
             {(counts.__unallocated__ ?? 0) > 0 && (
               <>
-                <div className="h-4 w-px bg-slate-200 shrink-0 mx-1" />
+                <div className="h-5 w-px bg-slate-200 shrink-0" />
                 <button
                   onClick={() => setActiveTab(activeTab === '__unallocated__' ? 'all' : '__unallocated__')}
                   className={cn(
-                    "shrink-0 flex items-center gap-1.5 h-7 px-3 rounded-full text-xs font-semibold transition-all border whitespace-nowrap",
+                    "shrink-0 flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg transition-all whitespace-nowrap",
                     activeTab === '__unallocated__'
-                      ? "bg-red-600 border-red-600 text-white"
-                      : "bg-red-50 text-red-600 border-red-200 hover:bg-red-100"
+                      ? "bg-red-600 text-white shadow-sm"
+                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
                   )}
                 >
-                  <AlertCircle className="h-3 w-3 shrink-0" />
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                   Unallocated
-                  <span className={cn("text-[10px]", activeTab === '__unallocated__' ? "text-white/80" : "text-red-400")}>
+                  <span className={cn(
+                    "text-[10px] font-bold px-1.5 py-0.5 rounded",
+                    activeTab === '__unallocated__' ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"
+                  )}>
                     {counts.__unallocated__}
                   </span>
                 </button>
@@ -515,111 +563,113 @@ export function StatusFilterBar({
   );
 
   return (
-    <div className="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center justify-between gap-4">
-      {/* Status tabs */}
-      <div className="flex items-center gap-1">
-        {STATUS_TABS.map(status => {
-          const isActive = activeStatus === status.id;
-          const count = counts[status.id];
-          return (
-            <button
-              key={status.id}
-              onClick={() => setActiveStatus(status.id)}
-              className={cn(
-                "flex items-center gap-2 h-8 px-3.5 rounded-full text-xs font-semibold transition-all border whitespace-nowrap",
-                isActive
-                  ? `${status.activeBg} ${status.activeText} border-transparent shadow-sm`
-                  : `bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50`
-              )}
-            >
-              {status.label}
-              <span className={cn(
-                "text-[10px] font-bold",
-                isActive ? "text-white/80" : "text-slate-400"
-              )}>
-                {count}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Search + Filters */}
-      <div className="flex items-center gap-2 shrink-0">
-        <div className="relative group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
-          <Input
-            placeholder="Quick search records..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="pl-9 pr-9 h-8 w-56 bg-slate-50 border-slate-200 rounded-full text-xs font-medium focus:bg-white focus:ring-2 focus:ring-blue-100 transition-all"
-          />
-          {searchQuery && (
-            <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
+    <div className="bg-white border-b border-slate-200">
+      <div className="px-6 flex items-center justify-between">
+        {/* Status tabs — underline style */}
+        <div className="flex items-center">
+          {STATUS_TABS.map(status => {
+            const isActive = activeStatus === status.id;
+            const count = counts[status.id];
+            return (
+              <button
+                key={status.id}
+                onClick={() => setActiveStatus(status.id)}
+                className={cn(
+                  "flex items-center gap-2.5 px-5 py-3.5 text-sm font-semibold transition-all border-b-2 -mb-px",
+                  isActive
+                    ? `${status.activeBorder} ${status.activeText}`
+                    : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
+                )}
+              >
+                {status.label}
+                <span className={cn(
+                  "text-xs font-bold",
+                  isActive ? "text-blue-500" : "text-slate-400"
+                )}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        <DropdownMenu open={isFiltersDropdownOpen} onOpenChange={setIsFiltersDropdownOpen}>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" className={cn(
-              "h-8 rounded-full px-3.5 text-xs font-semibold gap-1.5 border-slate-200",
-              (activeClassId !== 'all' || activeSubClassId !== 'all') && "bg-blue-50 border-blue-200 text-blue-700"
-            )}>
-              <Filter className="h-3.5 w-3.5" />
-              Filters
-              {(activeClassId !== 'all' || activeSubClassId !== 'all') && (
-                <span className="h-4 w-4 flex items-center justify-center rounded-full bg-blue-600 text-white text-[9px] font-black">!</span>
-              )}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-72 p-4 rounded-2xl shadow-2xl border-slate-200">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-sm font-bold text-slate-900">Categorization</span>
-              <Sparkles className="h-4 w-4 text-blue-500" />
-            </div>
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Task Class</label>
-                <Select value={activeClassId} onValueChange={v => { setActiveClassId(v); setActiveSubClassId('all'); }}>
-                  <SelectTrigger className="h-9 rounded-xl font-semibold border-slate-200 text-sm">
-                    <SelectValue placeholder="Select Class" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    <SelectItem value="all">All Classes</SelectItem>
-                    {currentSubDept?.classes?.map((cls: any) => (
-                      <SelectItem key={cls.id} value={cls.id.toString()}>{cls.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+        {/* Search + Filters */}
+        <div className="flex items-center gap-3 shrink-0 py-3">
+          <div className="relative group">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+            <Input
+              placeholder="Quick search records..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="pl-9 pr-9 h-8 w-60 bg-slate-50 border-slate-200 rounded-full text-xs font-medium focus:bg-white focus:ring-2 focus:ring-blue-100 transition-all"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          <DropdownMenu open={isFiltersDropdownOpen} onOpenChange={setIsFiltersDropdownOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className={cn(
+                "h-8 rounded-full px-4 text-xs font-semibold gap-1.5 border-slate-200",
+                (activeClassId !== 'all' || activeSubClassId !== 'all') && "bg-blue-50 border-blue-200 text-blue-700"
+              )}>
+                <Filter className="h-3.5 w-3.5" />
+                Filters
+                {(activeClassId !== 'all' || activeSubClassId !== 'all') && (
+                  <span className="h-4 w-4 flex items-center justify-center rounded-full bg-blue-600 text-white text-[9px] font-black">!</span>
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72 p-4 rounded-2xl shadow-2xl border-slate-200">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm font-bold text-slate-900">Categorization</span>
+                <Sparkles className="h-4 w-4 text-blue-500" />
               </div>
-              {activeClassId !== 'all' && (
+              <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Sub-Class</label>
-                  <Select value={activeSubClassId} onValueChange={setActiveSubClassId}>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Task Class</label>
+                  <Select value={activeClassId} onValueChange={v => { setActiveClassId(v); setActiveSubClassId('all'); }}>
                     <SelectTrigger className="h-9 rounded-xl font-semibold border-slate-200 text-sm">
-                      <SelectValue placeholder="Select Sub-class" />
+                      <SelectValue placeholder="Select Class" />
                     </SelectTrigger>
                     <SelectContent className="rounded-xl">
-                      <SelectItem value="all">All Sub-classes</SelectItem>
-                      {currentSubDept?.classes?.find((c: any) => c.id.toString() === activeClassId)?.subClasses?.map((sc: any) => (
-                        <SelectItem key={sc.id} value={sc.id.toString()}>{sc.name}</SelectItem>
+                      <SelectItem value="all">All Classes</SelectItem>
+                      {currentSubDept?.classes?.map((cls: any) => (
+                        <SelectItem key={cls.id} value={cls.id.toString()}>{cls.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-              )}
-              <Button
-                variant="ghost"
-                className="w-full text-xs h-9 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl font-semibold"
-                onClick={() => { setActiveClassId('all'); setActiveSubClassId('all'); }}
-              >
-                Clear all filters
-              </Button>
-            </div>
-          </DropdownMenuContent>
-        </DropdownMenu>
+                {activeClassId !== 'all' && (
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Sub-Class</label>
+                    <Select value={activeSubClassId} onValueChange={setActiveSubClassId}>
+                      <SelectTrigger className="h-9 rounded-xl font-semibold border-slate-200 text-sm">
+                        <SelectValue placeholder="Select Sub-class" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl">
+                        <SelectItem value="all">All Sub-classes</SelectItem>
+                        {currentSubDept?.classes?.find((c: any) => c.id.toString() === activeClassId)?.subClasses?.map((sc: any) => (
+                          <SelectItem key={sc.id} value={sc.id.toString()}>{sc.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <Button
+                  variant="ghost"
+                  className="w-full text-xs h-9 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl font-semibold"
+                  onClick={() => { setActiveClassId('all'); setActiveSubClassId('all'); }}
+                >
+                  Clear all filters
+                </Button>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
     </div>
   );
@@ -638,31 +688,31 @@ const STATUS_TABS = [
   {
     id: 'all',
     label: 'Total',
-    activeBg: 'bg-blue-600',
-    activeText: 'text-white',
+    activeText: 'text-blue-600',
+    activeBorder: 'border-blue-600',
   },
   {
     id: 'wip',
     label: 'WIP Stages',
-    activeBg: 'bg-amber-500',
-    activeText: 'text-white',
+    activeText: 'text-amber-600',
+    activeBorder: 'border-amber-500',
   },
   {
     id: 'write_up_completed',
     label: 'Write Up Completed',
-    activeBg: 'bg-emerald-600',
-    activeText: 'text-white',
+    activeText: 'text-emerald-600',
+    activeBorder: 'border-emerald-600',
   },
   {
     id: 'endorsed',
     label: 'Endorsement Completed',
-    activeBg: 'bg-violet-600',
-    activeText: 'text-white',
+    activeText: 'text-violet-600',
+    activeBorder: 'border-violet-600',
   },
   {
     id: 'cancelled',
     label: 'Cancelled',
-    activeBg: 'bg-red-600',
-    activeText: 'text-white',
+    activeText: 'text-red-600',
+    activeBorder: 'border-red-600',
   },
 ];

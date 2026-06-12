@@ -69,7 +69,24 @@
       "Bash(Select-Object -ExpandProperty FullName)",
       "Bash(Sort-Object)",
       "PowerShell(Get-ChildItem -Path \"e:\\\\GitHub\\\\Appointment-Booking\" -Directory | Where-Object {$_.Name -ne '.next'} | Select-Object -ExpandProperty FullName)",
-      "Bash(./gradlew :app:compileDebugKotlin --quiet)"
+      "Bash(./gradlew :app:compileDebugKotlin --quiet)",
+      "Bash(Get-ChildItem -Recurse -Directory)",
+      "Bash(New-Item -ItemType Directory -Force \"E:\\\\GitHub\\\\Appointment-Booking\\\\app\\\\api\\\\registry\\\\individuals\")",
+      "Bash(Out-Null)",
+      "Bash(New-Item -ItemType Directory -Force \"E:\\\\GitHub\\\\Appointment-Booking\\\\app\\\\api\\\\registry\\\\companies-with-individuals\")",
+      "Bash(Write-Host \"done\")",
+      "Bash(mkdir -p \"E:/GitHub/Appointment-Booking/app/api/registry/individuals/[id]\" && echo done)",
+      "Bash(Get-ChildItem -Path \"E:\\\\GitHub\\\\Bclmeetingsapp\\\\app\\\\src\\\\main\" -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(./gradlew --stop)",
+      "Bash(./gradlew clean *)",
+      "Bash(taskkill /PID 22968 /F)",
+      "Bash(Remove-Item -Force \"C:\\\\Users\\\\user\\\\.gradle\\\\caches\\\\journal-1\\\\journal-1.lock\" -ErrorAction SilentlyContinue)",
+      "Bash(Write-Host \"Done\")",
+      "Bash(./gradlew assembleDebug --no-daemon)"
+    ],
+    "additionalDirectories": [
+      "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals"
     ]
   }
 }

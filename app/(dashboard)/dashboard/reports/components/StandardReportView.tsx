@@ -36,35 +36,35 @@ const colBucket = (type: string) => {
 const BUCKET = {
   task: {
     groupBg: 'bg-slate-100 text-slate-700 border-b border-slate-300',
-    headBg: 'bg-blue-700',
-    headHover: 'hover:bg-blue-800',
+    headBg: 'bg-blue-50 text-blue-700 border-b-2 border-blue-200',
+    headHover: 'hover:bg-blue-100',
     subBg: 'bg-slate-50',
     bodyBg: '',
     bodyBgAlt: '',
   },
   reference: {
     groupBg: 'bg-emerald-50 text-emerald-800 border-b border-emerald-200',
-    headBg: 'bg-emerald-700',
-    headHover: 'hover:bg-emerald-800',
+    headBg: 'bg-emerald-50 text-emerald-700 border-b-2 border-emerald-200',
+    headHover: 'hover:bg-emerald-100',
     subBg: 'bg-emerald-50/60',
     bodyBg: 'bg-emerald-50/30',
     bodyBgAlt: 'bg-emerald-50/50',
   },
   duration: {
     groupBg: 'bg-amber-50 text-amber-800 border-b border-amber-200',
-    headBg: 'bg-amber-500',
-    headHover: 'hover:bg-amber-600',
+    headBg: 'bg-amber-50 text-amber-700 border-b-2 border-amber-200',
+    headHover: 'hover:bg-amber-100',
     subBg: 'bg-amber-50',
     bodyBg: 'bg-amber-50/50',
     bodyBgAlt: 'bg-amber-50/80',
   },
   stage: {
-    groupBg: 'bg-violet-50 text-violet-800 border-b border-violet-200',
-    headBg: 'bg-violet-600',
-    headHover: 'hover:bg-violet-700',
-    subBg: 'bg-violet-50/60',
-    bodyBg: 'bg-violet-50/20',
-    bodyBgAlt: 'bg-violet-50/40',
+    groupBg: 'bg-slate-100 text-slate-700 border-b border-slate-300',
+    headBg: 'bg-slate-100 text-slate-700 border-b-2 border-slate-300',
+    headHover: 'hover:bg-slate-200',
+    subBg: 'bg-slate-50/60',
+    bodyBg: '',
+    bodyBgAlt: '',
   },
 };
 
@@ -87,7 +87,12 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(initialRowsPerPage);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
-  const stickyColumnIds = new Set(['task_applicant_name', 'task_job_level', 'task_renewal_new']);
+  const stickyColumnIds = new Set(['task_id', 'task_passport_number', 'task_applicant_name']);
+
+  // Find the ID of the first stage column to apply a distinctive border
+  const firstStageColumnId = useMemo(() => {
+    return filteredColumns.find((c: any) => colBucket(c.type ?? 'stage') === 'stage')?.id;
+  }, [filteredColumns]);
 
   const columnDefs = useMemo<ColumnDef<any>[]>(() => [
     {
@@ -100,7 +105,6 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
       cell: () => null,
     },
     ...filteredColumns.map((col: any) => {
-      // For task-type columns, use the width defined in ENHANCED_TABLE_HEADERS_IMMIGRATION if available
       const defaultSize = (col.type === 'task' && col.field && HEADER_WIDTHS.has(col.field))
         ? HEADER_WIDTHS.get(col.field)!
         : DEFAULT_COL_WIDTH;
@@ -162,10 +166,9 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
     }, {});
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* Table wrapper */}
-      <div className="relative overflow-hidden border border-slate-300 shadow-[0_2px_16px_0_rgba(30,41,59,0.10)]">
-        <div className="overflow-auto max-h-[calc(100vh-280px)]">
+    <div className="flex flex-col">
+      <div className="relative overflow-hidden border border-slate-200 rounded-lg">
+        <div className="overflow-auto max-h-[calc(100vh-228px)]">
           <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
             <colgroup>
               <col style={{ width: INDEX_COL_WIDTH }} />
@@ -174,16 +177,18 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
               ))}
             </colgroup>
 
-            <TableHeader className="sticky top-0 z-40">
+            <TableHeader className="sticky top-0 z-40 shadow-[0_1px_2px_-1px_rgba(0,0,0,0.08)]">
+              {/* PRIMARY HEADER */}
               <TableRow className="border-0">
                 <TableHead
-                  className="sticky left-0 z-50 bg-blue-700 border-r border-b border-white text-center text-white uppercase "
+                  className="sticky left-0 z-50 bg-slate-200 border-r border-b border-slate-300 text-center text-slate-700 uppercase"
                   style={{ width: INDEX_COL_WIDTH }}
                 >
-                  IDX
+                  <span className="text-[9px] font-semibold">#</span>
                 </TableHead>
                 {filteredColumns.map((col: any) => {
                   const isSticky = stickyColumnIds.has(col.id);
+                  const isFirstStage = col.id === firstStageColumnId;
                   const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
                   const isColFilterNA = col.stageId ? !isStageApplicableToCurrentFilter(col.stageId) : false;
                   const resizeHeader = headersByColId[col.id];
@@ -196,45 +201,41 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
                       key={col.id}
                       onClick={() => handleSort(col.id)}
                       className={cn(
-                        "border-r",
-                        "border-white",
+                        "border-r border-slate-200 transition-colors cursor-pointer select-none",
                         b.headBg,
                         b.headHover,
                         isSticky && "z-40 sticky",
+                        isFirstStage && "border-l-2 border-l-slate-300",
                         isColFilterNA && "opacity-60",
-                        isActive && "ring-inset ring-2 ring-white/30"
+                        isActive && "ring-inset ring-2 ring-blue-300"
                       )}
                       style={isSticky ? { left: `${left}px` } : undefined}
                     >
-                      <div className="">
-                        <div className="text-white font-medium uppercase">
-                          <span className={cn("text-[10px] break-words",)}>
-                            {col.label}
-                          </span>
-                          {col.hasSubColumns && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); toggleStageColumns(col.stageId); }}
-                              className="mt-0.5 h-4 w-4 shrink-0 flex items-center justify-center rounded bg-white/15 hover:bg-white/25 text-white transition-colors"
-                            >
-                              {expandedStageColumns.has(col.stageId) ? <Minus size={9} /> : <Plus size={9} />}
-                            </button>
-                          )}
-                        </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[9px] font-semibold uppercase">
+                          {col.label}
+                        </span>
+                        {col.hasSubColumns && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); toggleStageColumns(col.stageId); }}
+                            className="h-3.5 w-3.5 shrink-0 flex items-center justify-center rounded bg-slate-300/50 hover:bg-slate-300 transition-colors"
+                          >
+                            {expandedStageColumns.has(col.stageId) ? <Minus size={8} /> : <Plus size={8} />}
+                          </button>
+                        )}
                         <ArrowUpDown className={cn(
-                          "h-3 w-3 shrink-0 mt-0.5 transition-opacity",
-                          isActive ? "text-white opacity-100" : "text-white/30 opacity-0 group-hover:opacity-100"
+                          "h-3 w-3 shrink-0 transition-opacity",
+                          isActive ? "opacity-100" : "opacity-0 group-hover:opacity-60"
                         )} />
                       </div>
 
-                      {/* Resize handle */}
                       {resizeHeader && (
                         <div
                           onMouseDown={(e) => { e.stopPropagation(); resizeHeader.getResizeHandler()(e); }}
                           onTouchStart={(e) => { e.stopPropagation(); resizeHeader.getResizeHandler()(e); }}
                           className={cn(
-                            "absolute inset-y-0 right-0 w-1 cursor-col-resize select-none touch-none z-10 transition-colors",
-                            "bg-transparent hover:bg-white/40",
-                            resizeHeader.column.getIsResizing() && "bg-white/60"
+                            "absolute inset-y-0 right-0 w-1 cursor-col-resize select-none touch-none z-10",
+                            resizeHeader.column.getIsResizing() ? "bg-slate-400" : "hover:bg-slate-300"
                           )}
                         />
                       )}
@@ -243,40 +244,41 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
                 })}
               </TableRow>
 
-              {/* ── ROW 3: ESTIMATE / SUB-HEADER ── */}
-              <TableRow className="border-0">
+              {/* SECONDARY HEADER (DURATION/ESTIMATE) */}
+              <TableRow className="border-0 h-6">
                 <TableHead
-                  className="sticky left-0 z-50 bg-slate-200 border-r border-b border-slate-200"
+                  className="sticky left-0 z-50 bg-slate-100 border-r border-b border-slate-200"
                   style={{ width: INDEX_COL_WIDTH }}
                 />
                 {filteredColumns.map((col: any) => {
                   const isSticky = stickyColumnIds.has(col.id);
+                  const isFirstStage = col.id === firstStageColumnId;
                   const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
-                  const bucket = colBucket(col.type ?? 'stage');
-                  const b = BUCKET[bucket];
-
+                  
                   let content: React.ReactNode = null;
-                  let extraClass = b.subBg;
+                  let extraClass = "bg-white text-slate-400";
 
                   if (col.type === 'stage_date' && col.stageId) {
                     const stage = stages.find((s: any) => s.id === col.stageId);
                     content = stage?.estimated_time
-                      ? <span className="italic text-indigo-600 font-semibold">{minutesToTimeString(stage.estimated_time)}</span>
-                      : <span className="text-slate-400">—</span>;
-                    extraClass = 'bg-indigo-50/60';
+                      ? <span className="italic text-blue-600 font-bold tracking-tight">{minutesToTimeString(stage.estimated_time)}</span>
+                      : <span className="text-slate-300">—</span>;
+                    extraClass = 'bg-blue-50/50 text-blue-600'; 
                   } else if (col.type === 'stage_gap') {
-                    content = <span className="font-bold text-amber-700 italic">Gap</span>;
-                    extraClass = 'bg-amber-50';
+                    content = <span className="font-bold text-amber-600 italic">Gap</span>;
+                    extraClass = 'bg-amber-50/50';
                   } else if (col.type === 'current_stage_age' || col.type === 'total_process_age') {
-                    content = <span className="text-amber-700 font-semibold text-[10px]">Duration</span>;
+                    content = <span className="text-amber-700 font-bold uppercase tracking-tighter">Dur</span>;
+                    extraClass = 'bg-amber-50/50';
                   }
 
                   return (
                     <TableHead
                       key={`sub-${col.id}`}
                       className={cn(
-                        "px-3 py-1 text-[10px] font-semibold text-center bg-slate-200 border-r border-b-2 border-slate-300",
+                        "text-[9px] font-semibold text-center border-r border-b border-slate-200",
                         isSticky && "sticky z-40",
+                        isFirstStage && "border-l-4 border-l-slate-200",
                         extraClass
                       )}
                       style={isSticky ? { left: `${left}px` } : undefined}
@@ -297,21 +299,32 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
                     key={task.id}
                     className={cn(
                       "group transition-colors",
-                      isEven ? "bg-white" : "bg-slate-50/70",
-                      "hover:bg-blue-50/60"
+                      isEven ? "bg-white" : "bg-slate-50/50",
+                      "hover:bg-blue-50/40"
                     )}
                   >
-                    {/* Index */}
                     <TableCell className={cn(
-                      "sticky left-0 z-20 border-r border-b border-slate-200 text-center text-xs font-bold text-slate-400",
-                      isEven ? "bg-white" : "bg-slate-50/70",
-                      "group-hover:bg-blue-50/60 transition-colors"
+                      "sticky left-0 z-20 border-r border-b border-slate-200 text-center",
+                      isEven ? "bg-white" : "bg-slate-50/50",
+                      "group-hover:bg-blue-50/60"
                     )}>
-                      {(currentPage - 1) * rowsPerPage + idx + 1}
+                      <div className="flex items-center justify-center gap-1">
+                        {(task.status === 'write_up_completed' || task.status === 'endorsed') && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                        )}
+                        {task.status === 'wip' && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />
+                        )}
+                        {task.status === 'cancel' && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-red-400 shrink-0" />
+                        )}
+                        <span className="text-[10px]">{(currentPage - 1) * rowsPerPage + idx + 1}</span>
+                      </div>
                     </TableCell>
 
                     {filteredColumns.map((col: any) => {
                       const isSticky = stickyColumnIds.has(col.id);
+                      const isFirstStage = col.id === firstStageColumnId;
                       const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
                       const bucket = colBucket(col.type ?? 'stage');
                       const b = BUCKET[bucket];
@@ -321,9 +334,10 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
                         <TableCell
                           key={col.id}
                           className={cn(
-                            "px-3 py-2 border-r border-b border-slate-200 transition-colors",
+                            "px-2.5 py-1 border-b border-slate-100 transition-colors",
+                            isFirstStage && "border-l border-l-slate-300/30",
                             isSticky
-                              ? cn("sticky z-20", isEven ? "bg-white" : "bg-slate-50/70", "group-hover:bg-blue-50/60")
+                              ? cn("sticky z-20 border-r border-slate-200", isEven ? "bg-white" : "bg-slate-50/50", "group-hover:bg-blue-50/60")
                               : bucketBodyBg
                           )}
                           style={isSticky ? { left: `${left}px` } : undefined}
@@ -338,11 +352,11 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
                 );
               }) : (
                 <TableRow>
-                  <TableCell colSpan={filteredColumns.length + 1} className="h-64 bg-slate-50/30">
+                  <TableCell colSpan={filteredColumns.length + 1} className="h-48 bg-slate-50/30">
                     <div className="flex flex-col items-center justify-center text-slate-400">
-                      <SearchX size={48} strokeWidth={1} className="mb-4 text-slate-300" />
-                      <p className="text-lg font-semibold">No matching records</p>
-                      <p className="text-sm">Adjust your filters to see results</p>
+                      <SearchX size={36} strokeWidth={1} className="mb-3 text-slate-300" />
+                      <p className="text-sm font-semibold">No matching records</p>
+                      <p className="text-[12px]">Adjust your filters to see results</p>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -354,49 +368,42 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
 
       {/* PAGINATION FOOTER */}
       {allTasks.length > 0 && (
-        <div className="flex items-center justify-between px-6 py-4 bg-white border border-slate-200 rounded-xl shadow-sm">
+        <div className="flex items-center justify-between px-4 py-2.5 bg-white border border-slate-200 rounded-b-lg">
           <div className="flex items-center gap-6">
-            <p className="text-xs text-slate-500">
-              Showing{" "}
-              <span className="text-slate-900 font-bold">{((currentPage - 1) * rowsPerPage) + 1}</span>
-              {" "}to{" "}
-              <span className="text-slate-900 font-bold">{Math.min(currentPage * rowsPerPage, allTasks.length)}</span>
-              {" "}of{" "}
-              <span className="text-slate-900 font-bold">{allTasks.length}</span>{" "}results
+            <p className="text-[11px] text-slate-500">
+              Showing <span className="text-slate-900 font-bold">{((currentPage - 1) * rowsPerPage) + 1}</span> to <span className="text-slate-900 font-bold">{Math.min(currentPage * rowsPerPage, allTasks.length)}</span> of <span className="text-slate-900 font-bold">{allTasks.length}</span>
             </p>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-extrabold text-slate-400 uppercase ">Per Page</span>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Rows</span>
               <Select value={String(rowsPerPage)} onValueChange={(v) => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
-                <SelectTrigger className="w-20 h-8 text-xs font-bold border-slate-200 focus:ring-indigo-500">
+                <SelectTrigger className="w-20 h-7 text-[11px] font-bold border-slate-200">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {[10, 25, 50, 100].map(s => <SelectItem key={s} value={String(s)}>{s} Rows</SelectItem>)}
+                  {[10, 25, 50, 100].map(s => <SelectItem key={s} value={String(s)}>{s}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="flex items-center border border-slate-200 rounded-lg p-1 bg-slate-50 mr-2">
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(1)} disabled={currentPage === 1}>
-                <ChevronsLeft size={14} />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}>
-                <ChevronLeft size={14} />
-              </Button>
-              <div className="h-4 w-[1px] bg-slate-300 mx-2" />
-              <span className="text-xs font-bold px-2 text-slate-700">
-                Page {currentPage} <span className="text-slate-400 font-normal">of</span> {totalPages}
-              </span>
-              <div className="h-4 w-[1px] bg-slate-300 mx-2" />
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages}>
-                <ChevronRight size={14} />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}>
-                <ChevronsRight size={14} />
-              </Button>
-            </div>
+          <div className="flex items-center border border-slate-200 rounded-md p-1 bg-slate-50">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(1)} disabled={currentPage === 1}>
+              <ChevronsLeft size={14} />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}>
+              <ChevronLeft size={14} />
+            </Button>
+            <div className="h-4 w-[1px] bg-slate-300 mx-1" />
+            <span className="text-xs font-bold px-2 text-slate-700">
+              {currentPage} / {totalPages}
+            </span>
+            <div className="h-4 w-[1px] bg-slate-300 mx-1" />
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages}>
+              <ChevronRight size={14} />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}>
+              <ChevronsRight size={14} />
+            </Button>
           </div>
         </div>
       )}

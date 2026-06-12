@@ -53,7 +53,7 @@ function RoleAssignmentsDisplay({ officer, departments }: { officer: any; depart
       {grouped.departments.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {grouped.departments.map((assignment: any, idx: number) => (
-            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200">
+            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-600 border-blue-200">
               <Building className="h-2.5 w-2.5 mr-1" />{formatJobLevel(assignment, departments)}
             </Badge>
           ))}
@@ -62,7 +62,7 @@ function RoleAssignmentsDisplay({ officer, departments }: { officer: any; depart
       {grouped.subDepartments.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {grouped.subDepartments.map((assignment: any, idx: number) => (
-            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-indigo-50 text-indigo-700 border-indigo-200">
+            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-600 border-slate-200">
               <Layers className="h-2.5 w-2.5 mr-1" />{formatJobLevel(assignment, departments)}
             </Badge>
           ))}
@@ -71,7 +71,7 @@ function RoleAssignmentsDisplay({ officer, departments }: { officer: any; depart
       {grouped.classes.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {grouped.classes.map((assignment: any, idx: number) => (
-            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-violet-50 text-violet-700 border-violet-200">
+            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-500 border-slate-200">
               <Layers className="h-2.5 w-2.5 mr-1" />{formatJobLevel(assignment, departments)}
             </Badge>
           ))}
@@ -104,8 +104,8 @@ function UserDetailsPopover({ userId, users, officers = [], role, children, depa
   };
 
   const roleColors = {
-    manager: 'bg-emerald-100 text-emerald-700',
-    assistant: 'bg-purple-100 text-purple-700',
+    manager: 'bg-slate-100 text-slate-700',
+    assistant: 'bg-slate-100 text-slate-700',
     officer: 'bg-blue-100 text-blue-700'
   };
 
@@ -147,8 +147,8 @@ function RoleAssignmentDisplay({ userIds, users, officers, departments, role, em
   const getRoleInfo = (r: string) => {
     switch (r) {
       case 'officer': return { color: 'blue', icon: Shield, label: 'Officer' };
-      case 'manager': return { color: 'emerald', icon: UserIcon, label: 'Manager' };
-      case 'assistant': return { color: 'purple', icon: Users, label: 'Assistant' };
+      case 'manager': return { color: 'slate', icon: UserIcon, label: 'Manager' };
+      case 'assistant': return { color: 'slate', icon: Users, label: 'Assistant' };
       default: return { color: 'slate', icon: UserIcon, label: role };
     }
   };
@@ -226,8 +226,10 @@ const safeRender = (content: any) => {
     if (content === 'Undedicated') {
       return <span className="text-red-600 font-medium">{content}</span>;
     }
-    // Replace "N/A" with "Missing" in red text
-    if (content === 'N/A') return <span className="text-red-500">Missing</span>;
+    // Replace "N/A" with "Missing" with a red dot
+    if (content === 'N/A') return <span className="text-red-500"><span className="inline-block h-1.5 w-1.5 rounded-full bg-red-400 mr-1 align-middle" />Missing</span>;
+    if (content === 'Completed') return <span><span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 mr-1 align-middle" />{content}</span>;
+    if (content === 'Pending') return <span><span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400 mr-1 align-middle" />{content}</span>;
     return content;
   }
   if (typeof content === 'number') return content;
@@ -348,7 +350,7 @@ export function TransposedReportView({
     <div className="space-y-4">
       {/* Column Pagination Controls */}
       {totalColumns > 0 && (
-        <div className="flex items-center justify-between p-4 bg-white border rounded-xl shadow-sm">
+        <div className="flex items-center justify-between px-4 py-3 bg-white border border-slate-200 rounded-lg">
           <div className="text-sm text-slate-500">
             Showing{' '}
             <span className="font-bold text-slate-800">{((columnsPage - 1) * columnsPerPage) + 1}</span> to{' '}
@@ -419,22 +421,22 @@ export function TransposedReportView({
         </div>
       )}
 
-      <div className="border-2 border-slate-300 rounded-b-lg rounded-tl-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 240px)' }}>
+      <div className="border border-slate-200 rounded-lg bg-white overflow-auto" style={{ maxHeight: 'calc(100vh - 240px)' }}>
         <Table className="min-w-full border-separate border-spacing-0">
 
-          <TableHeader className="sticky top-0 z-30 bg-slate-100/80 backdrop-blur-sm">
+          <TableHeader className="sticky top-0 z-30 bg-white shadow-[0_1px_2px_-1px_rgba(0,0,0,0.08)]">
 
-            {/* Section Header for Task Details (Collapsible UI) */}
+              {/* Section Header for Task Details (Collapsible UI) */}
             {headerRows.find(r => r.id === 'task_details') && (
-              <TableRow className="bg-slate-200 border-y-2 border-slate-400 hover:bg-slate-200">
+              <TableRow className="bg-slate-100 border-y border-slate-200">
                 <TableCell colSpan={paginatedTasks.length + 2} className="p-0">
-                  <div className="flex items-center justify-between px-3 py-2 sticky left-0 w-max min-w-full">
+                  <div className="flex items-center justify-between px-4 py-2.5 sticky left-0 w-max min-w-full border-l-3 border-l-blue-400">
                     <div className="flex items-center gap-3">
-                      <Briefcase className="h-5 w-5 text-slate-600" />
-                      <span className="font-bold text-slate-700 text-lg">Task Details</span>
+                      <Briefcase className="h-4 w-4 text-slate-500" />
+                      <span className="font-semibold text-slate-700 text-sm">Task Details</span>
                     </div>
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 hover:bg-slate-300" onClick={() => toggleSection('task_details')}>
-                      {expandedSections.has('task_details') ? <Minus className="h-4 w-4 text-slate-600" /> : <Plus className="h-4 w-4 text-slate-600" />}
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 hover:bg-slate-200" onClick={() => toggleSection('task_details')}>
+                      {expandedSections.has('task_details') ? <Minus className="h-3.5 w-3.5 text-slate-500" /> : <Plus className="h-3.5 w-3.5 text-slate-500" />}
                     </Button>
                   </div>
                 </TableCell>
@@ -443,18 +445,18 @@ export function TransposedReportView({
 
             {/* Render Task Detail Fields as normal table headers */}
             {expandedSections.has('task_details') && headerRows.filter(r => r.type === 'task').map((row, idx) => (
-              <TableRow key={row.id} className="bg-blue-600 text-white group border-b border-slate-200">
+              <TableRow key={row.id} className="bg-slate-100 border-b border-slate-200">
 
-                <TableCell className={`sticky left-0 z-40 bg-blue-600 text-white group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm p-2 text-center ${INDEX_WIDTH}`}>
+                <TableCell className={`sticky left-0 z-40 bg-slate-100 border-r border-b border-slate-200 font-semibold text-xs text-slate-600 p-2 text-center ${INDEX_WIDTH}`}>
                   {idx + 1}
                 </TableCell>
 
-                <TableCell className={`sticky left-14 z-40 bg-blue-600 text-white group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm p-2 ${LABEL_WIDTH}`}>
+                <TableCell className={`sticky left-14 z-40 bg-slate-100 border-r border-b border-slate-200 font-semibold text-xs text-slate-600 p-2 ${LABEL_WIDTH}`}>
                   <span className="break-words leading-tight">{row.label}</span>
                 </TableCell>
 
                 {paginatedColumns.map((task) => (
-                  <TableCell key={`${row.id}-${task.id}`} className={`text-center text-sm py-1 px-2 align-middle bg-blue-500 text-white border border-gray-100 ${DATA_COLUMN_WIDTH} ${task.type === 'dependant' ? 'bg-orange-500' : ''}`}>
+                  <TableCell key={`${row.id}-${task.id}`} className={`text-center text-xs py-1.5 px-2 align-middle bg-white border-b border-slate-200 text-slate-700 ${DATA_COLUMN_WIDTH}`}>
                     {safeRender(enhancedRenderCellValue(task, row))}
                   </TableCell>
                 ))}
@@ -464,20 +466,20 @@ export function TransposedReportView({
 
             {/* Fallback Identifiers (Visible only if Task Details is completely collapsed) */}
             {!expandedSections.has('task_details') && (
-              <TableRow className="bg-blue-600 text-white group border-b border-slate-200">
-                <TableCell className={`sticky left-0 z-40 bg-blue-600 text-white border border-gray-100 font-medium text-sm p-2 text-center ${INDEX_WIDTH}`}>
+              <TableRow className="bg-slate-100 border-b border-slate-200">
+                <TableCell className={`sticky left-0 z-40 bg-slate-100 border-r border-b border-slate-200 font-semibold text-xs text-slate-600 p-2 text-center ${INDEX_WIDTH}`}>
                   #
                 </TableCell>
-                <TableCell className={`sticky left-14 z-40 bg-blue-600 text-white border border-gray-100 font-medium text-sm p-2 ${LABEL_WIDTH}`}>
+                <TableCell className={`sticky left-14 z-40 bg-slate-100 border-r border-b border-slate-200 font-semibold text-xs text-slate-600 p-2 ${LABEL_WIDTH}`}>
                   Task Identifiers
                 </TableCell>
                 {paginatedColumns.map((task, idx) => (
-                  <TableCell key={`fallback-${task.id}`} className={`text-center text-sm py-1 px-2 align-middle bg-blue-500 text-white border border-gray-100 ${DATA_COLUMN_WIDTH} ${task.type === 'dependant' ? 'bg-orange-500' : ''}`}>
+                  <TableCell key={`fallback-${task.id}`} className={`text-center text-xs py-1.5 px-2 align-middle bg-white border-b border-slate-200 text-slate-700 ${DATA_COLUMN_WIDTH}`}>
                     <div className="flex flex-col items-center justify-center gap-1 p-1">
                       <span className="font-semibold text-center" title={task.applicant_name}>
-                        {task.applicant_name || <span className="text-red-300">Missing</span>}
+                        {task.applicant_name || <span><span className="inline-block h-1.5 w-1.5 rounded-full bg-red-300 mr-1 align-middle" /><span className="text-red-300">Missing</span></span>}
                       </span>
-                      <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-4 ${task.type === 'dependant' ? 'bg-orange-600/50 border-orange-400 text-white' : 'bg-blue-600/50 border-blue-400 text-white'}`}>
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-slate-100 border-slate-200 text-slate-500">
                         ID: {task.id}
                       </Badge>
                     </div>
@@ -509,35 +511,30 @@ export function TransposedReportView({
                 const isDocReq = row.id === 'reference_requirements';
                 const isStage = row.id !== 'task_info' && row.id !== 'reference_requirements' && row.id !== 'time_tracking';
 
+                const sectionAccent = isFilterNA ? 'border-l-amber-400'
+                  : isDocReq ? 'border-l-emerald-400'
+                  : isStage ? 'border-l-slate-300'
+                  : 'border-l-blue-400';
+
                 return (
-                  <TableRow key={row.id} className={cn(
-                    "border-y-2 border-slate-400 hover:bg-slate-200",
-                    isDocReq && isFilterNA ? 'bg-amber-50/80' : '',
-                    isDocReq && !isFilterNA ? 'bg-emerald-100' : '',
-                    isStage && isFilterNA ? 'bg-amber-50/80' : '',
-                    isStage && !isFilterNA ? 'bg-purple-100' : '',
-                    !isDocReq && !isStage && isFilterNA ? 'bg-amber-50/80' : '',
-                    !isDocReq && !isStage && !isFilterNA ? 'bg-slate-200' : ''
+                  <TableRow className={cn(
+                    "border-y border-slate-200",
+                    isFilterNA ? 'bg-slate-50' : 'bg-white'
                   )}>
-                    <TableCell colSpan={paginatedColumns.length + 2} className="p-0">
+                    <TableCell colSpan={paginatedTasks.length + 2} className="p-0">
                       <div className={cn(
-                        "flex items-center justify-between px-3 py-2 sticky left-0 w-max min-w-full border-l-4",
-                        isDocReq && isFilterNA ? 'border-l-amber-400' : '',
-                        isDocReq && !isFilterNA ? 'border-l-emerald-500' : '',
-                        isStage && isFilterNA ? 'border-l-purple-400' : '',
-                        isStage && !isFilterNA ? 'border-l-purple-500' : ''
+                        "flex items-center justify-between px-4 py-2 sticky left-0 w-max min-w-full border-l-3",
+                        sectionAccent
                       )}>
-                        <div className="flex items-center gap-3">
-                          <Icon className={cn("h-5 w-5", isFilterNA ? "text-amber-600" : "text-slate-600")} />
-                          <span className={cn("font-bold text-lg", isDocReq ? 'text-emerald-900' : isStage ? 'text-purple-900' : 'text-slate-700')}>{row.label}</span>
+                        <div className="flex items-center gap-2">
+                          <Icon className="h-4 w-4 text-slate-500" />
+                          <span className="font-semibold text-sm text-slate-700">{row.label}</span>
                           {isFilterNA && (
-                            <Badge variant="secondary" className="bg-amber-500 text-white hover:bg-amber-600 text-xs py-0 h-5">
-                              FILTER N/A
-                            </Badge>
+                            <span className="text-[9px] font-semibold text-amber-600 uppercase tracking-wider ml-1">N/A</span>
                           )}
                         </div>
-                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 hover:bg-slate-300" onClick={() => toggleSection(row.id)}>
-                          {expandedSections.has(row.id) ? <Minus className="h-4 w-4 text-slate-600" /> : <Plus className="h-4 w-4 text-slate-600" />}
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 hover:bg-slate-100" onClick={() => toggleSection(row.id)}>
+                          {expandedSections.has(row.id) ? <Minus className="h-3.5 w-3.5 text-slate-400" /> : <Plus className="h-3.5 w-3.5 text-slate-400" />}
                         </Button>
                       </div>
                     </TableCell>
@@ -546,22 +543,25 @@ export function TransposedReportView({
               }
 
               // --- STANDARD DATA ROWS ---
-              const rowBg = row.isSubSubRow ? 'bg-slate-100/50' : row.isSubRow ? 'bg-slate-50/60' : 'bg-white';
-              const hoverBg = 'hover:bg-blue-50/50';
-              const baseBgClass = rowBg.split('/')[0]; // Isolate base class for sticky cells
-              const isDocReq = row.type === 'reference_requirement';
-              const isStage = row.stageId && row.type !== 'task' && row.type !== 'current_stage_age' && row.type !== 'total_process_age';
-
-              const currentIndex = dataRowCounter++;
+              const rowIdx = dataRowCounter;
+              dataRowCounter++;
+              const isOdd = rowIdx % 2 === 1;
+              const rowBg = row.isSubSubRow
+                ? (isOdd ? 'bg-slate-100/20' : 'bg-slate-50/30')
+                : row.isSubRow
+                  ? (isOdd ? 'bg-slate-50/20' : 'bg-slate-50/10')
+                  : (isOdd ? 'bg-slate-50/40' : 'bg-white');
+              const cellBg = isOdd ? 'bg-slate-50/40' : 'bg-white';
+              const baseBgClass = isOdd ? 'bg-slate-50' : 'bg-white';
 
               return (
-                <TableRow key={rIdx} className={`${rowBg} ${hoverBg} group border-b border-slate-200`}>
+                <TableRow key={rIdx} className={`${rowBg} group border-b border-slate-100`}>
 
-                  <TableCell className={`sticky left-0 z-20 ${baseBgClass} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 text-center ${INDEX_WIDTH}`}>
-                    {row.stageOrder || currentIndex}
+                  <TableCell className={`sticky left-0 z-20 ${baseBgClass} group-hover:bg-slate-100 border-r border-b border-slate-100 text-xs text-slate-500 p-2 text-center ${INDEX_WIDTH}`}>
+                    {row.stageOrder || rowIdx}
                   </TableCell>
 
-                  <TableCell className={`sticky left-14 z-20 ${baseBgClass} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 ${LABEL_WIDTH}`}>
+                  <TableCell className={`sticky left-14 z-20 ${baseBgClass} group-hover:bg-slate-100 border-r border-b border-slate-100 text-xs text-slate-600 p-2 ${LABEL_WIDTH}`}>
                     <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }} className="flex items-center gap-2">
                       <span className={cn(row.type === 'stage' ? 'font-semibold' : '', 'break-words leading-tight')}>
                         {safeRender(row.label)}
@@ -570,14 +570,12 @@ export function TransposedReportView({
                   </TableCell>
 
                   {paginatedColumns.map(task => (
-                    <TableCell key={`${row.id}-${task.id}`} className={cn(
-                      "text-center text-sm py-1 px-2 align-middle border-l-4 border-t border-b border-gray-100",
+                    <TableCell className={cn(
+                      "text-xs py-1.5 px-2 align-middle border-b border-slate-100",
                       DATA_COLUMN_WIDTH,
-                      task.type === 'dependant' ? 'bg-orange-50/50' : '',
-                      isDocReq && 'bg-emerald-50/50',
-                      isStage && 'bg-purple-50/50'
+                      cellBg
                     )}>
-                      <div className="w-full mx-auto flex items-center justify-center min-h-[24px]">
+                      <div className="w-full mx-auto flex items-center justify-center min-h-[22px]">
                         {safeRender(enhancedRenderCellValue(task, row))}
                       </div>
                     </TableCell>
