@@ -397,8 +397,8 @@ export function ReportKpiCards({
 
   return (
     <div className="bg-white border-b border-slate-200">
-      <div className="px-6 py-4">
-        <div className="flex items-stretch gap-3">
+      <div className="px-6 py-3">
+        <div className="flex items-stretch gap-2.5">
           {cards.map((card) => (
             <div key={card.label} className={cn(
               "flex-1 min-w-0 rounded-xl border px-4 py-3 flex flex-col",
