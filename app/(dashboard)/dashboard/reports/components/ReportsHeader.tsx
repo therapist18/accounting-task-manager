@@ -284,7 +284,7 @@ export function ReportsToolbar({
 
   return (
     <div className="bg-white border-b border-slate-200 sticky top-0 z-30">
-      <div className="px-6 py-5 flex items-center justify-between gap-10">
+      <div className="px-6 py-4 flex items-center justify-between gap-10">
         {/* LEFT: Title + breadcrumb stacked */}
         <div
           onClick={() => setIsReportDialogOpen(true)}
@@ -494,15 +494,15 @@ export function PersonFilterStrip({
         )}
       </div>
 
-      {/* ROW 2: Person tabs — filled pill style for active */}
+      {/* ROW 2: Person tabs — filled pill */}
       {showPersonList && (
         <div className="border-b border-slate-100">
-          <div className="px-6 py-2.5 flex items-center gap-2 overflow-x-auto no-scrollbar">
+          <div className="px-6 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
             <div className={cn(
-              "shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[10px] font-black uppercase tracking-wide",
+              "shrink-0 flex items-center gap-1 px-2 py-1 rounded text-[9px] font-black uppercase tracking-wider",
               isOfficer ? "bg-blue-50 text-blue-600" : "bg-slate-100 text-slate-600"
             )}>
-              {isOfficer ? <Shield className="h-3 w-3" /> : <User className="h-3 w-3" />}
+              {isOfficer ? <Shield className="h-2.5 w-2.5" /> : <User className="h-2.5 w-2.5" />}
               {isOfficer ? "Officer" : "Manager"}
             </div>
 
@@ -510,16 +510,16 @@ export function PersonFilterStrip({
             <button
               onClick={() => setActiveTab('all')}
               className={cn(
-                "shrink-0 flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg transition-all",
+                "shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold rounded-md transition-all",
                 activeTab === 'all'
                   ? "bg-blue-600 text-white shadow-sm"
-                  : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
+                  : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
               )}
             >
               All {isOfficer ? "Officers" : "Managers"}
               <span className={cn(
-                "text-[10px] font-bold px-1.5 py-0.5 rounded",
-                activeTab === 'all' ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"
+                "text-[9px] font-bold px-1 py-0.5 rounded",
+                activeTab === 'all' ? "bg-white/20 text-white" : "bg-slate-200 text-slate-500"
               )}>
                 {counts.all}
               </span>
@@ -533,17 +533,17 @@ export function PersonFilterStrip({
                   key={p.id}
                   onClick={() => setActiveTab(isActive ? 'all' : p.id.toString())}
                   className={cn(
-                    "shrink-0 flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg transition-all whitespace-nowrap",
+                    "shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold rounded-md transition-all whitespace-nowrap",
                     isActive
                       ? "bg-blue-600 text-white shadow-sm"
-                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
+                      : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
                   )}
                 >
                   {p.full_name || p.name || p.displayName}
                   {count > 0 && (
                     <span className={cn(
-                      "text-[10px] font-bold px-1.5 py-0.5 rounded",
-                      isActive ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"
+                      "text-[9px] font-bold px-1 py-0.5 rounded",
+                      isActive ? "bg-white/20 text-white" : "bg-slate-200 text-slate-500"
                     )}>
                       {count}
                     </span>
@@ -554,21 +554,21 @@ export function PersonFilterStrip({
 
             {(counts.__unallocated__ ?? 0) > 0 && (
               <>
-                <div className="h-5 w-px bg-slate-200 shrink-0" />
+                <div className="h-4 w-px bg-slate-200 shrink-0" />
                 <button
                   onClick={() => setActiveTab(activeTab === '__unallocated__' ? 'all' : '__unallocated__')}
                   className={cn(
-                    "shrink-0 flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg transition-all whitespace-nowrap",
+                    "shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold rounded-md transition-all whitespace-nowrap",
                     activeTab === '__unallocated__'
                       ? "bg-red-600 text-white shadow-sm"
-                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
+                      : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
                   )}
                 >
-                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  <AlertCircle className="h-3 w-3 shrink-0" />
                   Unallocated
                   <span className={cn(
-                    "text-[10px] font-bold px-1.5 py-0.5 rounded",
-                    activeTab === '__unallocated__' ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"
+                    "text-[9px] font-bold px-1 py-0.5 rounded",
+                    activeTab === '__unallocated__' ? "bg-white/20 text-white" : "bg-slate-200 text-slate-500"
                   )}>
                     {counts.__unallocated__}
                   </span>
@@ -607,8 +607,8 @@ export function StatusFilterBar({
   return (
     <div className="bg-white border-b border-slate-200">
       <div className="px-6 flex items-center justify-between">
-        {/* Status tabs — underline style */}
-        <div className="flex items-center">
+        {/* Status tabs — compact */}
+        <div className="flex items-center gap-0.5">
           {STATUS_TABS.map(status => {
             const isActive = activeStatus === status.id;
             const count = counts[status.id];
@@ -617,15 +617,15 @@ export function StatusFilterBar({
                 key={status.id}
                 onClick={() => setActiveStatus(status.id)}
                 className={cn(
-                  "flex items-center gap-2.5 px-5 py-3.5 text-sm font-semibold transition-all border-b-2 -mb-px",
+                  "flex items-center gap-1.5 px-3 py-2.5 text-xs font-bold transition-all border-b-2 -mb-px",
                   isActive
                     ? `${status.activeBorder} ${status.activeText}`
-                    : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
+                    : "border-transparent text-slate-400 hover:text-slate-700 hover:border-slate-300"
                 )}
               >
                 {status.label}
                 <span className={cn(
-                  "text-xs font-bold",
+                  "text-[10px] font-bold",
                   isActive ? "text-blue-500" : "text-slate-400"
                 )}>
                   {count}
@@ -635,8 +635,8 @@ export function StatusFilterBar({
           })}
         </div>
 
-        {/* Search + Filters */}
-        <div className="flex items-center gap-3 shrink-0 py-3">
+        {/* Search + Filters — compact */}
+        <div className="flex items-center gap-2 shrink-0 py-2">
           <div className="relative group">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
             <Input
