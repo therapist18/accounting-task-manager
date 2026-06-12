@@ -339,7 +339,10 @@ class UnifiedUserService {
    * Get all users with their assignments, categorized by role
    */
   async getAllUserData(options: UserAssignmentOptions = {}, departments?: any[]): Promise<FilteredUserData> {
-    const cacheKey = `allUserData_${JSON.stringify(options)}_${departments ? 'with-departments' : 'no-departments'}`;
+    const deptKey = departments?.length
+      ? departments.map((d: any) => d.id).sort().join(',')
+      : 'no-departments';
+    const cacheKey = `allUserData_${JSON.stringify(options)}_${deptKey}`;
 
     if (this.isCacheValid(cacheKey)) {
       return this.cache.get(cacheKey);

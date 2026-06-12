@@ -1,33 +1,36 @@
 "use client";
 
 import React, { useState, useCallback, useMemo } from "react";
-import {
-  useReactTable,
-  getCoreRowModel,
-  type ColumnDef,
-  type ColumnSizingState,
-} from "@tanstack/react-table";
+import { useReactTable, getCoreRowModel, type ColumnDef, type ColumnSizingState } from "@tanstack/react-table";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  Plus, Minus, ArrowUpDown, SearchX, ChevronLeft, ChevronRight,
-  ChevronsLeft, ChevronsRight,
-} from "lucide-react";
+import { Plus, Minus, ArrowUpDown, SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ENHANCED_TABLE_HEADERS_IMMIGRATION } from "../../tasks/overall-view/tableUtils";
 
 const DEFAULT_COL_WIDTH = 160;
+
+const TAILWIND_PX: Record<string, number> = {
+  'w-16': 64, 'w-20': 80, 'w-24': 96, 'w-28': 112, 'w-32': 128,
+  'w-36': 144, 'w-40': 160, 'w-44': 176, 'w-48': 192, 'w-56': 224, 'w-64': 256,
+};
+
+const HEADER_WIDTHS = new Map(
+  ENHANCED_TABLE_HEADERS_IMMIGRATION
+    .filter(h => h.width)
+    .map(h => [h.id, TAILWIND_PX[h.width!] ?? DEFAULT_COL_WIDTH])
+);
 const MIN_COL_WIDTH = 60;
 const INDEX_COL_WIDTH = 48;
 
-// Column-type → visual accent bucket
 const colBucket = (type: string) => {
   if (type === 'current_stage_age' || type === 'total_process_age') return 'duration';
   if (type === 'task' || type === 'current_stage_officer') return 'task';
   if (type === 'reference_requirement') return 'reference';
-  return 'stage'; // stage_date, stage_officers, extracted_field, stage_gap
+  return 'stage';
 };
 
 const BUCKET = {
@@ -80,27 +83,10 @@ const DataCell = ({ children }: { children: React.ReactNode }) => (
   </TooltipProvider>
 );
 
-export function StandardReportView({
-  allTasks,
-  filteredColumns,
-  columnGroups,
-  sortConfig,
-  expandedStageColumns,
-  renderCellValue,
-  safeRender,
-  handleSort,
-  toggleStageColumns,
-  isStageApplicableToCurrentFilter,
-  initialRowsPerPage = 25,
-  userData = { officers: [], managers: [], assistants: [], allUsers: [] },
-  departments = [],
-  stages = []
-}: any) {
-
+export function StandardReportView({ allTasks, filteredColumns, columnGroups, sortConfig, expandedStageColumns, renderCellValue, safeRender, handleSort, toggleStageColumns, isStageApplicableToCurrentFilter, initialRowsPerPage = 25, userData = { officers: [], managers: [], assistants: [], allUsers: [] }, departments = [], stages = [] }: any) {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(initialRowsPerPage);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
-
   const stickyColumnIds = new Set(['task_applicant_name', 'task_job_level', 'task_renewal_new']);
 
   const columnDefs = useMemo<ColumnDef<any>[]>(() => [
@@ -113,15 +99,21 @@ export function StandardReportView({
       header: () => null,
       cell: () => null,
     },
-    ...filteredColumns.map((col: any) => ({
-      id: col.id,
-      size: DEFAULT_COL_WIDTH,
-      minSize: MIN_COL_WIDTH,
-      maxSize: 600,
-      enableResizing: true,
-      header: () => null,
-      cell: () => null,
-    })),
+    ...filteredColumns.map((col: any) => {
+      // For task-type columns, use the width defined in ENHANCED_TABLE_HEADERS_IMMIGRATION if available
+      const defaultSize = (col.type === 'task' && col.field && HEADER_WIDTHS.has(col.field))
+        ? HEADER_WIDTHS.get(col.field)!
+        : DEFAULT_COL_WIDTH;
+      return {
+        id: col.id,
+        size: defaultSize,
+        minSize: MIN_COL_WIDTH,
+        maxSize: 600,
+        enableResizing: true,
+        header: () => null,
+        cell: () => null,
+      };
+    }),
   ], [filteredColumns]);
 
   const table = useReactTable({
@@ -172,12 +164,9 @@ export function StandardReportView({
   return (
     <div className="flex flex-col gap-3">
       {/* Table wrapper */}
-      <div className="relative rounded-xl overflow-hidden border border-slate-300 shadow-[0_2px_16px_0_rgba(30,41,59,0.10)]">
+      <div className="relative overflow-hidden border border-slate-300 shadow-[0_2px_16px_0_rgba(30,41,59,0.10)]">
         <div className="overflow-auto max-h-[calc(100vh-280px)]">
-          <Table
-            className="border-separate border-spacing-0 table-fixed"
-            style={{ width: table.getTotalSize(), minWidth: '100%' }}
-          >
+          <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
             <colgroup>
               <col style={{ width: INDEX_COL_WIDTH }} />
               {filteredColumns.map((col: any) => (
@@ -186,50 +175,9 @@ export function StandardReportView({
             </colgroup>
 
             <TableHeader className="sticky top-0 z-40">
-
-              {/* ── ROW 1: GROUP HEADERS ── */}
               <TableRow className="border-0">
                 <TableHead
-                  className="sticky left-0 z-50 bg-slate-200 text-center text-[10px] font-bold text-slate-500 uppercase tracking-widest border-r border-b border-slate-300"
-                  style={{ width: INDEX_COL_WIDTH }}
-                >
-                  #
-                </TableHead>
-                {columnGroups.map((group: any, i: number) => {
-                  const bucket = group.id === 'reference_requirements' ? 'reference'
-                    : group.id === 'time_tracking' ? 'duration'
-                    : group.id === 'task_info' ? 'task'
-                    : 'stage';
-                  const b = BUCKET[bucket];
-                  const isNA = !group.applicable;
-
-                  return (
-                    <TableHead
-                      key={i}
-                      colSpan={group.span}
-                      className={cn(
-                        "text-center py-2 text-[11px] font-extrabold tracking-widest uppercase border-r transition-colors",
-                        b.groupBg,
-                        isNA && "opacity-60"
-                      )}
-                    >
-                      <div className="flex items-center justify-center gap-2 px-2">
-                        {group.label}
-                        {isNA && (
-                          <Badge variant="outline" className="text-[9px] border-current opacity-80 px-1 py-0">
-                            N/A
-                          </Badge>
-                        )}
-                      </div>
-                    </TableHead>
-                  );
-                })}
-              </TableRow>
-
-              {/* ── ROW 2: COLUMN NAMES + RESIZE HANDLES ── */}
-              <TableRow className="border-0">
-                <TableHead
-                  className="sticky left-0 z-50 bg-blue-700 border-r border-b border-blue-800 text-center font-black text-[10px] text-blue-100 uppercase tracking-widest"
+                  className="sticky left-0 z-50 bg-blue-700 border-r border-b border-white text-center text-white uppercase "
                   style={{ width: INDEX_COL_WIDTH }}
                 >
                   IDX
@@ -248,8 +196,8 @@ export function StandardReportView({
                       key={col.id}
                       onClick={() => handleSort(col.id)}
                       className={cn(
-                        "group relative px-3 py-2.5 border-r border-b cursor-pointer transition-all select-none",
-                        "border-white/10",
+                        "border-r",
+                        "border-white",
                         b.headBg,
                         b.headHover,
                         isSticky && "z-40 sticky",
@@ -258,12 +206,9 @@ export function StandardReportView({
                       )}
                       style={isSticky ? { left: `${left}px` } : undefined}
                     >
-                      <div className="flex items-start justify-between gap-1 h-full min-h-[44px] pr-1">
-                        <div className="flex items-start gap-1.5 leading-tight min-w-0">
-                          <span className={cn(
-                            "text-[11px] font-bold whitespace-normal break-words leading-snug",
-                            isActive ? "text-white" : "text-white/90"
-                          )}>
+                      <div className="">
+                        <div className="text-white font-medium uppercase">
+                          <span className={cn("text-[10px] break-words",)}>
                             {col.label}
                           </span>
                           {col.hasSubColumns && (
@@ -301,7 +246,7 @@ export function StandardReportView({
               {/* ── ROW 3: ESTIMATE / SUB-HEADER ── */}
               <TableRow className="border-0">
                 <TableHead
-                  className="sticky left-0 z-50 bg-slate-100 border-r border-b border-slate-200"
+                  className="sticky left-0 z-50 bg-slate-200 border-r border-b border-slate-200"
                   style={{ width: INDEX_COL_WIDTH }}
                 />
                 {filteredColumns.map((col: any) => {
@@ -330,7 +275,7 @@ export function StandardReportView({
                     <TableHead
                       key={`sub-${col.id}`}
                       className={cn(
-                        "px-3 py-1 text-[10px] font-semibold text-center border-r border-b-2 border-slate-300",
+                        "px-3 py-1 text-[10px] font-semibold text-center bg-slate-200 border-r border-b-2 border-slate-300",
                         isSticky && "sticky z-40",
                         extraClass
                       )}
@@ -420,7 +365,7 @@ export function StandardReportView({
               <span className="text-slate-900 font-bold">{allTasks.length}</span>{" "}results
             </p>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-extrabold text-slate-400 uppercase tracking-widest">Per Page</span>
+              <span className="text-xs font-extrabold text-slate-400 uppercase ">Per Page</span>
               <Select value={String(rowsPerPage)} onValueChange={(v) => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
                 <SelectTrigger className="w-20 h-8 text-xs font-bold border-slate-200 focus:ring-indigo-500">
                   <SelectValue />

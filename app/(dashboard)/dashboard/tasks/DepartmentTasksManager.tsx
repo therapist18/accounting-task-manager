@@ -44,15 +44,9 @@ import { determineCurrentStage, getStageProgress } from './utils/stageUtils'
 import { calculateStageDate } from './utils/dateUtils'
 import { fetchUserAssignmentData, hasJobLevelAccess, getOfficerDisplayName, userService } from "@/lib/shared-user-assignment-service"
 
-export default function DepartmentTasksManager({
-  error,
-  onTaskAction,
-  handleStageStatusSave,
-  onTaskUpdate,
-  getCurrentRequirements
-}: DepartmentTasksManagerProps) {
+export default function DepartmentTasksManager({ error, onTaskAction, handleStageStatusSave, onTaskUpdate, getCurrentRequirements }: DepartmentTasksManagerProps) {
   const [departments, setDepartments] = useState<Department[]>([])
-  const [companies, setCompanies] = useState<Map<number, string>>(new Map())
+  const [companies, setCompanies] = useState<Map<number, { name: string; prefix: string }>>(new Map())
   const [activeDepartmentTab, setActiveDepartmentTab] = useState<string>("")
   const [activeSubTab, setActiveSubTab] = useState<string>("wip-stages")
   const [activeSubdepartmentTab, setActiveSubdepartmentTab] = useState<string>("")
@@ -2306,6 +2300,19 @@ export default function DepartmentTasksManager({
   }, [getDocumentForTaskStage, kycDocuments]);
 
   const handleTaskEdit = (task: UtilTask) => {
+    console.log('[handleTaskEdit] Opening edit for task:', {
+      id: task.id,
+      job_description: task.job_description,
+      job_level: task.job_level,
+      individual_id: task.individual_id,
+      company_id: task.company_id,
+      applicant_details: task.applicant_details,
+      participants_details: task.participants_details,
+      job_specific_answers: task.job_specific_answers,
+      date_initiated: task.date_initiated,
+      renewal_status: task.renewal_status,
+      duration: task.duration,
+    });
     // Get the department for this task
     const department = departments.find(d =>
       d.id === task.department_id ||

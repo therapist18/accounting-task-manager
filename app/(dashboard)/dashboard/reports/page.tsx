@@ -48,10 +48,16 @@ const formatDateForDisplay = (date: any): string => {
 
 const formatDateTimeForDisplay = (date: any): string => {
   if (!date) return '-';
-  if (typeof date === 'string' && /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/.test(date)) return date;
+  if (typeof date === 'string') {
+    const t = date.trim();
+    if (/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/.test(t)) return t.endsWith(' 00:00') ? t.slice(0, -6) : t;
+  }
   const d = parseDate(date);
   if (!d) return '-';
-  try { return format(d, 'dd/MM/yyyy HH:mm'); } catch { return '-'; }
+  try {
+    const formatted = format(d, 'dd/MM/yyyy HH:mm');
+    return formatted.endsWith(' 00:00') ? formatted.slice(0, -6) : formatted;
+  } catch { return '-'; }
 };
 
 const getElapsedMinutes = (from: Date | null, to: Date = new Date()): number | null => {
@@ -62,7 +68,6 @@ const getElapsedMinutes = (from: Date | null, to: Date = new Date()): number | n
 const safeRender = (content: any) => {
   if (React.isValidElement(content)) return content;
   if (typeof content === 'string') {
-    // Replace "N/A" with "Missing" in red text
     if (content === 'N/A') return <span className="text-red-500">Missing</span>;
     return content;
   }
@@ -128,7 +133,7 @@ export default function ReportsPage() {
   const [tasks, setTasks] = useState<any[]>([]);
   const [stages, setStages] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
-  const [companies, setCompanies] = useState<Map<number, string>>(new Map());
+  const [companies, setCompanies] = useState<Map<number, { name: string; prefix: string }>>(new Map());
   const [allDocuments, setAllDocuments] = useState<any[]>([]);
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map());
   const [taskDependants, setTaskDependants] = useState<Map<string, any[]>>(new Map());
@@ -150,22 +155,16 @@ export default function ReportsPage() {
   const [allOfficers, setAllOfficers] = useState<any[]>([]);
   const [availableOfficers, setAvailableOfficers] = useState<any[]>([]);
   const [isOfficerDropdownOpen, setIsOfficerDropdownOpen] = useState(false);
-
-  // Task Managers tab state
   const [selectedTaskManagers, setSelectedTaskManagers] = useState<string[]>([]);
   const [activeTaskManagerTab, setActiveTaskManagerTab] = useState<string>("all");
   const [taskManagerFilterMode, setTaskManagerFilterMode] = useState<'current' | 'history'>('current');
   const [availableTaskManagers, setAvailableTaskManagers] = useState<any[]>([]);
   const [isTaskManagerDropdownOpen, setIsTaskManagerDropdownOpen] = useState(false);
-
-  // Clients (Companies/Sponsors) tab state
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
   const [activeClientTab, setActiveClientTab] = useState<string>("all");
   const [clientFilterMode, setClientFilterMode] = useState<'current' | 'history'>('current');
   const [availableClients, setAvailableClients] = useState<any[]>([]);
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
-
-  // BCL (Assistants) tab state
   const [selectedBCLs, setSelectedBCLs] = useState<string[]>([]);
   const [activeBCLTab, setActiveBCLTab] = useState<string>("all");
   const [bclFilterMode, setBCLFilterMode] = useState<'current' | 'history'>('current');
@@ -355,9 +354,9 @@ export default function ReportsPage() {
     }
   }, [activeReport?.id]);
 
-  const refreshData = useCallback(async () => {
+  const refreshData = useCallback(async (silent = false) => {
     if (!activeReport) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const [depts, comps, docs, kycFields] = await Promise.all([
         fetchDepartments(),
@@ -402,11 +401,15 @@ export default function ReportsPage() {
           setActiveDeptId(depts[0].id.toString());
         }
       }
+
+      if (silent) {
+        toast({ title: "Updated", description: "Report data refreshed.", duration: 2000 });
+      }
     } catch (error) {
       console.error("Error loading report data", error);
       toast({ title: "Error", description: "Failed to load report data.", variant: "destructive" });
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [activeReport, activeDeptId]);
 
@@ -819,7 +822,7 @@ export default function ReportsPage() {
       t.id.toString().includes(q) ||
       (t.applicant_name && t.applicant_name.toLowerCase().includes(q)) ||
       (t.company_name && t.company_name.toLowerCase().includes(q)) ||
-      (companies.get(t.company_id)?.toLowerCase().includes(q))
+      (companies.get(t.company_id)?.name?.toLowerCase().includes(q))
     );
   }, [filteredTasks, searchQuery, companies]);
 
@@ -1449,18 +1452,30 @@ export default function ReportsPage() {
       }
 
       if (col.isAutoAdded) {
-        let foundValue = null, foundDoc = null;
+        let foundValue: any = null, foundDoc = null;
+        const isDateTimeField = col.fieldType === 'date_and_time' || col.fieldName === 'date_and_time';
+        const isDateLike = col.fieldType === 'date' || col.fieldType === 'Date' || isDateTimeField;
+        const dtPat = /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/;
         for (const stageDocInfo of (stage.documents || [])) {
           if (!isDocumentApplicable(stageDocInfo, task)) continue;
           const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
           if (!linked || linked.indicator) continue;
-          foundValue = (col.fieldType === 'date' || col.fieldType === 'Date')
-            ? findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId])
+          foundValue = isDateLike
+            ? (findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId])
+               || linked.extracted_details?.[col.fieldName]
+               || linked.extracted_details?.[col.fieldId])
             : linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
+          if (!foundValue && isDateTimeField) {
+            foundValue = (Object.values(linked.extracted_details || {}) as any[]).find(
+              (v) => typeof v === 'string' && dtPat.test(v)
+            );
+          }
           if (foundValue) { foundDoc = linked; break; }
         }
         if (!foundDoc) return <span className="text-sm text-red-500">Missing</span>;
-        const display = (col.fieldType === 'Date' || col.fieldType === 'date') ? formatDateForDisplay(foundValue) : foundValue;
+        const display = isDateTimeField
+          ? formatDateTimeForDisplay(foundValue)
+          : isDateLike ? formatDateForDisplay(foundValue) : foundValue;
         const isOld = foundDoc.created_at && task.created_at && new Date(foundDoc.created_at) < new Date(task.created_at);
         return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || <span className="text-slate-400">—</span>}</span>;
       }
@@ -1473,12 +1488,26 @@ export default function ReportsPage() {
       if (!linked) return <span className="text-sm text-red-500">Missing</span>;
       if (linked.indicator) return <span className="inline-flex items-center rounded-sm bg-red-50 text-red-600 border border-red-200 text-xs font-medium px-2 py-1">Indicator</span>;
 
-      let val = (col.fieldType === 'date' || col.fieldType === 'Date')
-        ? findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId])
+      const isDateTimeField2 = col.fieldType === 'date_and_time' || col.fieldName === 'date_and_time';
+      const isDateLike2 = col.fieldType === 'date' || col.fieldType === 'Date' || isDateTimeField2;
+      let val = isDateLike2
+        ? (findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId])
+           || linked.extracted_details?.[col.fieldName]
+           || linked.extracted_details?.[col.fieldId])
         : linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
 
+      // Pattern fallback: find any dd/MM/yyyy HH:mm value in extracted_details when key lookup failed
+      if (!val && isDateTimeField2) {
+        const dtPat = /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/;
+        val = (Object.values(linked.extracted_details || {}) as any[]).find(
+          (v) => typeof v === 'string' && dtPat.test(v)
+        );
+      }
+
       const isOld = linked.created_at && task.created_at && new Date(linked.created_at) < new Date(task.created_at);
-      const display = (col.fieldType === 'Date' || col.fieldType === 'date') ? formatDateForDisplay(val) : val;
+      const display = isDateTimeField2
+        ? formatDateTimeForDisplay(val)
+        : isDateLike2 ? formatDateForDisplay(val) : val;
       return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || <span className="text-slate-400">—</span>}</span>;
     }
 
@@ -1674,23 +1703,35 @@ export default function ReportsPage() {
       if (!stage) return '-';
       if (!checkStageApplicableForTask(stage, task)) return 'Missing';
 
-      let foundValue = null, foundDoc = null;
+      let foundValue: any = null, foundDoc = null;
       const docsToSearch = col.isAutoAdded
         ? (stage.documents || [])
         : [stage?.documents?.find((d: any) => d.kycId === col.kycId)].filter(Boolean);
 
+      const isDateTimeFieldExport = col.fieldType === 'date_and_time' || col.fieldName === 'date_and_time';
+      const isDateLike = col.fieldType === 'date' || col.fieldType === 'Date' || isDateTimeFieldExport;
+      const dtPatExport = /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/;
       for (const stageDocInfo of docsToSearch) {
         if (!isDocumentApplicable(stageDocInfo, task)) continue;
         const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
         if (!linked || linked.indicator) continue;
-        foundValue = (col.fieldType === 'date' || col.fieldType === 'Date')
-          ? findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId])
+        foundValue = isDateLike
+          ? (findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId])
+             || linked.extracted_details?.[col.fieldName]
+             || linked.extracted_details?.[col.fieldId])
           : linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
+        if (!foundValue && isDateTimeFieldExport) {
+          foundValue = (Object.values(linked.extracted_details || {}) as any[]).find(
+            (v) => typeof v === 'string' && dtPatExport.test(v)
+          );
+        }
         if (foundValue) { foundDoc = linked; break; }
       }
       if (!foundDoc) return col.isAutoAdded ? 'Missing' : '-';
       if ((foundDoc as any).indicator) return 'Indicator';
-      return (col.fieldType === 'Date' || col.fieldType === 'date') ? formatDateForDisplay(foundValue) : String(foundValue || '-');
+      return isDateTimeFieldExport
+        ? formatDateTimeForDisplay(foundValue)
+        : isDateLike ? formatDateForDisplay(foundValue) : String(foundValue || '-');
     }
     return '';
   }, [departments, stages, kycDocuments, companies, enhancedTasksData, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, checkStageApplicableForTask, isDocumentApplicable, getDocumentForTaskStage, getCurrentStageTracking, getTaskInitiatedDate, getStageOfficerIds, unifiedOfficers]);
@@ -2417,7 +2458,7 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-slate-50">
+    <div className="flex h-screen w-full overflow-hidden">
       {/* 1. Sidebar: Now sits to the left of the main content */}
       <ReportsSidebar
         departments={departments}
@@ -2447,7 +2488,7 @@ export default function ReportsPage() {
           view={view}
           setView={setView}
           handleSendReport={handleSendReport}
-          refreshData={refreshData}
+          refreshData={() => refreshData(true)}
           loading={loading}
           activeDepartment={activeDepartment}
           activeSubDepartments={activeSubDepartments}

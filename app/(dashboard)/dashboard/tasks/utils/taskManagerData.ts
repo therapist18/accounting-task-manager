@@ -100,15 +100,15 @@ const transformKycFields = (fields: any[]): any[] => {
 /**
  * Fetch all companies from the database
  */
-export const fetchCompanies = async (): Promise<Map<number, string>> => {
+export const fetchCompanies = async (): Promise<Map<number, { name: string; prefix: string }>> => {
   try {
     const { data, error } = await supabase
       .from('acc_portal_company_duplicate')
-      .select('id, company_name')
+      .select('id, company_name, company_prefix')
 
     if (error) throw error
 
-    const companyMap = new Map(data?.map(c => [c.id, c.company_name]) || [])
+    const companyMap = new Map(data?.map(c => [c.id, { name: c.company_name || '', prefix: c.company_prefix || '' }]) || [])
     return companyMap
   } catch (error) {
     console.error('Error fetching companies:', error)

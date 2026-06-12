@@ -827,6 +827,11 @@ export default function EditableStageCell({
       } else {
         setCurrentPreviewIndex(prev => prev + 1);
       }
+
+      // Refresh parent table state silently after saving extracted data
+      if (onFetchData) {
+        await onFetchData();
+      }
     } catch (error) {
       toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to save document data.', variant: 'destructive' });
     }

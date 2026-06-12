@@ -88,21 +88,21 @@ body {
     --chart-5: 345 72% 58%;
 
     /* ==============================
-       MAIN SIDEBAR
-       Deep Corporate Blue
+        MAIN SIDEBAR
+        Azure Light
     ============================== */
+    /* Sidebar - Azure Light */
+    --sidebar-background: 210 100% 97%;
+    --sidebar-foreground: 222 47% 18%;
 
-    --sidebar-background: 218 53% 21%;
-    --sidebar-foreground: 210 40% 96%;
-
-    --sidebar-primary: 214 84% 56%;
+    --sidebar-primary: 217 91% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
 
-    --sidebar-accent: 218 45% 28%;
-    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-accent: 210 40% 94%;
+    --sidebar-accent-foreground: 222 47% 18%;
 
-    --sidebar-border: 218 40% 26%;
-    --sidebar-ring: 214 84% 56%;
+    --sidebar-border: 214 32% 88%;
+    --sidebar-ring: 217 91% 60%;
   }
 
   .dark {
@@ -163,18 +163,17 @@ body {
     /* ==============================
        DARK SIDEBAR
     ============================== */
+    --sidebar-background: 222 47% 4%;
+    --sidebar-foreground: 213 31% 91%;
 
-    --sidebar-background: 220 30% 8%;
-    --sidebar-foreground: 210 40% 96%;
-
-    --sidebar-primary: 214 84% 60%;
+    --sidebar-primary: 217 91% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
 
-    --sidebar-accent: 220 22% 15%;
-    --sidebar-accent-foreground: 210 40% 96%;
+    --sidebar-accent: 217 33% 12%;
+    --sidebar-accent-foreground: 210 40% 98%;
 
-    --sidebar-border: 220 18% 18%;
-    --sidebar-ring: 214 84% 60%;
+    --sidebar-border: 217 33% 12%;
+    --sidebar-ring: 217 91% 60%;
   }
 }
 

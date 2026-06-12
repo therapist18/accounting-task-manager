@@ -46,27 +46,28 @@ export interface TimeStatus {
 
 export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'id', label: 'Task Reference', default: true, width: 'w-20' },
-  { id: 'applicant_name', label: 'Applicant Full Name', default: true, width: 'w-48' },
+  { id: 'applicant_name', label: 'Applicant Full Name', default: true, width: 'w-44' },
   { id: 'company_name', label: 'Company Name', default: true, width: 'w-48' },
-  { id: 'sub_department', label: 'Sub Department', default: true, width: 'w-32' }, // New column
-  { id: 'job_level', label: 'Class', default: true, width: 'w-32' },
+  { id: 'company_prefix', label: 'Company Prefix', default: false, width: 'w-28' },
+  { id: 'sub_department', label: 'Sub Department', default: true, width: 'w-28' }, // New column
+  { id: 'job_level', label: 'Class', default: true, width: 'w-28' },
   { id: 'renewal_status', label: 'Renewal/New', default: true, width: 'w-28' },
-  { id: 'passport_number', label: 'Passport Number', default: false, width: 'w-32' },
-  { id: 'duration', label: 'Duration', default: false, width: 'w-32' },
+  { id: 'passport_number', label: 'Passport Number', default: false, width: 'w-28' },
+  { id: 'duration', label: 'Duration', default: false, width: 'w-28' },
   { id: 'immigration_document_type', label: 'Current Immigration Document Type', default: false, width: 'w-48' },
   { id: 'immigration_expiry_date', label: 'Current Immigration Expiry Date', default: false, width: 'w-40' },
-  { id: 'immigration_days_to_go', label: 'Days Remaining', default: false, width: 'w-32' }, // New Column
+  { id: 'immigration_days_to_go', label: 'Days Remaining', default: false, width: 'w-28' }, // New Column
   // { id: 'immigration_status', label: 'Current Immigration Status', default: true, width: 'w-48' },
-  { id: 'current_stage_name', label: 'Current Stage Name', default: true, width: 'w-48' },
-  { id: 'current_stage_status_value', label: 'Current Stage Status', default: true, width: 'w-48' },
-  { id: 'current_stage_follow_up', label: 'Current Stage Follow-up', default: false, width: 'w-40' },
+  { id: 'current_stage_name', label: 'Current Stage Name', default: true, width: 'w-42' },
+  { id: 'current_stage_status_value', label: 'Current Stage Status', default: true, width: 'w-42' },
+  { id: 'current_stage_follow_up', label: 'Current Stage Follow-up', default: false, width: 'w-28' },
   { id: 'job_description', label: 'Job Description', default: false, width: 'w-32' },
   { id: 'nationality', label: 'Nationality', default: false, width: 'w-32' },
   { id: 'full_name', label: 'Full Name', default: false, width: 'w-32' },
   { id: 'age', label: 'Age', default: false, width: 'w-20' },
   { id: 'task_manager', label: 'Task Manager', default: false, width: 'w-32' },
   { id: 'task_assistant', label: 'Task Assistant', default: false, width: 'w-32' },
-  { id: 'r_number', label: 'R Number', default: false, width: 'w-32' },
+  { id: 'r_number', label: 'R Number', default: false, width: 'w-28' },
   { id: 'cancellation_reason', label: 'Cancellation Reason', default: true, width: 'w-48' },
   { id: 'cancellation_date', label: 'Cancellation Date', default: true, width: 'w-40' },
   { id: 'cancelled_by', label: 'Cancelled By', default: true, width: 'w-32' },
@@ -262,7 +263,7 @@ export const getJobLevelDisplay = (task: any, departments: any[]): string => {
   return 'N/A';
 };
 
-export const getCompanyNameFromParticipants = (task: any, companies?: Map<number, string>): string => {
+export const getCompanyNameFromParticipants = (task: any, companies?: Map<number, any>): string => {
   if (!task?.participants_details || !Array.isArray(task.participants_details)) {
     return 'N/A';
   }
@@ -279,7 +280,26 @@ export const getCompanyNameFromParticipants = (task: any, companies?: Map<number
 
   // Otherwise, look up the name from the companies map using the company id
   if (company?.id && companies instanceof Map) {
-    return companies.get(Number(company.id)) || 'N/A';
+    const entry = companies.get(Number(company.id));
+    return (typeof entry === 'object' ? entry?.name : entry) || 'N/A';
+  }
+
+  return 'N/A';
+};
+
+export const getCompanyPrefixFromParticipants = (task: any, companies?: Map<number, any>): string => {
+  if (!task?.participants_details || !Array.isArray(task.participants_details)) {
+    return 'N/A';
+  }
+
+  const company = task.participants_details.find((p: any) =>
+    (Array.isArray(p.role) && (p.role.includes('company') || p.role.includes('sponsor'))) ||
+    p.role === 'company' || p.role === 'sponsor'
+  );
+
+  if (company?.id && companies instanceof Map) {
+    const entry = companies.get(Number(company.id));
+    return (typeof entry === 'object' ? entry?.prefix : '') || 'N/A';
   }
 
   return 'N/A';
@@ -440,7 +460,7 @@ export const getOfficersForCurrentStage = (
   return null;
 };
 
-export const getCompanyName = (task: any, companies: Map<number, string>): string => {
+export const getCompanyName = (task: any, companies: Map<number, any>): string => {
   // First try participants_details with companies map for lookup
   const participantsName = getCompanyNameFromParticipants(task, companies);
   if (participantsName !== 'N/A') {
@@ -449,9 +469,10 @@ export const getCompanyName = (task: any, companies: Map<number, string>): strin
 
   // Fallback to companies map using company_id
   if (companies instanceof Map) {
-    return companies.get(task.company_id) || 'N/A';
+    const entry = companies.get(task.company_id);
+    return (typeof entry === 'object' ? entry?.name : entry) || 'N/A';
   }
-  return companies?.[task.company_id] || 'N/A';
+  return 'N/A';
 };
 
 export const formatImmigrationDocumentType = (task: any, getEnhancedStatus: (task: any) => StatusInfo): string => {
@@ -934,7 +955,7 @@ export const getCellContent = (
   enhancedTasksData: Map<string, any>,
   taskDependants: Map<string, any[]>,
   expandedDependants: Set<string>,
-  companies: Map<number, string>,
+  companies: Map<number, any>,
   getTaskHierarchy: (task: any) => any,
   getStaffName: (id: string) => string,
   getEnhancedStatus: (task: any) => StatusInfo,
@@ -966,6 +987,7 @@ export const getCellContent = (
     current_stage_name: getStageStatus(task).stageName || 'N/A',
     current_stage_follow_up: getCurrentStageFollowUp(task, getStageStatus),
     company_name: getCompanyNameFromParticipants(task, companies),
+    company_prefix: getCompanyPrefixFromParticipants(task, companies),
     sub_department: getSubDepartmentDisplay(task, departments),
     job_level: getJobLevelDisplay(task, departments),
     job_description: task.job_description || 'N/A',
@@ -1040,7 +1062,7 @@ export const getRawCellValue = (
   task: any,
   headerId: string,
   enhancedTasksData: Map<string, any>,
-  companies: Map<number, string>,
+  companies: Map<number, any>,
   getStaffName: (id: string) => string,
   getEnhancedStatus: (task: any) => StatusInfo,
   getStageStatus: (task: any) => StageStatusInfo,
@@ -1059,6 +1081,7 @@ export const getRawCellValue = (
     current_stage_status_value: getStageStatus(task).stageStatus || 'N/A',
     current_stage_follow_up: getCurrentStageFollowUp(task, getStageStatus),
     company_name: getCompanyNameFromParticipants(task, companies),
+    company_prefix: getCompanyPrefixFromParticipants(task, companies),
     sub_department: getSubDepartmentDisplay(task, departments),
     job_level: getJobLevelDisplay(task, departments),
     job_description: task.job_description || 'N/A',
@@ -1083,7 +1106,7 @@ export const getRawCellValue = (
 export const sortTasks = (
   tasks: any[],
   sortConfig: { key: string; direction: 'asc' | 'desc' } | null,
-  companies: Map<number, string>
+  companies: Map<number, any>
 ): any[] => {
   if (!sortConfig) return [...tasks];
 
@@ -1091,7 +1114,10 @@ export const sortTasks = (
     const getSortValue = (task: any, key: string) => {
       switch (key) {
         case 'applicant_name': return task.applicant_name?.toLowerCase() || '';
-        case 'company_name': return companies.get(task.company_id)?.toLowerCase() || '';
+        case 'company_name': {
+          const e = companies.get(task.company_id);
+          return (typeof e === 'object' ? e?.name : e)?.toLowerCase() || '';
+        }
         case 'status': return task.status?.toLowerCase() || '';
         default: return task[key]?.toString().toLowerCase() || '';
       }
@@ -1114,7 +1140,7 @@ export const filterTasksBySearch = (
   searchTerm: string,
   enhancedTasksData: Map<string, any>,
   taskDependants: Map<string, any[]>,
-  companies: Map<number, string>,
+  companies: Map<number, any>,
   getTaskHierarchy: (task: any) => any,
   getUserDisplayName: (id: string) => string
 ) => {
@@ -1134,7 +1160,7 @@ export const filterTasksBySearch = (
       enhancedTask.nationality,
       enhancedTask.age?.toString(),
       enhancedTask.r_number?.toString(),
-      companies.get(task.company_id),
+      (() => { const e = companies.get(task.company_id); return typeof e === 'object' ? e?.name : e; })(),
       hierarchy?.department?.name,
       hierarchy?.subdepartment?.name,
       hierarchy?.class?.name,

@@ -544,10 +544,26 @@ export function EnquiryDialog({
 
         // Only load edit data once per task opening
         if (editDataLoadedRef.current || loadingStaff) {
+            console.log('[EnquiryDialog] Skipping edit load — already loaded or staff still loading', { editDataLoaded: editDataLoadedRef.current, loadingStaff });
             return;
         }
 
+        console.log('[EnquiryDialog] Loading edit data for taskToEdit:', {
+            id: taskToEdit.id,
+            job_description: taskToEdit.job_description,
+            job_level: taskToEdit.job_level,
+            individual_id: taskToEdit.individual_id,
+            company_id: taskToEdit.company_id,
+            applicant_details: taskToEdit.applicant_details,
+            participants_details: taskToEdit.participants_details,
+            job_specific_answers: taskToEdit.job_specific_answers,
+            date_initiated: taskToEdit.date_initiated,
+            renewal_status: taskToEdit.renewal_status,
+            duration: taskToEdit.duration,
+        });
+
         if (taskToEdit.participants_details) {
+            console.log('[EnquiryDialog] Merging participants into staff arrays:', taskToEdit.participants_details);
             const existingOfficers = [...availableOfficers];
             const existingManagers = [...managersData];
             const existingAssistants = [...assistantsData];
@@ -591,7 +607,7 @@ export function EnquiryDialog({
         }
 
         // 1. Basic Form Data
-        setFormData({
+        const formPayload = {
             job_description: taskToEdit.job_description || '',
             department_id: String(taskToEdit.job_level?.department_id || ''),
             subdepartment_id: String(taskToEdit.job_level?.subdepartment_id || ''),
@@ -604,35 +620,45 @@ export function EnquiryDialog({
             officer_id: taskToEdit.participants_details?.find(p => p.role?.includes('officer'))?.id?.toString() || '',
             task_manager_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_manager'))?.id?.toString() || '',
             task_assistant_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_assistant'))?.id?.toString() || '',
-        });
+        };
+        console.log('[EnquiryDialog] Step 1 - setFormData:', formPayload);
+        setFormData(formPayload);
 
         // 2. Job Specific Answers
+        console.log('[EnquiryDialog] Step 2 - setJobAnswers:', taskToEdit.job_specific_answers);
         setJobAnswers(taskToEdit.job_specific_answers || {});
 
         // 3. Resolve Applicant Type
+        console.log('[EnquiryDialog] Step 3 - setApplicantType:', taskToEdit.applicant_details?.role || 'principal');
         setApplicantType(taskToEdit.applicant_details?.role || 'principal');
 
-        // 4. Load the individual and trigger related data (Companies/Understudies) — in parallel
+        // 4. Load individual, then re-apply company + understudy AFTER handleIndividualSelect
+        // (handleIndividualSelect resets selectedCompany/selectedUnderstudy at the top of its body)
         if (taskToEdit.individual_id) {
             const companyId = taskToEdit.company_id ? String(taskToEdit.company_id) : null;
-            if (companyId) setSelectedCompany(companyId);
+            console.log('[EnquiryDialog] Step 4 - fetching individual id:', taskToEdit.individual_id, 'companyId:', companyId);
 
-            Promise.all([
-                supabase.from('registry_individuals').select('*').eq('id', taskToEdit.individual_id).single(),
-                companyId ? fetchUnderstudies(companyId) : Promise.resolve(null)
-            ]).then(([{ data: indData }]) => {
-                if (indData) {
-                    handleIndividualSelect(indData);
+            supabase.from('registry_individuals').select('*').eq('id', taskToEdit.individual_id).single()
+                .then(async ({ data: indData }) => {
+                    console.log('[EnquiryDialog] Step 4 - individual fetched from Supabase:', indData);
+                    if (!indData) return;
+
+                    await handleIndividualSelect(indData);
+
+                    // Re-apply company and understudy — handleIndividualSelect clears them unconditionally
                     if (companyId) {
+                        setSelectedCompany(companyId);
+                        await fetchUnderstudies(companyId);
                         const understudyPart = taskToEdit.participants_details?.find(p => p.role?.includes('understudy'));
+                        console.log('[EnquiryDialog] Step 4 - understudy participant:', understudyPart);
                         if (understudyPart) setSelectedUnderstudy(String(understudyPart.id));
                     }
-                }
-            });
+                });
         }
 
         // 5. Handle Sponsor if applicable
         const sponsorPart = taskToEdit.participants_details?.find(p => p.role?.includes('sponsor'));
+        console.log('[EnquiryDialog] Step 5 - sponsor participant:', sponsorPart);
         if (sponsorPart) {
             setSelectedSponsor({ id: sponsorPart.id, full_name: sponsorPart.name });
         }
