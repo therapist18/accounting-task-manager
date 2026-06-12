@@ -388,11 +388,11 @@ export function ReportKpiCards({
   allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount
 }: any) {
   const cards = [
-    { label: 'Total', value: allTasksCount, border: 'border-t-blue-500', sub: 'Applications' },
-    { label: 'WIP', value: wipTasksCount, border: 'border-t-amber-400', sub: 'In Progress' },
-    { label: 'Completed', value: writeUpCompletedCount, border: 'border-t-emerald-500', sub: 'Write Ups Done' },
-    { label: 'Endorsed', value: endorsedCount, border: 'border-t-violet-500', sub: 'Endorsed' },
-    { label: 'Cancelled', value: cancelledCount, border: 'border-t-red-400', sub: 'Cancelled' },
+    { label: 'Total', value: allTasksCount, valueClass: 'text-blue-600', bgClass: 'bg-gradient-to-b from-blue-50/40 to-white', sub: 'Applications' },
+    { label: 'WIP', value: wipTasksCount, valueClass: 'text-amber-600', bgClass: 'bg-gradient-to-b from-amber-50/40 to-white', sub: 'In Progress' },
+    { label: 'Completed', value: writeUpCompletedCount, valueClass: 'text-emerald-600', bgClass: 'bg-gradient-to-b from-emerald-50/40 to-white', sub: 'Write Ups Done' },
+    { label: 'Endorsed', value: endorsedCount, valueClass: 'text-violet-600', bgClass: 'bg-gradient-to-b from-violet-50/40 to-white', sub: 'Endorsed' },
+    { label: 'Cancelled', value: cancelledCount, valueClass: 'text-red-500', bgClass: 'bg-gradient-to-b from-red-50/30 to-white', sub: 'Cancelled' },
   ];
 
   return (
@@ -401,13 +401,13 @@ export function ReportKpiCards({
         <div className="flex items-stretch gap-3">
           {cards.map((card) => (
             <div key={card.label} className={cn(
-              "flex-1 min-w-0 rounded-xl border px-4 py-3 flex flex-col border-t-[3px]",
-              "bg-white border-slate-200",
-              card.border
+              "flex-1 min-w-0 rounded-xl border px-4 py-3 flex flex-col",
+              "border-slate-200",
+              card.bgClass
             )}>
-              <span className="text-2xl font-black text-slate-900 leading-none">{card.value}</span>
-              <span className="text-[11px] font-semibold text-slate-500 mt-1.5">{card.label}</span>
-              <span className="text-[10px] text-slate-400 mt-0.5">{card.sub}</span>
+              <span className={cn("text-3xl font-black leading-none", card.valueClass)}>{card.value}</span>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-2">{card.label}</span>
+              <span className="text-[9px] text-slate-400 mt-0.5">{card.sub}</span>
             </div>
           ))}
         </div>
@@ -449,9 +449,9 @@ export function PersonFilterStrip({
 
   return (
     <div className="bg-white border-b border-slate-200">
-      {/* ROW 1: Perspective tabs — borderless underline style */}
+      {/* ROW 1: Perspective tabs — compact */}
       <div className="px-6 flex items-center justify-between border-b border-slate-100">
-        <div className="flex items-center">
+        <div className="flex items-center gap-0.5">
           {PERSPECTIVE_TABS.map(p => {
             const active = activePerspective === p.value;
             const count = perspectiveCounts[p.value];
@@ -460,15 +460,15 @@ export function PersonFilterStrip({
                 key={p.value}
                 onClick={() => setActivePerspective(p.value)}
                 className={cn(
-                  'flex items-center gap-2 px-4 py-3 text-sm font-semibold transition-all border-b-2 -mb-px',
+                  'flex items-center gap-1.5 px-3 py-2.5 text-xs font-bold transition-all border-b-2 -mb-px',
                   active
                     ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
+                    : 'border-transparent text-slate-400 hover:text-slate-700 hover:border-slate-300'
                 )}
               >
                 {p.label}
                 <span className={cn(
-                  "text-xs font-bold",
+                  "text-[10px] font-bold",
                   active ? "text-blue-500" : "text-slate-400"
                 )}>
                   {count}
