@@ -39,6 +39,8 @@ export function ReportsSidebar({
   isCollapsed = false, onToggleCollapse,
 }: ReportsSidebarProps) {
   const [sidebarSearch, setSidebarSearch] = React.useState("");
+  const [subDeptSearch, setSubDeptSearch] = React.useState("");
+  const [subDeptOpen, setSubDeptOpen] = React.useState(true);
 
   const toggleSubDept = (id: string) => {
     setActiveSubDeptIds(
@@ -56,6 +58,10 @@ export function ReportsSidebar({
   const filteredDepartments = sidebarSearch.trim()
     ? departments.filter(d => d.name?.toLowerCase().includes(sidebarSearch.toLowerCase()))
     : departments;
+
+  const filteredSubDepts = subDeptSearch.trim()
+    ? activeSubDepartments.filter(s => s.name?.toLowerCase().includes(subDeptSearch.toLowerCase()))
+    : activeSubDepartments;
 
   return (
     <div className={cn(
@@ -157,54 +163,90 @@ export function ReportsSidebar({
               </button>
 
               {isActive && activeSubDepartments.length > 0 && (
-                <div className="ml-7 pl-4 border-l-2 border-slate-100 space-y-0.5 mt-2 mb-4">
-                  <div className="flex items-center justify-between px-2 pb-1.5">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sub-departments</span>
-                    {activeSubDeptIds.length > 0 && (
-                      <button onClick={() => setActiveSubDeptIds([])} className="text-[9px] font-semibold text-blue-500 hover:text-blue-700">
-                        Clear ({activeSubDeptIds.length})
-                      </button>
-                    )}
-                  </div>
-
+                <div className="ml-7 pl-4 border-l-2 border-slate-100 mt-2 mb-4">
+                  {/* Accordion toggle */}
                   <button
-                    onClick={() => setActiveSubDeptIds([])}
+                    onClick={() => setSubDeptOpen(!subDeptOpen)}
+                    className="w-full flex items-center gap-2 px-2 pb-1.5 text-left"
+                  >
+                    <ChevronRight className={cn(
+                      "h-3 w-3 text-slate-400 transition-transform",
+                      subDeptOpen && "rotate-90"
+                    )} />
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                      Sub-departments
+                    </span>
+                    <span className="text-[9px] text-slate-400 ml-auto">
+                      {activeSubDeptIds.length > 0 ? `${activeSubDeptIds.length} selected` : `${activeSubDepartments.length}`}
+                    </span>
+                  </button>
+
+                  {/* Always visible: "All" option */}
+                  <button
+                    onClick={() => { setActiveSubDeptIds([]); setSubDeptOpen(false); }}
                     className={cn(
-                      "w-full flex items-center gap-2.5 text-left px-3 py-2 text-xs rounded-lg transition-all font-semibold",
+                      "w-full flex items-center gap-2.5 text-left px-3 py-1.5 text-xs rounded-lg transition-all font-semibold",
                       activeSubDeptIds.length === 0
                         ? "bg-blue-50 text-blue-600"
                         : "text-slate-500 hover:text-slate-700 hover:bg-white"
                     )}
                   >
                     <ListChecks className="h-3.5 w-3.5 shrink-0" />
-                    <span className="flex-1 truncate">All Sub-departments</span>
+                    <span className="flex-1 truncate">All</span>
                     {activeSubDeptIds.length === 0 && <Check className="h-3.5 w-3.5 text-blue-500" />}
                   </button>
 
-                  {activeSubDepartments.map((sub) => {
-                    const id = sub.id.toString();
-                    const checked = activeSubDeptIds.includes(id);
-                    return (
-                      <button
-                        key={sub.id}
-                        onClick={() => toggleSubDept(id)}
-                        className={cn(
-                          "w-full flex items-center gap-2.5 text-left px-3 py-2 text-xs rounded-lg transition-all",
-                          checked
-                            ? "bg-blue-50 text-blue-600 font-semibold"
-                            : "text-slate-500 hover:text-slate-700 hover:bg-white font-medium"
-                        )}
-                      >
-                        <span className={cn(
-                          "h-4 w-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors",
-                          checked ? "bg-blue-500 border-blue-500" : "border-slate-300 bg-white"
-                        )}>
-                          {checked && <Check className="h-2.5 w-2.5 text-white" strokeWidth={3} />}
-                        </span>
-                        <span className="flex-1 truncate">{sub.name}</span>
-                      </button>
-                    );
-                  })}
+                  {/* Expandable sub-dept list */}
+                  {subDeptOpen && (
+                    <div className="mt-0.5 space-y-0.5">
+                      {/* Mini search */}
+                      {activeSubDepartments.length > 6 && (
+                        <div className="relative px-2 py-1">
+                          <input
+                            type="text"
+                            placeholder="Filter..."
+                            value={subDeptSearch}
+                            onChange={e => setSubDeptSearch(e.target.value)}
+                            className="w-full h-7 pl-6 pr-5 text-[10px] rounded-md bg-slate-100 border-0 text-slate-600 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                          />
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-2.5 w-2.5 text-slate-400" />
+                          {subDeptSearch && (
+                            <button onClick={() => setSubDeptSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                              <X className="h-2.5 w-2.5" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {filteredSubDepts.map((sub) => {
+                        const id = sub.id.toString();
+                        const checked = activeSubDeptIds.includes(id);
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={() => toggleSubDept(id)}
+                            className={cn(
+                              "w-full flex items-center gap-2 text-left px-3 py-1.5 text-xs rounded-lg transition-all",
+                              checked
+                                ? "bg-blue-50 text-blue-600 font-semibold"
+                                : "text-slate-500 hover:text-slate-700 hover:bg-white font-medium"
+                            )}
+                          >
+                            <span className={cn(
+                              "h-3.5 w-3.5 rounded border-2 flex items-center justify-center shrink-0 transition-colors",
+                              checked ? "bg-blue-500 border-blue-500" : "border-slate-300 bg-white"
+                            )}>
+                              {checked && <Check className="h-2 w-2 text-white" strokeWidth={3} />}
+                            </span>
+                            <span className="flex-1 truncate">{sub.name}</span>
+                          </button>
+                        );
+                      })}
+                      {filteredSubDepts.length === 0 && subDeptSearch && (
+                        <div className="text-center py-3 text-[10px] text-slate-400">No matches</div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
