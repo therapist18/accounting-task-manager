@@ -35,10 +35,10 @@ const colBucket = (type: string) => {
 
 const BUCKET = {
   task: {
-    groupBg: 'bg-slate-100 text-slate-700 border-b border-slate-300',
+    groupBg: 'bg-gray-100 text-gray-700 border-b border-gray-300',
     headBg: 'bg-blue-50 text-blue-700 border-b-2 border-blue-200',
     headHover: 'hover:bg-blue-100',
-    subBg: 'bg-slate-50',
+    subBg: 'bg-gray-50',
     bodyBg: '',
     bodyBgAlt: '',
   },
@@ -59,10 +59,10 @@ const BUCKET = {
     bodyBgAlt: 'bg-amber-50/80',
   },
   stage: {
-    groupBg: 'bg-slate-100 text-slate-700 border-b border-slate-300',
-    headBg: 'bg-slate-100 text-slate-700 border-b-2 border-slate-300',
-    headHover: 'hover:bg-slate-200',
-    subBg: 'bg-slate-50/60',
+    groupBg: 'bg-gray-100 text-gray-700 border-b border-gray-300',
+    headBg: 'bg-gray-100 text-gray-700 border-b-2 border-gray-300',
+    headHover: 'hover:bg-gray-200',
+    subBg: 'bg-gray-50/60',
     bodyBg: '',
     bodyBgAlt: '',
   },
@@ -72,11 +72,11 @@ const DataCell = ({ children }: { children: React.ReactNode }) => (
   <TooltipProvider delayDuration={400}>
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="truncate text-sm font-medium text-slate-700 w-full cursor-default">
+        <div className="truncate text-sm font-medium text-gray-700 w-full cursor-default">
           {children}
         </div>
       </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-xs bg-slate-900 text-white border-none shadow-xl text-sm">
+      <TooltipContent side="top" className="max-w-xs bg-gray-900 text-white border-none shadow-xl text-sm">
         {children}
       </TooltipContent>
     </Tooltip>
@@ -167,7 +167,7 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
 
   return (
     <div className="flex flex-col">
-      <div className="relative overflow-hidden border border-slate-200 rounded-lg">
+      <div className="relative overflow-hidden border border-gray-200 rounded-lg">
         <div className="overflow-auto max-h-[calc(100vh-228px)]">
           <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
             <colgroup>
@@ -181,10 +181,10 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
               {/* PRIMARY HEADER */}
               <TableRow className="border-0">
                 <TableHead
-                  className="sticky left-0 z-50 bg-slate-200 border-r border-b border-slate-300 text-center text-slate-700 uppercase"
+                  className="sticky left-0 z-50 bg-gray-100 border-r border-b border-gray-200 text-center text-gray-700 uppercase"
                   style={{ width: INDEX_COL_WIDTH }}
                 >
-                  <span className="text-[9px] font-semibold">#</span>
+                  <span className="text-[10px] font-semibold">#</span>
                 </TableHead>
                 {filteredColumns.map((col: any) => {
                   const isSticky = stickyColumnIds.has(col.id);
@@ -201,7 +201,7 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
                       key={col.id}
                       onClick={() => handleSort(col.id)}
                       className={cn(
-                        "border-r border-slate-200 transition-colors cursor-pointer select-none",
+                        "border-r border-gray-200 transition-colors cursor-pointer select-none",
                         b.headBg,
                         b.headHover,
                         isSticky && "z-40 sticky",
@@ -212,13 +212,13 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
                       style={isSticky ? { left: `${left}px` } : undefined}
                     >
                       <div className="flex items-center gap-1">
-                        <span className="text-[9px] font-semibold uppercase">
+                        <span className="text-[10px] font-semibold uppercase">
                           {col.label}
                         </span>
                         {col.hasSubColumns && (
                           <button
                             onClick={(e) => { e.stopPropagation(); toggleStageColumns(col.stageId); }}
-                            className="h-3.5 w-3.5 shrink-0 flex items-center justify-center rounded bg-slate-300/50 hover:bg-slate-300 transition-colors"
+                            className="h-3.5 w-3.5 shrink-0 flex items-center justify-center rounded bg-gray-300/50 hover:bg-gray-300 transition-colors"
                           >
                             {expandedStageColumns.has(col.stageId) ? <Minus size={8} /> : <Plus size={8} />}
                           </button>
@@ -235,7 +235,7 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
                           onTouchStart={(e) => { e.stopPropagation(); resizeHeader.getResizeHandler()(e); }}
                           className={cn(
                             "absolute inset-y-0 right-0 w-1 cursor-col-resize select-none touch-none z-10",
-                            resizeHeader.column.getIsResizing() ? "bg-slate-400" : "hover:bg-slate-300"
+                            resizeHeader.column.getIsResizing() ? "bg-gray-400" : "hover:bg-gray-300"
                           )}
                         />
                       )}
@@ -247,7 +247,7 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
               {/* SECONDARY HEADER (DURATION/ESTIMATE) */}
               <TableRow className="border-0 h-6">
                 <TableHead
-                  className="sticky left-0 z-50 bg-slate-100 border-r border-b border-slate-200"
+                  className="sticky left-0 z-50 bg-gray-100 border-r border-b border-gray-200"
                   style={{ width: INDEX_COL_WIDTH }}
                 />
                 {filteredColumns.map((col: any) => {
@@ -256,13 +256,13 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
                   const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
                   
                   let content: React.ReactNode = null;
-                  let extraClass = "bg-white text-slate-400";
+                  let extraClass = "bg-white text-gray-400";
 
                   if (col.type === 'stage_date' && col.stageId) {
                     const stage = stages.find((s: any) => s.id === col.stageId);
                     content = stage?.estimated_time
                       ? <span className="italic text-blue-600 font-bold tracking-tight">{minutesToTimeString(stage.estimated_time)}</span>
-                      : <span className="text-slate-300">—</span>;
+                      : <span className="text-gray-300">—</span>;
                     extraClass = 'bg-blue-50/50 text-blue-600'; 
                   } else if (col.type === 'stage_gap') {
                     content = <span className="font-bold text-amber-600 italic">Gap</span>;
@@ -276,9 +276,9 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
                     <TableHead
                       key={`sub-${col.id}`}
                       className={cn(
-                        "text-[9px] font-semibold text-center border-r border-b border-slate-200",
+                        "text-[10px] font-semibold text-center border-r border-b border-gray-200",
                         isSticky && "sticky z-40",
-                        isFirstStage && "border-l-4 border-l-slate-200",
+                        isFirstStage && "border-l-4 border-l-gray-200",
                         extraClass
                       )}
                       style={isSticky ? { left: `${left}px` } : undefined}
@@ -299,13 +299,13 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
                     key={task.id}
                     className={cn(
                       "group transition-colors",
-                      isEven ? "bg-white" : "bg-slate-50/50",
+                      isEven ? "bg-white" : "bg-gray-50/50",
                       "hover:bg-blue-50/40"
                     )}
                   >
                     <TableCell className={cn(
-                      "sticky left-0 z-20 border-r border-b border-slate-200 text-center",
-                      isEven ? "bg-white" : "bg-slate-50/50",
+                      "sticky left-0 z-20 border-r border-b border-gray-200 text-center",
+                      isEven ? "bg-white" : "bg-gray-50/50",
                       "group-hover:bg-blue-50/60"
                     )}>
                       <div className="flex items-center justify-center gap-1">
@@ -318,7 +318,7 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
                         {task.status === 'cancel' && (
                           <span className="h-1.5 w-1.5 rounded-full bg-red-400 shrink-0" />
                         )}
-                        <span className="text-[10px]">{(currentPage - 1) * rowsPerPage + idx + 1}</span>
+                        <span className="text-xs">{(currentPage - 1) * rowsPerPage + idx + 1}</span>
                       </div>
                     </TableCell>
 
@@ -334,10 +334,10 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
                         <TableCell
                           key={col.id}
                           className={cn(
-                            "px-2.5 py-1 border-b border-slate-100 transition-colors",
-                            isFirstStage && "border-l border-l-slate-300/30",
+                            "px-2.5 py-1 border-b border-gray-100 transition-colors",
+                            isFirstStage && "border-l border-l-gray-300/30",
                             isSticky
-                              ? cn("sticky z-20 border-r border-slate-200", isEven ? "bg-white" : "bg-slate-50/50", "group-hover:bg-blue-50/60")
+                              ? cn("sticky z-20 border-r border-gray-200", isEven ? "bg-white" : "bg-gray-50/50", "group-hover:bg-blue-50/60")
                               : bucketBodyBg
                           )}
                           style={isSticky ? { left: `${left}px` } : undefined}
@@ -352,9 +352,9 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
                 );
               }) : (
                 <TableRow>
-                  <TableCell colSpan={filteredColumns.length + 1} className="h-48 bg-slate-50/30">
-                    <div className="flex flex-col items-center justify-center text-slate-400">
-                      <SearchX size={36} strokeWidth={1} className="mb-3 text-slate-300" />
+                  <TableCell colSpan={filteredColumns.length + 1} className="h-48 bg-gray-50/30">
+                    <div className="flex flex-col items-center justify-center text-gray-400">
+                      <SearchX size={36} strokeWidth={1} className="mb-3 text-gray-300" />
                       <p className="text-sm font-semibold">No matching records</p>
                       <p className="text-[12px]">Adjust your filters to see results</p>
                     </div>
@@ -368,15 +368,15 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
 
       {/* PAGINATION FOOTER */}
       {allTasks.length > 0 && (
-        <div className="flex items-center justify-between px-4 py-2.5 bg-white border border-slate-200 rounded-b-lg">
+        <div className="flex items-center justify-between px-4 py-2.5 bg-white border border-gray-200 rounded-b-lg">
           <div className="flex items-center gap-6">
-            <p className="text-[11px] text-slate-500">
-              Showing <span className="text-slate-900 font-bold">{((currentPage - 1) * rowsPerPage) + 1}</span> to <span className="text-slate-900 font-bold">{Math.min(currentPage * rowsPerPage, allTasks.length)}</span> of <span className="text-slate-900 font-bold">{allTasks.length}</span>
+            <p className="text-xs text-gray-500">
+              Showing <span className="text-gray-900 font-bold">{((currentPage - 1) * rowsPerPage) + 1}</span> to <span className="text-gray-900 font-bold">{Math.min(currentPage * rowsPerPage, allTasks.length)}</span> of <span className="text-gray-900 font-bold">{allTasks.length}</span>
             </p>
             <div className="flex items-center gap-2">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Rows</span>
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Rows</span>
               <Select value={String(rowsPerPage)} onValueChange={(v) => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
-                <SelectTrigger className="w-20 h-7 text-[11px] font-bold border-slate-200">
+                <SelectTrigger className="w-20 h-7 text-xs font-bold border-gray-200">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -386,18 +386,18 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
             </div>
           </div>
 
-          <div className="flex items-center border border-slate-200 rounded-md p-1 bg-slate-50">
+          <div className="flex items-center border border-gray-200 rounded-md p-1 bg-gray-50">
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(1)} disabled={currentPage === 1}>
               <ChevronsLeft size={14} />
             </Button>
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}>
               <ChevronLeft size={14} />
             </Button>
-            <div className="h-4 w-[1px] bg-slate-300 mx-1" />
-            <span className="text-xs font-bold px-2 text-slate-700">
+            <div className="h-4 w-[1px] bg-gray-300 mx-1" />
+            <span className="text-xs font-bold px-2 text-gray-700">
               {currentPage} / {totalPages}
             </span>
-            <div className="h-4 w-[1px] bg-slate-300 mx-1" />
+            <div className="h-4 w-[1px] bg-gray-300 mx-1" />
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages}>
               <ChevronRight size={14} />
             </Button>

@@ -1,4 +1,4 @@
-// @ts-nocheck
+﻿// @ts-nocheck
 "use client";
 
 import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
 import { ReportColumnVisibilityDialog } from "./components/ReportColumnVisibilityDialog";
-import { ReportsSidebar, ReportsToolbar, PersonFilterStrip, StatusFilterBar, ReportKpiCards } from "./components/ReportsHeader";
+import { ReportsSidebar, ReportsHeader, PersonFilterStrip, StatusFilterBar, ReportKpiCards } from "./components/ReportsHeader";
 
 const SPECIAL_STAGE_IDS = [
   '072b9710-45df-4a05-ba65-01b4ef29d61d',
@@ -72,7 +72,7 @@ const safeRender = (content: any) => {
     return content;
   }
   if (typeof content === 'number') return content;
-  if (content === null || content === undefined) return <span className="text-[11px] font-bold text-slate-300 uppercase tracking-widest">—</span>;
+    if (content === null || content === undefined) return <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">â€”</span>;
   if (Array.isArray(content)) return content.map((c, i) => <React.Fragment key={i}>{safeRender(c)}</React.Fragment>);
   if (typeof content === 'object') {
     if ('status' in content) {
@@ -85,7 +85,7 @@ const safeRender = (content: any) => {
       if (!s) return null;
       return JSON.stringify(s);
     }
-    return <span className="text-sm text-slate-500 truncate max-w-[100px] inline-block" title={JSON.stringify(content)}>{JSON.stringify(content)}</span>;
+    return <span className="text-sm text-gray-500 truncate max-w-[100px] inline-block" title={JSON.stringify(content)}>{JSON.stringify(content)}</span>;
   }
   return String(content);
 };
@@ -633,7 +633,7 @@ export default function ReportsPage() {
       if (activeClassId !== 'all' && task.class_id?.toString() !== activeClassId) return false;
       if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
 
-      // Officer filtering — only when officers perspective is active
+      // Officer filtering â€” only when officers perspective is active
       if (activePerspective === 'officers') {
         if (activeOfficerTab === '__unallocated__') {
           if (getStageOfficerIds(task, 'current').length !== 0) return false;
@@ -642,7 +642,7 @@ export default function ReportsPage() {
         }
       }
 
-      // Task Manager filtering — only when managers perspective is active
+      // Task Manager filtering â€” only when managers perspective is active
       if (activePerspective === 'managers') {
         const tracking = getCurrentStageTracking(task);
         if (activeTaskManagerTab === '__unallocated__') {
@@ -673,7 +673,7 @@ export default function ReportsPage() {
     });
   }, [tasks, activeDeptId, activeSubDeptIds, activeClassId, activeSubClassId, activePerspective, activeOfficerTab, activeTaskManagerTab, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, effectiveClientIds, clientFilterMode, stages, getCurrentStageTracking, taskHasStageOfficer, isTaskWithClient, getTaskCompanyParticipant, getStageOfficerIds]);
 
-  // Dept/subdept/class filter only — used for stable status tab counts (unaffected by officer/TM/BCL tabs)
+  // Dept/subdept/class filter only â€” used for stable status tab counts (unaffected by officer/TM/BCL tabs)
   const tasksByDeptFilter = useMemo(() => {
     return tasks.filter(task => {
       if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
@@ -698,7 +698,7 @@ export default function ReportsPage() {
   const endorsedCount = useMemo(() => tasksByFilters.filter(t => t.status === 'endorsed').length, [tasksByFilters]);
   const cancelledCount = useMemo(() => tasksByFilters.filter(t => t.status === 'cancel').length, [tasksByFilters]);
 
-  // Count tasks per officer — respects officerFilterMode for per-officer badges; 'current' for unallocated
+  // Count tasks per officer â€” respects officerFilterMode for per-officer badges; 'current' for unallocated
   const officerTaskCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0, __unallocated__: 0 };
     availableOfficers.forEach(officer => { counts[officer.id] = 0; });
@@ -713,7 +713,7 @@ export default function ReportsPage() {
     return counts;
   }, [tasksByDeptFilter, availableOfficers, getStageOfficerIds, officerFilterMode]);
 
-  // Count tasks per task manager — unallocated = BCL stage with no manager assigned
+  // Count tasks per task manager â€” unallocated = BCL stage with no manager assigned
   const taskManagerTaskCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0, __unallocated__: 0 };
     availableTaskManagers.forEach(tm => { counts[tm.id] = 0; });
@@ -782,7 +782,7 @@ export default function ReportsPage() {
         if (task.status !== 'cancel') return false;
       }
 
-      // Officer filtering — only when officers perspective is active
+      // Officer filtering â€” only when officers perspective is active
       if (activePerspective === 'officers') {
         if (activeOfficerTab === '__unallocated__') {
           if (getStageOfficerIds(task, 'current').length !== 0) return false;
@@ -791,7 +791,7 @@ export default function ReportsPage() {
         }
       }
 
-      // Task Manager filtering — only when managers perspective is active
+      // Task Manager filtering â€” only when managers perspective is active
       if (activePerspective === 'managers') {
         const tracking = getCurrentStageTracking(task);
         if (activeTaskManagerTab === '__unallocated__') {
@@ -806,7 +806,7 @@ export default function ReportsPage() {
         }
       }
 
-      // Client filtering — tasks where current stage is waiting on the client
+      // Client filtering â€” tasks where current stage is waiting on the client
       if (activePerspective === 'clients' && !isTaskWithClient(task)) {
         return false;
       }
@@ -1116,7 +1116,7 @@ export default function ReportsPage() {
           if (nextShouldShowDateColumn && showTimeTrackingColumns) {
             cols.push({
               id: `gap_${stage.id}_to_${nextStage.id}`,
-              label: `→`,
+              label: `â†’`,
               type: 'stage_gap',
               fromStageId: stage.id,
               toStageId: nextStage.id,
@@ -1206,7 +1206,7 @@ export default function ReportsPage() {
       const tracking = getCurrentStageTracking(task);
       const elapsedMinutes = getElapsedMinutes(tracking?.handledAt || null);
 
-      if (!tracking || elapsedMinutes == null) return <span className="text-sm text-slate-400">—</span>;
+      if (!tracking || elapsedMinutes == null) return <span className="text-sm text-gray-400">â€”</span>;
 
       return (
         <Tooltip>
@@ -1216,11 +1216,11 @@ export default function ReportsPage() {
               <span>{formatDuration(elapsedMinutes)}</span>
             </div>
           </TooltipTrigger>
-          <TooltipContent className="border-slate-200 shadow-xl text-sm bg-white text-slate-700">
+          <TooltipContent className="border-gray-200 shadow-xl text-sm bg-white text-gray-700">
             <div className="space-y-1">
-              <div><span className="font-semibold text-slate-500">Stage:</span> {tracking.stage?.name || '-'}</div>
-              <div><span className="font-semibold text-slate-500">Handled:</span> {formatDateTimeForDisplay(tracking.handledAt)}</div>
-              <div><span className="font-semibold text-slate-500">Elapsed:</span> <span className="text-blue-600">{formatDuration(elapsedMinutes)}</span></div>
+              <div><span className="font-semibold text-gray-500">Stage:</span> {tracking.stage?.name || '-'}</div>
+              <div><span className="font-semibold text-gray-500">Handled:</span> {formatDateTimeForDisplay(tracking.handledAt)}</div>
+              <div><span className="font-semibold text-gray-500">Elapsed:</span> <span className="text-blue-600">{formatDuration(elapsedMinutes)}</span></div>
             </div>
           </TooltipContent>
         </Tooltip>
@@ -1231,7 +1231,7 @@ export default function ReportsPage() {
       const initiatedAt = getTaskInitiatedDate(task);
       const elapsedMinutes = getElapsedMinutes(initiatedAt);
 
-      if (!initiatedAt || elapsedMinutes == null) return <span className="text-sm text-slate-400">—</span>;
+      if (!initiatedAt || elapsedMinutes == null) return <span className="text-sm text-gray-400">â€”</span>;
 
       return (
         <Tooltip>
@@ -1241,10 +1241,10 @@ export default function ReportsPage() {
               <span>{formatDuration(elapsedMinutes)}</span>
             </div>
           </TooltipTrigger>
-          <TooltipContent className="border-slate-200 shadow-xl text-sm bg-white text-slate-700">
+          <TooltipContent className="border-gray-200 shadow-xl text-sm bg-white text-gray-700">
             <div className="space-y-1">
-              <div><span className="font-semibold text-slate-500">Initiated:</span> {formatDateTimeForDisplay(initiatedAt)}</div>
-              <div><span className="font-semibold text-slate-500">Elapsed:</span> <span className="text-violet-600">{formatDuration(elapsedMinutes)}</span></div>
+              <div><span className="font-semibold text-gray-500">Initiated:</span> {formatDateTimeForDisplay(initiatedAt)}</div>
+              <div><span className="font-semibold text-gray-500">Elapsed:</span> <span className="text-violet-600">{formatDuration(elapsedMinutes)}</span></div>
             </div>
           </TooltipContent>
         </Tooltip>
@@ -1254,12 +1254,12 @@ export default function ReportsPage() {
     if (col.type === 'stage_gap') {
       const fromStage = stages.find(s => s.id === col.fromStageId);
       const toStage = stages.find(s => s.id === col.toStageId);
-      if (!fromStage || !toStage) return <span className="text-sm text-slate-400">—</span>;
+      if (!fromStage || !toStage) return <span className="text-sm text-gray-400">â€”</span>;
 
       const fromDate = getStageHandledDate(task, fromStage);
       const toDate = getStageHandledDate(task, toStage);
 
-      if (!fromDate || !toDate) return <span className="text-sm text-slate-400">—</span>;
+      if (!fromDate || !toDate) return <span className="text-sm text-gray-400">â€”</span>;
 
       const diffMs = toDate.getTime() - fromDate.getTime();
       const diffMins = Math.floor(diffMs / 60000);
@@ -1279,13 +1279,13 @@ export default function ReportsPage() {
               <span>{displayText.trim() || '0m'}</span>
             </div>
           </TooltipTrigger>
-          <TooltipContent className="bg-white text-slate-700 border-slate-200 shadow-xl p-2">
+          <TooltipContent className="bg-white text-gray-700 border-gray-200 shadow-xl p-2">
             <div className="text-sm space-y-1">
-              <div><span className="font-semibold text-slate-500">From:</span> {col.fromStageName}</div>
-              <div><span className="font-semibold text-slate-500">To:</span> {col.toStageName}</div>
-              <div><span className="font-semibold text-slate-500">Gap:</span> <span className="text-orange-600">{displayText.trim() || '0m'}</span></div>
-              <div><span className="font-semibold text-slate-500">From Date:</span> {formatDateForDisplay(fromDate)}</div>
-              <div><span className="font-semibold text-slate-500">To Date:</span> {formatDateForDisplay(toDate)}</div>
+              <div><span className="font-semibold text-gray-500">From:</span> {col.fromStageName}</div>
+              <div><span className="font-semibold text-gray-500">To:</span> {col.toStageName}</div>
+              <div><span className="font-semibold text-gray-500">Gap:</span> <span className="text-orange-600">{displayText.trim() || '0m'}</span></div>
+              <div><span className="font-semibold text-gray-500">From Date:</span> {formatDateForDisplay(fromDate)}</div>
+              <div><span className="font-semibold text-gray-500">To Date:</span> {formatDateForDisplay(toDate)}</div>
             </div>
           </TooltipContent>
         </Tooltip>
@@ -1294,7 +1294,7 @@ export default function ReportsPage() {
 
     if (col.type === 'stage_date') {
       const stage = stages.find(s => s.id === col.stageId);
-      if (!stage) return <span className="text-sm text-slate-400">—</span>;
+      if (!stage) return <span className="text-sm text-gray-400">â€”</span>;
 
       if (!checkStageApplicableForTask(stage, task)) {
         return <span className="text-sm text-red-500">Missing</span>;
@@ -1336,10 +1336,10 @@ export default function ReportsPage() {
                 <AlertCircle className="h-4 w-4" /> Skipped
               </span>
             </TooltipTrigger>
-            <TooltipContent className="bg-white text-slate-700 border-slate-200 shadow-xl p-2">
+            <TooltipContent className="bg-white text-gray-700 border-gray-200 shadow-xl p-2">
               <div className="text-sm space-y-1">
-                <p><span className="font-semibold text-slate-500">Reason:</span> {reason}</p>
-                {skippedAt && <p><span className="font-semibold text-slate-500">Date:</span> {formatDateTimeForDisplay(skippedAt)}</p>}
+                <p><span className="font-semibold text-gray-500">Reason:</span> {reason}</p>
+                {skippedAt && <p><span className="font-semibold text-gray-500">Date:</span> {formatDateTimeForDisplay(skippedAt)}</p>}
               </div>
             </TooltipContent>
           </Tooltip>
@@ -1390,13 +1390,13 @@ export default function ReportsPage() {
                 {icon}<span>{formatDateForDisplay(completionDate)}</span>
               </div>
             </TooltipTrigger>
-            <TooltipContent className={`bg-white text-slate-700 border-slate-200 shadow-xl p-2`}>
+            <TooltipContent className={`bg-white text-gray-700 border-gray-200 shadow-xl p-2`}>
               <div className="space-y-2 p-1">
-                <div className={`font-semibold text-sm ${textColor} border-b border-slate-100 pb-1.5`}>{statusText}</div>
+                <div className={`font-semibold text-sm ${textColor} border-b border-gray-100 pb-1.5`}>{statusText}</div>
                 <div className="text-sm space-y-1">
-                  <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Completed:</span><span className="text-slate-700">{formatDateTimeForDisplay(completionDate)}</span></div>
-                  <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Duration:</span><span className="text-slate-700">{durationTakenText}</span></div>
-                  {estimatedMinutes > 0 && <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Allowed:</span><span className="text-slate-700">{formatDuration(estimatedMinutes)}</span></div>}
+                  <div className="flex justify-between gap-4"><span className="text-gray-500 font-semibold">Completed:</span><span className="text-gray-700">{formatDateTimeForDisplay(completionDate)}</span></div>
+                  <div className="flex justify-between gap-4"><span className="text-gray-500 font-semibold">Duration:</span><span className="text-gray-700">{durationTakenText}</span></div>
+                  {estimatedMinutes > 0 && <div className="flex justify-between gap-4"><span className="text-gray-500 font-semibold">Allowed:</span><span className="text-gray-700">{formatDuration(estimatedMinutes)}</span></div>}
                 </div>
               </div>
             </TooltipContent>
@@ -1404,7 +1404,7 @@ export default function ReportsPage() {
         );
       }
 
-      if (!effectiveStartTime || !showTimeStatuses) return <span className="text-sm text-slate-400">—</span>;
+      if (!effectiveStartTime || !showTimeStatuses) return <span className="text-sm text-gray-400">â€”</span>;
 
       const timeStatus = getTimeStatus(effectiveStartTime, estimatedMinutes);
       const isOverdue = timeStatus?.isOverdue || false;
@@ -1418,22 +1418,22 @@ export default function ReportsPage() {
               {icon}<span>{timeStatus?.formattedElapsed}</span>
             </div>
           </TooltipTrigger>
-          <TooltipContent className={`bg-white text-slate-700 border-slate-200 shadow-xl p-2`}>
+          <TooltipContent className={`bg-white text-gray-700 border-gray-200 shadow-xl p-2`}>
             <div className="space-y-2 p-1">
-              <div className={`font-semibold text-sm ${textColor} border-b border-slate-100 pb-1.5`}>
+              <div className={`font-semibold text-sm ${textColor} border-b border-gray-100 pb-1.5`}>
                 {isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}
               </div>
               <div className="text-sm space-y-1">
-                <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Started:</span><span className="text-slate-700">{formatDateTimeForDisplay(effectiveStartTime)}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-gray-500 font-semibold">Started:</span><span className="text-gray-700">{formatDateTimeForDisplay(effectiveStartTime)}</span></div>
                 {estimatedMinutes > 0 && (
                   <>
                     <div className="flex justify-between gap-4">
-                      <span className="text-slate-500 font-semibold">Remaining:</span>
+                      <span className="text-gray-500 font-semibold">Remaining:</span>
                       <span className={isOverdue ? 'font-semibold text-red-600' : 'text-emerald-600'}>
                         {isOverdue ? `Overdue by ${timeStatus?.formattedOverdue}` : timeStatus?.formattedRemaining}
                       </span>
                     </div>
-                    <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Estimate:</span><span className="text-slate-700">{formatDuration(estimatedMinutes)}</span></div>
+                    <div className="flex justify-between gap-4"><span className="text-gray-500 font-semibold">Estimate:</span><span className="text-gray-700">{formatDuration(estimatedMinutes)}</span></div>
                   </>
                 )}
               </div>
@@ -1445,7 +1445,7 @@ export default function ReportsPage() {
 
     if (col.type === 'extracted_field') {
       const stage = stages.find(s => s.id === col.stageId);
-      if (!stage) return <span className="text-sm text-slate-400">—</span>;
+      if (!stage) return <span className="text-sm text-gray-400">â€”</span>;
 
       if (!checkStageApplicableForTask(stage, task)) {
         return <span className="text-sm text-red-500">Missing</span>;
@@ -1477,11 +1477,11 @@ export default function ReportsPage() {
           ? formatDateTimeForDisplay(foundValue)
           : isDateLike ? formatDateForDisplay(foundValue) : foundValue;
         const isOld = foundDoc.created_at && task.created_at && new Date(foundDoc.created_at) < new Date(task.created_at);
-        return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || <span className="text-slate-400">—</span>}</span>;
+        return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-gray-700'}`}>{display || <span className="text-gray-400">â€”</span>}</span>;
       }
 
       const stageDocInfo = stage?.documents?.find((d: any) => d.kycId === col.kycId);
-      if (!stageDocInfo) return <span className="text-sm text-slate-400">—</span>;
+      if (!stageDocInfo) return <span className="text-sm text-gray-400">â€”</span>;
       if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-red-500">Missing</span>;
 
       const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
@@ -1508,7 +1508,7 @@ export default function ReportsPage() {
       const display = isDateTimeField2
         ? formatDateTimeForDisplay(val)
         : isDateLike2 ? formatDateForDisplay(val) : val;
-      return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || <span className="text-slate-400">—</span>}</span>;
+      return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-gray-700'}`}>{display || <span className="text-gray-400">â€”</span>}</span>;
     }
 
     if (col.type === 'task') {
@@ -1531,7 +1531,7 @@ export default function ReportsPage() {
       );
 
       if (!requirement) {
-        return <span className="text-sm text-slate-400">—</span>;
+        return <span className="text-sm text-gray-400">â€”</span>;
       }
 
       // Check if task has fetched reference documents
@@ -1539,7 +1539,7 @@ export default function ReportsPage() {
 
       if (referenceDocs.length === 0) {
         return (
-          <div className="text-slate-400 italic">No documents found</div>
+          <div className="text-gray-400 italic">No documents found</div>
         );
       }
 
@@ -1560,7 +1560,7 @@ export default function ReportsPage() {
 
 
       return (
-        <div className="text-slate-500"><span className="font-medium text-slate-700">{isEffectiveTo || '-'}</span></div>
+        <div className="text-gray-500"><span className="font-medium text-gray-700">{isEffectiveTo || '-'}</span></div>
       );
     }
 
@@ -1568,13 +1568,13 @@ export default function ReportsPage() {
       const currentStage = getCurrentOfficerStage(task);
 
       if (!currentStage) {
-        return <span className="text-sm text-slate-400">—</span>;
+        return <span className="text-sm text-gray-400">â€”</span>;
       }
 
       const officerIds = getStageOfficerIds(task, 'current');
 
       if (!officerIds || officerIds.length === 0) {
-        return <span className="text-sm text-slate-400 italic">None assigned</span>;
+        return <span className="text-sm text-gray-400 italic">None assigned</span>;
       }
 
       const officerNames = officerIds.map((id: string) => {
@@ -1583,13 +1583,13 @@ export default function ReportsPage() {
       }).filter(Boolean);
 
       if (officerNames.length === 0) {
-        return <span className="text-sm text-slate-400 italic">None assigned</span>;
+        return <span className="text-sm text-gray-400 italic">None assigned</span>;
       }
 
       return (
         <div className="flex flex-wrap gap-1">
           {officerNames.map((name: string, idx: number) => (
-            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200">
+            <Badge key={idx} variant="outline" className="text-xs px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200">
               {name}
             </Badge>
           ))}
@@ -1603,7 +1603,7 @@ export default function ReportsPage() {
         : [];
 
       if (!officerIds || officerIds.length === 0) {
-        return <span className="text-sm text-slate-400 italic">None assigned</span>;
+        return <span className="text-sm text-gray-400 italic">None assigned</span>;
       }
 
       const officerNames = officerIds.map((id: string) => {
@@ -1612,13 +1612,13 @@ export default function ReportsPage() {
       }).filter(Boolean);
 
       if (officerNames.length === 0) {
-        return <span className="text-sm text-slate-400 italic">None assigned</span>;
+        return <span className="text-sm text-gray-400 italic">None assigned</span>;
       }
 
       return (
         <div className="flex flex-wrap gap-1">
           {officerNames.map((name: string, idx: number) => (
-            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-violet-50 text-violet-700 border-violet-200">
+            <Badge key={idx} variant="outline" className="text-xs px-1.5 py-0 bg-violet-50 text-violet-700 border-violet-200">
               {name}
             </Badge>
           ))}
@@ -1626,7 +1626,7 @@ export default function ReportsPage() {
       );
     }
 
-    return <span className="text-sm text-slate-400">—</span>;
+    return <span className="text-sm text-gray-400">â€”</span>;
   }, [
     stages, departments, kycDocuments, allDocuments, companies,
     enhancedTasksData, taskDependants, showTimeStatuses,
@@ -1742,7 +1742,7 @@ export default function ReportsPage() {
     const deptLabel = activeDepartment?.name || 'All Departments';
     const totalCols = filteredColumns.length + 1; // +1 for # index
 
-    // ── Shared helper: apply semantic colour to a cell based on its text value ──
+    // â”€â”€ Shared helper: apply semantic colour to a cell based on its text value â”€â”€
     const applySemanticColor = (cell: ExcelJS.Cell) => {
       const v = String(cell.value ?? '');
       if (v === 'Missing' || v === 'N/A' || v.toLowerCase().includes('missing')) {
@@ -1770,7 +1770,7 @@ export default function ReportsPage() {
       const rowAlt = 'FFF8F9FF';
       const borderColor = 'FFCBD5E1';
 
-      // ── Row 1: Full-width branded cover ──────────────────────────────────
+      // â”€â”€ Row 1: Full-width branded cover â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       ws.mergeCells(1, 1, 1, totalCols);
       const coverCell = ws.getCell('A1');
       coverCell.value = reportName.toUpperCase();
@@ -1779,16 +1779,16 @@ export default function ReportsPage() {
       coverCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 2 };
       ws.getRow(1).height = 36;
 
-      // ── Row 2: Metadata subtitle ─────────────────────────────────────────
+      // â”€â”€ Row 2: Metadata subtitle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       ws.mergeCells(2, 1, 2, totalCols);
       const metaCell = ws.getCell('A2');
-      metaCell.value = `${deptLabel}   ·   ${dateStr}   ·   ${searchedTasks.length} records`;
+      metaCell.value = `${deptLabel}   Â·   ${dateStr}   Â·   ${searchedTasks.length} records`;
       metaCell.font = { name: 'Calibri', size: 9, color: { argb: 'FFB0A8F0' } };
       metaCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerFg } };
       metaCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 2 };
       ws.getRow(2).height = 20;
 
-      // ── Row 3: Stats pill strip ──────────────────────────────────────────
+      // â”€â”€ Row 3: Stats pill strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const pillLabels = ['Total', 'WIP', 'Completed', 'Endorsed', 'Cancelled'];
       const pillValues = [allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount];
       const pillArgbs = ['FF4F46E5', 'FFF59E0B', 'FF16A34A', 'FF0284C7', 'FFDC2626'];
@@ -1812,10 +1812,10 @@ export default function ReportsPage() {
       ws.getRow(3).height = 18;
       ws.getRow(4).height = 30;
 
-      // ── Spacer row ────────────────────────────────────────────────────────
+      // â”€â”€ Spacer row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       ws.getRow(5).height = 8;
 
-      // ── Row 6: Column Headers ─────────────────────────────────────────────
+      // â”€â”€ Row 6: Column Headers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const colHeaders = ['#', ...filteredColumns.map(c => c.label)];
       const hRow = ws.getRow(6);
       hRow.values = colHeaders;
@@ -1832,7 +1832,7 @@ export default function ReportsPage() {
 
       ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 6, showGridLines: false }];
 
-      // ── Data rows ─────────────────────────────────────────────────────────
+      // â”€â”€ Data rows â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       searchedTasks.forEach((task, idx) => {
         const vals = [idx + 1, ...filteredColumns.map(col => getExportCellValue(task, col))];
         const row = ws.addRow(vals); // row 7+
@@ -1847,7 +1847,7 @@ export default function ReportsPage() {
         });
       });
 
-      // ── Column widths ──────────────────────────────────────────────────────
+      // â”€â”€ Column widths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       ws.getColumn(1).width = 5;
       filteredColumns.forEach((col, i) => {
         ws.getColumn(i + 2).width = Math.min(45, Math.max(18, col.label.length * 1.4));
@@ -1862,7 +1862,7 @@ export default function ReportsPage() {
       toast({ title: 'Export Complete', description: `${searchedTasks.length} rows exported to Excel.` });
 
     } else {
-      // ── PDF export ────────────────────────────────────────────────────────
+      // â”€â”€ PDF export â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const { default: jsPDF } = await import('jspdf');
       const { default: autoTable } = await import('jspdf-autotable');
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
@@ -1885,7 +1885,7 @@ export default function ReportsPage() {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7);
       doc.setTextColor(...greyMid);
-      doc.text(`${deptLabel}  ·  ${dateStr}  ·  ${searchedTasks.length} records`, 14, 19.5);
+      doc.text(`${deptLabel}  Â·  ${dateStr}  Â·  ${searchedTasks.length} records`, 14, 19.5);
       doc.setDrawColor(...greyLight);
       doc.setLineWidth(0.3);
       doc.line(10, 22, pageW - 10, 22);
@@ -1917,7 +1917,7 @@ export default function ReportsPage() {
           doc.setFontSize(6.5);
           doc.setTextColor(148, 163, 184);
           doc.setFont('helvetica', 'normal');
-          doc.text(`${reportName}  ·  ${dateStr}`, 14, pageH - 3.5);
+          doc.text(`${reportName}  Â·  ${dateStr}`, 14, pageH - 3.5);
           doc.text(`Page ${pg}`, pageW - 14, pageH - 3.5, { align: 'right' });
         }
       });
@@ -2022,7 +2022,7 @@ export default function ReportsPage() {
       // Subtitle row
       ws.mergeCells(2, 1, 2, numDataCols);
       const subCell = ws.getCell(2, 1);
-      subCell.value = `${deptName}  ·  ${subdeptLabel}  ·  ${statusLabel}  ·  Generated: ${dateStr}  ·  Total: ${totalTasks} tasks`;
+      subCell.value = `${deptName}  Â·  ${subdeptLabel}  Â·  ${statusLabel}  Â·  Generated: ${dateStr}  Â·  Total: ${totalTasks} tasks`;
       subCell.font = { name: 'Calibri', size: 10, color: { argb: 'FF475569' } };
       subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
       subCell.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -2117,7 +2117,7 @@ export default function ReportsPage() {
       ];
       const accent = hexToRgb(accentHex);
 
-      // ── Colour helpers ─────────────────────────────────────────────────────────
+      // â”€â”€ Colour helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const GREY_DARK: [number, number, number] = [15, 23, 42];       // slate-950
       const GREY_MID: [number, number, number] = [71, 85, 105];       // slate-600
       const GREY_LIGHT: [number, number, number] = [226, 232, 240];   // slate-200
@@ -2137,7 +2137,7 @@ export default function ReportsPage() {
         return 'stage';
       };
 
-      // ── Modern page header ─────────────────────────────────────────────────────
+      // â”€â”€ Modern page header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const paintPageHeader = (pageNum: number) => {
         // Thin accent top border
         doc.setFillColor(...accent);
@@ -2158,7 +2158,7 @@ export default function ReportsPage() {
         doc.setFontSize(7);
         doc.setFont('helvetica', 'normal');
         doc.text(
-          `${deptName}  ·  ${subdeptLabel}  ·  ${statusLabel}  ·  ${dateStr}  ·  ${totalTasks} tasks`,
+          `${deptName}  Â·  ${subdeptLabel}  Â·  ${statusLabel}  Â·  ${dateStr}  Â·  ${totalTasks} tasks`,
           14, 20.5
         );
 
@@ -2168,7 +2168,7 @@ export default function ReportsPage() {
         doc.line(10, 23, pageW - 10, 23);
       };
 
-      // ── Footer ─────────────────────────────────────────────────────────────────
+      // â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const paintFooter = (pageNum: number) => {
         doc.setDrawColor(226, 232, 240);
         doc.setLineWidth(0.3);
@@ -2176,7 +2176,7 @@ export default function ReportsPage() {
         doc.setFontSize(6.5);
         doc.setTextColor(148, 163, 184);
         doc.setFont('helvetica', 'normal');
-        doc.text(`${reportTitle}  ·  ${deptName}  ·  ${dateStr}`, 14, pageH - 3.5);
+        doc.text(`${reportTitle}  Â·  ${deptName}  Â·  ${dateStr}`, 14, pageH - 3.5);
         doc.text(`Page ${pageNum}`, pageW - 14, pageH - 3.5, { align: 'right' });
       };
 
@@ -2191,7 +2191,7 @@ export default function ReportsPage() {
       }
       if (colChunks.length === 0) colChunks.push([]);
 
-      // ── Per-group rendering ────────────────────────────────────────────────────
+      // â”€â”€ Per-group rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       for (const group of groups) {
         if (group.tasks.length === 0) continue;
         const isUnalloc = group.name === 'Unallocated';
@@ -2207,7 +2207,7 @@ export default function ReportsPage() {
             startY = 26;
           }
 
-          // ── Group banner ───────────────────────────────────────────────────────
+          // â”€â”€ Group banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           doc.setFillColor(...gColor);
           doc.roundedRect(8, startY, pageW - 16, 7, 1.5, 1.5, 'F');
           doc.setTextColor(...WHITE);
@@ -2215,13 +2215,13 @@ export default function ReportsPage() {
           doc.setFont('helvetica', 'bold');
           const groupLabel = isFirstChunk
             ? group.name.toUpperCase()
-            : `${group.name.toUpperCase()} (cont. — cols ${ci * CHUNK + 1}–${Math.min(ci * CHUNK + chunk.length, pdfCols.length)})`;
+            : `${group.name.toUpperCase()} (cont. â€” cols ${ci * CHUNK + 1}â€“${Math.min(ci * CHUNK + chunk.length, pdfCols.length)})`;
           const countLabel = `${group.tasks.length} task${group.tasks.length !== 1 ? 's' : ''}`;
           doc.text(`  ${groupLabel}`, 11, startY + 4.8);
           if (isFirstChunk) doc.text(countLabel, pageW - 11, startY + 4.8, { align: 'right' });
           startY += 9.5;
 
-          // ── Build head styles per column ───────────────────────────────────────
+          // â”€â”€ Build head styles per column â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           const buildHeadStyle = (colIndex: number): any => {
             if (colIndex === 0) return { fillColor: GREY_DARK, textColor: WHITE };
             const col = chunk[colIndex - 1];
@@ -2238,7 +2238,7 @@ export default function ReportsPage() {
             String(i + 1),
             ...chunk.map((col: any) => {
               const v = getExportCellValue(task, col);
-              return v || '—';
+              return v || 'â€”';
             })
           ]);
 
@@ -2392,7 +2392,7 @@ export default function ReportsPage() {
     return rows;
   }, [activeReport, filteredColumns, expandedSections, stages, isStageApplicableToCurrentFilter]);
 
-  // Full hierarchy path (Department → Sub-department → Class) for the report's configured job level
+  // Full hierarchy path (Department â†’ Sub-department â†’ Class) for the report's configured job level
   const jobLevelPath = useMemo(() => {
     if (!activeReport?.job_level) return null;
     const jl = activeReport.job_level;
@@ -2437,146 +2437,152 @@ export default function ReportsPage() {
 
   if (reportLoading) {
     return (
-      <div className="flex-1 p-8 bg-slate-50 flex items-center justify-center min-h-screen">
+      <div className="flex-1 p-8 bg-gray-50 flex items-center justify-center min-h-screen">
         <div className="text-center space-y-4">
-          <Loader2 className="h-12 w-12 animate-spin text-slate-400 mx-auto" />
-          <p className="text-slate-700">Loading Reports...</p>
+          <Loader2 className="h-10 w-10 animate-spin text-gray-400 mx-auto" />
+          <p className="text-sm font-medium text-gray-500">Loading Reports...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="h-full w-full overflow-hidden">
-      {/* Top Row: Report Info & High-level Perspectives */}
-      <ReportsToolbar
-        activeReport={activeReport}
-        setIsReportDialogOpen={setIsReportDialogOpen}
-        columns={columns}
-        visibleColumnIds={visibleColumnIds}
-        setVisibleColumnIds={setVisibleColumnIds}
-        showTimeTrackingColumns={showTimeTrackingColumns}
-        setShowTimeTrackingColumns={setShowTimeTrackingColumns}
-        showDocRequirementsColumns={showDocRequirementsColumns}
-        setShowDocRequirementsColumns={setShowDocRequirementsColumns}
-        view={view}
-        setView={setView}
-        handleSendReport={handleSendReport}
-        refreshData={() => refreshData(true)}
-        loading={loading}
-        activeDepartment={activeDepartment}
+    <div className="flex flex-1 overflow-hidden">
+      {/* 1. Sidebar */}
+      <ReportsSidebar
+        departments={departments}
+        activeDeptId={activeDeptId}
+        setActiveDeptId={setActiveDeptId}
         activeSubDepartments={activeSubDepartments}
         activeSubDeptIds={activeSubDeptIds}
+        setActiveSubDeptIds={setActiveSubDeptIds}
+        isCollapsed={sidebarCollapsed}
+        onToggleCollapse={handleSidebarToggle}
       />
 
-      {/* 2. Main Content Area: Takes up remaining width */}
-      <div className="flex min-w-0">
-        {/* 1. Sidebar: Now sits to the left of the main content */}
-        <ReportsSidebar
-          departments={departments}
-          activeDeptId={activeDeptId}
-          setActiveDeptId={setActiveDeptId}
+      {/* 2. Main Content Area */}
+      <div className="flex flex-col flex-1 overflow-hidden">
+        {/* Header Bar */}
+        <ReportsHeader
+          activeReport={activeReport}
+          setIsReportDialogOpen={setIsReportDialogOpen}
+          columns={columns}
+          visibleColumnIds={visibleColumnIds}
+          setVisibleColumnIds={setVisibleColumnIds}
+          showTimeTrackingColumns={showTimeTrackingColumns}
+          setShowTimeTrackingColumns={setShowTimeTrackingColumns}
+          showDocRequirementsColumns={showDocRequirementsColumns}
+          setShowDocRequirementsColumns={setShowDocRequirementsColumns}
+          view={view}
+          setView={setView}
+          handleSendReport={handleSendReport}
+          refreshData={() => refreshData(true)}
+          loading={loading}
+          activeDepartment={activeDepartment}
           activeSubDepartments={activeSubDepartments}
           activeSubDeptIds={activeSubDeptIds}
-          setActiveSubDeptIds={setActiveSubDeptIds}
-          isCollapsed={sidebarCollapsed}
-          onToggleCollapse={handleSidebarToggle}
+          allTasksCount={allTasksCount}
+          wipTasksCount={wipTasksCount}
+          writeUpCompletedCount={writeUpCompletedCount}
+          endorsedCount={endorsedCount}
+          cancelledCount={cancelledCount}
         />
-        <div className="flex flex-col w-full overflow-hidden">
-          {/* KPI Cards */}
-          <ReportKpiCards
-            allTasksCount={allTasksCount}
-            wipTasksCount={wipTasksCount}
-            writeUpCompletedCount={writeUpCompletedCount}
-            endorsedCount={endorsedCount}
-            cancelledCount={cancelledCount}
-          />
-          {/* Second Row: Person Specific Filters (Conditional based on perspective) */}
-          <PersonFilterStrip
-            activePerspective={activePerspective}
-            setActivePerspective={setActivePerspective} // Added
-            allTasksCount={allTasksCount}                 // Added
-            officerTaskCounts={officerTaskCounts}
-            taskManagerTaskCounts={taskManagerTaskCounts}
-            clientTaskCounts={clientTaskCounts}           // Added
-            availableOfficers={availableOfficers}
-            activeOfficerTab={activeOfficerTab}
-            setActiveOfficerTab={setActiveOfficerTab}
-            officerFilterMode={officerFilterMode}
-            setOfficerFilterMode={setOfficerFilterMode}
-            availableTaskManagers={availableTaskManagers}
-            activeTaskManagerTab={activeTaskManagerTab}
-            setActiveTaskManagerTab={setActiveTaskManagerTab}
-            taskManagerFilterMode={taskManagerFilterMode}
-            setTaskManagerFilterMode={setTaskManagerFilterMode}
-          />
 
-          {/* Third Row: Status, Search, and Category Filters */}
-          <StatusFilterBar
-            activeStatus={activeStatus}
-            setActiveStatus={setActiveStatus}
-            allTasksCount={allTasksCount}
-            wipTasksCount={wipTasksCount}
-            writeUpCompletedCount={writeUpCompletedCount}
-            endorsedCount={endorsedCount}
-            cancelledCount={cancelledCount}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            activeClassId={activeClassId}
-            setActiveClassId={setActiveClassId}
-            activeSubClassId={activeSubClassId}
-            setActiveSubClassId={setActiveSubClassId}
-            activeSubDeptIds={activeSubDeptIds}
-            activeSubDepartments={activeSubDepartments}
-            isFiltersDropdownOpen={isFiltersDropdownOpen}
-            setIsFiltersDropdownOpen={setIsFiltersDropdownOpen}
-          />
-          {/* Table Area */}
-          <div className="flex-1 overflow-hidden p-2">
-            {!activeReport ? (
-              <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200">
-                <FileText className="h-16 w-16 mb-4 opacity-20 text-blue-600" />
-                <p className="text-lg font-bold text-slate-600">No Report Selected</p>
-                <p className="text-sm text-slate-400 mt-1">Select a report template to view data</p>
-                <Button size="sm" className="mt-4" onClick={() => setIsReportDialogOpen(true)}>
-                  <Filter className="h-3.5 w-3.5 mr-1.5" />Select Report
-                </Button>
-              </div>
-            ) : loading ? (
-              <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200">
-                <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-3" />
-                <p className="text-sm font-bold text-slate-500">Processing Report Data...</p>
-              </div>
-            ) : view === 'standard' ? (
-              <StandardReportView
-                allTasks={filteredByNARows}
-                filteredColumns={filteredColumns}
-                columnGroups={columnGroups}
-                sortConfig={sortConfig}
-                expandedStageColumns={expandedStageColumns}
-                renderCellValue={renderCellValue}
-                safeRender={safeRender}
-                handleSort={handleSort}
-                toggleStageColumns={toggleStageColumns}
-                isStageApplicableToCurrentFilter={isStageApplicableToCurrentFilter}
-                userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
-                departments={departments}
-                stages={stages}
-              />
-            ) : (
-              <TransposedReportView
-                paginatedTasks={filteredByNARows}
-                transposedRows={transposedRows}
-                currentPage={1}
-                itemsPerPage={filteredByNARows.length}
-                expandedSections={expandedSections}
-                renderCellValue={renderCellValue}
-                toggleSection={toggleSection}
-                userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
-                departments={departments}
-              />
-            )}
-          </div>
+        {/* KPI Cards */}
+        <ReportKpiCards
+          allTasksCount={allTasksCount}
+          wipTasksCount={wipTasksCount}
+          writeUpCompletedCount={writeUpCompletedCount}
+          endorsedCount={endorsedCount}
+          cancelledCount={cancelledCount}
+        />
+
+        {/* Person Filter Strip */}
+        <PersonFilterStrip
+          activePerspective={activePerspective}
+          setActivePerspective={setActivePerspective}
+          allTasksCount={allTasksCount}
+          officerTaskCounts={officerTaskCounts}
+          taskManagerTaskCounts={taskManagerTaskCounts}
+          clientTaskCounts={clientTaskCounts}
+          availableOfficers={availableOfficers}
+          activeOfficerTab={activeOfficerTab}
+          setActiveOfficerTab={setActiveOfficerTab}
+          officerFilterMode={officerFilterMode}
+          setOfficerFilterMode={setOfficerFilterMode}
+          availableTaskManagers={availableTaskManagers}
+          activeTaskManagerTab={activeTaskManagerTab}
+          setActiveTaskManagerTab={setActiveTaskManagerTab}
+          taskManagerFilterMode={taskManagerFilterMode}
+          setTaskManagerFilterMode={setTaskManagerFilterMode}
+        />
+
+        {/* Status + Search Bar */}
+        <StatusFilterBar
+          activeStatus={activeStatus}
+          setActiveStatus={setActiveStatus}
+          allTasksCount={allTasksCount}
+          wipTasksCount={wipTasksCount}
+          writeUpCompletedCount={writeUpCompletedCount}
+          endorsedCount={endorsedCount}
+          cancelledCount={cancelledCount}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          activeClassId={activeClassId}
+          setActiveClassId={setActiveClassId}
+          activeSubClassId={activeSubClassId}
+          setActiveSubClassId={setActiveSubClassId}
+          activeSubDeptIds={activeSubDeptIds}
+          activeSubDepartments={activeSubDepartments}
+          isFiltersDropdownOpen={isFiltersDropdownOpen}
+          setIsFiltersDropdownOpen={setIsFiltersDropdownOpen}
+        />
+
+        {/* Table Area */}
+        <div className="flex-1 overflow-hidden">
+          {!activeReport ? (
+            <div className="h-full flex flex-col items-center justify-center bg-white">
+              <FileText className="h-10 w-10 mb-3 text-gray-300" />
+              <p className="text-sm font-medium text-gray-500">No Report Selected</p>
+              <p className="text-xs text-gray-400 mt-1">Select a report template to view data</p>
+              <Button size="sm" className="mt-4" onClick={() => setIsReportDialogOpen(true)}>
+                <Filter className="h-3.5 w-3.5 mr-1.5" />Select Report
+              </Button>
+            </div>
+          ) : loading ? (
+            <div className="h-full flex flex-col items-center justify-center bg-white">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-500 mb-3" />
+              <p className="text-sm font-medium text-gray-500">Processing Report Data...</p>
+            </div>
+          ) : view === 'standard' ? (
+            <StandardReportView
+              allTasks={filteredByNARows}
+              filteredColumns={filteredColumns}
+              columnGroups={columnGroups}
+              sortConfig={sortConfig}
+              expandedStageColumns={expandedStageColumns}
+              renderCellValue={renderCellValue}
+              safeRender={safeRender}
+              handleSort={handleSort}
+              toggleStageColumns={toggleStageColumns}
+              isStageApplicableToCurrentFilter={isStageApplicableToCurrentFilter}
+              userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
+              departments={departments}
+              stages={stages}
+            />
+          ) : (
+            <TransposedReportView
+              paginatedTasks={filteredByNARows}
+              transposedRows={transposedRows}
+              currentPage={1}
+              itemsPerPage={filteredByNARows.length}
+              expandedSections={expandedSections}
+              renderCellValue={renderCellValue}
+              toggleSection={toggleSection}
+              userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
+              departments={departments}
+            />
+          )}
         </div>
       </div>
 

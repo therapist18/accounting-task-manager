@@ -83,7 +83,21 @@
       "Bash(taskkill /PID 22968 /F)",
       "Bash(Remove-Item -Force \"C:\\\\Users\\\\user\\\\.gradle\\\\caches\\\\journal-1\\\\journal-1.lock\" -ErrorAction SilentlyContinue)",
       "Bash(Write-Host \"Done\")",
-      "Bash(./gradlew assembleDebug --no-daemon)"
+      "Bash(./gradlew assembleDebug --no-daemon)",
+      "PowerShell(Get-Process -Name \"java\" -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Id 21180 -Force)",
+      "Bash(taskkill /F /PID 21180)",
+      "PowerShell(Get-Process -Name \"studio64\" -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Id 8040 -ErrorAction SilentlyContinue)",
+      "PowerShell(& taskkill /F /PID 8040 /T)",
+      "PowerShell(Get-Process -Name \"java\",\"studio64\" -ErrorAction SilentlyContinue)",
+      "PowerShell(& taskkill /F /PID 4440 /T; & taskkill /F /PID 21180 /T; Start-Sleep -Seconds 3; $lockFile = \"C:\\\\Users\\\\user\\\\.gradle\\\\caches\\\\journal-1\\\\journal-1.lock\"; if \\(Test-Path $lockFile\\) { Remove-Item $lockFile -Force -ErrorAction SilentlyContinue }; Get-Process -Name \"java\",\"studio64\" -ErrorAction SilentlyContinue | Select-Object Id, ProcessName; if \\(-not \\(Test-Path $lockFile\\)\\) { \"Lock file cleared\" } else { \"Lock still held\" })",
+      "PowerShell($handlePath = \\(Get-Command handle.exe -ErrorAction SilentlyContinue\\); if \\($handlePath\\) { & $handlePath.Source \"journal-1.lock\" -accepteula } else { \"Handle.exe not found - will try restart approach\" })",
+      "PowerShell($pw = -join \\(\\(65..90\\) + \\(97..122\\) + \\(48..57\\) + \\(33,35,36,37,38,42,64\\) | Get-Random -Count 18 | ForEach-Object { [char]$_ }\\); Write-Output $pw)",
+      "PowerShell(keytool -genkey -v -keystore \"C:\\\\Users\\\\user\\\\bcl-meetings-release.jks\" -keyalg RSA -keysize 2048 -validity 10000 -alias bcl-meetings -storepass \"FnlQHZ!4hTU8G7Nqxe\" -keypass \"FnlQHZ!4hTU8G7Nqxe\" -dname \"CN=BCL Meetings, OU=BCL, O=BCL, L=Unknown, ST=Unknown, C=ZA\" 2>&1)",
+      "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"E:\\\\Bclmeetingsapp\\\\app\\\\src\\\\main\\\\res\\\\drawable\\\\header_bg.png\"\\); $header = $bytes[0..7] | ForEach-Object { $_.ToString\\(\"X2\"\\) }; Write-Output \"Header bytes: $\\($header -join ' '\\)\"; Write-Output \"File size: $\\($bytes.Length\\) bytes\")",
+      "PowerShell(Add-Type -AssemblyName System.Drawing; $src = \"E:\\\\Bclmeetingsapp\\\\app\\\\src\\\\main\\\\res\\\\drawable\\\\header_bg.png\"; $img = [System.Drawing.Image]::FromFile\\($src\\); $img.Save\\($src, [System.Drawing.Imaging.ImageFormat]::Png\\); $img.Dispose\\(\\); Write-Output \"Converted successfully. New size: $\\(\\(Get-Item $src\\).Length\\) bytes\")",
+      "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"E:\\\\Bclmeetingsapp\\\\app\\\\src\\\\main\\\\res\\\\drawable\\\\header_bg.png\"\\); $header = $bytes[0..3] | ForEach-Object { $_.ToString\\(\"X2\"\\) }; Write-Output \"Header: $\\($header -join ' '\\)\")"
     ],
     "additionalDirectories": [
       "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals"

@@ -65,24 +65,24 @@ export function ReportsSidebar({
 
   return (
     <div className={cn(
-      "border-r border-slate-100 bg-slate-50/80 flex flex-col h-full shrink-0 transition-all duration-300 ease-in-out z-20",
+      "border-r border-gray-200 bg-white flex flex-col h-full shrink-0 transition-all duration-300 ease-in-out z-20",
       isCollapsed ? "w-16" : "w-64"
     )}>
       {/* Header */}
       <div className={cn(
-        "px-4 py-4 flex items-center border-b border-slate-100 h-16 shrink-0",
+        "px-4 py-3 flex items-center border-b border-gray-200 h-12 shrink-0",
         isCollapsed ? "justify-center" : "justify-between"
       )}>
         {!isCollapsed && (
           <div>
-            <span className="text-[9px] font-bold text-blue-500 uppercase tracking-[0.2em]">Workspace</span>
-            <h2 className="text-base font-bold text-slate-900 leading-none mt-0.5">Departments</h2>
+            <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Workspace</span>
+            <h2 className="text-sm font-semibold text-gray-900 leading-tight mt-0.5">Departments</h2>
           </div>
         )}
         {onToggleCollapse && (
           <button
             onClick={onToggleCollapse}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all"
           >
             {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           </button>
@@ -91,18 +91,18 @@ export function ReportsSidebar({
 
       {/* Search */}
       {!isCollapsed && (
-        <div className="px-3 py-3 shrink-0 border-b border-slate-100">
+        <div className="px-3 py-2.5 shrink-0 border-b border-gray-200">
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
             <input
               type="text"
               placeholder="Search departments..."
               value={sidebarSearch}
               onChange={e => setSidebarSearch(e.target.value)}
-              className="w-full pl-7 pr-7 h-8 text-xs rounded-lg bg-white border border-slate-200 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all"
+              className="w-full pl-7 pr-7 h-8 text-xs rounded-lg bg-white border border-gray-200 text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all"
             />
             {sidebarSearch && (
-              <button onClick={() => setSidebarSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <button onClick={() => setSidebarSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                 <X className="h-3 w-3" />
               </button>
             )}
@@ -112,8 +112,8 @@ export function ReportsSidebar({
 
       {/* Content */}
       <div className={cn(
-        "flex-1 overflow-y-auto py-4 space-y-1.5 scrollbar-thin",
-        isCollapsed ? "px-2" : "px-3"
+        "flex-1 overflow-y-auto py-2 space-y-0.5 scrollbar-thin",
+        isCollapsed ? "px-2" : "px-2"
       )}>
         {filteredDepartments.map((dept) => {
           const isActive = activeDeptId === dept.id.toString();
@@ -124,10 +124,10 @@ export function ReportsSidebar({
                 key={dept.id}
                 onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
                 className={cn(
-                  "w-10 h-10 mx-auto flex items-center justify-center rounded-xl text-xs font-bold transition-all",
+                  "w-10 h-10 mx-auto flex items-center justify-center rounded-lg text-xs font-bold transition-all",
                   isActive
                     ? "bg-blue-600 text-white shadow-sm"
-                    : "bg-white text-slate-400 hover:bg-blue-50 hover:text-blue-600"
+                    : "bg-gray-50 text-gray-400 hover:bg-blue-50 hover:text-blue-600"
                 )}
                 title={dept.name}
               >
@@ -141,42 +141,42 @@ export function ReportsSidebar({
               <button
                 onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
                 className={cn(
-                  "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all text-left",
+                  "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all text-left",
                   isActive
-                    ? "bg-gradient-to-r from-blue-50 to-white text-blue-600 border border-blue-200 shadow-sm"
-                    : "text-slate-500 hover:text-slate-700 hover:bg-white hover:shadow-sm"
+                    ? "bg-blue-50 text-blue-700 border border-blue-200"
+                    : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
                 )}
               >
                 <div className={cn(
-                  "h-8 w-8 rounded-lg flex items-center justify-center text-[11px] font-bold shrink-0 transition-all",
-                  isActive ? "bg-blue-600 text-white shadow-sm" : "bg-white text-slate-400 border border-slate-200"
+                  "h-8 w-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 transition-all",
+                  isActive ? "bg-blue-600 text-white shadow-sm" : "bg-white text-gray-500 border border-gray-200"
                 )}>
                   {getInitials(dept.name)}
                 </div>
                 <div className="flex flex-col min-w-0 flex-1">
-                  <span className={cn("text-xs font-semibold truncate leading-tight", isActive ? "text-blue-600" : "text-slate-600")}>
+                  <span className={cn("text-xs font-medium truncate leading-tight", isActive ? "text-blue-700" : "text-gray-700")}>
                     {dept.name}
                   </span>
-                  <span className="text-[9px] text-slate-400 truncate leading-tight">{dept.tm_subdepartments?.length || 0} sub-depts</span>
+                  <span className="text-[11px] text-gray-400 truncate leading-tight">{dept.tm_subdepartments?.length || 0} sub-depts</span>
                 </div>
                 {isActive && <Building2 className="h-3.5 w-3.5 text-blue-400 shrink-0" />}
               </button>
 
               {isActive && activeSubDepartments.length > 0 && (
-                <div className="ml-7 pl-4 border-l-2 border-slate-100 mt-2 mb-4">
+                <div className="ml-7 pl-4 border-l-2 border-gray-200 mt-1.5 mb-3">
                   {/* Accordion toggle */}
                   <button
                     onClick={() => setSubDeptOpen(!subDeptOpen)}
                     className="w-full flex items-center gap-2 px-2 pb-1.5 text-left"
                   >
                     <ChevronRight className={cn(
-                      "h-3 w-3 text-slate-400 transition-transform",
+                      "h-3 w-3 text-gray-400 transition-transform",
                       subDeptOpen && "rotate-90"
                     )} />
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                    <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
                       Sub-departments
                     </span>
-                    <span className="text-[9px] text-slate-400 ml-auto">
+                    <span className="text-[11px] text-gray-400 ml-auto">
                       {activeSubDeptIds.length > 0 ? `${activeSubDeptIds.length} selected` : `${activeSubDepartments.length}`}
                     </span>
                   </button>
@@ -185,10 +185,10 @@ export function ReportsSidebar({
                   <button
                     onClick={() => { setActiveSubDeptIds([]); setSubDeptOpen(false); }}
                     className={cn(
-                      "w-full flex items-center gap-2.5 text-left px-3 py-1.5 text-xs rounded-lg transition-all font-semibold",
+                      "w-full flex items-center gap-2.5 text-left px-3 py-1.5 text-xs rounded-lg transition-all font-medium",
                       activeSubDeptIds.length === 0
-                        ? "bg-blue-50 text-blue-600"
-                        : "text-slate-500 hover:text-slate-700 hover:bg-white"
+                        ? "bg-blue-50 text-blue-700"
+                        : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
                     )}
                   >
                     <ListChecks className="h-3.5 w-3.5 shrink-0" />
@@ -207,11 +207,11 @@ export function ReportsSidebar({
                             placeholder="Filter..."
                             value={subDeptSearch}
                             onChange={e => setSubDeptSearch(e.target.value)}
-                            className="w-full h-7 pl-6 pr-5 text-[10px] rounded-md bg-slate-100 border-0 text-slate-600 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            className="w-full h-7 pl-6 pr-5 text-[11px] rounded-md bg-gray-100 border-0 text-gray-600 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
                           />
-                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-2.5 w-2.5 text-slate-400" />
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-2.5 w-2.5 text-gray-400" />
                           {subDeptSearch && (
-                            <button onClick={() => setSubDeptSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                            <button onClick={() => setSubDeptSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                               <X className="h-2.5 w-2.5" />
                             </button>
                           )}
@@ -228,13 +228,13 @@ export function ReportsSidebar({
                             className={cn(
                               "w-full flex items-center gap-2 text-left px-3 py-1.5 text-xs rounded-lg transition-all",
                               checked
-                                ? "bg-blue-50 text-blue-600 font-semibold"
-                                : "text-slate-500 hover:text-slate-700 hover:bg-white font-medium"
+                                ? "bg-blue-50 text-blue-700 font-medium"
+                                : "text-gray-600 hover:text-gray-900 hover:bg-gray-50 font-normal"
                             )}
                           >
                             <span className={cn(
                               "h-3.5 w-3.5 rounded border-2 flex items-center justify-center shrink-0 transition-colors",
-                              checked ? "bg-blue-500 border-blue-500" : "border-slate-300 bg-white"
+                              checked ? "bg-blue-500 border-blue-500" : "border-gray-300 bg-white"
                             )}>
                               {checked && <Check className="h-2 w-2 text-white" strokeWidth={3} />}
                             </span>
@@ -243,7 +243,7 @@ export function ReportsSidebar({
                         );
                       })}
                       {filteredSubDepts.length === 0 && subDeptSearch && (
-                        <div className="text-center py-3 text-[10px] text-slate-400">No matches</div>
+                        <div className="text-center py-3 text-xs text-gray-400">No matches</div>
                       )}
                     </div>
                   )}
@@ -253,7 +253,7 @@ export function ReportsSidebar({
           );
         })}
         {filteredDepartments.length === 0 && sidebarSearch && (
-          <div className="text-center py-6 text-slate-400 text-xs">
+          <div className="text-center py-6 text-gray-400 text-xs">
             No departments match &ldquo;{sidebarSearch}&rdquo;
           </div>
         )}
@@ -262,14 +262,15 @@ export function ReportsSidebar({
   );
 }
 
-// ─── Toolbar ─────────────────────────────────────────────────────────────────
+// ─── Header Bar (replaces ReportsToolbar) ──────────────────────────────────────
 
-export function ReportsToolbar({
+export function ReportsHeader({
   activeReport, setIsReportDialogOpen, columns, visibleColumnIds, setVisibleColumnIds,
   showTimeTrackingColumns, setShowTimeTrackingColumns,
   showDocRequirementsColumns, setShowDocRequirementsColumns,
   view, setView, handleSendReport, refreshData, loading,
-  activeDepartment, activeSubDepartments, activeSubDeptIds
+  activeDepartment, activeSubDepartments, activeSubDeptIds,
+  allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount,
 }: any) {
 
   const selectedSubDeptText = React.useMemo(() => {
@@ -283,26 +284,55 @@ export function ReportsToolbar({
   }, [activeSubDeptIds, activeSubDepartments]);
 
   return (
-    <div className="bg-white border-b border-slate-200 sticky top-0 z-30">
-      <div className="px-6 py-4 flex items-center justify-between gap-10">
+    <div className="border-b border-gray-200 bg-white px-6 py-3">
+      <div className="flex items-center justify-between gap-3">
         {/* LEFT: Title + breadcrumb stacked */}
         <div
           onClick={() => setIsReportDialogOpen(true)}
-          className="group cursor-pointer flex flex-col gap-1.5 min-w-0"
+          className="group cursor-pointer min-w-0"
         >
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-none uppercase group-hover:text-blue-600 transition-colors truncate">
+          <p className="text-sm font-semibold text-gray-800 truncate group-hover:text-blue-600 transition-colors">
             {activeReport?.name || "Select Report"}
-          </h1>
-          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-blue-600">
-            <Building2 className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{activeDepartment?.name || "All Departments"}</span>
-            <span className="text-slate-300">›</span>
-            <span className="truncate">{selectedSubDeptText}</span>
-          </div>
+          </p>
+          <p className="text-xs text-gray-500 truncate mt-0.5">
+            {activeDepartment?.name || "All Departments"} › {selectedSubDeptText}
+            <span className="mx-1.5 text-gray-300">|</span>
+            Active: {allTasksCount} · WIP: {wipTasksCount} · Done: {writeUpCompletedCount} · Endorsed: {endorsedCount}
+          </p>
         </div>
 
-        {/* RIGHT: Action buttons */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* RIGHT: Tabs + Action buttons */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* View toggle */}
+          <div className="flex items-center rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+            <button
+              type="button"
+              onClick={() => setView('standard')}
+              className={cn(
+                "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
+                view === 'standard'
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              )}
+            >
+              <LayoutGrid className="h-3.5 w-3.5 inline-block mr-1" />
+              Standard
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('transposed')}
+              className={cn(
+                "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
+                view === 'transposed'
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              )}
+            >
+              <TableProperties className="h-3.5 w-3.5 inline-block mr-1" />
+              Transposed
+            </button>
+          </div>
+
           {/* Columns visibility */}
           <ReportColumnVisibilityDialog
             columns={columns}
@@ -314,63 +344,50 @@ export function ReportsToolbar({
             setShowDocRequirementsColumns={setShowDocRequirementsColumns}
           />
 
-          {/* Transpose */}
-          <Button
-            variant="outline"
-            className={cn(
-              "h-9 px-4 text-xs font-semibold rounded-lg border-slate-200 gap-2",
-              view === 'transposed' && "bg-blue-50 border-blue-200 text-blue-600"
-            )}
-            onClick={() => setView(view === 'standard' ? 'transposed' : 'standard')}
-          >
-            {view === 'standard'
-              ? <><LayoutGrid className="h-3.5 w-3.5" />Transpose</>
-              : <><TableProperties className="h-3.5 w-3.5" />Standard</>
-            }
-          </Button>
-
           {/* Refresh */}
           <Button
             variant="outline"
+            size="sm"
             onClick={refreshData}
             disabled={loading}
-            className="h-9 w-9 p-0 border-slate-200 rounded-lg hover:bg-slate-50 shrink-0"
+            className="gap-1.5"
           >
-            <RotateCcw className={cn('h-3.5 w-3.5 text-slate-500', loading && 'animate-spin')} />
+            <RotateCcw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+            Refresh
           </Button>
 
           {/* Send Report */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg gap-2 font-semibold text-xs">
+              <Button size="sm" className="gap-1.5">
                 <Send className="h-3.5 w-3.5" />
                 Send Report
                 <ChevronDown className="h-3 w-3 opacity-60" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52 p-1.5 rounded-xl shadow-xl border-slate-200">
+            <DropdownMenuContent align="end" className="w-52 p-1.5 rounded-xl shadow-xl border-gray-200">
               <div className="px-2 py-1 mb-1">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Delivery Options</p>
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Delivery Options</p>
               </div>
               <div className="space-y-1">
-                <div className="flex flex-col gap-1 p-2 bg-slate-50 rounded-lg">
+                <div className="flex flex-col gap-1 p-2 bg-gray-50 rounded-lg">
                   <div className="flex items-center gap-2 px-1 mb-1">
                     <Shield className="h-3 w-3 text-blue-500" />
-                    <span className="text-[10px] font-bold text-slate-600">OFFICER EXPORT</span>
+                    <span className="text-[11px] font-medium text-gray-600">Officer Export</span>
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => handleSendReport('officer', 'excel')} className="flex-1 bg-white hover:bg-blue-50 border border-slate-200 py-1.5 rounded-md text-[10px] font-bold transition-colors">Excel</button>
-                    <button onClick={() => handleSendReport('officer', 'pdf')} className="flex-1 bg-white hover:bg-blue-50 border border-slate-200 py-1.5 rounded-md text-[10px] font-bold transition-colors">PDF</button>
+                    <button onClick={() => handleSendReport('officer', 'excel')} className="flex-1 bg-white hover:bg-blue-50 border border-gray-200 py-1.5 rounded-md text-[11px] font-medium transition-colors">Excel</button>
+                    <button onClick={() => handleSendReport('officer', 'pdf')} className="flex-1 bg-white hover:bg-blue-50 border border-gray-200 py-1.5 rounded-md text-[11px] font-medium transition-colors">PDF</button>
                   </div>
                 </div>
-                <div className="flex flex-col gap-1 p-2 bg-slate-50 rounded-lg">
+                <div className="flex flex-col gap-1 p-2 bg-gray-50 rounded-lg">
                   <div className="flex items-center gap-2 px-1 mb-1">
                     <User className="h-3 w-3 text-blue-500" />
-                    <span className="text-[10px] font-bold text-slate-600">MANAGER EXPORT</span>
+                    <span className="text-[11px] font-medium text-gray-600">Manager Export</span>
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => handleSendReport('manager', 'excel')} className="flex-1 bg-white hover:bg-blue-50 border border-slate-200 py-1.5 rounded-md text-[10px] font-bold transition-colors">Excel</button>
-                    <button onClick={() => handleSendReport('manager', 'pdf')} className="flex-1 bg-white hover:bg-blue-50 border border-slate-200 py-1.5 rounded-md text-[10px] font-bold transition-colors">PDF</button>
+                    <button onClick={() => handleSendReport('manager', 'excel')} className="flex-1 bg-white hover:bg-blue-50 border border-gray-200 py-1.5 rounded-md text-[11px] font-medium transition-colors">Excel</button>
+                    <button onClick={() => handleSendReport('manager', 'pdf')} className="flex-1 bg-white hover:bg-blue-50 border border-gray-200 py-1.5 rounded-md text-[11px] font-medium transition-colors">PDF</button>
                   </div>
                 </div>
               </div>
@@ -388,29 +405,25 @@ export function ReportKpiCards({
   allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount
 }: any) {
   const cards = [
-    { label: 'Total', value: allTasksCount, valueClass: 'text-blue-600', bgClass: 'bg-gradient-to-b from-blue-50/40 to-white', sub: 'Applications' },
-    { label: 'WIP', value: wipTasksCount, valueClass: 'text-amber-600', bgClass: 'bg-gradient-to-b from-amber-50/40 to-white', sub: 'In Progress' },
-    { label: 'Completed', value: writeUpCompletedCount, valueClass: 'text-emerald-600', bgClass: 'bg-gradient-to-b from-emerald-50/40 to-white', sub: 'Write Ups Done' },
-    { label: 'Endorsed', value: endorsedCount, valueClass: 'text-violet-600', bgClass: 'bg-gradient-to-b from-violet-50/40 to-white', sub: 'Endorsed' },
-    { label: 'Cancelled', value: cancelledCount, valueClass: 'text-red-500', bgClass: 'bg-gradient-to-b from-red-50/30 to-white', sub: 'Cancelled' },
+    { label: 'Total', value: allTasksCount, dotClass: 'bg-blue-500' },
+    { label: 'WIP', value: wipTasksCount, dotClass: 'bg-amber-500' },
+    { label: 'Completed', value: writeUpCompletedCount, dotClass: 'bg-emerald-500' },
+    { label: 'Endorsed', value: endorsedCount, dotClass: 'bg-violet-500' },
+    { label: 'Cancelled', value: cancelledCount, dotClass: 'bg-red-500' },
   ];
 
   return (
-    <div className="bg-white border-b border-slate-200">
-      <div className="px-6 py-3">
-        <div className="flex items-stretch gap-2.5">
-          {cards.map((card) => (
-            <div key={card.label} className={cn(
-              "flex-1 min-w-0 rounded-xl border px-4 py-3 flex flex-col",
-              "border-slate-200",
-              card.bgClass
-            )}>
-              <span className={cn("text-3xl font-black leading-none", card.valueClass)}>{card.value}</span>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-2">{card.label}</span>
-              <span className="text-[9px] text-slate-400 mt-0.5">{card.sub}</span>
+    <div className="px-6 py-3 border-b border-gray-200 bg-white">
+      <div className="flex items-stretch gap-2">
+        {cards.map((card) => (
+          <div key={card.label} className="flex-1 min-w-0 rounded-xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
+            <div className="flex items-center gap-2">
+              <span className={cn("h-2 w-2 rounded-full shrink-0", card.dotClass)} />
+              <span className="text-xs text-gray-500 font-medium">{card.label}</span>
             </div>
-          ))}
-        </div>
+            <span className="text-sm font-semibold text-gray-900 mt-1 block">{card.value}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -448,9 +461,9 @@ export function PersonFilterStrip({
   const setMode = isOfficer ? setOfficerFilterMode : setTaskManagerFilterMode;
 
   return (
-    <div className="bg-white border-b border-slate-200">
-      {/* ROW 1: Perspective tabs — compact */}
-      <div className="px-6 flex items-center justify-between border-b border-slate-100">
+    <div className="bg-white border-b border-gray-200">
+      {/* ROW 1: Perspective tabs */}
+      <div className="px-6 flex items-center justify-between">
         <div className="flex items-center gap-0.5">
           {PERSPECTIVE_TABS.map(p => {
             const active = activePerspective === p.value;
@@ -460,16 +473,16 @@ export function PersonFilterStrip({
                 key={p.value}
                 onClick={() => setActivePerspective(p.value)}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-2.5 text-xs font-bold transition-all border-b-2 -mb-px',
+                  'flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium transition-all border-b-2 -mb-px',
                   active
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-slate-400 hover:text-slate-700 hover:border-slate-300'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-400 hover:text-gray-700 hover:border-gray-300'
                 )}
               >
                 {p.label}
                 <span className={cn(
-                  "text-[10px] font-bold",
-                  active ? "text-blue-500" : "text-slate-400"
+                  "text-[10px] font-semibold",
+                  active ? "text-blue-500" : "text-gray-400"
                 )}>
                   {count}
                 </span>
@@ -480,27 +493,27 @@ export function PersonFilterStrip({
 
         {showPersonList && (
           <Select value={mode} onValueChange={setMode}>
-            <SelectTrigger className="w-44 h-8 bg-white border-slate-200 rounded-lg text-xs font-semibold shadow-sm">
+            <SelectTrigger className="w-44 h-8 bg-white border-gray-200 rounded-lg text-xs font-medium">
               <div className="flex items-center gap-1.5">
-                <Clock className="h-3 w-3 text-blue-500" />
+                <Clock className="h-3 w-3 text-gray-400" />
                 <SelectValue />
               </div>
             </SelectTrigger>
             <SelectContent className="rounded-xl">
-              <SelectItem value="current" className="text-xs font-semibold">Current Assignments</SelectItem>
-              <SelectItem value="history" className="text-xs font-semibold">Historical Activity</SelectItem>
+              <SelectItem value="current" className="text-xs font-medium">Current Assignments</SelectItem>
+              <SelectItem value="history" className="text-xs font-medium">Historical Activity</SelectItem>
             </SelectContent>
           </Select>
         )}
       </div>
 
-      {/* ROW 2: Person tabs — filled pill */}
+      {/* ROW 2: Person tabs */}
       {showPersonList && (
-        <div className="border-b border-slate-100">
+        <div className="border-b border-gray-200">
           <div className="px-6 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
             <div className={cn(
-              "shrink-0 flex items-center gap-1 px-2 py-1 rounded text-[9px] font-black uppercase tracking-wider",
-              isOfficer ? "bg-blue-50 text-blue-600" : "bg-slate-100 text-slate-600"
+              "shrink-0 flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold uppercase tracking-wide",
+              isOfficer ? "bg-blue-50 text-blue-600" : "bg-gray-100 text-gray-600"
             )}>
               {isOfficer ? <Shield className="h-2.5 w-2.5" /> : <User className="h-2.5 w-2.5" />}
               {isOfficer ? "Officer" : "Manager"}
@@ -510,16 +523,16 @@ export function PersonFilterStrip({
             <button
               onClick={() => setActiveTab('all')}
               className={cn(
-                "shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold rounded-md transition-all",
+                "shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md transition-all",
                 activeTab === 'all'
                   ? "bg-blue-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                  : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
               )}
             >
               All {isOfficer ? "Officers" : "Managers"}
               <span className={cn(
-                "text-[9px] font-bold px-1 py-0.5 rounded",
-                activeTab === 'all' ? "bg-white/20 text-white" : "bg-slate-200 text-slate-500"
+                "text-[10px] font-semibold px-1 py-0.5 rounded",
+                activeTab === 'all' ? "bg-white/20 text-white" : "bg-gray-200 text-gray-500"
               )}>
                 {counts.all}
               </span>
@@ -533,17 +546,17 @@ export function PersonFilterStrip({
                   key={p.id}
                   onClick={() => setActiveTab(isActive ? 'all' : p.id.toString())}
                   className={cn(
-                    "shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold rounded-md transition-all whitespace-nowrap",
+                    "shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md transition-all whitespace-nowrap",
                     isActive
                       ? "bg-blue-600 text-white shadow-sm"
-                      : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
                   )}
                 >
                   {p.full_name || p.name || p.displayName}
                   {count > 0 && (
                     <span className={cn(
-                      "text-[9px] font-bold px-1 py-0.5 rounded",
-                      isActive ? "bg-white/20 text-white" : "bg-slate-200 text-slate-500"
+                      "text-[10px] font-semibold px-1 py-0.5 rounded",
+                      isActive ? "bg-white/20 text-white" : "bg-gray-200 text-gray-500"
                     )}>
                       {count}
                     </span>
@@ -554,21 +567,21 @@ export function PersonFilterStrip({
 
             {(counts.__unallocated__ ?? 0) > 0 && (
               <>
-                <div className="h-4 w-px bg-slate-200 shrink-0" />
+                <div className="h-4 w-px bg-gray-200 shrink-0" />
                 <button
                   onClick={() => setActiveTab(activeTab === '__unallocated__' ? 'all' : '__unallocated__')}
                   className={cn(
-                    "shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold rounded-md transition-all whitespace-nowrap",
+                    "shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md transition-all whitespace-nowrap",
                     activeTab === '__unallocated__'
                       ? "bg-red-600 text-white shadow-sm"
-                      : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
                   )}
                 >
                   <AlertCircle className="h-3 w-3 shrink-0" />
                   Unallocated
                   <span className={cn(
-                    "text-[9px] font-bold px-1 py-0.5 rounded",
-                    activeTab === '__unallocated__' ? "bg-white/20 text-white" : "bg-slate-200 text-slate-500"
+                    "text-[10px] font-semibold px-1 py-0.5 rounded",
+                    activeTab === '__unallocated__' ? "bg-white/20 text-white" : "bg-gray-200 text-gray-500"
                   )}>
                     {counts.__unallocated__}
                   </span>
@@ -605,9 +618,9 @@ export function StatusFilterBar({
   );
 
   return (
-    <div className="bg-white border-b border-slate-200">
+    <div className="bg-white border-b border-gray-200">
       <div className="px-6 flex items-center justify-between">
-        {/* Status tabs — compact */}
+        {/* Status tabs */}
         <div className="flex items-center gap-0.5">
           {STATUS_TABS.map(status => {
             const isActive = activeStatus === status.id;
@@ -617,16 +630,16 @@ export function StatusFilterBar({
                 key={status.id}
                 onClick={() => setActiveStatus(status.id)}
                 className={cn(
-                  "flex items-center gap-1.5 px-3 py-2.5 text-xs font-bold transition-all border-b-2 -mb-px",
+                  "flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium transition-all border-b-2 -mb-px",
                   isActive
                     ? `${status.activeBorder} ${status.activeText}`
-                    : "border-transparent text-slate-400 hover:text-slate-700 hover:border-slate-300"
+                    : "border-transparent text-gray-400 hover:text-gray-700 hover:border-gray-300"
                 )}
               >
                 {status.label}
                 <span className={cn(
-                  "text-[10px] font-bold",
-                  isActive ? "text-blue-500" : "text-slate-400"
+                  "text-[10px] font-semibold",
+                  isActive ? "text-blue-500" : "text-gray-400"
                 )}>
                   {count}
                 </span>
@@ -635,18 +648,18 @@ export function StatusFilterBar({
           })}
         </div>
 
-        {/* Search + Filters — compact */}
+        {/* Search + Filters */}
         <div className="flex items-center gap-2 shrink-0 py-2">
           <div className="relative group">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
             <Input
               placeholder="Quick search records..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="pl-9 pr-9 h-8 w-60 bg-slate-50 border-slate-200 rounded-full text-xs font-medium focus:bg-white focus:ring-2 focus:ring-blue-100 transition-all"
+              className="pl-9 pr-9 h-8 w-60 bg-gray-50 border-gray-200 rounded-full text-xs font-medium focus:bg-white focus:ring-2 focus:ring-blue-100 transition-all"
             />
             {searchQuery && (
-              <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                 <X className="h-3.5 w-3.5" />
               </button>
             )}
@@ -654,27 +667,27 @@ export function StatusFilterBar({
 
           <DropdownMenu open={isFiltersDropdownOpen} onOpenChange={setIsFiltersDropdownOpen}>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" className={cn(
-                "h-8 rounded-full px-4 text-xs font-semibold gap-1.5 border-slate-200",
+              <Button variant="outline" size="sm" className={cn(
+                "gap-1.5",
                 (activeClassId !== 'all' || activeSubClassId !== 'all') && "bg-blue-50 border-blue-200 text-blue-700"
               )}>
                 <Filter className="h-3.5 w-3.5" />
                 Filters
                 {(activeClassId !== 'all' || activeSubClassId !== 'all') && (
-                  <span className="h-4 w-4 flex items-center justify-center rounded-full bg-blue-600 text-white text-[9px] font-black">!</span>
+                  <span className="h-4 w-4 flex items-center justify-center rounded-full bg-blue-600 text-white text-[10px] font-bold">!</span>
                 )}
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-72 p-4 rounded-2xl shadow-2xl border-slate-200">
+            <DropdownMenuContent align="end" className="w-72 p-4 rounded-2xl shadow-2xl border-gray-200">
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-bold text-slate-900">Categorization</span>
+                <span className="text-sm font-semibold text-gray-900">Categorization</span>
                 <Sparkles className="h-4 w-4 text-blue-500" />
               </div>
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Task Class</label>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide ml-1">Task Class</label>
                   <Select value={activeClassId} onValueChange={v => { setActiveClassId(v); setActiveSubClassId('all'); }}>
-                    <SelectTrigger className="h-9 rounded-xl font-semibold border-slate-200 text-sm">
+                    <SelectTrigger className="h-9 rounded-xl font-medium border-gray-200 text-sm">
                       <SelectValue placeholder="Select Class" />
                     </SelectTrigger>
                     <SelectContent className="rounded-xl">
@@ -687,9 +700,9 @@ export function StatusFilterBar({
                 </div>
                 {activeClassId !== 'all' && (
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Sub-Class</label>
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide ml-1">Sub-Class</label>
                     <Select value={activeSubClassId} onValueChange={setActiveSubClassId}>
-                      <SelectTrigger className="h-9 rounded-xl font-semibold border-slate-200 text-sm">
+                      <SelectTrigger className="h-9 rounded-xl font-medium border-gray-200 text-sm">
                         <SelectValue placeholder="Select Sub-class" />
                       </SelectTrigger>
                       <SelectContent className="rounded-xl">
@@ -703,7 +716,7 @@ export function StatusFilterBar({
                 )}
                 <Button
                   variant="ghost"
-                  className="w-full text-xs h-9 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl font-semibold"
+                  className="w-full text-xs h-9 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-xl font-medium"
                   onClick={() => { setActiveClassId('all'); setActiveSubClassId('all'); }}
                 >
                   Clear all filters
@@ -731,7 +744,7 @@ const STATUS_TABS = [
     id: 'all',
     label: 'Total',
     activeText: 'text-blue-600',
-    activeBorder: 'border-blue-600',
+    activeBorder: 'border-blue-500',
   },
   {
     id: 'wip',
@@ -743,18 +756,18 @@ const STATUS_TABS = [
     id: 'write_up_completed',
     label: 'Write Up Completed',
     activeText: 'text-emerald-600',
-    activeBorder: 'border-emerald-600',
+    activeBorder: 'border-emerald-500',
   },
   {
     id: 'endorsed',
     label: 'Endorsement Completed',
     activeText: 'text-violet-600',
-    activeBorder: 'border-violet-600',
+    activeBorder: 'border-violet-500',
   },
   {
     id: 'cancelled',
     label: 'Cancelled',
     activeText: 'text-red-600',
-    activeBorder: 'border-red-600',
+    activeBorder: 'border-red-500',
   },
 ];

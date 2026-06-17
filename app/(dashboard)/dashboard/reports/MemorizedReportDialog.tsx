@@ -1,4 +1,4 @@
-// @ts-nocheck
+﻿// @ts-nocheck
 // components/MemorizedReportDialog.tsx
 
 "use client"
@@ -154,9 +154,9 @@ const TableHeaderRow = React.memo(({ handleSelectAllDefault, handleSelectAllRepo
   handleSelectAllDefault: () => void;
   handleSelectAllReports: () => void;
 }) => (
-  <div className="grid grid-cols-12 gap-0 border-b border-slate-200 bg-slate-100 text-xs font-semibold text-slate-700 sticky top-0 z-20 shadow-sm">
-    <div className="col-span-8 px-4 py-3 border-r border-slate-200">Field / Category</div>
-    <div className="col-span-2 px-2 py-3 border-r border-slate-200 text-center bg-green-50/50 text-green-700 flex items-center justify-center gap-1">
+  <div className="grid grid-cols-12 gap-0 border-b border-gray-200 bg-gray-100 text-xs font-semibold text-gray-700 sticky top-0 z-20 shadow-sm">
+    <div className="col-span-8 px-4 py-3 border-r border-gray-200">Field / Category</div>
+    <div className="col-span-2 px-2 py-3 border-r border-gray-200 text-center bg-green-50/50 text-green-700 flex items-center justify-center gap-1">
       <span>Default</span>
       <Button variant="ghost" size="sm" className="h-5 w-5 p-0 hover:bg-green-100 text-green-600" onClick={handleSelectAllDefault} title="Toggle All Default">
         <CheckSquare className="h-3 w-3" />
@@ -172,21 +172,21 @@ const TableHeaderRow = React.memo(({ handleSelectAllDefault, handleSelectAllRepo
 ));
 
 const TableRowItem = React.memo(({ label, isIncluded, isDefault, onToggleInclude, onToggleDefault, depth = 0, className = "", icon = null, readOnly = false, onMoveUp, onMoveDown, showMoveControls = false, isSaved = false }: { label: React.ReactNode; isIncluded?: boolean; isDefault?: boolean; onToggleInclude?: () => void; onToggleDefault?: () => void; depth?: number; className?: string; icon?: React.ReactNode; readOnly?: boolean; onMoveUp?: () => void; onMoveDown?: () => void; showMoveControls?: boolean; isSaved?: boolean; }) => (
-  <div className={cn("grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm transition-colors", isIncluded ? "bg-blue-50/20 hover:bg-blue-50/40" : "bg-white hover:bg-slate-50", className)}>
-    <div className="col-span-8 flex items-center border-r border-slate-100 py-2">
-      <div style={{ width: `${depth * 24}px` }} className="shrink-0 h-full border-r border-dashed border-slate-100 mr-2 opacity-50" />
+  <div className={cn("grid grid-cols-12 gap-0 border-b border-gray-100 items-stretch text-sm transition-colors", isIncluded ? "bg-blue-50/20 hover:bg-blue-50/40" : "bg-white hover:bg-gray-50", className)}>
+    <div className="col-span-8 flex items-center border-r border-gray-100 py-2">
+      <div style={{ width: `${depth * 24}px` }} className="shrink-0 h-full border-r border-dashed border-gray-100 mr-2 opacity-50" />
       <div className="flex items-center gap-2 px-2 min-w-0 flex-1">
         {icon}
-        <span className={cn("truncate font-medium", isIncluded ? "text-slate-800" : "text-slate-500")}>
+        <span className={cn("truncate font-medium", isIncluded ? "text-gray-800" : "text-gray-500")}>
           {label}
         </span>
         {isSaved && isIncluded && (
-          <Badge variant="outline" className="ml-1 shrink-0 text-[9px] py-0 px-1.5 bg-emerald-50 text-emerald-600 border-emerald-200 font-semibold">
+          <Badge variant="outline" className="ml-1 shrink-0 text-[10px] py-0 px-1.5 bg-emerald-50 text-emerald-600 border-emerald-200 font-semibold">
             Saved
           </Badge>
         )}
         {isSaved && !isIncluded && (
-          <Badge variant="outline" className="ml-1 shrink-0 text-[9px] py-0 px-1.5 bg-slate-50 text-slate-400 border-slate-200 line-through">
+          <Badge variant="outline" className="ml-1 shrink-0 text-[10px] py-0 px-1.5 bg-gray-50 text-gray-400 border-gray-200 line-through">
             Saved
           </Badge>
         )}
@@ -195,7 +195,7 @@ const TableRowItem = React.memo(({ label, isIncluded, isDefault, onToggleInclude
             <Button
               variant="ghost"
               size="sm"
-              className="h-5 w-5 p-0 hover:bg-slate-200"
+              className="h-5 w-5 p-0 hover:bg-gray-200"
               onClick={onMoveUp}
               disabled={!onMoveUp}
               title="Move up"
@@ -205,7 +205,7 @@ const TableRowItem = React.memo(({ label, isIncluded, isDefault, onToggleInclude
             <Button
               variant="ghost"
               size="sm"
-              className="h-5 w-5 p-0 hover:bg-slate-200"
+              className="h-5 w-5 p-0 hover:bg-gray-200"
               onClick={onMoveDown}
               disabled={!onMoveDown}
               title="Move down"
@@ -216,7 +216,7 @@ const TableRowItem = React.memo(({ label, isIncluded, isDefault, onToggleInclude
         )}
       </div>
     </div>
-    <div className="col-span-2 flex items-center justify-center border-r border-slate-100 bg-slate-50/30 py-2">
+    <div className="col-span-2 flex items-center justify-center border-r border-gray-100 bg-gray-50/30 py-2">
       {(onToggleDefault || readOnly) && (
         <Checkbox
           checked={isDefault}
@@ -226,7 +226,7 @@ const TableRowItem = React.memo(({ label, isIncluded, isDefault, onToggleInclude
         />
       )}
     </div>
-    <div className="col-span-2 flex items-center justify-center bg-slate-50/30 py-2">
+    <div className="col-span-2 flex items-center justify-center bg-gray-50/30 py-2">
       {(onToggleInclude || readOnly) && (
         <Checkbox
           checked={isIncluded}
@@ -245,23 +245,23 @@ const ExpandableRow = React.memo(({ title, children, stageId, getSectionId, nonA
 
   return (
     <AccordionItem value={sectionId} className={cn(
-      "border-b border-slate-200 last:border-0 transition-opacity",
+      "border-b border-gray-200 last:border-0 transition-opacity",
       isNA && "opacity-60"
     )}>
-      <AccordionTrigger className="w-full py-0 hover:no-underline group bg-slate-50/80 hover:bg-slate-100/80 pr-4">
+      <AccordionTrigger className="w-full py-0 hover:no-underline group bg-gray-50/80 hover:bg-gray-100/80 pr-4">
         <div className="grid grid-cols-12 w-full gap-0 text-left">
           <div className="col-span-12 px-4 py-2.5 flex justify-between items-center">
             <div className="flex items-center gap-2">
-              <span className={cn("font-semibold text-xs uppercase tracking-wide", isNA ? "text-slate-400" : "text-slate-600")}>
+              <span className={cn("font-semibold text-xs uppercase tracking-wide", isNA ? "text-gray-400" : "text-gray-600")}>
                 {title}
               </span>
               {isNA && (
-                <Badge variant="outline" className="text-[9px] bg-white text-amber-600 border-amber-200">
+                <Badge variant="outline" className="text-[10px] bg-white text-amber-600 border-amber-200">
                   N/A
                 </Badge>
               )}
             </div>
-            <div className="h-4 w-4 rounded border border-slate-300 bg-white flex items-center justify-center text-slate-400 shadow-sm">
+            <div className="h-4 w-4 rounded border border-gray-300 bg-white flex items-center justify-center text-gray-400 shadow-sm">
               <Plus className="h-2.5 w-2.5 group-data-[state=open]:hidden" />
               <Minus className="h-2.5 w-2.5 hidden group-data-[state=open]:block" />
             </div>
@@ -354,10 +354,10 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
       <div className="mb-3 pb-3 border-b px-1 shrink-0">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
-            <h3 className="text-base font-bold text-slate-900">
+            <h3 className="text-base font-bold text-gray-900">
               {selectedReport ? `Editing: ${selectedReport.name}` : 'Create New Report'}
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">{selectedCount} field{selectedCount !== 1 ? 's' : ''} selected</p>
+            <p className="text-xs text-gray-500 mt-0.5">{selectedCount} field{selectedCount !== 1 ? 's' : ''} selected</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {isEditMode && originalSavedFieldIds.size > 0 && (
@@ -390,11 +390,11 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
       </div>
 
       {/* Job-level Hierarchy */}
-      <div className="grid grid-cols-4 gap-2 mb-3 p-3 bg-slate-50 rounded-lg border border-slate-200 shrink-0">
+      <div className="grid grid-cols-4 gap-2 mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200 shrink-0">
         <div className="space-y-1">
-          <Label className="text-[10px] text-slate-600 uppercase tracking-wide">Department</Label>
+          <Label className="text-[11px] text-gray-600 uppercase tracking-wide">Department</Label>
           <Select value={selectedDepartment} onValueChange={v => { setSelectedDepartment(v); setSelectedSubdepartment('all'); setSelectedClass('all'); setSelectedSubClass('all'); }}>
-            <SelectTrigger className="h-8 bg-white border-slate-200 text-xs">
+            <SelectTrigger className="h-8 bg-white border-gray-200 text-xs">
               <SelectValue placeholder="All" />
             </SelectTrigger>
             <SelectContent>
@@ -409,9 +409,9 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
         </div>
 
         <div className="space-y-1">
-          <Label className="text-[10px] text-slate-600 uppercase tracking-wide">Sub-Department</Label>
+          <Label className="text-[11px] text-gray-600 uppercase tracking-wide">Sub-Department</Label>
           <Select value={selectedSubdepartment} onValueChange={v => { setSelectedSubdepartment(v); setSelectedClass('all'); setSelectedSubClass('all'); }} disabled={!selectedDepartment || selectedDepartment === 'all'}>
-            <SelectTrigger className="h-8 bg-white border-slate-200 text-xs">
+            <SelectTrigger className="h-8 bg-white border-gray-200 text-xs">
               <SelectValue placeholder="All" />
             </SelectTrigger>
             <SelectContent>
@@ -424,9 +424,9 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
         </div>
 
         <div className="space-y-1">
-          <Label className="text-[10px] text-slate-600 uppercase tracking-wide">Service Class</Label>
+          <Label className="text-[11px] text-gray-600 uppercase tracking-wide">Service Class</Label>
           <Select value={selectedClass} onValueChange={v => { setSelectedClass(v); setSelectedSubClass('all'); }} disabled={!selectedSubdepartment || selectedSubdepartment === 'all'}>
-            <SelectTrigger className="h-8 bg-white border-slate-200 text-xs">
+            <SelectTrigger className="h-8 bg-white border-gray-200 text-xs">
               <SelectValue placeholder="All" />
             </SelectTrigger>
             <SelectContent>
@@ -439,9 +439,9 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
         </div>
 
         <div className="space-y-1">
-          <Label className="text-[10px] text-slate-600 uppercase tracking-wide">Subclass</Label>
+          <Label className="text-[11px] text-gray-600 uppercase tracking-wide">Subclass</Label>
           <Select value={selectedSubClass} onValueChange={setSelectedSubClass} disabled={!selectedClass || selectedClass === 'all'}>
-            <SelectTrigger className="h-8 bg-white border-slate-200 text-xs">
+            <SelectTrigger className="h-8 bg-white border-gray-200 text-xs">
               <SelectValue placeholder="All" />
             </SelectTrigger>
             <SelectContent>
@@ -528,11 +528,11 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
                     return (
                       <div key={`doc-${stage.id}-${doc.kycId}`}>
                         <div className={cn(
-                          "grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm",
-                          isDocActive ? "bg-blue-50/20 hover:bg-blue-50/40" : "bg-white hover:bg-slate-50"
+                          "grid grid-cols-12 gap-0 border-b border-gray-100 items-stretch text-sm",
+                          isDocActive ? "bg-blue-50/20 hover:bg-blue-50/40" : "bg-white hover:bg-gray-50"
                         )}>
-                          <div className="col-span-8 flex items-center border-r border-slate-100 py-2">
-                            <div style={{ width: `24px` }} className="shrink-0 h-full border-r border-dashed border-slate-100 mr-2 opacity-50" />
+                          <div className="col-span-8 flex items-center border-r border-gray-100 py-2">
+                            <div style={{ width: `24px` }} className="shrink-0 h-full border-r border-dashed border-gray-100 mr-2 opacity-50" />
                             <div className="flex items-center gap-2 px-2 py-1 w-full">
                               <Checkbox
                                 id={`doc-${stage.id}-${doc.kycId}`}
@@ -542,18 +542,18 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
                               />
                               <Label htmlFor={`doc-${stage.id}-${doc.kycId}`} className={cn(
                                 "cursor-pointer font-semibold flex-1 truncate text-sm",
-                                isDocActive ? "text-slate-800" : "text-slate-500"
+                                isDocActive ? "text-gray-800" : "text-gray-500"
                               )}>
                                 {kycDoc.display_name || kycDoc.name}
                               </Label>
                             </div>
                           </div>
-                          <div className="col-span-2 border-r border-slate-100 bg-slate-50/30" />
-                          <div className="col-span-2 bg-slate-50/30" />
+                          <div className="col-span-2 border-r border-gray-100 bg-gray-50/30" />
+                          <div className="col-span-2 bg-gray-50/30" />
                         </div>
 
                         {isDocActive && (
-                          <div className="bg-slate-50/30">
+                          <div className="bg-gray-50/30">
                             {kycDoc.fields?.map((field: any) => {
                               const docConfig = stageConfig?.documents?.[doc.kycId];
                               const fieldConfig = docConfig?.fields.find((f: any) => f.id === field.id);
@@ -818,8 +818,8 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
     setReportConfig(prev => {
       const exists = prev.taskFields.find(f => f.id === fieldId);
       const newFields = exists
-        ? prev.taskFields.filter(f => f.id !== fieldId)          // remove → deselect
-        : [...prev.taskFields, { id: fieldId, isDefault: false }]; // add → session-only
+        ? prev.taskFields.filter(f => f.id !== fieldId)          // remove â†’ deselect
+        : [...prev.taskFields, { id: fieldId, isDefault: false }]; // add â†’ session-only
       return { ...prev, taskFields: newFields };
     });
   }, []);
@@ -1016,7 +1016,7 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
 
   const renderReportList = () => (
     <div className="flex flex-col gap-2 h-full">
-      <Button onClick={handleCreateNew} className="w-full mb-2 bg-slate-800 hover:bg-slate-700 h-8 text-sm">
+      <Button onClick={handleCreateNew} className="w-full mb-2 bg-gray-800 hover:bg-gray-700 h-8 text-sm">
         <Plus className="mr-2 h-3.5 w-3.5" /> New Report
       </Button>
       <ScrollArea className="flex-1 pr-4 -mr-4">
@@ -1028,7 +1028,7 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
                 "group flex items-center justify-between p-2 rounded-md cursor-pointer border transition-all",
                 selectedReport?.id === report.id
                   ? 'bg-blue-50 border-blue-200 shadow-sm'
-                  : 'border-transparent hover:bg-slate-50 hover:border-slate-200'
+                  : 'border-transparent hover:bg-gray-50 hover:border-gray-200'
               )}
               onClick={() => handleSelectReport(report)}
             >
@@ -1036,17 +1036,17 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
                 <Button
                   variant="ghost"
                   size="icon"
-                  className={cn("h-5 w-5 shrink-0", report.is_favorite ? 'text-amber-400 hover:text-amber-500' : 'text-slate-300 hover:text-amber-400')}
+                  className={cn("h-5 w-5 shrink-0", report.is_favorite ? 'text-amber-400 hover:text-amber-500' : 'text-gray-300 hover:text-amber-400')}
                   onClick={(e) => handleToggleFavorite(e, report)}
                 >
                   <Star className="h-3.5 w-3.5 fill-current" />
                 </Button>
                 <div className="flex flex-col min-w-0">
-                  <span className={cn("font-medium text-xs truncate", selectedReport?.id === report.id ? 'text-blue-700' : 'text-slate-700')}>
+                  <span className={cn("font-medium text-xs truncate", selectedReport?.id === report.id ? 'text-blue-700' : 'text-gray-700')}>
                     {report.name}
                   </span>
                   {report.job_level && (
-                    <span className="text-[10px] text-slate-400 truncate">
+                    <span className="text-[11px] text-gray-400 truncate">
                       {report.job_level.class_id
                         ? `Class ${report.job_level.class_id}`
                         : report.job_level.subdepartment_id
@@ -1058,17 +1058,17 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
               </div>
               {selectedReport?.id === report.id && (
                 <div className="flex items-center gap-0.5 shrink-0">
-                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 hover:text-blue-600" onClick={(e) => { e.stopPropagation(); handleEditReport(); }}>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-500 hover:text-blue-600" onClick={(e) => { e.stopPropagation(); handleEditReport(); }}>
                     <Edit className="h-3 w-3" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 hover:text-red-600" onClick={(e) => { e.stopPropagation(); handleDeleteReport(report.id); }}>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-500 hover:text-red-600" onClick={(e) => { e.stopPropagation(); handleDeleteReport(report.id); }}>
                     <Trash2 className="h-3 w-3" />
                   </Button>
                 </div>
               )}
             </div>
           ))}
-          {reports.length === 0 && <div className="text-center text-slate-400 py-8 text-xs">No reports yet.</div>}
+          {reports.length === 0 && <div className="text-center text-gray-400 py-8 text-xs">No reports yet.</div>}
         </div>
       </ScrollArea>
     </div>
@@ -1077,10 +1077,10 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
   const renderReportViewer = () => (
     <div className="flex flex-col h-full">
       <div className="mb-3 shrink-0">
-        <h3 className="text-base font-bold text-slate-900">{selectedReport?.name}</h3>
-        <p className="text-xs text-slate-500 mt-0.5">Read-only preview.</p>
+        <h3 className="text-base font-bold text-gray-900">{selectedReport?.name}</h3>
+        <p className="text-xs text-gray-500 mt-0.5">Read-only preview.</p>
         {selectedReport?.job_level && (
-          <div className="mt-2 flex items-center gap-2 text-xs text-slate-500 flex-wrap">
+          <div className="mt-2 flex items-center gap-2 text-xs text-gray-500 flex-wrap">
             <span className="font-medium">Scope:</span>
             {selectedDepartment && selectedDepartment !== 'all' && <Badge variant="outline" className="text-xs">{memoizedDepartments.find(d => d.id.toString() === selectedDepartment)?.name}</Badge>}
             {selectedSubdepartment && selectedSubdepartment !== 'all' && <Badge variant="outline" className="text-xs">{availableSubdepartments.find(s => s.id.toString() === selectedSubdepartment)?.name}</Badge>}
@@ -1092,7 +1092,7 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
         <TableHeaderRow handleSelectAllDefault={() => { }} handleSelectAllReports={() => { }} />
         <ScrollArea className="flex-1">
           <div className="divide-y divide-slate-100">
-            <div className="bg-slate-50 px-4 py-2 font-bold text-xs uppercase text-slate-500 tracking-wider">Task Fields</div>
+            <div className="bg-gray-50 px-4 py-2 font-bold text-xs uppercase text-gray-500 tracking-wider">Task Fields</div>
             {reportConfig.taskFields.map(fieldConfig => {
               const header = tableHeaders.find(h => h.id === fieldConfig.id);
               return (
@@ -1112,9 +1112,9 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
               const isNA = nonApplicableStageIds.has(stageId);
               return (
                 <div key={stageId}>
-                  <div className="bg-slate-50 px-4 py-2 font-bold text-xs uppercase text-slate-500 tracking-wider border-t border-slate-200 flex items-center gap-2">
+                  <div className="bg-gray-50 px-4 py-2 font-bold text-xs uppercase text-gray-500 tracking-wider border-t border-gray-200 flex items-center gap-2">
                     {stage.name}
-                    {isNA && <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300 bg-amber-50">N/A</Badge>}
+                    {isNA && <Badge variant="outline" className="text-[11px] text-amber-600 border-amber-300 bg-amber-50">N/A</Badge>}
                   </div>
                   {stageConfig.isStageDateSelected && (
                     <TableRowItem label="Completion Date" isIncluded isDefault={stageConfig.isStageDateDefault} depth={0} readOnly />
@@ -1125,7 +1125,7 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
                     if (!kycDoc) return null;
                     return (
                       <React.Fragment key={kycId}>
-                        <div className="px-4 py-1.5 bg-slate-50/50 text-xs font-semibold text-slate-600 border-t border-slate-100 pl-8">
+                        <div className="px-4 py-1.5 bg-gray-50/50 text-xs font-semibold text-gray-600 border-t border-gray-100 pl-8">
                           {kycDoc.display_name || kycDoc.name}
                         </div>
                         {docFields.map((field: any) => {
@@ -1155,7 +1155,7 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[72vw] h-[88vh] p-0 overflow-hidden bg-slate-50 flex flex-col gap-0">
+      <DialogContent className="max-w-[72vw] h-[88vh] p-0 overflow-hidden bg-gray-50 flex flex-col gap-0">
         <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0">
           <ResizablePanel defaultSize={24} minSize={18} maxSize={38} className="flex flex-col bg-white border-r">
             <div className="p-4 border-b shrink-0">
@@ -1220,11 +1220,11 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
                 : selectedReport
                   ? renderReportViewer()
                   : (
-                    <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                    <div className="flex flex-col items-center justify-center h-full text-gray-400">
                       <div className="p-6 bg-white shadow-sm rounded-full mb-4">
-                        <TableIcon className="h-10 w-10 text-slate-200" />
+                        <TableIcon className="h-10 w-10 text-gray-200" />
                       </div>
-                      <p className="font-semibold text-lg text-slate-600">Select a report to preview</p>
+                      <p className="font-semibold text-lg text-gray-600">Select a report to preview</p>
                       <p className="text-sm">Or create a new one to get started.</p>
                     </div>
                   )}

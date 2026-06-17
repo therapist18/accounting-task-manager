@@ -1,4 +1,4 @@
-// @ts-nocheck
+﻿// @ts-nocheck
 "use client"
 import React, { useState } from "react"
 import { Button } from "@/components/ui/button"
@@ -98,7 +98,7 @@ export function ReportColumnVisibilityDialog({
         <DialogHeader>
           <DialogTitle>Column Visibility</DialogTitle>
           <div className="relative mt-2">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
               placeholder="Search columns..."
               value={searchQuery}
@@ -111,8 +111,8 @@ export function ReportColumnVisibilityDialog({
         <div className="flex-grow overflow-y-auto pr-4 -mr-4 mt-4 space-y-4">
           {/* Task Details */}
           <div className="rounded-lg border bg-white shadow-sm">
-            <div className="border-b p-4 bg-slate-50">
-              <h3 className="font-semibold text-xs text-slate-500 uppercase tracking-wider">Task Details</h3>
+            <div className="border-b p-4 bg-gray-50">
+              <h3 className="font-semibold text-xs text-gray-500 uppercase tracking-wider">Task Details</h3>
             </div>
             <div className="p-4 space-y-2">
               {filterColumns(taskColumns).map(col => (
@@ -130,8 +130,8 @@ export function ReportColumnVisibilityDialog({
 
           {/* Time Tracking */}
           <div className="rounded-lg border bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b p-4 bg-slate-50">
-              <h3 className="font-semibold text-xs text-slate-500 uppercase tracking-wider">Time Tracking</h3>
+            <div className="flex items-center justify-between border-b p-4 bg-gray-50">
+              <h3 className="font-semibold text-xs text-gray-500 uppercase tracking-wider">Time Tracking</h3>
               <Checkbox
                 id="toggle-time-tracking"
                 checked={showTimeTrackingColumns}
@@ -154,8 +154,8 @@ export function ReportColumnVisibilityDialog({
 
           {/* Document Requirements */}
           <div className="rounded-lg border bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b p-4 bg-slate-50">
-              <h3 className="font-semibold text-xs text-slate-500 uppercase tracking-wider">Document Requirements</h3>
+            <div className="flex items-center justify-between border-b p-4 bg-gray-50">
+              <h3 className="font-semibold text-xs text-gray-500 uppercase tracking-wider">Document Requirements</h3>
               <Checkbox
                 id="toggle-doc-requirements"
                 checked={showDocRequirementsColumns}
@@ -178,8 +178,8 @@ export function ReportColumnVisibilityDialog({
 
           {/* Stages */}
           <div className="rounded-lg border bg-white shadow-sm">
-            <div className="border-b p-4 bg-slate-50">
-              <h3 className="font-semibold text-xs text-slate-500 uppercase tracking-wider">Stages</h3>
+            <div className="border-b p-4 bg-gray-50">
+              <h3 className="font-semibold text-xs text-gray-500 uppercase tracking-wider">Stages</h3>
             </div>
             <div className="p-4 space-y-2">
               {filterColumns(stageColumns).map(col => (
