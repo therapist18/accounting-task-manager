@@ -1,4 +1,4 @@
-﻿// @ts-nocheck
+// @ts-nocheck
 "use client";
 
 import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
 import { ReportColumnVisibilityDialog } from "./components/ReportColumnVisibilityDialog";
-import { ReportsSidebar, ReportsHeader, PersonFilterStrip, StatusFilterBar, ReportKpiCards } from "./components/ReportsHeader";
+import { ReportsSidebar, ReportsHeader, PersonFilterStrip, StatusFilterBar } from "./components/ReportsHeader";
 
 const SPECIAL_STAGE_IDS = [
   '072b9710-45df-4a05-ba65-01b4ef29d61d',
@@ -72,7 +72,7 @@ const safeRender = (content: any) => {
     return content;
   }
   if (typeof content === 'number') return content;
-    if (content === null || content === undefined) return <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">â€”</span>;
+    if (content === null || content === undefined) return <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">—</span>;
   if (Array.isArray(content)) return content.map((c, i) => <React.Fragment key={i}>{safeRender(c)}</React.Fragment>);
   if (typeof content === 'object') {
     if ('status' in content) {
@@ -633,7 +633,7 @@ export default function ReportsPage() {
       if (activeClassId !== 'all' && task.class_id?.toString() !== activeClassId) return false;
       if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
 
-      // Officer filtering â€” only when officers perspective is active
+      // Officer filtering — only when officers perspective is active
       if (activePerspective === 'officers') {
         if (activeOfficerTab === '__unallocated__') {
           if (getStageOfficerIds(task, 'current').length !== 0) return false;
@@ -642,7 +642,7 @@ export default function ReportsPage() {
         }
       }
 
-      // Task Manager filtering â€” only when managers perspective is active
+      // Task Manager filtering — only when managers perspective is active
       if (activePerspective === 'managers') {
         const tracking = getCurrentStageTracking(task);
         if (activeTaskManagerTab === '__unallocated__') {
@@ -673,7 +673,7 @@ export default function ReportsPage() {
     });
   }, [tasks, activeDeptId, activeSubDeptIds, activeClassId, activeSubClassId, activePerspective, activeOfficerTab, activeTaskManagerTab, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, effectiveClientIds, clientFilterMode, stages, getCurrentStageTracking, taskHasStageOfficer, isTaskWithClient, getTaskCompanyParticipant, getStageOfficerIds]);
 
-  // Dept/subdept/class filter only â€” used for stable status tab counts (unaffected by officer/TM/BCL tabs)
+  // Dept/subdept/class filter only — used for stable status tab counts (unaffected by officer/TM/BCL tabs)
   const tasksByDeptFilter = useMemo(() => {
     return tasks.filter(task => {
       if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
@@ -698,7 +698,7 @@ export default function ReportsPage() {
   const endorsedCount = useMemo(() => tasksByFilters.filter(t => t.status === 'endorsed').length, [tasksByFilters]);
   const cancelledCount = useMemo(() => tasksByFilters.filter(t => t.status === 'cancel').length, [tasksByFilters]);
 
-  // Count tasks per officer â€” respects officerFilterMode for per-officer badges; 'current' for unallocated
+  // Count tasks per officer — respects officerFilterMode for per-officer badges; 'current' for unallocated
   const officerTaskCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0, __unallocated__: 0 };
     availableOfficers.forEach(officer => { counts[officer.id] = 0; });
@@ -713,7 +713,7 @@ export default function ReportsPage() {
     return counts;
   }, [tasksByDeptFilter, availableOfficers, getStageOfficerIds, officerFilterMode]);
 
-  // Count tasks per task manager â€” unallocated = BCL stage with no manager assigned
+  // Count tasks per task manager — unallocated = BCL stage with no manager assigned
   const taskManagerTaskCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0, __unallocated__: 0 };
     availableTaskManagers.forEach(tm => { counts[tm.id] = 0; });
@@ -782,7 +782,7 @@ export default function ReportsPage() {
         if (task.status !== 'cancel') return false;
       }
 
-      // Officer filtering â€” only when officers perspective is active
+      // Officer filtering — only when officers perspective is active
       if (activePerspective === 'officers') {
         if (activeOfficerTab === '__unallocated__') {
           if (getStageOfficerIds(task, 'current').length !== 0) return false;
@@ -791,7 +791,7 @@ export default function ReportsPage() {
         }
       }
 
-      // Task Manager filtering â€” only when managers perspective is active
+      // Task Manager filtering — only when managers perspective is active
       if (activePerspective === 'managers') {
         const tracking = getCurrentStageTracking(task);
         if (activeTaskManagerTab === '__unallocated__') {
@@ -806,7 +806,7 @@ export default function ReportsPage() {
         }
       }
 
-      // Client filtering â€” tasks where current stage is waiting on the client
+      // Client filtering — tasks where current stage is waiting on the client
       if (activePerspective === 'clients' && !isTaskWithClient(task)) {
         return false;
       }
@@ -1116,7 +1116,7 @@ export default function ReportsPage() {
           if (nextShouldShowDateColumn && showTimeTrackingColumns) {
             cols.push({
               id: `gap_${stage.id}_to_${nextStage.id}`,
-              label: `â†’`,
+              label: `→`,
               type: 'stage_gap',
               fromStageId: stage.id,
               toStageId: nextStage.id,
@@ -1206,7 +1206,7 @@ export default function ReportsPage() {
       const tracking = getCurrentStageTracking(task);
       const elapsedMinutes = getElapsedMinutes(tracking?.handledAt || null);
 
-      if (!tracking || elapsedMinutes == null) return <span className="text-sm text-gray-400">â€”</span>;
+      if (!tracking || elapsedMinutes == null) return <span className="text-sm text-gray-400">—</span>;
 
       return (
         <Tooltip>
@@ -1231,7 +1231,7 @@ export default function ReportsPage() {
       const initiatedAt = getTaskInitiatedDate(task);
       const elapsedMinutes = getElapsedMinutes(initiatedAt);
 
-      if (!initiatedAt || elapsedMinutes == null) return <span className="text-sm text-gray-400">â€”</span>;
+      if (!initiatedAt || elapsedMinutes == null) return <span className="text-sm text-gray-400">—</span>;
 
       return (
         <Tooltip>
@@ -1254,12 +1254,12 @@ export default function ReportsPage() {
     if (col.type === 'stage_gap') {
       const fromStage = stages.find(s => s.id === col.fromStageId);
       const toStage = stages.find(s => s.id === col.toStageId);
-      if (!fromStage || !toStage) return <span className="text-sm text-gray-400">â€”</span>;
+      if (!fromStage || !toStage) return <span className="text-sm text-gray-400">—</span>;
 
       const fromDate = getStageHandledDate(task, fromStage);
       const toDate = getStageHandledDate(task, toStage);
 
-      if (!fromDate || !toDate) return <span className="text-sm text-gray-400">â€”</span>;
+      if (!fromDate || !toDate) return <span className="text-sm text-gray-400">—</span>;
 
       const diffMs = toDate.getTime() - fromDate.getTime();
       const diffMins = Math.floor(diffMs / 60000);
@@ -1294,7 +1294,7 @@ export default function ReportsPage() {
 
     if (col.type === 'stage_date') {
       const stage = stages.find(s => s.id === col.stageId);
-      if (!stage) return <span className="text-sm text-gray-400">â€”</span>;
+      if (!stage) return <span className="text-sm text-gray-400">—</span>;
 
       if (!checkStageApplicableForTask(stage, task)) {
         return <span className="text-sm text-red-500">Missing</span>;
@@ -1404,7 +1404,7 @@ export default function ReportsPage() {
         );
       }
 
-      if (!effectiveStartTime || !showTimeStatuses) return <span className="text-sm text-gray-400">â€”</span>;
+      if (!effectiveStartTime || !showTimeStatuses) return <span className="text-sm text-gray-400">—</span>;
 
       const timeStatus = getTimeStatus(effectiveStartTime, estimatedMinutes);
       const isOverdue = timeStatus?.isOverdue || false;
@@ -1445,7 +1445,7 @@ export default function ReportsPage() {
 
     if (col.type === 'extracted_field') {
       const stage = stages.find(s => s.id === col.stageId);
-      if (!stage) return <span className="text-sm text-gray-400">â€”</span>;
+      if (!stage) return <span className="text-sm text-gray-400">—</span>;
 
       if (!checkStageApplicableForTask(stage, task)) {
         return <span className="text-sm text-red-500">Missing</span>;
@@ -1477,11 +1477,11 @@ export default function ReportsPage() {
           ? formatDateTimeForDisplay(foundValue)
           : isDateLike ? formatDateForDisplay(foundValue) : foundValue;
         const isOld = foundDoc.created_at && task.created_at && new Date(foundDoc.created_at) < new Date(task.created_at);
-        return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-gray-700'}`}>{display || <span className="text-gray-400">â€”</span>}</span>;
+        return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-gray-700'}`}>{display || <span className="text-gray-400">—</span>}</span>;
       }
 
       const stageDocInfo = stage?.documents?.find((d: any) => d.kycId === col.kycId);
-      if (!stageDocInfo) return <span className="text-sm text-gray-400">â€”</span>;
+      if (!stageDocInfo) return <span className="text-sm text-gray-400">—</span>;
       if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-red-500">Missing</span>;
 
       const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
@@ -1508,7 +1508,7 @@ export default function ReportsPage() {
       const display = isDateTimeField2
         ? formatDateTimeForDisplay(val)
         : isDateLike2 ? formatDateForDisplay(val) : val;
-      return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-gray-700'}`}>{display || <span className="text-gray-400">â€”</span>}</span>;
+      return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-gray-700'}`}>{display || <span className="text-gray-400">—</span>}</span>;
     }
 
     if (col.type === 'task') {
@@ -1531,7 +1531,7 @@ export default function ReportsPage() {
       );
 
       if (!requirement) {
-        return <span className="text-sm text-gray-400">â€”</span>;
+        return <span className="text-sm text-gray-400">—</span>;
       }
 
       // Check if task has fetched reference documents
@@ -1568,7 +1568,7 @@ export default function ReportsPage() {
       const currentStage = getCurrentOfficerStage(task);
 
       if (!currentStage) {
-        return <span className="text-sm text-gray-400">â€”</span>;
+        return <span className="text-sm text-gray-400">—</span>;
       }
 
       const officerIds = getStageOfficerIds(task, 'current');
@@ -1626,7 +1626,7 @@ export default function ReportsPage() {
       );
     }
 
-    return <span className="text-sm text-gray-400">â€”</span>;
+    return <span className="text-sm text-gray-400">—</span>;
   }, [
     stages, departments, kycDocuments, allDocuments, companies,
     enhancedTasksData, taskDependants, showTimeStatuses,
@@ -1742,7 +1742,7 @@ export default function ReportsPage() {
     const deptLabel = activeDepartment?.name || 'All Departments';
     const totalCols = filteredColumns.length + 1; // +1 for # index
 
-    // â”€â”€ Shared helper: apply semantic colour to a cell based on its text value â”€â”€
+    // ── Shared helper: apply semantic colour to a cell based on its text value ──
     const applySemanticColor = (cell: ExcelJS.Cell) => {
       const v = String(cell.value ?? '');
       if (v === 'Missing' || v === 'N/A' || v.toLowerCase().includes('missing')) {
@@ -1764,13 +1764,13 @@ export default function ReportsPage() {
       wb.created = new Date();
       const ws = wb.addWorksheet('Report', { views: [{ showGridLines: false }] });
 
-      const accentArgb = 'FF4F46E5'; // indigo-600
-      const accentLightArgb = 'FFF5F3FF'; // indigo-50
-      const headerFg = 'FF1E1B4B'; // dark indigo
+      const accentArgb = 'FF4F46E5'; // blue-600
+      const accentLightArgb = 'FFF5F3FF'; // blue-50
+      const headerFg = 'FF1E1B4B'; // dark blue
       const rowAlt = 'FFF8F9FF';
       const borderColor = 'FFCBD5E1';
 
-      // â”€â”€ Row 1: Full-width branded cover â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ── Row 1: Full-width branded cover ──────────────────────────────────
       ws.mergeCells(1, 1, 1, totalCols);
       const coverCell = ws.getCell('A1');
       coverCell.value = reportName.toUpperCase();
@@ -1779,16 +1779,16 @@ export default function ReportsPage() {
       coverCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 2 };
       ws.getRow(1).height = 36;
 
-      // â”€â”€ Row 2: Metadata subtitle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ── Row 2: Metadata subtitle ─────────────────────────────────────────
       ws.mergeCells(2, 1, 2, totalCols);
       const metaCell = ws.getCell('A2');
-      metaCell.value = `${deptLabel}   Â·   ${dateStr}   Â·   ${searchedTasks.length} records`;
+      metaCell.value = `${deptLabel}   ·   ${dateStr}   ·   ${searchedTasks.length} records`;
       metaCell.font = { name: 'Calibri', size: 9, color: { argb: 'FFB0A8F0' } };
       metaCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerFg } };
       metaCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 2 };
       ws.getRow(2).height = 20;
 
-      // â”€â”€ Row 3: Stats pill strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ── Row 3: Stats pill strip ──────────────────────────────────────────
       const pillLabels = ['Total', 'WIP', 'Completed', 'Endorsed', 'Cancelled'];
       const pillValues = [allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount];
       const pillArgbs = ['FF4F46E5', 'FFF59E0B', 'FF16A34A', 'FF0284C7', 'FFDC2626'];
@@ -1812,10 +1812,10 @@ export default function ReportsPage() {
       ws.getRow(3).height = 18;
       ws.getRow(4).height = 30;
 
-      // â”€â”€ Spacer row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ── Spacer row ────────────────────────────────────────────────────────
       ws.getRow(5).height = 8;
 
-      // â”€â”€ Row 6: Column Headers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ── Row 6: Column Headers ─────────────────────────────────────────────
       const colHeaders = ['#', ...filteredColumns.map(c => c.label)];
       const hRow = ws.getRow(6);
       hRow.values = colHeaders;
@@ -1832,7 +1832,7 @@ export default function ReportsPage() {
 
       ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 6, showGridLines: false }];
 
-      // â”€â”€ Data rows â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ── Data rows ─────────────────────────────────────────────────────────
       searchedTasks.forEach((task, idx) => {
         const vals = [idx + 1, ...filteredColumns.map(col => getExportCellValue(task, col))];
         const row = ws.addRow(vals); // row 7+
@@ -1847,7 +1847,7 @@ export default function ReportsPage() {
         });
       });
 
-      // â”€â”€ Column widths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ── Column widths ──────────────────────────────────────────────────────
       ws.getColumn(1).width = 5;
       filteredColumns.forEach((col, i) => {
         ws.getColumn(i + 2).width = Math.min(45, Math.max(18, col.label.length * 1.4));
@@ -1862,7 +1862,7 @@ export default function ReportsPage() {
       toast({ title: 'Export Complete', description: `${searchedTasks.length} rows exported to Excel.` });
 
     } else {
-      // â”€â”€ PDF export â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ── PDF export ────────────────────────────────────────────────────────
       const { default: jsPDF } = await import('jspdf');
       const { default: autoTable } = await import('jspdf-autotable');
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
@@ -1885,7 +1885,7 @@ export default function ReportsPage() {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7);
       doc.setTextColor(...greyMid);
-      doc.text(`${deptLabel}  Â·  ${dateStr}  Â·  ${searchedTasks.length} records`, 14, 19.5);
+      doc.text(`${deptLabel}  ·  ${dateStr}  ·  ${searchedTasks.length} records`, 14, 19.5);
       doc.setDrawColor(...greyLight);
       doc.setLineWidth(0.3);
       doc.line(10, 22, pageW - 10, 22);
@@ -1917,7 +1917,7 @@ export default function ReportsPage() {
           doc.setFontSize(6.5);
           doc.setTextColor(148, 163, 184);
           doc.setFont('helvetica', 'normal');
-          doc.text(`${reportName}  Â·  ${dateStr}`, 14, pageH - 3.5);
+          doc.text(`${reportName}  ·  ${dateStr}`, 14, pageH - 3.5);
           doc.text(`Page ${pg}`, pageW - 14, pageH - 3.5, { align: 'right' });
         }
       });
@@ -2022,7 +2022,7 @@ export default function ReportsPage() {
       // Subtitle row
       ws.mergeCells(2, 1, 2, numDataCols);
       const subCell = ws.getCell(2, 1);
-      subCell.value = `${deptName}  Â·  ${subdeptLabel}  Â·  ${statusLabel}  Â·  Generated: ${dateStr}  Â·  Total: ${totalTasks} tasks`;
+      subCell.value = `${deptName}  ·  ${subdeptLabel}  ·  ${statusLabel}  ·  Generated: ${dateStr}  ·  Total: ${totalTasks} tasks`;
       subCell.font = { name: 'Calibri', size: 10, color: { argb: 'FF475569' } };
       subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
       subCell.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -2117,17 +2117,17 @@ export default function ReportsPage() {
       ];
       const accent = hexToRgb(accentHex);
 
-      // â”€â”€ Colour helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-      const GREY_DARK: [number, number, number] = [15, 23, 42];       // slate-950
-      const GREY_MID: [number, number, number] = [71, 85, 105];       // slate-600
-      const GREY_LIGHT: [number, number, number] = [226, 232, 240];   // slate-200
+      // ── Colour helpers ─────────────────────────────────────────────────────────
+      const GREY_DARK: [number, number, number] = [15, 23, 42];       // gray-950
+      const GREY_MID: [number, number, number] = [71, 85, 105];       // gray-600
+      const GREY_LIGHT: [number, number, number] = [226, 232, 240];   // gray-200
       const WHITE: [number, number, number] = [255, 255, 255];
-      const ROW_ALT: [number, number, number] = [248, 250, 252];      // slate-50
+      const ROW_ALT: [number, number, number] = [248, 250, 252];      // gray-50
       const AMBER_BG: [number, number, number] = [255, 251, 235];     // amber-50
       const AMBER_TEXT: [number, number, number] = [146, 64, 14];     // amber-800
       const RED_TEXT: [number, number, number] = [220, 38, 38];
       const ORANGE_TEXT: [number, number, number] = [234, 88, 12];
-      const SLATE_TEXT: [number, number, number] = [100, 116, 139];
+      const gray_TEXT: [number, number, number] = [100, 116, 139];
       const GREEN_TEXT: [number, number, number] = [21, 128, 61];
 
       const pdfBucket = (type: string) => {
@@ -2137,7 +2137,7 @@ export default function ReportsPage() {
         return 'stage';
       };
 
-      // â”€â”€ Modern page header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ── Modern page header ─────────────────────────────────────────────────────
       const paintPageHeader = (pageNum: number) => {
         // Thin accent top border
         doc.setFillColor(...accent);
@@ -2158,7 +2158,7 @@ export default function ReportsPage() {
         doc.setFontSize(7);
         doc.setFont('helvetica', 'normal');
         doc.text(
-          `${deptName}  Â·  ${subdeptLabel}  Â·  ${statusLabel}  Â·  ${dateStr}  Â·  ${totalTasks} tasks`,
+          `${deptName}  ·  ${subdeptLabel}  ·  ${statusLabel}  ·  ${dateStr}  ·  ${totalTasks} tasks`,
           14, 20.5
         );
 
@@ -2168,7 +2168,7 @@ export default function ReportsPage() {
         doc.line(10, 23, pageW - 10, 23);
       };
 
-      // â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ── Footer ─────────────────────────────────────────────────────────────────
       const paintFooter = (pageNum: number) => {
         doc.setDrawColor(226, 232, 240);
         doc.setLineWidth(0.3);
@@ -2176,7 +2176,7 @@ export default function ReportsPage() {
         doc.setFontSize(6.5);
         doc.setTextColor(148, 163, 184);
         doc.setFont('helvetica', 'normal');
-        doc.text(`${reportTitle}  Â·  ${deptName}  Â·  ${dateStr}`, 14, pageH - 3.5);
+        doc.text(`${reportTitle}  ·  ${deptName}  ·  ${dateStr}`, 14, pageH - 3.5);
         doc.text(`Page ${pageNum}`, pageW - 14, pageH - 3.5, { align: 'right' });
       };
 
@@ -2191,7 +2191,7 @@ export default function ReportsPage() {
       }
       if (colChunks.length === 0) colChunks.push([]);
 
-      // â”€â”€ Per-group rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ── Per-group rendering ────────────────────────────────────────────────────
       for (const group of groups) {
         if (group.tasks.length === 0) continue;
         const isUnalloc = group.name === 'Unallocated';
@@ -2207,7 +2207,7 @@ export default function ReportsPage() {
             startY = 26;
           }
 
-          // â”€â”€ Group banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          // ── Group banner ───────────────────────────────────────────────────────
           doc.setFillColor(...gColor);
           doc.roundedRect(8, startY, pageW - 16, 7, 1.5, 1.5, 'F');
           doc.setTextColor(...WHITE);
@@ -2215,13 +2215,13 @@ export default function ReportsPage() {
           doc.setFont('helvetica', 'bold');
           const groupLabel = isFirstChunk
             ? group.name.toUpperCase()
-            : `${group.name.toUpperCase()} (cont. â€” cols ${ci * CHUNK + 1}â€“${Math.min(ci * CHUNK + chunk.length, pdfCols.length)})`;
+            : `${group.name.toUpperCase()} (cont. — cols ${ci * CHUNK + 1}–${Math.min(ci * CHUNK + chunk.length, pdfCols.length)})`;
           const countLabel = `${group.tasks.length} task${group.tasks.length !== 1 ? 's' : ''}`;
           doc.text(`  ${groupLabel}`, 11, startY + 4.8);
           if (isFirstChunk) doc.text(countLabel, pageW - 11, startY + 4.8, { align: 'right' });
           startY += 9.5;
 
-          // â”€â”€ Build head styles per column â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          // ── Build head styles per column ───────────────────────────────────────
           const buildHeadStyle = (colIndex: number): any => {
             if (colIndex === 0) return { fillColor: GREY_DARK, textColor: WHITE };
             const col = chunk[colIndex - 1];
@@ -2238,7 +2238,7 @@ export default function ReportsPage() {
             String(i + 1),
             ...chunk.map((col: any) => {
               const v = getExportCellValue(task, col);
-              return v || 'â€”';
+              return v || '—';
             })
           ]);
 
@@ -2284,7 +2284,7 @@ export default function ReportsPage() {
                 } else if (raw === 'Unallocated') {
                   data.cell.styles.textColor = ORANGE_TEXT;
                 } else if (raw.startsWith('Skipped')) {
-                  data.cell.styles.textColor = SLATE_TEXT;
+                  data.cell.styles.textColor = gray_TEXT;
                   data.cell.styles.fontStyle = 'italic';
                 } else if (raw.toLowerCase().includes('completed')) {
                   data.cell.styles.textColor = GREEN_TEXT;
@@ -2392,7 +2392,7 @@ export default function ReportsPage() {
     return rows;
   }, [activeReport, filteredColumns, expandedSections, stages, isStageApplicableToCurrentFilter]);
 
-  // Full hierarchy path (Department â†’ Sub-department â†’ Class) for the report's configured job level
+  // Full hierarchy path (Department → Sub-department → Class) for the report's configured job level
   const jobLevelPath = useMemo(() => {
     if (!activeReport?.job_level) return null;
     const jl = activeReport.job_level;
@@ -2481,15 +2481,6 @@ export default function ReportsPage() {
           activeDepartment={activeDepartment}
           activeSubDepartments={activeSubDepartments}
           activeSubDeptIds={activeSubDeptIds}
-          allTasksCount={allTasksCount}
-          wipTasksCount={wipTasksCount}
-          writeUpCompletedCount={writeUpCompletedCount}
-          endorsedCount={endorsedCount}
-          cancelledCount={cancelledCount}
-        />
-
-        {/* KPI Cards */}
-        <ReportKpiCards
           allTasksCount={allTasksCount}
           wipTasksCount={wipTasksCount}
           writeUpCompletedCount={writeUpCompletedCount}

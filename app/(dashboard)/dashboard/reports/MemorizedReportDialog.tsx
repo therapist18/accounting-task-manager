@@ -1,4 +1,4 @@
-﻿// @ts-nocheck
+// @ts-nocheck
 // components/MemorizedReportDialog.tsx
 
 "use client"
@@ -467,7 +467,7 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
         <ScrollArea className="flex-1">
           <Accordion
             type="multiple"
-            className="w-full divide-y divide-slate-200"
+            className="w-full divide-y divide-gray-200"
             value={expandedSections}
             onValueChange={setExpandedSections}
           >
@@ -818,8 +818,8 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
     setReportConfig(prev => {
       const exists = prev.taskFields.find(f => f.id === fieldId);
       const newFields = exists
-        ? prev.taskFields.filter(f => f.id !== fieldId)          // remove â†’ deselect
-        : [...prev.taskFields, { id: fieldId, isDefault: false }]; // add â†’ session-only
+        ? prev.taskFields.filter(f => f.id !== fieldId)          // remove → deselect
+        : [...prev.taskFields, { id: fieldId, isDefault: false }]; // add → session-only
       return { ...prev, taskFields: newFields };
     });
   }, []);
@@ -1091,7 +1091,7 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
       <div className="border rounded-lg shadow-sm flex-1 flex flex-col min-h-0 overflow-hidden bg-white">
         <TableHeaderRow handleSelectAllDefault={() => { }} handleSelectAllReports={() => { }} />
         <ScrollArea className="flex-1">
-          <div className="divide-y divide-slate-100">
+          <div className="divide-y divide-gray-100">
             <div className="bg-gray-50 px-4 py-2 font-bold text-xs uppercase text-gray-500 tracking-wider">Task Fields</div>
             {reportConfig.taskFields.map(fieldConfig => {
               const header = tableHeaders.find(h => h.id === fieldConfig.id);

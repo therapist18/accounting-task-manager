@@ -23,13 +23,12 @@ export default async function DashboardLayout({
 
   return (
     <SidebarProvider>
-      {/* Change bg-background to a slightly muted color (e.g., bg-slate-50 or bg-zinc-950) */}
       <div className="flex h-screen w-screen overflow-hidden dark:bg-zinc-950">
         <AppSidebar />
         <SidebarInset className="flex flex-col w-full bg-transparent overflow-hidden">
           {!pathname.startsWith("/dashboard/reports") && <Navbar />}
           {/* Add margin and rounded corners to create the 'card' effect */}
-          <main className="flex-1 relative overflow-y-auto m-2 mt-0 bg-white dark:bg-zinc-900">
+          <main className="flex-1 relative bg-gray-100 dark:bg-zinc-900">
             {children}
           </main>
         </SidebarInset>

@@ -1,123 +1,88 @@
+// @ts-nocheck
 "use client";
 
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { useReactTable, getCoreRowModel, type ColumnDef, type ColumnSizingState } from "@tanstack/react-table";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Plus, Minus, ArrowUpDown, SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ENHANCED_TABLE_HEADERS_IMMIGRATION } from "../../tasks/overall-view/tableUtils";
 
-const DEFAULT_COL_WIDTH = 160;
+const DEFAULT_COL_WIDTH = 180;
+const MIN_COL_WIDTH = 80;
+const INDEX_COL_WIDTH = 56;
 
-const TAILWIND_PX: Record<string, number> = {
-  'w-16': 64, 'w-20': 80, 'w-24': 96, 'w-28': 112, 'w-32': 128,
-  'w-36': 144, 'w-40': 160, 'w-44': 176, 'w-48': 192, 'w-56': 224, 'w-64': 256,
+// --- Theming Buckets ---
+const BUCKET = {
+  task: {
+    headBg: 'bg-blue-700 text-white',
+    subHeadBg: 'bg-blue-800 text-blue-300',
+    bodyBg: 'bg-white',
+    accent: 'border-blue-500'
+  },
+  reference: {
+    headBg: 'bg-blue-700 text-white',
+    subHeadBg: 'bg-blue-800 text-blue-300',
+    bodyBg: 'bg-emerald-50/20',
+    accent: 'border-emerald-500'
+  },
+  duration: {
+    headBg: 'bg-amber-600 text-white',
+    subHeadBg: 'bg-amber-700 text-amber-200',
+    bodyBg: 'bg-amber-50/10',
+    accent: 'border-amber-400'
+  },
+  stage: {
+    headBg: 'bg-indigo-700 text-white',
+    subHeadBg: 'bg-indigo-800 text-indigo-300',
+    bodyBg: 'bg-indigo-50/10',
+    accent: 'border-indigo-400'
+  },
 };
-
-const HEADER_WIDTHS = new Map(
-  ENHANCED_TABLE_HEADERS_IMMIGRATION
-    .filter(h => h.width)
-    .map(h => [h.id, TAILWIND_PX[h.width!] ?? DEFAULT_COL_WIDTH])
-);
-const MIN_COL_WIDTH = 60;
-const INDEX_COL_WIDTH = 48;
 
 const colBucket = (type: string) => {
   if (type === 'current_stage_age' || type === 'total_process_age') return 'duration';
-  if (type === 'task' || type === 'current_stage_officer') return 'task';
   if (type === 'reference_requirement') return 'reference';
+  if (type === 'task' || type === 'current_stage_officer') return 'task';
   return 'stage';
-};
-
-const BUCKET = {
-  task: {
-    groupBg: 'bg-gray-100 text-gray-700 border-b border-gray-300',
-    headBg: 'bg-blue-50 text-blue-700 border-b-2 border-blue-200',
-    headHover: 'hover:bg-blue-100',
-    subBg: 'bg-gray-50',
-    bodyBg: '',
-    bodyBgAlt: '',
-  },
-  reference: {
-    groupBg: 'bg-emerald-50 text-emerald-800 border-b border-emerald-200',
-    headBg: 'bg-emerald-50 text-emerald-700 border-b-2 border-emerald-200',
-    headHover: 'hover:bg-emerald-100',
-    subBg: 'bg-emerald-50/60',
-    bodyBg: 'bg-emerald-50/30',
-    bodyBgAlt: 'bg-emerald-50/50',
-  },
-  duration: {
-    groupBg: 'bg-amber-50 text-amber-800 border-b border-amber-200',
-    headBg: 'bg-amber-50 text-amber-700 border-b-2 border-amber-200',
-    headHover: 'hover:bg-amber-100',
-    subBg: 'bg-amber-50',
-    bodyBg: 'bg-amber-50/50',
-    bodyBgAlt: 'bg-amber-50/80',
-  },
-  stage: {
-    groupBg: 'bg-gray-100 text-gray-700 border-b border-gray-300',
-    headBg: 'bg-gray-100 text-gray-700 border-b-2 border-gray-300',
-    headHover: 'hover:bg-gray-200',
-    subBg: 'bg-gray-50/60',
-    bodyBg: '',
-    bodyBgAlt: '',
-  },
 };
 
 const DataCell = ({ children }: { children: React.ReactNode }) => (
   <TooltipProvider delayDuration={400}>
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="truncate text-sm font-medium text-gray-700 w-full cursor-default">
+        <div className="truncate text-sm font-medium text-slate-700 w-full cursor-default leading-relaxed">
           {children}
         </div>
       </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-xs bg-gray-900 text-white border-none shadow-xl text-sm">
+      <TooltipContent side="top" className="max-w-xs bg-slate-900 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2">
         {children}
       </TooltipContent>
     </Tooltip>
   </TooltipProvider>
 );
 
-export function StandardReportView({ allTasks, filteredColumns, columnGroups, sortConfig, expandedStageColumns, renderCellValue, safeRender, handleSort, toggleStageColumns, isStageApplicableToCurrentFilter, initialRowsPerPage = 25, userData = { officers: [], managers: [], assistants: [], allUsers: [] }, departments = [], stages = [] }: any) {
+export function StandardReportView({ 
+  allTasks, filteredColumns, sortConfig, expandedStageColumns, 
+  renderCellValue, safeRender, handleSort, toggleStageColumns, 
+  isStageApplicableToCurrentFilter, initialRowsPerPage = 25, 
+  stages = [] 
+}: any) {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(initialRowsPerPage);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
+  
   const stickyColumnIds = new Set(['task_id', 'task_passport_number', 'task_applicant_name']);
 
-  // Find the ID of the first stage column to apply a distinctive border
-  const firstStageColumnId = useMemo(() => {
-    return filteredColumns.find((c: any) => colBucket(c.type ?? 'stage') === 'stage')?.id;
-  }, [filteredColumns]);
-
+  // Column definitions for Tanstack Table sizing logic
   const columnDefs = useMemo<ColumnDef<any>[]>(() => [
-    {
-      id: '__index__',
-      size: INDEX_COL_WIDTH,
-      minSize: INDEX_COL_WIDTH,
-      maxSize: INDEX_COL_WIDTH,
-      enableResizing: false,
-      header: () => null,
-      cell: () => null,
-    },
-    ...filteredColumns.map((col: any) => {
-      const defaultSize = (col.type === 'task' && col.field && HEADER_WIDTHS.has(col.field))
-        ? HEADER_WIDTHS.get(col.field)!
-        : DEFAULT_COL_WIDTH;
-      return {
-        id: col.id,
-        size: defaultSize,
-        minSize: MIN_COL_WIDTH,
-        maxSize: 600,
-        enableResizing: true,
-        header: () => null,
-        cell: () => null,
-      };
-    }),
+    { id: '__index__', size: INDEX_COL_WIDTH },
+    ...filteredColumns.map((col: any) => ({
+      id: col.id,
+      size: DEFAULT_COL_WIDTH,
+    })),
   ], [filteredColumns]);
 
   const table = useReactTable({
@@ -129,8 +94,7 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
     getCoreRowModel: getCoreRowModel(),
   });
 
-  const getColWidth = (colId: string): number =>
-    table.getColumn(colId)?.getSize() ?? DEFAULT_COL_WIDTH;
+  const getColWidth = (colId: string): number => table.getColumn(colId)?.getSize() ?? DEFAULT_COL_WIDTH;
 
   const stickyColumnOffsets = useMemo(() => {
     const offsets: Record<string, number> = {};
@@ -151,24 +115,10 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
 
   const totalPages = Math.max(1, Math.ceil(allTasks.length / rowsPerPage));
 
-  const minutesToTimeString = (minutes: number | null) => {
-    if (!minutes) return "—";
-    const d = Math.floor(minutes / (60 * 24));
-    const h = Math.floor((minutes % (60 * 24)) / 60);
-    const m = minutes % 60;
-    return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
-  };
-
-  const headersByColId: Record<string, any> =
-    (table.getHeaderGroups()[0]?.headers ?? []).reduce((acc: Record<string, any>, h) => {
-      acc[h.id] = h;
-      return acc;
-    }, {});
-
   return (
-    <div className="flex flex-col">
-      <div className="relative overflow-hidden border border-gray-200 rounded-lg">
-        <div className="overflow-auto max-h-[calc(100vh-228px)]">
+    <div className="flex flex-col bg-white h-full antialiased">
+      <div className="relative overflow-hidden border border-slate-200">
+        <div className="overflow-auto max-h-[calc(100vh-220px)] custom-scrollbar">
           <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
             <colgroup>
               <col style={{ width: INDEX_COL_WIDTH }} />
@@ -177,186 +127,160 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
               ))}
             </colgroup>
 
-            <TableHeader className="sticky top-0 z-40 shadow-[0_1px_2px_-1px_rgba(0,0,0,0.08)]">
-              {/* PRIMARY HEADER */}
-              <TableRow className="border-0">
-                <TableHead
-                  className="sticky left-0 z-50 bg-gray-100 border-r border-b border-gray-200 text-center text-gray-700 uppercase"
-                  style={{ width: INDEX_COL_WIDTH }}
-                >
-                  <span className="text-[10px] font-semibold">#</span>
+            <TableHeader className="sticky top-0 z-40">
+              <TableRow className="hover:bg-transparent border-0">
+                <TableHead className="sticky left-0 z-50 bg-blue-700 border-r border-b border-blue-800 text-center">
+                  <span className="text-xs font-black text-white uppercase tracking-wide">#</span>
                 </TableHead>
-                {filteredColumns.map((col: any) => {
-                  const isSticky = stickyColumnIds.has(col.id);
-                  const isFirstStage = col.id === firstStageColumnId;
-                  const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
-                  const isColFilterNA = col.stageId ? !isStageApplicableToCurrentFilter(col.stageId) : false;
-                  const resizeHeader = headersByColId[col.id];
-                  const bucket = colBucket(col.type ?? 'stage');
-                  const b = BUCKET[bucket];
-                  const isActive = sortConfig?.key === col.id;
+                {(() => {
+                  const firstStageIdx = filteredColumns.findIndex((c: any) => colBucket(c.type ?? 'stage') === 'stage');
+                  return filteredColumns.map((col: any, colIdx: number) => {
+                    const isSticky = stickyColumnIds.has(col.id);
+                    const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
+                    const bucket = colBucket(col.type ?? 'stage');
+                    const b = BUCKET[bucket];
+                    const isActive = sortConfig?.key === col.id;
+                    const isFirstStage = colIdx === firstStageIdx;
 
-                  return (
-                    <TableHead
-                      key={col.id}
-                      onClick={() => handleSort(col.id)}
-                      className={cn(
-                        "border-r border-gray-200 transition-colors cursor-pointer select-none",
-                        b.headBg,
-                        b.headHover,
-                        isSticky && "z-40 sticky",
-                        isFirstStage && "border-l-2 border-l-slate-300",
-                        isColFilterNA && "opacity-60",
-                        isActive && "ring-inset ring-2 ring-blue-300"
-                      )}
-                      style={isSticky ? { left: `${left}px` } : undefined}
-                    >
-                      <div className="flex items-center gap-1">
-                        <span className="text-[10px] font-semibold uppercase">
-                          {col.label}
-                        </span>
-                        {col.hasSubColumns && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); toggleStageColumns(col.stageId); }}
-                            className="h-3.5 w-3.5 shrink-0 flex items-center justify-center rounded bg-gray-300/50 hover:bg-gray-300 transition-colors"
-                          >
-                            {expandedStageColumns.has(col.stageId) ? <Minus size={8} /> : <Plus size={8} />}
-                          </button>
+                    return (
+                      <TableHead
+                        key={col.id}
+                        onClick={() => handleSort(col.id)}
+                        className={cn(
+                          "group relative border-r border-b border-white/10 transition-colors cursor-pointer select-none px-4 py-4",
+                          b.headBg,
+                          isSticky && "z-40 sticky shadow-[2px_0_5px_-2px_rgba(0,0,0,0.2)]",
+                          isActive && "brightness-110",
+                          isFirstStage && "border-l-[3px] border-l-amber-400"
                         )}
-                        <ArrowUpDown className={cn(
-                          "h-3 w-3 shrink-0 transition-opacity",
-                          isActive ? "opacity-100" : "opacity-0 group-hover:opacity-60"
-                        )} />
-                      </div>
+                        style={isSticky ? { left: `${left}px` } : undefined}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold uppercase tracking-wide text-white whitespace-nowrap">
+                            {col.label}
+                          </span>
 
-                      {resizeHeader && (
-                        <div
-                          onMouseDown={(e) => { e.stopPropagation(); resizeHeader.getResizeHandler()(e); }}
-                          onTouchStart={(e) => { e.stopPropagation(); resizeHeader.getResizeHandler()(e); }}
-                          className={cn(
-                            "absolute inset-y-0 right-0 w-1 cursor-col-resize select-none touch-none z-10",
-                            resizeHeader.column.getIsResizing() ? "bg-gray-400" : "hover:bg-gray-300"
-                          )}
-                        />
-                      )}
-                    </TableHead>
-                  );
-                })}
+                          <div className="flex items-center gap-1.5">
+                              {col.hasSubColumns && (
+                                  <button
+                                      onClick={(e) => { e.stopPropagation(); toggleStageColumns(col.stageId); }}
+                                      className="h-5 w-5 shrink-0 flex items-center justify-center rounded-md bg-white/20 border border-white/20 hover:bg-white/30 transition-all"
+                                  >
+                                      {expandedStageColumns.has(col.stageId) ? <Minus size={10} strokeWidth={3} /> : <Plus size={10} strokeWidth={3} />}
+                                  </button>
+                              )}
+                              <ArrowUpDown className={cn(
+                                  "h-3 w-3 shrink-0 transition-opacity text-white",
+                                  isActive ? "opacity-100" : "opacity-0 group-hover:opacity-50"
+                              )} />
+                          </div>
+                        </div>
+
+                        {/* Resize Handle */}
+                        <div className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-white/40 transition-colors" />
+                      </TableHead>
+                    );
+                  });
+                })()}
               </TableRow>
 
-              {/* SECONDARY HEADER (DURATION/ESTIMATE) */}
-              <TableRow className="border-0 h-6">
-                <TableHead
-                  className="sticky left-0 z-50 bg-gray-100 border-r border-b border-gray-200"
-                  style={{ width: INDEX_COL_WIDTH }}
-                />
-                {filteredColumns.map((col: any) => {
-                  const isSticky = stickyColumnIds.has(col.id);
-                  const isFirstStage = col.id === firstStageColumnId;
-                  const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
-                  
-                  let content: React.ReactNode = null;
-                  let extraClass = "bg-white text-gray-400";
+              {/* Sub-Header: Estimates/Types */}
+              <TableRow className="hover:bg-transparent border-0 h-4">
+                <TableHead className="sticky left-0 z-50 bg-blue-800 border-r border-b border-blue-900" />
+                {(() => {
+                  const firstStageIdx = filteredColumns.findIndex((c: any) => colBucket(c.type ?? 'stage') === 'stage');
+                  return filteredColumns.map((col: any, colIdx: number) => {
+                    const isSticky = stickyColumnIds.has(col.id);
+                    const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
+                    const bucket = colBucket(col.type ?? 'stage');
+                    const b = BUCKET[bucket];
+                    const isFirstStage = colIdx === firstStageIdx;
 
-                  if (col.type === 'stage_date' && col.stageId) {
-                    const stage = stages.find((s: any) => s.id === col.stageId);
-                    content = stage?.estimated_time
-                      ? <span className="italic text-blue-600 font-bold tracking-tight">{minutesToTimeString(stage.estimated_time)}</span>
-                      : <span className="text-gray-300">—</span>;
-                    extraClass = 'bg-blue-50/50 text-blue-600'; 
-                  } else if (col.type === 'stage_gap') {
-                    content = <span className="font-bold text-amber-600 italic">Gap</span>;
-                    extraClass = 'bg-amber-50/50';
-                  } else if (col.type === 'current_stage_age' || col.type === 'total_process_age') {
-                    content = <span className="text-amber-700 font-bold uppercase tracking-tighter">Dur</span>;
-                    extraClass = 'bg-amber-50/50';
-                  }
+                    let content: React.ReactNode = null;
+                    if (col.type === 'stage_date' && col.stageId) {
+                      const stage = stages.find((s: any) => s.id === col.stageId);
+                      content = stage?.estimated_time ? `${Math.floor(stage.estimated_time / 60)}h ${stage.estimated_time % 60}m` : 'No TAT';
+                    } else if (col.type === 'stage_gap') {
+                      content = "Wait Gap";
+                    }
 
-                  return (
-                    <TableHead
-                      key={`sub-${col.id}`}
-                      className={cn(
-                        "text-[10px] font-semibold text-center border-r border-b border-gray-200",
-                        isSticky && "sticky z-40",
-                        isFirstStage && "border-l-4 border-l-gray-200",
-                        extraClass
-                      )}
-                      style={isSticky ? { left: `${left}px` } : undefined}
-                    >
-                      {content}
-                    </TableHead>
-                  );
-                })}
+                    return (
+                      <TableHead
+                        key={`sub-${col.id}`}
+                        className={cn(
+                          "text-[9px] font-black uppercase tracking-widest text-center border-r border-b border-white/10 px-2",
+                          b.subHeadBg,
+                          isSticky && "sticky z-40 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.15)]",
+                          isFirstStage && "border-l-[3px] border-l-amber-400"
+                        )}
+                        style={isSticky ? { left: `${left}px` } : undefined}
+                      >
+                        {content}
+                      </TableHead>
+                    );
+                  });
+                })()}
               </TableRow>
             </TableHeader>
 
             <TableBody>
-              {paginatedTasks.length > 0 ? paginatedTasks.map((task: any, idx: number) => {
-                const isEven = idx % 2 === 0;
+              {paginatedTasks.length > 0 ? (() => {
+                const firstStageIdx = filteredColumns.findIndex((c: any) => colBucket(c.type ?? 'stage') === 'stage');
+                return paginatedTasks.map((task: any, idx: number) => {
+                  const isEven = idx % 2 === 0;
 
-                return (
-                  <TableRow
-                    key={task.id}
-                    className={cn(
-                      "group transition-colors",
-                      isEven ? "bg-white" : "bg-gray-50/50",
-                      "hover:bg-blue-50/40"
-                    )}
-                  >
-                    <TableCell className={cn(
-                      "sticky left-0 z-20 border-r border-b border-gray-200 text-center",
-                      isEven ? "bg-white" : "bg-gray-50/50",
-                      "group-hover:bg-blue-50/60"
-                    )}>
-                      <div className="flex items-center justify-center gap-1">
-                        {(task.status === 'write_up_completed' || task.status === 'endorsed') && (
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
-                        )}
-                        {task.status === 'wip' && (
-                          <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />
-                        )}
-                        {task.status === 'cancel' && (
-                          <span className="h-1.5 w-1.5 rounded-full bg-red-400 shrink-0" />
-                        )}
-                        <span className="text-xs">{(currentPage - 1) * rowsPerPage + idx + 1}</span>
-                      </div>
-                    </TableCell>
+                  return (
+                    <TableRow
+                      key={task.id}
+                      className="group border-0 hover:bg-blue-50/30 transition-colors"
+                    >
+                      <TableCell className={cn(
+                        "sticky left-0 z-20 border-r border-b border-slate-100 text-center py-3",
+                        isEven ? "bg-white" : "bg-slate-50/40",
+                        "group-hover:bg-blue-50/50"
+                      )}>
+                        <span className="group-hover:text-blue-600 transition-colors">
+                          {((currentPage - 1) * rowsPerPage) + idx + 1}
+                        </span>
+                      </TableCell>
 
-                    {filteredColumns.map((col: any) => {
-                      const isSticky = stickyColumnIds.has(col.id);
-                      const isFirstStage = col.id === firstStageColumnId;
-                      const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
-                      const bucket = colBucket(col.type ?? 'stage');
-                      const b = BUCKET[bucket];
-                      const bucketBodyBg = isEven ? b.bodyBg : b.bodyBgAlt;
+                      {filteredColumns.map((col: any, colIdx: number) => {
+                        const isSticky = stickyColumnIds.has(col.id);
+                        const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
+                        const bucket = colBucket(col.type ?? 'stage');
+                        const b = BUCKET[bucket];
+                        const isFirstStage = colIdx === firstStageIdx;
 
-                      return (
-                        <TableCell
-                          key={col.id}
-                          className={cn(
-                            "px-2.5 py-1 border-b border-gray-100 transition-colors",
-                            isFirstStage && "border-l border-l-gray-300/30",
-                            isSticky
-                              ? cn("sticky z-20 border-r border-gray-200", isEven ? "bg-white" : "bg-gray-50/50", "group-hover:bg-blue-50/60")
-                              : bucketBodyBg
-                          )}
-                          style={isSticky ? { left: `${left}px` } : undefined}
-                        >
-                          <DataCell>
-                            {safeRender(renderCellValue(task, col))}
-                          </DataCell>
-                        </TableCell>
-                      );
-                    })}
-                  </TableRow>
-                );
-              }) : (
+                        return (
+                          <TableCell
+                            key={col.id}
+                            className={cn(
+                              "px-4 py-2.5 border-r border-b border-slate-100 transition-colors",
+                              isSticky
+                                ? cn("sticky z-20 border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]", isEven ? "bg-white" : "bg-slate-50/40", "group-hover:bg-blue-50/50")
+                                : b.bodyBg,
+                              isFirstStage && "border-l-[3px] border-l-amber-400"
+                            )}
+                            style={isSticky ? { left: `${left}px` } : undefined}
+                          >
+                            <DataCell>
+                              {safeRender(renderCellValue(task, col))}
+                            </DataCell>
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  );
+                });
+              })() : (
                 <TableRow>
-                  <TableCell colSpan={filteredColumns.length + 1} className="h-48 bg-gray-50/30">
-                    <div className="flex flex-col items-center justify-center text-gray-400">
-                      <SearchX size={36} strokeWidth={1} className="mb-3 text-gray-300" />
-                      <p className="text-sm font-semibold">No matching records</p>
-                      <p className="text-[12px]">Adjust your filters to see results</p>
+                  <TableCell colSpan={filteredColumns.length + 1} className="h-64 bg-slate-50/20">
+                    <div className="flex flex-col items-center justify-center ">
+                      <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center mb-4">
+                        <SearchX size={32} className="text-slate-300" />
+                      </div>
+                      <p className="text-[15px] font-bold text-slate-900">No records found</p>
+                      <p className="text-sm mt-1">Try adjusting your filters or search query</p>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -364,49 +288,67 @@ export function StandardReportView({ allTasks, filteredColumns, columnGroups, so
             </TableBody>
           </Table>
         </div>
-      </div>
 
-      {/* PAGINATION FOOTER */}
-      {allTasks.length > 0 && (
-        <div className="flex items-center justify-between px-4 py-2.5 bg-white border border-gray-200 rounded-b-lg">
-          <div className="flex items-center gap-6">
-            <p className="text-xs text-gray-500">
-              Showing <span className="text-gray-900 font-bold">{((currentPage - 1) * rowsPerPage) + 1}</span> to <span className="text-gray-900 font-bold">{Math.min(currentPage * rowsPerPage, allTasks.length)}</span> of <span className="text-gray-900 font-bold">{allTasks.length}</span>
-            </p>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Rows</span>
+        {/* Pagination Footer */}
+        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200">
+          <div className="flex items-center gap-8">
+            <div className="flex flex-col">
+                <span className="text-sm font-bold  uppercase tracking-widest mb-0.5">Showing Range</span>
+                <p className="text-sm text-slate-600 font-medium">
+                    <span className="text-slate-900 font-bold">{((currentPage - 1) * rowsPerPage) + 1}</span>
+                    <span className="mx-1 opacity-40">-</span>
+                    <span className="text-slate-900 font-bold">{Math.min(currentPage * rowsPerPage, allTasks.length)}</span>
+                    <span className="mx-2 text-slate-300">of</span>
+                    <span className="text-blue-600 font-black">{allTasks.length}</span>
+                </p>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-bold  uppercase tracking-widest">Page Size</span>
               <Select value={String(rowsPerPage)} onValueChange={(v) => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
-                <SelectTrigger className="w-20 h-7 text-xs font-bold border-gray-200">
+                <SelectTrigger className="w-20 h-9 rounded-xl border-slate-200 bg-white font-bold text-sm shadow-sm">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
-                  {[10, 25, 50, 100].map(s => <SelectItem key={s} value={String(s)}>{s}</SelectItem>)}
+                <SelectContent className="rounded-xl">
+                  {[10, 25, 50, 100].map(s => <SelectItem key={s} value={String(s)} className="text-xs font-medium">{s} per page</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
           </div>
 
-          <div className="flex items-center border border-gray-200 rounded-md p-1 bg-gray-50">
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(1)} disabled={currentPage === 1}>
-              <ChevronsLeft size={14} />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}>
-              <ChevronLeft size={14} />
-            </Button>
-            <div className="h-4 w-[1px] bg-gray-300 mx-1" />
-            <span className="text-xs font-bold px-2 text-gray-700">
-              {currentPage} / {totalPages}
-            </span>
-            <div className="h-4 w-[1px] bg-gray-300 mx-1" />
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages}>
-              <ChevronRight size={14} />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}>
-              <ChevronsRight size={14} />
-            </Button>
+          <div className="flex items-center gap-1 bg-white p-1 rounded-xl shadow-sm border border-slate-200">
+            <PaginationButton onClick={() => setCurrentPage(1)} disabled={currentPage === 1}>
+              <ChevronsLeft size={16} />
+            </PaginationButton>
+            <PaginationButton onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}>
+              <ChevronLeft size={16} />
+            </PaginationButton>
+            
+            <div className="px-4 text-sm font-bold text-slate-900 min-w-[80px] text-center">
+              {currentPage} <span className="mx-1 text-slate-300 font-normal">/</span> {totalPages}
+            </div>
+
+            <PaginationButton onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages}>
+              <ChevronRight size={16} />
+            </PaginationButton>
+            <PaginationButton onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}>
+              <ChevronsRight size={16} />
+            </PaginationButton>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
+
+const PaginationButton = ({ children, onClick, disabled }: any) => (
+    <Button 
+        variant="ghost" 
+        size="icon" 
+        className="h-8 w-8 rounded-lg  hover:text-blue-600 hover:bg-blue-50 disabled:opacity-30" 
+        onClick={onClick} 
+        disabled={disabled}
+    >
+        {children}
+    </Button>
+);
