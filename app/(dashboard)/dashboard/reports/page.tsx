@@ -2446,7 +2446,7 @@ export default function ReportsPage() {
     );
   }
 
-  return (
+  return ( 
     <div className="flex flex-1 overflow-hidden">
       {/* 1. Sidebar */}
       <ReportsSidebar
@@ -2488,7 +2488,8 @@ export default function ReportsPage() {
           cancelledCount={cancelledCount}
         />
 
-        {/* Person Filter Strip */}
+       <div className="border rounded-lg shadow-md m-4">
+         {/* Person Filter Strip */}
         <PersonFilterStrip
           activePerspective={activePerspective}
           setActivePerspective={setActivePerspective}
@@ -2575,6 +2576,7 @@ export default function ReportsPage() {
             />
           )}
         </div>
+       </div>
       </div>
 
       <MemorizedReportDialog

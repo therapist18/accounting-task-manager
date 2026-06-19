@@ -99,10 +99,10 @@ export function StandardReportView({
   const totalPages = Math.max(1, Math.ceil(allTasks.length / rowsPerPage));
 
   return (
-    <div className="flex flex-col bg-white/20 h-full antialiased p-8 pt-0">
-      {/* Table Wrapper (No top border so it naturally connects to the active tab above it) */}
-      <div className="relative overflow-hidden border border-slate-200 border-t-blue-600 rounded-b-md rounded-tr-md shadow-sm">
-        <div className="overflow-auto max-h-[calc(100vh-280px)] custom-scrollbar bg-white/20">
+    <div className="flex flex-col h-full antialiased pt-0 bg-white">
+      {/* Table Wrapper: white card with subtle border and shadow */}
+      <div className="relative overflow-hidden border border-slate-100 rounded-md shadow-sm">
+        <div className="overflow-auto max-h-[calc(100vh-280px)] custom-scrollbar">
           <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
             <colgroup>
               <col style={{ width: INDEX_COL_WIDTH }} />
@@ -115,8 +115,8 @@ export function StandardReportView({
               {/* Main Header Row */}
               <TableRow className="hover:bg-transparent border-0">
                 {/* Index Header */}
-                <TableHead className="sticky left-0 z-50 bg-[#2f394e] border-r border-slate-600/50 text-center py-4 px-2">
-                  <span className="text-xs font-black text-slate-300 uppercase tracking-widest">#</span>
+                <TableHead className="sticky left-0 z-50 bg-slate-800 border-r border-slate-700 text-center py-4 px-2">
+                  <span className="text-xs font-black text-white uppercase tracking-widest">#</span>
                 </TableHead>
 
                 {filteredColumns.map((col: any) => {
@@ -129,14 +129,14 @@ export function StandardReportView({
                       key={col.id}
                       onClick={() => handleSort(col.id)}
                       className={cn(
-                        "group relative border-r border-slate-600/50 transition-colors cursor-pointer select-none px-4 py-4 bg-[#2f394e]",
-                        isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.1)]",
-                        isActive && "bg-[#252d3e]"
-                      )}
+                          "group relative border-r border-slate-700 transition-colors cursor-pointer select-none px-4 py-4 bg-slate-800",
+                          isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.1)]",
+                          isActive && "bg-slate-900"
+                        )}
                       style={isSticky ? { left: `${left}px` } : undefined}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-black uppercase tracking-widest text-slate-100 whitespace-nowrap">
+                        <span className="text-sm font-black uppercase tracking-widest text-white whitespace-nowrap">
                           {col.label}
                         </span>
 
@@ -165,7 +165,7 @@ export function StandardReportView({
 
               {/* Sub-Header Row: Estimates / Duration / Types */}
               <TableRow className="hover:bg-transparent border-0">
-                <TableHead className="sticky left-0 z-50 bg-[#38435a] border-r border-slate-600/50 h-7" />
+                <TableHead className="sticky left-0 z-50 bg-slate-700 border-r border-slate-700 h-7" />
                 {filteredColumns.map((col: any) => {
                   const isSticky = stickyColumnIds.has(col.id);
                   const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
@@ -190,7 +190,7 @@ export function StandardReportView({
                     <TableHead
                       key={`sub-${col.id}`}
                       className={cn(
-                        "text-[9px] font-bold uppercase tracking-widest text-center border-r border-slate-600/50 px-2 h-7 bg-[#38435a] text-slate-400",
+                        "text-[9px] font-bold uppercase tracking-widest text-center border-r border-slate-700 px-2 h-7 bg-slate-700 text-slate-200",
                         isSticky && "sticky z-40 shadow-[2px_0_4px_rgba(0,0,0,0.1)]"
                       )}
                       style={isSticky ? { left: `${left}px` } : undefined}
@@ -262,7 +262,7 @@ export function StandardReportView({
       </div>
 
       {/* Pagination Footer */}
-      <div className="flex items-center justify-between py-4">
+      <div className="flex items-center justify-between p-4">
         {/* Left Stats Info */}
         <div className="text-sm text-slate-500 font-medium">
             Showing <span className="font-semibold text-slate-700">{((currentPage - 1) * rowsPerPage) + 1}</span> to <span className="font-semibold text-slate-700">{Math.min(currentPage * rowsPerPage, allTasks.length)}</span> of <span className="font-semibold text-slate-700">{allTasks.length}</span> entries

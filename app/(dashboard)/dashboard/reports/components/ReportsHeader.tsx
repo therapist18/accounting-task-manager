@@ -46,7 +46,8 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
       "border-r border-slate-200 bg-[#FAFAFC] flex flex-col max-h-screen shrink-0 transition-all duration-300 ease-in-out z-20",
       isCollapsed ? "w-[72px]" : "w-[280px]"
     )}>
-      {/* Header */}
+    <div className="border rounded-lg shadow-md m-4 flex flex-col h-full overflow-hidden">
+        {/* Header */}
       <div className={cn(
         "px-6 py-6 flex items-center shrink-0 border-b border-slate-200 bg-white",
         isCollapsed ? "justify-center" : "justify-between"
@@ -77,7 +78,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
               placeholder="Search department..."
               value={sidebarSearch}
               onChange={e => setSidebarSearch(e.target.value)}
-              className="w-full pl-10 pr-8 h-10 text-[13px] rounded-full border border-slate-300 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-400"
+              className="w-full pl-10 pr-8 h-10 text-[11px] rounded-full border border-slate-300 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-400"
             />
             {sidebarSearch && (
               <button onClick={() => setSidebarSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
@@ -99,7 +100,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
                 key={dept.id}
                 onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
                 className={cn(
-                  "w-11 h-11 mx-auto flex items-center justify-center rounded-full text-[12px] font-bold transition-all mt-3 border",
+                  "w-11 h-11 mx-auto flex items-center justify-center rounded-full text-[11px] font-bold transition-all mt-3 border",
                   isActive
                     ? "bg-blue-600 text-white border-blue-600"
                     : "bg-white text-slate-400 border-slate-200 hover:border-blue-300"
@@ -128,7 +129,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
                     {getInitials(dept.name)}
                   </div>
                   <span className={cn(
-                    "text-[12px] font-semibold uppercase tracking-wider truncate",
+                    "text-[11px] font-semibold uppercase tracking-wider truncate",
                     isActive ? "text-slate-900" : "text-slate-600"
                   )}>
                     {dept.name}
@@ -142,7 +143,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
                   <button
                     onClick={() => setActiveSubDeptIds([])}
                     className={cn(
-                      "w-full text-left px-8 py-2.5 text-[13px] font-medium transition-all flex justify-between items-center",
+                      "w-full text-left px-8 py-2.5 text-[11px] font-medium transition-all flex justify-between items-center",
                       activeSubDeptIds.length === 0
                         ? "bg-blue-50/80 text-blue-700"
                         : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
@@ -160,7 +161,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
                         key={sub.id}
                         onClick={() => toggleSubDept(id)}
                         className={cn(
-                          "w-full text-left px-8 py-2.5 text-[13px] font-medium transition-all truncate flex justify-between items-center",
+                          "w-full text-left px-8 py-2.5 text-[11px] font-medium transition-all truncate flex justify-between items-center",
                           isSelected
                             ? "bg-blue-50/80 text-blue-700"
                             : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
@@ -177,6 +178,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
           );
         })}
       </div>
+    </div>
     </div>
   );
 }
@@ -321,7 +323,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                 key={p.id}
                 onClick={() => setActivePerspective(p.id)}
                 className={cn(
-                  "h-8 px-4 text-[12px] font-bold rounded-full transition-all flex items-center gap-2 ",
+                  "h-8 px-4 text-[11px] font-bold rounded-full transition-all flex items-center gap-2 ",
                   activePerspective === p.id
                     ? "bg-white text-blue-600 shadow-sm"
                     : "text-slate-500 hover:text-slate-800"
@@ -433,7 +435,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
       {(isOfficer || isManager) && (
         <div className="px-8 pb-3 flex flex-wrap items-center gap-1.5">
           <div className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest mr-1 shrink-0",
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase font-bold mr-1 shrink-0",
             isOfficer ? "bg-blue-50 text-blue-600 border border-blue-100" : "bg-violet-50 text-violet-600 border border-violet-100"
           )}>
             {isOfficer ? <Shield className="h-3 w-3" /> : <User className="h-3 w-3" />}
@@ -443,7 +445,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
           <button
             onClick={() => setTab('all')}
             className={cn(
-              "h-10 px-6 py-2 rounded-full text-[11.5px] font-bold transition-all border flex items-center gap-1.5",
+              "h-10 px-6 py-2 rounded-full text-[11px] font-bold transition-all border flex items-center gap-1.5",
               currentActive === 'all'
                 ? "bg-slate-800 border-slate-800 text-white shadow-sm"
                 : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
@@ -467,7 +469,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                 key={p.id}
                 onClick={() => setTab(isActive ? 'all' : p.id.toString())}
                 className={cn(
-                  "h-10 px-6 py-2 rounded-full text-[11.5px] font-bold transition-all border flex items-center gap-1.5",
+                  "h-10 px-6 py-2 rounded-full text-[11px] font-bold transition-all border flex items-center gap-1.5",
                   isActive
                     ? (isOfficer ? "bg-blue-600 border-blue-600 text-white shadow-sm" : "bg-violet-600 border-violet-600 text-white shadow-sm")
                     : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
@@ -489,7 +491,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
             <button
               onClick={() => setTab(currentActive === '__unallocated__' ? 'all' : '__unallocated__')}
               className={cn(
-                "h-10 px-3.5 rounded-full text-[11.5px] font-bold transition-all border flex items-center gap-1.5",
+                "h-10 px-3.5 rounded-full text-[11px] font-bold transition-all border flex items-center gap-1.5",
                 currentActive === '__unallocated__'
                   ? "bg-red-600 border-red-600 text-white shadow-sm"
                   : "bg-red-50 border-red-100 text-red-600 hover:bg-red-100"
