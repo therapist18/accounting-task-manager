@@ -32,15 +32,14 @@ const DataCell = ({ val, isMissing }: { val: React.ReactNode, isMissing: boolean
     <Tooltip>
       <TooltipTrigger asChild>
         <div className={cn(
-          "block w-full truncate text-[12px] cursor-default leading-relaxed",
-          isMissing ? "text-red-500 font-semibold" : "text-slate-600 font-medium"
+          "block w-full truncate text-sm cursor-default leading-snug",
+          isMissing ? "text-red-500 font-semibold" : "text-slate-700 font-medium"
         )}>
           {val}
         </div>
       </TooltipTrigger>
-      {/* Tooltip only shows if there's actual text and it isn't just the word 'Missing' */}
       {val && val !== 'Missing' && (
-         <TooltipContent side="top" className="max-w-sm bg-slate-800 text-white border-none shadow-xl text-[11px] rounded-lg px-3 py-2 z-[100] break-words">
+         <TooltipContent side="top" className="max-w-sm bg-slate-800 text-white border-none shadow-xl text-sm rounded-lg px-3 py-2 z-[100] break-words">
           {val}
         </TooltipContent>
       )}
@@ -100,10 +99,10 @@ export function StandardReportView({
   const totalPages = Math.max(1, Math.ceil(allTasks.length / rowsPerPage));
 
   return (
-    <div className="flex flex-col bg-white/80 h-full antialiased p-8 pt-0">
+    <div className="flex flex-col bg-white/20 h-full antialiased p-8 pt-0">
       {/* Table Wrapper (No top border so it naturally connects to the active tab above it) */}
       <div className="relative overflow-hidden border border-slate-200 border-t-blue-600 rounded-b-md rounded-tr-md shadow-sm">
-        <div className="overflow-auto max-h-[calc(100vh-280px)] custom-scrollbar bg-white/80">
+        <div className="overflow-auto max-h-[calc(100vh-280px)] custom-scrollbar bg-white/20">
           <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
             <colgroup>
               <col style={{ width: INDEX_COL_WIDTH }} />
@@ -116,10 +115,10 @@ export function StandardReportView({
               {/* Main Header Row */}
               <TableRow className="hover:bg-transparent border-0">
                 {/* Index Header */}
-                <TableHead className="sticky left-0 z-50 bg-[#2f394e] border-r border-slate-600/50 text-center py-3 px-2">
-                  <span className="text-[11px] font-semibold text-slate-200 uppercase tracking-wider">#</span>
+                <TableHead className="sticky left-0 z-50 bg-[#2f394e] border-r border-slate-600/50 text-center py-4 px-2">
+                  <span className="text-xs font-black text-slate-300 uppercase tracking-widest">#</span>
                 </TableHead>
-                
+
                 {filteredColumns.map((col: any) => {
                   const isSticky = stickyColumnIds.has(col.id);
                   const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
@@ -130,14 +129,14 @@ export function StandardReportView({
                       key={col.id}
                       onClick={() => handleSort(col.id)}
                       className={cn(
-                        "group relative border-r border-slate-600/50 transition-colors cursor-pointer select-none px-4 py-3 bg-[#2f394e]",
+                        "group relative border-r border-slate-600/50 transition-colors cursor-pointer select-none px-4 py-4 bg-[#2f394e]",
                         isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.1)]",
                         isActive && "bg-[#252d3e]"
                       )}
                       style={isSticky ? { left: `${left}px` } : undefined}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-100 whitespace-nowrap">
+                        <span className="text-sm font-black uppercase tracking-widest text-slate-100 whitespace-nowrap">
                           {col.label}
                         </span>
 
@@ -166,7 +165,7 @@ export function StandardReportView({
 
               {/* Sub-Header Row: Estimates / Duration / Types */}
               <TableRow className="hover:bg-transparent border-0">
-                <TableHead className="sticky left-0 z-50 bg-[#3a455a] border-r border-slate-600/50 h-7" />
+                <TableHead className="sticky left-0 z-50 bg-[#38435a] border-r border-slate-600/50 h-7" />
                 {filteredColumns.map((col: any) => {
                   const isSticky = stickyColumnIds.has(col.id);
                   const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
@@ -191,7 +190,7 @@ export function StandardReportView({
                     <TableHead
                       key={`sub-${col.id}`}
                       className={cn(
-                        "text-[9px] font-semibold uppercase tracking-widest text-center border-r border-slate-600/50 px-2 h-7 bg-[#3a455a] text-slate-300",
+                        "text-[9px] font-bold uppercase tracking-widest text-center border-r border-slate-600/50 px-2 h-7 bg-[#38435a] text-slate-400",
                         isSticky && "sticky z-40 shadow-[2px_0_4px_rgba(0,0,0,0.1)]"
                       )}
                       style={isSticky ? { left: `${left}px` } : undefined}
@@ -209,13 +208,13 @@ export function StandardReportView({
                   return (
                     <TableRow
                       key={task.id}
-                      className="group border-0 hover:bg-slate-50/80 transition-colors bg-white/80"
+                      className="group border-0 hover:bg-blue-50/30 transition-colors bg-white"
                     >
                       {/* Index Cell */}
                       <TableCell className={cn(
-                        "sticky left-0 z-20 border-r border-b border-slate-200 text-center py-2.5 bg-white/80 group-hover:bg-slate-50",
+                        "sticky left-0 z-20 border-r border-b border-slate-100 text-center py-3 bg-white group-hover:bg-blue-50/40",
                       )}>
-                        <span className="text-[11px] font-medium text-slate-400 group-hover:text-slate-600 transition-colors">
+                        <span className="text-sm font-semibold text-slate-400 group-hover:text-slate-600 transition-colors">
                           {((currentPage - 1) * rowsPerPage) + idx + 1}
                         </span>
                       </TableCell>
@@ -224,7 +223,7 @@ export function StandardReportView({
                       {filteredColumns.map((col: any) => {
                         const isSticky = stickyColumnIds.has(col.id);
                         const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
-                        
+
                         const val = safeRender(renderCellValue(task, col));
                         const isMissing = typeof val === 'string' && val.toLowerCase() === 'missing';
 
@@ -232,8 +231,8 @@ export function StandardReportView({
                           <TableCell
                             key={col.id}
                             className={cn(
-                              "px-4 py-2 border-r border-b border-slate-200 transition-colors max-w-0 overflow-hidden", // max-w-0 forces truncation inside table-fixed
-                              isSticky ? "sticky z-20 shadow-[2px_0_4px_rgba(0,0,0,0.02)] bg-white/80 group-hover:bg-slate-50" : "bg-white/80 group-hover:bg-transparent"
+                              "px-4 py-3 border-r border-b border-slate-100 transition-colors max-w-0 overflow-hidden",
+                              isSticky ? "sticky z-20 shadow-[2px_0_4px_rgba(0,0,0,0.02)] bg-white group-hover:bg-blue-50/40" : "bg-white group-hover:bg-blue-50/30"
                             )}
                             style={isSticky ? { left: `${left}px` } : undefined}
                           >
@@ -252,7 +251,7 @@ export function StandardReportView({
                         <SearchX size={24} className="text-slate-400" />
                       </div>
                       <p className="text-[14px] font-semibold text-slate-700">No records found</p>
-                      <p className="text-[12px] mt-1 text-slate-500">Adjust your filters to see more results</p>
+                      <p className="text-sm mt-1 text-slate-500">Adjust your filters to see more results</p>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -265,20 +264,20 @@ export function StandardReportView({
       {/* Pagination Footer */}
       <div className="flex items-center justify-between py-4">
         {/* Left Stats Info */}
-        <div className="text-[12px] text-slate-500 font-medium">
+        <div className="text-sm text-slate-500 font-medium">
             Showing <span className="font-semibold text-slate-700">{((currentPage - 1) * rowsPerPage) + 1}</span> to <span className="font-semibold text-slate-700">{Math.min(currentPage * rowsPerPage, allTasks.length)}</span> of <span className="font-semibold text-slate-700">{allTasks.length}</span> entries
         </div>
         
         {/* Right Controls */}
         <div className="flex items-center gap-5">
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Rows:</span>
+            <span className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Rows:</span>
             <Select value={String(rowsPerPage)} onValueChange={(v) => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
-              <SelectTrigger className="w-[70px] h-8 rounded-md border-slate-200 bg-white/80 text-[12px] font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 shadow-sm">
+              <SelectTrigger className="w-[70px] h-8 rounded-md border-slate-200 bg-white/20 text-sm font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 shadow-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="rounded-md">
-                {[10, 25, 50, 100].map(s => <SelectItem key={s} value={String(s)} className="text-[12px]">{s}</SelectItem>)}
+                {[10, 25, 50, 100].map(s => <SelectItem key={s} value={String(s)} className="text-sm">{s}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -291,7 +290,7 @@ export function StandardReportView({
               <ChevronLeft size={14} />
             </PaginationButton>
             
-            <div className="px-3 py-1 rounded-md text-[12px] font-semibold text-slate-700 min-w-[32px] text-center bg-blue-50 border border-blue-200 mx-1">
+            <div className="px-3 py-1 rounded-md text-sm font-semibold text-slate-700 min-w-[32px] text-center bg-blue-50 border border-blue-200 mx-1">
               {currentPage}
             </div>
 
@@ -314,7 +313,7 @@ const PaginationButton = ({ children, onClick, disabled }: any) => (
         variant="outline" 
         size="icon" 
         className={cn(
-          "h-8 w-8 rounded-md border-slate-200 bg-white/80 text-slate-600 transition-all shadow-sm",
+          "h-8 w-8 rounded-md border-slate-200 bg-white/20 text-slate-600 transition-all shadow-sm",
           disabled ? "opacity-40 cursor-not-allowed bg-slate-50 shadow-none" : "hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50"
         )} 
         onClick={onClick} 

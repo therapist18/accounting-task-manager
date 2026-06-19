@@ -2,23 +2,14 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { useReactTable, getCoreRowModel, type ColumnDef, type ColumnSizingState } from "@tanstack/react-table";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ChevronDown, Filter, RotateCcw, X, Download, Search, Send, ChevronRight, ChevronLeft, Plus, Minus, ArrowUpDown, SearchX, ChevronsLeft, ChevronsRight, Shield, User, Clock, Sparkles, AlertCircle, ListChecks, Check, Layers, Settings2, TableProperties, LayoutGrid, Building2, Eye } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  ChevronDown, Filter, RotateCcw, X, Download,
-  Search, Send, ChevronRight, ChevronLeft,
-  Plus, Minus, ArrowUpDown, SearchX, ChevronsLeft, ChevronsRight
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-
-// ─── Sidebar Navigation ───────────────────────────────────────────────────────
+import { ReportColumnVisibilityDialog } from "./ReportColumnVisibilityDialog";
 
 interface ReportsSidebarProps {
   departments: any[];
@@ -31,13 +22,8 @@ interface ReportsSidebarProps {
   onToggleCollapse?: () => void;
 }
 
-export function ReportsSidebar({
-  departments, activeDeptId, setActiveDeptId,
-  activeSubDepartments, activeSubDeptIds, setActiveSubDeptIds,
-  isCollapsed = false, onToggleCollapse,
-}: ReportsSidebarProps) {
+export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, activeSubDepartments, activeSubDeptIds, setActiveSubDeptIds, isCollapsed = false, onToggleCollapse }: ReportsSidebarProps) {
   const [sidebarSearch, setSidebarSearch] = React.useState("");
-
   const toggleSubDept = (id: string) => {
     setActiveSubDeptIds(
       activeSubDeptIds.includes(id)
@@ -46,11 +32,14 @@ export function ReportsSidebar({
     );
   };
 
+  const getInitials = (name: string) => {
+    if (!name) return "";
+    return name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  };
+
   const filteredDepartments = sidebarSearch.trim()
     ? departments.filter(d => d.name?.toLowerCase().includes(sidebarSearch.toLowerCase()))
     : departments;
-
-  const filteredSubDepts = activeSubDepartments;
 
   return (
     <div className={cn(
@@ -59,13 +48,13 @@ export function ReportsSidebar({
     )}>
       {/* Header */}
       <div className={cn(
-        "px-6 py-6 flex items-center shrink-0 border-b border-slate-200 bg-white/80",
+        "px-6 py-6 flex items-center shrink-0 border-b border-slate-200 bg-white",
         isCollapsed ? "justify-center" : "justify-between"
       )}>
         {!isCollapsed && (
           <div className="flex flex-col gap-1">
-            <h2 className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest leading-tight">Departments</h2>
-            <span className="text-[12px] text-slate-400 font-medium">Showing {filteredDepartments.length} of {departments.length}</span>
+            <h2 className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest leading-tight">Workspace</h2>
+            <span className="text-[14px] text-slate-900 font-bold">Departments</span>
           </div>
         )}
         {onToggleCollapse && (
@@ -78,9 +67,9 @@ export function ReportsSidebar({
         )}
       </div>
 
-      {/* Search Input (No Filter Button to reduce noise) */}
+      {/* Search Input */}
       {!isCollapsed && (
-        <div className="p-4 bg-white/80 border-b border-slate-200 shrink-0">
+        <div className="p-4 bg-white border-b border-slate-200 shrink-0">
           <div className="relative group">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <input
@@ -88,7 +77,7 @@ export function ReportsSidebar({
               placeholder="Search department..."
               value={sidebarSearch}
               onChange={e => setSidebarSearch(e.target.value)}
-              className="w-full pl-10 pr-8 h-10 text-[13px] rounded-full border border-slate-300 focus:bg-white/80 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-400"
+              className="w-full pl-10 pr-8 h-10 text-[13px] rounded-full border border-slate-300 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-400"
             />
             {sidebarSearch && (
               <button onClick={() => setSidebarSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
@@ -100,7 +89,7 @@ export function ReportsSidebar({
       )}
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto bg-white/80 custom-scrollbar pb-6">
+      <div className="flex-1 overflow-y-auto bg-white custom-scrollbar pb-6">
         {filteredDepartments.map((dept) => {
           const isActive = activeDeptId === dept.id.toString();
 
@@ -112,53 +101,58 @@ export function ReportsSidebar({
                 className={cn(
                   "w-11 h-11 mx-auto flex items-center justify-center rounded-full text-[12px] font-bold transition-all mt-3 border",
                   isActive
-                    ? "bg-blue-50 text-blue-600 border-blue-200"
-                    : "bg-white/80 text-slate-400 border-slate-200 hover:border-blue-300"
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-white text-slate-400 border-slate-200 hover:border-blue-300"
                 )}
                 title={dept.name}
               >
-                {dept.name.substring(0, 2).toUpperCase()}
+                {getInitials(dept.name)}
               </button>
             );
           }
 
           return (
             <div key={dept.id} className="border-b border-slate-100 last:border-none">
-              {/* Department Item */}
               <button
                 onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
                 className={cn(
                   "w-full flex items-center justify-between px-6 py-4 transition-all text-left",
-                  isActive ? "bg-slate-50" : "hover:bg-slate-50"
+                  isActive ? "bg-slate-50 border-l-4 border-blue-600" : "hover:bg-slate-50 border-l-4 border-transparent"
                 )}
               >
-                <span className={cn(
-                  "text-[12px] font-semibold uppercase tracking-wider truncate pr-4",
-                  isActive ? "text-slate-900" : "text-slate-600"
-                )}>
-                  {dept.name}
-                </span>
+                <div className="flex items-center gap-3">
+                  <div className={cn(
+                    "h-7 w-7 rounded flex items-center justify-center text-[10px] font-bold",
+                    isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-500"
+                  )}>
+                    {getInitials(dept.name)}
+                  </div>
+                  <span className={cn(
+                    "text-[12px] font-semibold uppercase tracking-wider truncate",
+                    isActive ? "text-slate-900" : "text-slate-600"
+                  )}>
+                    {dept.name}
+                  </span>
+                </div>
                 {isActive && <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
               </button>
 
-              {/* Sub-department List (Cleaned up, no checkboxes, highlighted selection) */}
               {isActive && activeSubDepartments.length > 0 && (
                 <div className="bg-[#FAFAFC] border-y border-slate-100 py-2 flex flex-col">
-                  {/* Select All Option */}
                   <button
                     onClick={() => setActiveSubDeptIds([])}
                     className={cn(
-                      "w-full text-left px-8 py-2.5 text-[13px] font-medium transition-all",
+                      "w-full text-left px-8 py-2.5 text-[13px] font-medium transition-all flex justify-between items-center",
                       activeSubDeptIds.length === 0
                         ? "bg-blue-50/80 text-blue-700"
                         : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                     )}
                   >
-                    All Sub-units
+                    <span>All Sub-units</span>
+                    {activeSubDeptIds.length === 0 && <Check className="h-3 w-3" />}
                   </button>
 
-                  {/* Individual Sub-units */}
-                  {filteredSubDepts.map((sub) => {
+                  {activeSubDepartments.map((sub) => {
                     const id = sub.id.toString();
                     const isSelected = activeSubDeptIds.includes(id);
                     return (
@@ -166,13 +160,14 @@ export function ReportsSidebar({
                         key={sub.id}
                         onClick={() => toggleSubDept(id)}
                         className={cn(
-                          "w-full text-left px-8 py-2.5 text-[13px] font-medium transition-all truncate",
+                          "w-full text-left px-8 py-2.5 text-[13px] font-medium transition-all truncate flex justify-between items-center",
                           isSelected
                             ? "bg-blue-50/80 text-blue-700"
                             : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                         )}
                       >
-                        {sub.name}
+                        <span className="truncate">{sub.name}</span>
+                        {isSelected && <Check className="h-3 w-3" />}
                       </button>
                     );
                   })}
@@ -186,75 +181,95 @@ export function ReportsSidebar({
   );
 }
 
-// ─── Reports Header ──────────────────────────────────────────────────────────
-
-export function ReportsHeader({
-  activeReport, setIsReportDialogOpen, view, setView, handleSendReport,
-  activeDepartment, activeSubDepartments, activeSubDeptIds,
-  allTasksCount, wipTasksCount, writeUpCompletedCount
-}: any) {
+export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setView, handleSendReport, activeDepartment, activeSubDepartments, activeSubDeptIds, allTasksCount, wipTasksCount, writeUpCompletedCount, columns, visibleColumnIds, setVisibleColumnIds, showTimeTrackingColumns, setShowTimeTrackingColumns, showDocRequirementsColumns, setShowDocRequirementsColumns }: any) {
 
   const selectedSubDeptText = React.useMemo(() => {
-    if (activeSubDeptIds.length === 0) return "All";
+    if (activeSubDeptIds.length === 0) return "All Sub-units";
     const names = activeSubDeptIds.map(id => activeSubDepartments.find((s: any) => s.id.toString() === id)?.name).filter(Boolean);
+    if (names.length === 1) return names[0];
     if (names.length <= 2) return names.join(", ");
     return `${names[0]} +${names.length - 1}`;
   }, [activeSubDeptIds, activeSubDepartments]);
 
   return (
-    <div className="border-b border-slate-200 bg-white/80 px-8 py-6 antialiased flex flex-col justify-center">
+    <div className="border-b border-slate-200 bg-white px-8 py-6 antialiased flex flex-col justify-center">
       <div className="flex items-center justify-between">
-
-        {/* LEFT: Context Header */}
-        <div onClick={() => setIsReportDialogOpen(true)} className="group cursor-pointer min-w-0 flex flex-col gap-1">
-          <h1 className="text-[18px] font-semibold text-slate-800 uppercase tracking-wide truncate group-hover:text-blue-600 transition-colors">
+        <div onClick={() => setIsReportDialogOpen(true)} className="group cursor-pointer min-w-0 flex flex-col gap-1.5">
+          <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight truncate group-hover:text-blue-600 transition-colors leading-none">
             {activeReport?.name || "SELECT REPORT"}
           </h1>
-          <div className="flex items-center text-[12px] text-slate-500 font-medium">
-            <span>{activeDepartment?.name || "Global"}</span>
-            <span className="mx-2 text-slate-300">-</span>
-            <span>Sub-units: {selectedSubDeptText}</span>
-            <span className="mx-2 text-slate-300">-</span>
-            <span>Total: {allTasksCount}</span>
-            <span className="mx-2 text-slate-300">-</span>
-            <span>WIP: {wipTasksCount}</span>
-            <span className="mx-2 text-slate-300">-</span>
-            <span>Done: {writeUpCompletedCount}</span>
+          <div className="flex items-center text-[12px] text-slate-500 font-semibold gap-1">
+            <Building2 className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+            <span className="text-blue-600 font-bold">{activeDepartment?.name || "Global"}</span>
+            <span className="text-slate-300 mx-0.5">/</span>
+            <span className="truncate text-slate-500">{selectedSubDeptText}</span>
           </div>
         </div>
 
-        {/* RIGHT: High Level Actions */}
-        <div className="flex items-center gap-4 shrink-0">
+        <div className="flex items-center gap-3 shrink-0">
 
-          {/* Top Level View Toggles (Uniform pill design) */}
-          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-full border border-slate-200">
+          <ReportColumnVisibilityDialog
+            columns={columns}
+            visibleColumnIds={visibleColumnIds}
+            setVisibleColumnIds={setVisibleColumnIds}
+            showTimeTrackingColumns={showTimeTrackingColumns}
+            setShowTimeTrackingColumns={setShowTimeTrackingColumns}
+            showDocRequirementsColumns={showDocRequirementsColumns}
+            setShowDocRequirementsColumns={setShowDocRequirementsColumns}
+          />
+
+          <div className="h-6 w-px bg-slate-200 mx-1" />
+
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-full border border-slate-200">
             <button onClick={() => setView('standard')} className={cn(
-              "px-5 py-2 text-[12px] font-semibold rounded-full transition-all border",
+              "px-4 py-1.5 text-[11px] font-bold rounded-full transition-all flex items-center gap-1.5",
               view === 'standard'
-                ? "bg-blue-600 border-blue-600 text-white shadow-sm"
-                : "bg-transparent border-transparent text-slate-600 hover:text-slate-900"
+                ? "bg-white text-blue-600 shadow-sm"
+                : "text-slate-500 hover:text-slate-900"
             )}>
-              Overall View
+              <LayoutGrid className="h-3 w-3" /> Overall View
             </button>
             <button onClick={() => setView('transposed')} className={cn(
-              "px-5 py-2 text-[12px] font-semibold rounded-full transition-all border",
+              "px-4 py-1.5 text-[11px] font-bold rounded-full transition-all flex items-center gap-1.5",
               view === 'transposed'
-                ? "bg-blue-600 border-blue-600 text-white shadow-sm"
-                : "bg-transparent border-transparent text-slate-600 hover:text-slate-900"
+                ? "bg-white text-blue-600 shadow-sm"
+                : "text-slate-500 hover:text-slate-900"
             )}>
-              Transposed
+              <TableProperties className="h-3 w-3" /> Transposed
             </button>
           </div>
 
           <div className="h-6 w-px bg-slate-200 mx-1" />
 
-          {/* Export Actions */}
-          <Button variant="outline" className="h-10 px-5 rounded-full border-slate-200 text-[12px] font-medium text-slate-700 bg-white/80 hover:bg-slate-50">
-            Export Template
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="h-10 px-6 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-[12px] font-bold gap-2 shadow-md transition-all">
+                <Send className="h-4 w-4" />
+                Send Report
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56 p-2 rounded-2xl shadow-xl border-slate-200">
+              <div className="px-3 py-2">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Officer Delivery</p>
+                <div className="flex gap-2 mt-2">
+                  <Button variant="outline" size="sm" className="flex-1 text-[10px] h-8 rounded-lg" onClick={() => handleSendReport('officer', 'excel')}>Excel</Button>
+                  <Button variant="outline" size="sm" className="flex-1 text-[10px] h-8 rounded-lg" onClick={() => handleSendReport('officer', 'pdf')}>PDF</Button>
+                </div>
+              </div>
+              <DropdownMenuSeparator />
+              <div className="px-3 py-2">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Manager Delivery</p>
+                <div className="flex gap-2 mt-2">
+                  <Button variant="outline" size="sm" className="flex-1 text-[10px] h-8 rounded-lg border-violet-200 hover:bg-violet-50 text-violet-700" onClick={() => handleSendReport('manager', 'excel')}>Excel</Button>
+                  <Button variant="outline" size="sm" className="flex-1 text-[10px] h-8 rounded-lg border-violet-200 hover:bg-violet-50 text-violet-700" onClick={() => handleSendReport('manager', 'pdf')}>PDF</Button>
+                </div>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-          <Button variant="outline" className="h-10 px-5 rounded-full border-emerald-600 text-[12px] font-semibold text-emerald-700 bg-emerald-50/30 hover:bg-emerald-50">
-            <Download className="h-4 w-4 mr-2 text-emerald-600" /> Bulk Export
+          <Button variant="outline" className="h-10 px-5 rounded-full border-emerald-600 text-[12px] font-bold text-emerald-700 bg-emerald-50/30 hover:bg-emerald-50">
+            <Download className="h-4 w-4 mr-2" /> Bulk Export
           </Button>
         </div>
       </div>
@@ -262,26 +277,22 @@ export function ReportsHeader({
   );
 }
 
-// ─── Primary Toolbar (Search & Filter Actions) ────────────────────────────────
-
-export function PersonFilterStrip({
-  searchQuery, setSearchQuery, activePerspective, setActivePerspective,
-  officerTaskCounts = { all: 0 }, taskManagerTaskCounts = { all: 0 },
-  availableOfficers = [], activeOfficerTab, setActiveOfficerTab,
-  availableTaskManagers = [], activeTaskManagerTab, setActiveTaskManagerTab,
-}: any) {
-
+export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspective, setActivePerspective, officerTaskCounts = { all: 0 }, taskManagerTaskCounts = { all: 0 }, allTasksCount = 0, clientTaskCounts = { all: 0 }, availableOfficers = [], activeOfficerTab, setActiveOfficerTab, officerFilterMode, setOfficerFilterMode, availableTaskManagers = [], activeTaskManagerTab, setActiveTaskManagerTab, taskManagerFilterMode, setTaskManagerFilterMode, refreshData, loading, activeClassId, setActiveClassId, activeSubClassId, setActiveSubClassId, activeSubDepartments, activeSubDeptIds }: any) {
   const isOfficer = activePerspective === 'officers';
   const isManager = activePerspective === 'managers';
   const currentData = isOfficer ? availableOfficers : availableTaskManagers;
   const currentActive = isOfficer ? activeOfficerTab : activeTaskManagerTab;
   const setTab = isOfficer ? setActiveOfficerTab : setActiveTaskManagerTab;
+  const counts = isOfficer ? officerTaskCounts : taskManagerTaskCounts;
+  const mode = isOfficer ? officerFilterMode : taskManagerFilterMode;
+  const setMode = isOfficer ? setOfficerFilterMode : setTaskManagerFilterMode;
+  const perspectiveCounts = { overview: allTasksCount || 0, officers: officerTaskCounts?.all || 0, managers: taskManagerTaskCounts?.all || 0, clients: clientTaskCounts?.all || 0 };
+  const currentSubDept = (activeSubDepartments || []).find((s: any) => s.id.toString() === (activeSubDeptIds[0] || activeSubDepartments?.[0]?.id.toString()));
 
   return (
-    <div className="bg-white/80 border-b border-slate-200 antialiased flex flex-col">
+    <div className="bg-white border-b border-slate-200 antialiased flex flex-col">
       {/* Tier 1: Toolbar Row */}
       <div className="px-8 py-4 flex items-center justify-between gap-4">
-
         {/* Left: Global Search */}
         <div className="relative group w-[320px]">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -289,7 +300,7 @@ export function PersonFilterStrip({
             placeholder="Search employee, ID, department..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full h-10 pl-11 pr-10 bg-white/80 border-slate-300 rounded-full text-[13px] font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
+            className="w-full h-10 pl-11 pr-10 bg-white border-slate-300 rounded-full text-[13px] font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
           />
           {searchQuery && (
             <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors">
@@ -299,10 +310,8 @@ export function PersonFilterStrip({
         </div>
 
         {/* Right: Actions */}
-        <div className="flex items-center gap-2.5 overflow-x-auto custom-scrollbar no-scrollbar">
-
-          {/* Perspective Toggles (Unified Segmented Control) */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-full border border-slate-200 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-0.5 bg-slate-100 p-1 rounded-full border border-slate-200 shrink-0">
             {[
               { id: 'overview', label: 'Overview' },
               { id: 'officers', label: 'Officers' },
@@ -312,111 +321,228 @@ export function PersonFilterStrip({
                 key={p.id}
                 onClick={() => setActivePerspective(p.id)}
                 className={cn(
-                  "h-8 px-4 text-[12px] font-semibold rounded-full transition-all",
+                  "h-8 px-4 text-[12px] font-bold rounded-full transition-all flex items-center gap-2 ",
                   activePerspective === p.id
-                    ? "bg-white/80 text-slate-800 shadow-sm"
+                    ? "bg-white text-blue-600 shadow-sm"
                     : "text-slate-500 hover:text-slate-800"
                 )}
               >
                 {p.label}
+                <span className={cn(
+                  "text-[10px] font-black tabular-nums px-1.5 py-0.5 rounded-full font-medium",
+                  activePerspective === p.id ? "bg-blue-50 text-blue-500" : "text-slate-400"
+                )}>
+                  {perspectiveCounts[p.id]}
+                </span>
               </button>
             ))}
           </div>
 
-          {/* Main Filter Toggle */}
+          <div className="h-6 w-px bg-slate-200 mx-2 shrink-0" />
+
+          {/* Mode Selector for Person Perspective */}
+          {(isOfficer || isManager) && (
+            <Select value={mode} onValueChange={setMode}>
+              <SelectTrigger className="w-44 h-10 bg-white border-slate-300 rounded-full text-sm font-bold shadow-sm">
+                <div className="flex items-center gap-2">
+                  <SelectValue />
+                </div>
+              </SelectTrigger>
+              <SelectContent className="rounded-2xl">
+                <SelectItem value="current">Current Assignments</SelectItem>
+                <SelectItem value="history">Historical Activity</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+
+          {/* Main Filter Dropdown (Class/Subclass logic) */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn(
+                  "h-10 px-5 rounded-full border-blue-500 text-[13px] font-semibold text-blue-600 bg-white hover:bg-blue-50 shrink-0",
+                  (activeClassId !== 'all') && "bg-blue-600 text-white hover:bg-blue-700 hover:text-white"
+                )}
+              >
+                <Filter className="h-4 w-4 mr-2" /> Filter
+                {(activeClassId !== 'all') && (
+                  <span className="ml-2 bg-white text-blue-600 rounded-full h-5 w-5 flex items-center justify-center text-[10px] font-black">!</span>
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72 p-4 rounded-2xl shadow-2xl border-slate-200">
+              <div className="flex items-center justify-between mb-4 px-1">
+                <span className="text-sm font-black text-slate-900 uppercase tracking-tight">Categorization</span>
+                <Sparkles className="h-4 w-4 text-blue-500" />
+              </div>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Task Class</label>
+                  <Select value={activeClassId} onValueChange={v => { setActiveClassId(v); setActiveSubClassId('all'); }}>
+                    <SelectTrigger className="h-10 rounded-xl font-bold border-slate-200 text-[13px]">
+                      <SelectValue placeholder="All Classes" />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl">
+                      <SelectItem value="all">All Classes</SelectItem>
+                      {currentSubDept?.classes?.map((cls: any) => (
+                        <SelectItem key={cls.id} value={cls.id.toString()}>{cls.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {activeClassId !== 'all' && (
+                  <div className="space-y-1.5 animate-in slide-in-from-top-2 duration-200">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Sub-Class</label>
+                    <Select value={activeSubClassId} onValueChange={setActiveSubClassId}>
+                      <SelectTrigger className="h-10 rounded-xl font-bold border-slate-200 text-[13px]">
+                        <SelectValue placeholder="All Sub-classes" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl">
+                        <SelectItem value="all">All Sub-classes</SelectItem>
+                        {currentSubDept?.classes?.find((c: any) => c.id.toString() === activeClassId)?.subClasses?.map((sc: any) => (
+                          <SelectItem key={sc.id} value={sc.id.toString()}>{sc.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <Button
+                  variant="ghost"
+                  className="w-full text-[11px] h-10 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl font-bold"
+                  onClick={() => { setActiveClassId('all'); setActiveSubClassId('all'); }}
+                >
+                  Reset Categorization
+                </Button>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <Button
             variant="outline"
-            className="h-10 px-5 rounded-full border-blue-500 text-[13px] font-semibold text-blue-600 bg-white/80 hover:bg-blue-50 shrink-0"
+            onClick={refreshData}
+            disabled={loading}
+            className="h-10 px-5 rounded-full border-slate-200 text-[13px] font-medium text-slate-700 bg-white hover:bg-slate-50 shrink-0"
           >
-            <Filter className="h-4 w-4 mr-2" /> Filter
-            <span className="ml-2 bg-blue-600 text-white rounded-full h-5 w-5 flex items-center justify-center text-[11px] font-bold leading-none">
-              1
-            </span>
+            <RotateCcw className={cn("h-4 w-4 mr-2 text-slate-400", loading && "animate-spin")} /> Refresh
           </Button>
-
-          <Button variant="outline" className="h-10 px-5 rounded-full border-slate-200 text-[13px] font-medium text-slate-700 bg-white/80 hover:bg-slate-50 shrink-0">
-            Select Filtered
-          </Button>
-
-          <Button variant="outline" className="h-10 px-5 rounded-full border-slate-200 text-[13px] font-medium text-slate-700 bg-white/80 hover:bg-slate-50 shrink-0">
-            Clear Selection
-          </Button>
-
-          <Button variant="outline" className="h-10 px-5 rounded-full border-slate-200 text-[13px] font-medium text-slate-700 bg-white/80 hover:bg-slate-50 shrink-0">
-            <RotateCcw className="h-4 w-4 mr-2 text-slate-400" /> Refresh
-          </Button>
-
-          <div className="h-6 w-px bg-slate-200 mx-2 shrink-0" />
         </div>
       </div>
 
-      {/* Tier 1.5: Dynamic Assignee Selection */}
+      {/* Tier 1.5: Assignee Pills with Counts */}
       {(isOfficer || isManager) && (
-        <div className="px-8 pb-4 flex flex-wrap items-center gap-2.5">
-          <span className="text-[12px] text-slate-400 mr-2 font-medium">Assignee Filter:</span>
+        <div className="px-8 pb-3 flex flex-wrap items-center gap-1.5">
+          <div className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest mr-1 shrink-0",
+            isOfficer ? "bg-blue-50 text-blue-600 border border-blue-100" : "bg-violet-50 text-violet-600 border border-violet-100"
+          )}>
+            {isOfficer ? <Shield className="h-3 w-3" /> : <User className="h-3 w-3" />}
+            {isOfficer ? "Officers" : "Managers"}
+          </div>
 
           <button
             onClick={() => setTab('all')}
             className={cn(
-              "h-8 px-4 rounded-full text-[12px] font-medium transition-all border",
+              "h-10 px-6 py-2 rounded-full text-[11.5px] font-bold transition-all border flex items-center gap-1.5",
               currentActive === 'all'
-                ? "bg-slate-700 border-slate-700 text-white shadow-sm"
-                : "bg-white/80 border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                ? "bg-slate-800 border-slate-800 text-white shadow-sm"
+                : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
             )}
           >
             All
+            <span className={cn(
+              "text-[10px] font-black tabular-nums font-medium",
+              currentActive === 'all' ? "text-white/60" : "text-slate-400"
+            )}>
+              {counts.all}
+            </span>
           </button>
 
           {currentData.map((p: any) => {
-            const displayName = p.full_name || p.name || p.username || `User ${p.id}`;
+            const displayName = p.displayName || p.full_name || p.name || `User ${p.id}`;
             const isActive = currentActive === p.id.toString();
+            const count = counts[p.id] || 0;
             return (
               <button
                 key={p.id}
-                onClick={() => setTab(p.id.toString())}
+                onClick={() => setTab(isActive ? 'all' : p.id.toString())}
                 className={cn(
-                  "h-8 px-4 rounded-full text-[12px] font-medium transition-all border",
+                  "h-10 px-6 py-2 rounded-full text-[11.5px] font-bold transition-all border flex items-center gap-1.5",
                   isActive
-                    ? "bg-slate-700 border-slate-700 text-white shadow-sm"
-                    : "bg-white/80 border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                    ? (isOfficer ? "bg-blue-600 border-blue-600 text-white shadow-sm" : "bg-violet-600 border-violet-600 text-white shadow-sm")
+                    : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
                 )}
               >
                 {displayName}
+                {count > 0 && (
+                  <span className={cn(
+                    "text-[10px] font-black tabular-nums font-medium bg-blue-500 text-white px-1.5 py-0.5 rounded-full"
+                  )}>
+                    {count}
+                  </span>
+                )}
               </button>
             );
           })}
+
+          {(counts.__unallocated__ ?? 0) > 0 && (
+            <button
+              onClick={() => setTab(currentActive === '__unallocated__' ? 'all' : '__unallocated__')}
+              className={cn(
+                "h-10 px-3.5 rounded-full text-[11.5px] font-bold transition-all border flex items-center gap-1.5",
+                currentActive === '__unallocated__'
+                  ? "bg-red-600 border-red-600 text-white shadow-sm"
+                  : "bg-red-50 border-red-100 text-red-600 hover:bg-red-100"
+              )}
+            >
+              <AlertCircle className="h-3 w-3" />
+              Unallocated
+              <span className={cn(
+                "text-[10px] font-black tabular-nums font-medium",
+                currentActive === '__unallocated__' ? "text-white/70" : "text-red-400"
+              )}>
+                {counts.__unallocated__}
+              </span>
+            </button>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// ─── Secondary Tabs (Status Filter Bar) ──────────────────────────────────────
+export function StatusFilterBar({ activeStatus, setActiveStatus, allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount }: any) {
+  const counts = { all: allTasksCount || 0, wip: wipTasksCount || 0, write_up_completed: writeUpCompletedCount || 0, endorsed: endorsedCount || 0, cancelled: cancelledCount || 0 };
+  const tabs = [
+    { id: 'all', label: 'All Tasks', color: 'bg-blue-600' },
+    { id: 'wip', label: 'WIP', color: 'bg-amber-500' },
+    { id: 'write_up_completed', label: 'Write-up Completed', color: 'bg-emerald-600' },
+    { id: 'endorsed', label: 'Endorsed', color: 'bg-violet-600' },
+  ];
 
-export function StatusFilterBar({ activeStatus, setActiveStatus }: any) {
-  // Styled as unified connected tabs matching the SaaS standard
   return (
-    <div className="px-8 pt-4 pb-0 flex items-center border-b border-slate-200 bg-[#FAFAFC] antialiased">
-      <div className="flex gap-2">
-        {[
-          { id: 'all', label: 'All Records' },
-          { id: 'wip', label: 'WIP Snapshot' },
-          { id: 'write_up_completed', label: 'Completed History' },
-          { id: 'endorsed', label: 'Endorsement View' },
-        ].map(s => {
+    <div className="px-8 pt-3 pb-0 flex items-center border-b border-slate-200 bg-[#FAFAFC] antialiased">
+      <div className="flex gap-1">
+        {tabs.map(s => {
           const isActive = activeStatus === s.id;
           return (
             <button
               key={s.id}
               onClick={() => setActiveStatus(s.id)}
               className={cn(
-                "h-10 px-6 text-[13px] font-semibold rounded-t-xl transition-all border border-b-0",
+                "h-10 px-5 text-[12px] font-semibold rounded-t-xl transition-all flex items-center gap-2.5 border-x border-t",
                 isActive
-                  ? "bg-blue-600 text-white border-blue-600"
+                  ? `${s.color} text-white border-transparent shadow-[0_-4px_12px_rgba(0,0,0,0.08)]`
                   : "bg-transparent text-slate-500 border-transparent hover:text-slate-800 hover:bg-slate-200/50"
               )}
             >
               {s.label}
+              <span className={cn(
+                "px-2 py-0.5 rounded-full text-[10px] font-black tabular-nums font-medium",
+                isActive ? "bg-white/25 text-white" : "bg-slate-200 text-slate-500"
+              )}>
+                {counts[s.id]}
+              </span>
             </button>
           );
         })}

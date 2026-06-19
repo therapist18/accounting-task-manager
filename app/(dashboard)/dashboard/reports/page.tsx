@@ -2530,7 +2530,7 @@ export default function ReportsPage() {
         />
 
         {/* Table Area */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden pt-6">
           {!activeReport ? (
             <div className="h-full flex flex-col items-center justify-center bg-white">
               <FileText className="h-10 w-10 mb-3 text-gray-300" />
