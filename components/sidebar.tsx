@@ -67,6 +67,7 @@ const navItems = [
             { title: "Letterheads", href: "/dashboard/letters/letterheads", permission: "letterheads.view" },
         ],
     },
+    { title: "CV Generator", href: "/dashboard/cv-generator", icon: FileText },
     { title: "Diary", href: "/dashboard/diary", icon: Calendar, permission: "diary.view" },
     {
         title: "BCL Task Diary",
