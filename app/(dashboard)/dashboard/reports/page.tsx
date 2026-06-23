@@ -68,24 +68,24 @@ const getElapsedMinutes = (from: Date | null, to: Date = new Date()): number | n
 const safeRender = (content: any) => {
   if (React.isValidElement(content)) return content;
   if (typeof content === 'string') {
-    if (content === 'N/A') return <span className="text-red-500">Missing</span>;
+    if (content === 'N/A') return <span className="text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded text-xs">Missing</span>;
     return content;
   }
   if (typeof content === 'number') return content;
-    if (content === null || content === undefined) return <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">—</span>;
+    if (content === null || content === undefined) return <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">—</span>;
   if (Array.isArray(content)) return content.map((c, i) => <React.Fragment key={i}>{safeRender(c)}</React.Fragment>);
   if (typeof content === 'object') {
     if ('status' in content) {
       const s = content.status;
       if (typeof s === 'string' || typeof s === 'number') {
-        if (s === 'N/A') return <span className="text-red-500">Missing</span>;
+        if (s === 'N/A') return <span className="text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded text-xs">Missing</span>;
         return s;
       }
       if (React.isValidElement(s)) return s;
       if (!s) return null;
       return JSON.stringify(s);
     }
-    return <span className="text-sm text-gray-500 truncate max-w-[100px] inline-block" title={JSON.stringify(content)}>{JSON.stringify(content)}</span>;
+    return <span className="text-sm text-slate-500 truncate max-w-[100px] inline-block" title={JSON.stringify(content)}>{JSON.stringify(content)}</span>;
   }
   return String(content);
 };
@@ -1297,7 +1297,7 @@ export default function ReportsPage() {
       if (!stage) return <span className="text-sm text-gray-400">—</span>;
 
       if (!checkStageApplicableForTask(stage, task)) {
-        return <span className="text-sm text-red-500">Missing</span>;
+        return <span className="text-sm text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded">Missing</span>;
       }
 
       const stageData = task.stages?.[col.stageId];
@@ -1448,7 +1448,7 @@ export default function ReportsPage() {
       if (!stage) return <span className="text-sm text-gray-400">—</span>;
 
       if (!checkStageApplicableForTask(stage, task)) {
-        return <span className="text-sm text-red-500">Missing</span>;
+        return <span className="text-sm text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded">Missing</span>;
       }
 
       if (col.isAutoAdded) {
@@ -1472,7 +1472,7 @@ export default function ReportsPage() {
           }
           if (foundValue) { foundDoc = linked; break; }
         }
-        if (!foundDoc) return <span className="text-sm text-red-500">Missing</span>;
+        if (!foundDoc) return <span className="text-sm text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded">Missing</span>;
         const display = isDateTimeField
           ? formatDateTimeForDisplay(foundValue)
           : isDateLike ? formatDateForDisplay(foundValue) : foundValue;
@@ -1482,11 +1482,11 @@ export default function ReportsPage() {
 
       const stageDocInfo = stage?.documents?.find((d: any) => d.kycId === col.kycId);
       if (!stageDocInfo) return <span className="text-sm text-gray-400">—</span>;
-      if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-red-500">Missing</span>;
+      if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded">Missing</span>;
 
       const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
-      if (!linked) return <span className="text-sm text-red-500">Missing</span>;
-      if (linked.indicator) return <span className="inline-flex items-center rounded-sm bg-red-50 text-red-600 border border-red-200 text-xs font-medium px-2 py-1">Indicator</span>;
+      if (!linked) return <span className="text-sm text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded">Missing</span>;
+      if (linked.indicator) return <span className="inline-flex items-center rounded-md bg-amber-50 text-amber-700 border border-amber-200 text-xs font-medium px-2 py-1">Indicator</span>;
 
       const isDateTimeField2 = col.fieldType === 'date_and_time' || col.fieldName === 'date_and_time';
       const isDateLike2 = col.fieldType === 'date' || col.fieldType === 'Date' || isDateTimeField2;
@@ -2437,10 +2437,10 @@ export default function ReportsPage() {
 
   if (reportLoading) {
     return (
-      <div className="flex-1 p-8 bg-gray-50 flex items-center justify-center min-h-screen">
+      <div className="flex-1 p-8 bg-slate-100 flex items-center justify-center min-h-screen">
         <div className="text-center space-y-4">
-          <Loader2 className="h-10 w-10 animate-spin text-gray-400 mx-auto" />
-          <p className="text-sm font-medium text-gray-500">Loading Reports...</p>
+          <Loader2 className="h-10 w-10 animate-spin text-slate-400 mx-auto" />
+          <p className="text-sm font-medium text-slate-500">Loading Reports...</p>
         </div>
       </div>
     );
@@ -2461,7 +2461,7 @@ export default function ReportsPage() {
       />
 
       {/* 2. Main Content Area */}
-      <div className="flex flex-col flex-1 overflow-hidden">
+      <div className="flex flex-col flex-1 overflow-hidden bg-slate-100">
         {/* Header Bar */}
         <ReportsHeader
           activeReport={activeReport}
@@ -2488,7 +2488,7 @@ export default function ReportsPage() {
           cancelledCount={cancelledCount}
         />
 
-       <div className="border rounded-lg shadow-md m-4">
+       <div className="border border-slate-200 rounded-lg shadow-sm m-4 bg-white">
          {/* Person Filter Strip */}
         <PersonFilterStrip
           activePerspective={activePerspective}
@@ -2533,18 +2533,18 @@ export default function ReportsPage() {
         {/* Table Area */}
         <div className="flex-1 overflow-hidden pt-6">
           {!activeReport ? (
-            <div className="h-full flex flex-col items-center justify-center bg-white">
-              <FileText className="h-10 w-10 mb-3 text-gray-300" />
-              <p className="text-sm font-medium text-gray-500">No Report Selected</p>
-              <p className="text-xs text-gray-400 mt-1">Select a report template to view data</p>
+            <div className="h-full flex flex-col items-center justify-center bg-white rounded-lg mx-4 shadow-sm border border-slate-200">
+              <FileText className="h-10 w-10 mb-3 text-slate-300" />
+              <p className="text-sm font-medium text-slate-600">No Report Selected</p>
+              <p className="text-xs text-slate-400 mt-1">Select a report template to view data</p>
               <Button size="sm" className="mt-4" onClick={() => setIsReportDialogOpen(true)}>
                 <Filter className="h-3.5 w-3.5 mr-1.5" />Select Report
               </Button>
             </div>
           ) : loading ? (
-            <div className="h-full flex flex-col items-center justify-center bg-white">
+            <div className="h-full flex flex-col items-center justify-center bg-white rounded-lg mx-4 shadow-sm border border-slate-200">
               <Loader2 className="h-8 w-8 animate-spin text-blue-500 mb-3" />
-              <p className="text-sm font-medium text-gray-500">Processing Report Data...</p>
+              <p className="text-sm font-medium text-slate-600">Processing Report Data...</p>
             </div>
           ) : view === 'standard' ? (
             <StandardReportView

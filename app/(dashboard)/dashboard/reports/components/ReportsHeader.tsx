@@ -43,10 +43,10 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
 
   return (
     <div className={cn(
-      "border-r border-slate-200 bg-[#FAFAFC] flex flex-col max-h-screen shrink-0 transition-all duration-300 ease-in-out z-20",
+      "border-r border-slate-200 bg-slate-100 flex flex-col max-h-screen shrink-0 transition-all duration-300 ease-in-out z-20",
       isCollapsed ? "w-[72px]" : "w-[280px]"
     )}>
-    <div className="border rounded-lg shadow-md m-4 flex flex-col h-full overflow-hidden">
+    <div className="border border-slate-200 rounded-lg shadow-sm m-4 flex flex-col h-full overflow-hidden bg-white">
         {/* Header */}
       <div className={cn(
         "px-6 py-6 flex items-center shrink-0 border-b border-slate-200 bg-white",
@@ -194,7 +194,7 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
   }, [activeSubDeptIds, activeSubDepartments]);
 
   return (
-    <div className="border-b border-slate-200 bg-white px-8 py-6 antialiased flex flex-col justify-center">
+    <div className="border-b border-slate-200 bg-slate-50 px-8 py-6 antialiased flex flex-col justify-center">
       <div className="flex items-center justify-between">
         <div onClick={() => setIsReportDialogOpen(true)} className="group cursor-pointer min-w-0 flex flex-col gap-1.5">
           <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight truncate group-hover:text-blue-600 transition-colors leading-none">
@@ -292,7 +292,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
   const currentSubDept = (activeSubDepartments || []).find((s: any) => s.id.toString() === (activeSubDeptIds[0] || activeSubDepartments?.[0]?.id.toString()));
 
   return (
-    <div className="bg-white border-b border-slate-200 antialiased flex flex-col">
+    <div className="bg-slate-50 border-b border-slate-200 antialiased flex flex-col">
       {/* Tier 1: Toolbar Row */}
       <div className="px-8 py-4 flex items-center justify-between gap-4">
         {/* Left: Global Search */}
@@ -516,14 +516,14 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
 export function StatusFilterBar({ activeStatus, setActiveStatus, allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount }: any) {
   const counts = { all: allTasksCount || 0, wip: wipTasksCount || 0, write_up_completed: writeUpCompletedCount || 0, endorsed: endorsedCount || 0, cancelled: cancelledCount || 0 };
   const tabs = [
-    { id: 'all', label: 'All Tasks', color: 'bg-blue-600' },
-    { id: 'wip', label: 'WIP', color: 'bg-amber-500' },
-    { id: 'write_up_completed', label: 'Write-up Completed', color: 'bg-emerald-600' },
-    { id: 'endorsed', label: 'Endorsed', color: 'bg-violet-600' },
+    { id: 'all', label: 'All Tasks', color: 'bg-blue-600', lightColor: 'bg-blue-100 text-blue-700' },
+    { id: 'wip', label: 'WIP', color: 'bg-amber-500', lightColor: 'bg-amber-100 text-amber-700' },
+    { id: 'write_up_completed', label: 'Write-up Completed', color: 'bg-emerald-600', lightColor: 'bg-emerald-100 text-emerald-700' },
+    { id: 'endorsed', label: 'Endorsed', color: 'bg-violet-600', lightColor: 'bg-violet-100 text-violet-700' },
   ];
 
   return (
-    <div className="px-8 pt-3 pb-0 flex items-center border-b border-slate-200 bg-[#FAFAFC] antialiased">
+    <div className="px-8 pt-3 pb-0 flex items-center border-b border-slate-200 bg-slate-100 antialiased">
       <div className="flex gap-1">
         {tabs.map(s => {
           const isActive = activeStatus === s.id;
@@ -535,13 +535,13 @@ export function StatusFilterBar({ activeStatus, setActiveStatus, allTasksCount, 
                 "h-10 px-5 text-[12px] font-semibold rounded-t-xl transition-all flex items-center gap-2.5 border-x border-t",
                 isActive
                   ? `${s.color} text-white border-transparent shadow-[0_-4px_12px_rgba(0,0,0,0.08)]`
-                  : "bg-transparent text-slate-500 border-transparent hover:text-slate-800 hover:bg-slate-200/50"
+                  : `bg-white text-slate-600 border-slate-200 hover:${s.lightColor}`
               )}
             >
               {s.label}
               <span className={cn(
                 "px-2 py-0.5 rounded-full text-[10px] font-black tabular-nums font-medium",
-                isActive ? "bg-white/25 text-white" : "bg-slate-200 text-slate-500"
+                isActive ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500"
               )}>
                 {counts[s.id]}
               </span>

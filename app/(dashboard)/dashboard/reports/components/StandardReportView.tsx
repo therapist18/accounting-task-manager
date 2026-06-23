@@ -10,9 +10,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Plus, Minus, ArrowUpDown, SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// --- Simplified Theming (Matching Image's uniform dark header) ---
-// We retain the function in case you need logical separation later, 
-// but visually they now share the clean, uniform SaaS aesthetic.
 const colBucket = (type: string) => {
   if (type === 'current_stage_age' || type === 'total_process_age') return 'duration';
   if (type === 'reference_requirement') return 'reference';
@@ -20,20 +17,17 @@ const colBucket = (type: string) => {
   return 'stage';
 };
 
-// ─── Main Data Table View ─────────────────────────────────────────────────────
-
 const DEFAULT_COL_WIDTH = 180;
 const MIN_COL_WIDTH = 80;
 const INDEX_COL_WIDTH = 56;
 
-// Reusable DataCell with built-in truncation and tooltip
 const DataCell = ({ val, isMissing }: { val: React.ReactNode, isMissing: boolean }) => (
   <TooltipProvider delayDuration={300}>
     <Tooltip>
       <TooltipTrigger asChild>
         <div className={cn(
           "block w-full truncate text-sm cursor-default leading-snug",
-          isMissing ? "text-red-500 font-semibold" : "text-slate-700 font-medium"
+          isMissing ? "text-rose-600 font-semibold bg-rose-50/80 px-1.5 py-0.5 rounded" : "text-slate-700 font-medium"
         )}>
           {val}
         </div>
@@ -59,7 +53,6 @@ export function StandardReportView({
   
   const stickyColumnIds = new Set(['task_id', 'task_passport_number', 'task_applicant_name']);
 
-  // Column definitions for Tanstack Table sizing logic
   const columnDefs = useMemo<ColumnDef<any>[]>(() => [
     { id: '__index__', size: INDEX_COL_WIDTH },
     ...filteredColumns.map((col: any) => ({
@@ -99,9 +92,9 @@ export function StandardReportView({
   const totalPages = Math.max(1, Math.ceil(allTasks.length / rowsPerPage));
 
   return (
-    <div className="flex flex-col h-full antialiased pt-0 bg-white">
+    <div className="flex flex-col h-full antialiased pt-0 bg-slate-50">
       {/* Table Wrapper: white card with subtle border and shadow */}
-      <div className="relative overflow-hidden border border-slate-100 rounded-md shadow-sm">
+      <div className="relative overflow-hidden border border-slate-200 rounded-lg shadow-sm bg-white">
         <div className="overflow-auto max-h-[calc(100vh-280px)] custom-scrollbar">
           <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
             <colgroup>
@@ -115,7 +108,7 @@ export function StandardReportView({
               {/* Main Header Row */}
               <TableRow className="hover:bg-transparent border-0">
                 {/* Index Header */}
-                <TableHead className="sticky left-0 z-50 bg-slate-800 border-r border-slate-700 text-center py-4 px-2">
+                <TableHead className="sticky left-0 z-50 bg-blue-600 border-r border-white text-center py-4 px-2">
                   <span className="text-xs font-black text-white uppercase tracking-widest">#</span>
                 </TableHead>
 
@@ -129,7 +122,7 @@ export function StandardReportView({
                       key={col.id}
                       onClick={() => handleSort(col.id)}
                       className={cn(
-                          "group relative border-r border-slate-700 transition-colors cursor-pointer select-none px-4 py-4 bg-slate-800",
+                          "group relative border-r border-white transition-colors cursor-pointer select-none px-4 py-4 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest",
                           isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.1)]",
                           isActive && "bg-slate-900"
                         )}
@@ -164,8 +157,8 @@ export function StandardReportView({
               </TableRow>
 
               {/* Sub-Header Row: Estimates / Duration / Types */}
-              <TableRow className="hover:bg-transparent border-0">
-                <TableHead className="sticky left-0 z-50 bg-slate-700 border-r border-slate-700 h-7" />
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="sticky left-0 z-50 bg-blue-800 border-r border-t border-white h-7" />
                 {filteredColumns.map((col: any) => {
                   const isSticky = stickyColumnIds.has(col.id);
                   const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
@@ -190,7 +183,7 @@ export function StandardReportView({
                     <TableHead
                       key={`sub-${col.id}`}
                       className={cn(
-                        "text-[9px] font-bold uppercase tracking-widest text-center border-r border-slate-700 px-2 h-7 bg-slate-700 text-slate-200",
+                        "text-[9px] font-bold uppercase tracking-widest text-center border-r border-t border-white px-2 h-7 bg-blue-800 text-slate-200",
                         isSticky && "sticky z-40 shadow-[2px_0_4px_rgba(0,0,0,0.1)]"
                       )}
                       style={isSticky ? { left: `${left}px` } : undefined}
@@ -208,11 +201,17 @@ export function StandardReportView({
                   return (
                     <TableRow
                       key={task.id}
-                      className="group border-0 hover:bg-blue-50/30 transition-colors bg-white"
+                      className={cn(
+                        "group border-0 transition-colors",
+                        idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
+                        "hover:bg-blue-50/40"
+                      )}
                     >
                       {/* Index Cell */}
                       <TableCell className={cn(
-                        "sticky left-0 z-20 border-r border-b border-slate-100 text-center py-3 bg-white group-hover:bg-blue-50/40",
+                        "sticky left-0 z-20 border-r border-b border-slate-200 text-center py-3",
+                        idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
+                        "group-hover:bg-blue-50/50",
                       )}>
                         <span className="text-sm font-semibold text-slate-400 group-hover:text-slate-600 transition-colors">
                           {((currentPage - 1) * rowsPerPage) + idx + 1}
@@ -231,8 +230,10 @@ export function StandardReportView({
                           <TableCell
                             key={col.id}
                             className={cn(
-                              "px-4 py-3 border-r border-b border-slate-100 transition-colors max-w-0 overflow-hidden",
-                              isSticky ? "sticky z-20 shadow-[2px_0_4px_rgba(0,0,0,0.02)] bg-white group-hover:bg-blue-50/40" : "bg-white group-hover:bg-blue-50/30"
+                              "px-4 py-3 border-r border-b border-slate-200 transition-colors max-w-0 overflow-hidden",
+                              isSticky ? "sticky z-20 shadow-[2px_0_4px_rgba(0,0,0,0.02)]" : "",
+                              idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
+                              "group-hover:bg-blue-50/50"
                             )}
                             style={isSticky ? { left: `${left}px` } : undefined}
                           >
@@ -245,10 +246,10 @@ export function StandardReportView({
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={filteredColumns.length + 1} className="h-64 bg-slate-50/50">
+                  <TableCell colSpan={filteredColumns.length + 1} className="h-64 bg-slate-50">
                     <div className="flex flex-col items-center justify-center ">
-                      <div className="h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center mb-3">
-                        <SearchX size={24} className="text-slate-400" />
+                      <div className="h-12 w-12 rounded-full bg-slate-200 flex items-center justify-center mb-3">
+                        <SearchX size={24} className="text-slate-500" />
                       </div>
                       <p className="text-[14px] font-semibold text-slate-700">No records found</p>
                       <p className="text-sm mt-1 text-slate-500">Adjust your filters to see more results</p>
