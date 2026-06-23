@@ -2,129 +2,160 @@ import { NextResponse } from 'next/server';
 import { API_KEYS } from '@/lib/apiKeys';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+type EnhancementLevel = "none" | "light" | "professional" | "executive";
+
+const ENHANCEMENT_INSTRUCTIONS: Record<EnhancementLevel, string> = {
+  none: "",
+  light: `
+    Make only minor improvements:
+    - Fix grammar, spelling, and punctuation errors
+    - Improve sentence flow where awkward
+    - DO NOT change any facts, names, dates, numbers, or key details
+    - Keep the original voice and style largely intact
+  `,
+  professional: `
+    Rewrite to a professional standard:
+    - Rewrite bullet points using strong action verbs (e.g. "Led", "Built", "Delivered", "Optimised")
+    - Make the professional summary clear, concise, and impactful
+    - Remove informal language, slang, or vague phrases
+    - DO NOT change company names, job titles, dates, locations, institutions, or any factual figures
+    - Do not invent achievements or add details that weren't in the original
+  `,
+  executive: `
+    Elevate to executive-level language:
+    - Frame experience using strategic and leadership language
+    - Emphasise business impact, scale, and outcomes
+    - Rewrite the summary as a compelling executive profile
+    - Use precise, authoritative language throughout
+    - DO NOT alter any facts: company names, job titles, dates, locations, institutions, or figures must remain exactly as provided
+    - Do not fabricate metrics, achievements, or responsibilities not present in the original
+  `,
+};
+
 export async function POST(request: Request) {
   try {
-    const { fileBase64, mimeType } = await request.json();
+    const { fileBase64, mimeType, enhancementLevel = "none" } = await request.json();
 
     if (!fileBase64) {
       return NextResponse.json({ error: 'No file data provided' }, { status: 400 });
     }
 
-    // Try to get a valid API key
-    const apiKey = process.env.GEMINI_API_KEY || API_KEYS[1] || API_KEYS[0];
+    const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || API_KEYS[1] || API_KEYS[0];
     if (!apiKey) {
       return NextResponse.json({ error: 'Gemini API key is not configured' }, { status: 500 });
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-      }
+      model: "gemini-3-flash-preview",
+      generationConfig: { responseMimeType: "application/json" }
     });
 
-    const filePart = {
-      inlineData: {
-        data: fileBase64,
-        mimeType: mimeType || 'application/pdf',
-      },
-    };
+    // ─── STAGE 1: RAW EXTRACTION ─────────────────────────────────────────────
+    const extractionPrompt = `
+      You are an expert CV parser. Extract all information from the attached CV exactly as written.
+      Do not rephrase, improve, or modify any content — extract raw data only.
 
-    const prompt = `
-      You are an expert CV parser and recruiter assistant.
-      Extract all available information from the attached CV document and return it as a structured JSON object.
-      
-      Match the following JSON schema strictly:
+      Return a JSON object matching this schema exactly:
       {
         "personalInfo": {
-          "fullName": "Full name of the candidate",
-          "title": "Professional title (e.g. Software Engineer)",
-          "email": "Email address",
-          "phone": "Phone number",
-          "location": "City and Country (e.g. Nairobi, Kenya)",
-          "github": "Github URL or username",
-          "linkedin": "LinkedIn URL or profile username"
+          "fullName": "string",
+          "title": "string",
+          "email": "string",
+          "phone": "string",
+          "location": "string (City, Country)",
+          "github": "string or null",
+          "linkedin": "string or null"
         },
         "personalDetails": {
-          "dateOfBirth": "DD/MM/YYYY if available",
-          "nationality": "Nationality",
-          "maritalStatus": "Marital status",
-          "residence": "Current residence",
-          "nairobiRes": "Nairobi residence details if specified",
-          "kenyaStatus": "Kenya work permit status or willingness to bear permit expenses if mentioned",
-          "drivingExperience": "Driving experience details if mentioned (e.g. 9 Years Experience)"
+          "dateOfBirth": "DD/MM/YYYY or null",
+          "nationality": "string or null",
+          "maritalStatus": "string or null",
+          "residence": "string or null",
+          "nairobiRes": "string or null",
+          "kenyaStatus": "string or null",
+          "drivingExperience": "string or null"
         },
-        "summary": "Professional profile summary paragraph",
-        "skills": [
-          {
-            "category": "Skill category name (e.g., Software & Programming)",
-            "items": ["skill 1", "skill 2"]
-          }
-        ],
-        "experience": [
-          {
-            "company": "Company name",
-            "location": "Location (e.g. India or Nairobi, Kenya)",
-            "role": "Job title/role",
-            "startDate": "Start date (e.g. Sept 2023)",
-            "endDate": "End date or 'Present'",
-            "companyDesc": "Brief company description if mentioned",
-            "responsibilities": ["bullet point 1", "bullet point 2"]
-          }
-        ],
-        "internships": [
-          {
-            "company": "Company name",
-            "location": "Location",
-            "role": "Internship role",
-            "startDate": "Start date",
-            "endDate": "End date",
-            "companyDesc": "Brief company description if mentioned",
-            "responsibilities": ["bullet point 1", "bullet point 2"]
-          }
-        ],
-        "projects": [
-          {
-            "title": "Project name",
-            "description": "Project details",
-            "year": "Year of project"
-          }
-        ],
-        "education": [
-          {
-            "degree": "Degree/Diploma name",
-            "institution": "School/University name",
-            "year": "Year of completion (e.g. 2019)",
-            "details": "Additional details if any"
-          }
-        ],
-        "references": [
-          {
-            "name": "Reference person name",
-            "title": "Title/Role",
-            "company": "Company name",
-            "address": "Address if available",
-            "contact": "Contact details (email, phone, etc.)"
-          }
-        ],
-        "declaration": "Declaration statement if present in CV",
+        "summary": "string",
+        "skills": [{ "category": "string", "items": ["string"] }],
+        "experience": [{
+          "company": "string",
+          "location": "string",
+          "role": "string",
+          "startDate": "string",
+          "endDate": "string",
+          "companyDesc": "string or null",
+          "responsibilities": ["string"]
+        }],
+        "internships": [{
+          "company": "string",
+          "location": "string",
+          "role": "string",
+          "startDate": "string",
+          "endDate": "string",
+          "companyDesc": "string or null",
+          "responsibilities": ["string"]
+        }],
+        "projects": [{ "title": "string", "description": "string", "year": "string or null" }],
+        "education": [{ "degree": "string", "institution": "string", "year": "string", "details": "string or null" }],
+        "references": [{ "name": "string", "title": "string", "company": "string", "address": "string or null", "contact": "string" }],
+        "languages": [{ "language": "string", "proficiency": "string" }],
+        "declaration": "string or null",
         "verifiedBadge": true
       }
 
-      Return only the JSON object containing the parsed information. If some fields are not present in the document, set them to null or an empty array/object as appropriate. Do not invent details.
+      IMPORTANT for "languages":
+      - Extract all languages explicitly mentioned in the CV
+      - If NO languages are mentioned anywhere in the document, return: [{ "language": "English", "proficiency": "Professional" }]
+
+      Return only the JSON object. Do not include markdown, code fences, or explanations.
     `;
 
-    console.log('[CV Extractor API] Calling Gemini...');
-    const result = await model.generateContent([prompt, filePart]);
-    const responseText = result.response.text();
-    console.log('[CV Extractor API] Parse result length:', responseText.length);
+    console.log('[CV Extractor] Stage 1: Extracting raw data...');
+    const extractionResult = await model.generateContent([
+      extractionPrompt,
+      { inlineData: { data: fileBase64, mimeType: mimeType || 'application/pdf' } }
+    ]);
+    const extractedJson = JSON.parse(extractionResult.response.text());
+    console.log('[CV Extractor] Stage 1 complete.');
 
-    const parsedJson = JSON.parse(responseText);
-    return NextResponse.json(parsedJson);
+    // ─── STAGE 2: PROFESSIONAL ENHANCEMENT (optional) ────────────────────────
+    if (enhancementLevel === "none") {
+      return NextResponse.json({ ...extractedJson, _enhancementLevel: "none" });
+    }
+
+    const instructions = ENHANCEMENT_INSTRUCTIONS[enhancementLevel as EnhancementLevel];
+    const enhancementPrompt = `
+      You are a professional CV writer. Enhance the text content of the following CV JSON.
+
+      Enhancement level: ${enhancementLevel.toUpperCase()}
+      ${instructions}
+
+      STRICT RULES — never break these:
+      1. Return the exact same JSON structure — do not add or remove fields
+      2. Do not change: personalInfo, personalDetails, education.institution, education.year, experience.company, experience.location, experience.startDate, experience.endDate, references, languages, verifiedBadge
+      3. Only improve: summary, experience.responsibilities, experience.companyDesc, internships.responsibilities, internships.companyDesc, projects.description, skills (items text only, not categories), declaration
+      4. Do not fabricate any information
+
+      Input JSON:
+      ${JSON.stringify(extractedJson, null, 2)}
+
+      Return only the enhanced JSON object with the same structure.
+    `;
+
+    console.log(`[CV Extractor] Stage 2: Enhancing at level "${enhancementLevel}"...`);
+    const textModel = genAI.getGenerativeModel({
+      model: "gemini-3-flash-preview",
+      generationConfig: { responseMimeType: "application/json" }
+    });
+    const enhancementResult = await textModel.generateContent(enhancementPrompt);
+    const enhancedJson = JSON.parse(enhancementResult.response.text());
+    console.log('[CV Extractor] Stage 2 complete.');
+
+    return NextResponse.json({ ...enhancedJson, _enhancementLevel: enhancementLevel });
 
   } catch (error: any) {
-    console.error('[CV Extractor API Error]:', error);
+    console.error('[CV Extractor Error]:', error);
     return NextResponse.json({
       error: 'Failed to extract CV details',
       details: error.message || String(error)

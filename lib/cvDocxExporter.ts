@@ -66,7 +66,7 @@ export async function exportToDocx(cvData: any) {
               bottom: {
                 color: "2c3e50",
                 space: 10,
-                value: BorderStyle.SINGLE,
+                style: BorderStyle.SINGLE,
                 size: 12,
               },
             },
@@ -179,7 +179,7 @@ export async function exportToDocx(cvData: any) {
                   }),
                   new TextRun({
                     text: ` (${exp.location || ""})`,
-                    italic: true,
+                    italics: true,
                     size: 20,
                     color: "555555",
                   }),
@@ -196,7 +196,7 @@ export async function exportToDocx(cvData: any) {
                   new TextRun({
                     text: exp.role || "Role",
                     bold: true,
-                    italic: true,
+                    italics: true,
                     size: 20,
                     color: "3498db",
                   }),
@@ -211,7 +211,7 @@ export async function exportToDocx(cvData: any) {
                   children: [
                     new TextRun({
                       text: exp.companyDesc,
-                      italic: true,
+                      italics: true,
                       size: 19,
                       color: "777777",
                     }),
@@ -266,7 +266,7 @@ export async function exportToDocx(cvData: any) {
                   }),
                   new TextRun({
                     text: ` (${intern.location || ""})`,
-                    italic: true,
+                    italics: true,
                     size: 20,
                     color: "555555",
                   }),
@@ -283,7 +283,7 @@ export async function exportToDocx(cvData: any) {
                   new TextRun({
                     text: intern.role || "Role",
                     bold: true,
-                    italic: true,
+                    italics: true,
                     size: 20,
                     color: "3498db",
                   }),
@@ -298,7 +298,7 @@ export async function exportToDocx(cvData: any) {
                   children: [
                     new TextRun({
                       text: intern.companyDesc,
-                      italic: true,
+                      italics: true,
                       size: 19,
                       color: "777777",
                     }),
@@ -388,7 +388,7 @@ export async function exportToDocx(cvData: any) {
                 }),
                 new TextRun({ text: " - ", size: 20 }),
                 new TextRun({ text: edu.institution || "Institution", size: 20 }),
-                new TextRun({ text: ` (${edu.year || ""})`, italic: true, size: 20, color: "555555" }),
+                new TextRun({ text: ` (${edu.year || ""})`, italics: true, size: 20, color: "555555" }),
                 edu.details ? new TextRun({ text: `\n${edu.details}`, size: 18, color: "777777" }) : new TextRun({ text: "" }),
               ],
             });
@@ -460,7 +460,7 @@ export async function exportToDocx(cvData: any) {
                 }),
                 new TextRun({
                   text: `\n${ref.title || ""} | ${ref.company || ""}`,
-                  italic: true,
+                  italics: true,
                   size: 19,
                 }),
                 ref.address ? new TextRun({ text: `\nAddress: ${ref.address}`, size: 18 }) : new TextRun({ text: "" }),
@@ -477,7 +477,7 @@ export async function exportToDocx(cvData: any) {
                   top: {
                     color: "e0e0e0",
                     space: 10,
-                    value: BorderStyle.SINGLE,
+                    style: BorderStyle.SINGLE,
                     size: 6,
                   },
                 },
@@ -490,7 +490,7 @@ export async function exportToDocx(cvData: any) {
                   }),
                   new TextRun({
                     text: declaration,
-                    italic: true,
+                    italics: true,
                     size: 18,
                     color: "777777",
                   }),

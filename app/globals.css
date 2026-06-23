@@ -7,7 +7,7 @@
     font-size: 16px;
   }
 
-  /* Scale down the layout globally on desktops/laptops to provide a high-density, professional view */
+  /* High-density enterprise layout */
   @media (min-width: 1024px) {
     html {
       font-size: 11px;
@@ -23,102 +23,157 @@ body {
   .text-balance {
     text-wrap: balance;
   }
-
-  /* Custom subtle scrollbar for the sidebar */
-  .sidebar-scroll::-webkit-scrollbar {
-    width: 4px;
-  }
-
-  .sidebar-scroll::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .sidebar-scroll::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-  }
-
-  .sidebar-scroll::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
-  }
 }
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
+    --radius: 0.75rem;
+
+    /* ==============================
+       MAIN SURFACES
+    ============================== */
+
+    --background: 210 20% 98%;
+    --foreground: 222 47% 11%;
+
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
+    --card-foreground: 222 47% 11%;
+
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
-    --radius: 0.5rem;
+    --popover-foreground: 222 47% 11%;
 
---sidebar-background: 224 38% 16%;
---sidebar-foreground: 210 25% 96%;
+    /* ==============================
+       BRAND BLUE
+    ============================== */
 
---sidebar-primary: 225 78% 70%;
---sidebar-primary-foreground: 0 0% 100%;
+    --primary: 214 84% 56%;
+    --primary-foreground: 0 0% 100%;
 
---sidebar-accent: 224 24% 24%;
---sidebar-accent-foreground: 210 25% 96%;
+    /* ==============================
+       SECONDARY
+    ============================== */
 
---sidebar-border: 224 18% 28%;
---sidebar-ring: 225 78% 70%;
+    --secondary: 210 25% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 25% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 214 100% 97%;
+    --accent-foreground: 214 84% 40%;
+
+    /* ==============================
+       FEEDBACK
+    ============================== */
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* ==============================
+       BORDERS
+    ============================== */
+
+    --border: 214 20% 90%;
+    --input: 214 20% 90%;
+    --ring: 214 84% 56%;
+
+    /* ==============================
+       STATUS COLORS
+    ============================== */
+
+    --chart-1: 214 84% 56%;
+    --chart-2: 160 60% 42%;
+    --chart-3: 32 90% 55%;
+    --chart-4: 270 45% 58%;
+    --chart-5: 345 72% 58%;
+
+    /* ==============================
+        MAIN SIDEBAR
+        Azure Light
+    ============================== */
+    /* Sidebar - Azure Light */
+    --sidebar-background: 210 100% 97%;
+    --sidebar-foreground: 222 47% 18%;
+
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+
+    --sidebar-accent: 210 40% 94%;
+    --sidebar-accent-foreground: 222 47% 18%;
+
+    --sidebar-border: 214 32% 88%;
+    --sidebar-ring: 217 91% 60%;
   }
 
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
+    --background: 220 26% 10%;
+    --foreground: 210 40% 96%;
 
-    /* Sidebar - Maintained Dark styling for Dark Mode */
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
+    --card: 220 24% 13%;
+    --card-foreground: 210 40% 96%;
+
+    --popover: 220 24% 13%;
+    --popover-foreground: 210 40% 96%;
+
+    /* ==============================
+       PRIMARY
+    ============================== */
+
+    --primary: 214 84% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    /* ==============================
+       SECONDARY
+    ============================== */
+
+    --secondary: 220 18% 16%;
+    --secondary-foreground: 210 40% 96%;
+
+    --muted: 220 18% 16%;
+    --muted-foreground: 215 16% 65%;
+
+    --accent: 220 20% 18%;
+    --accent-foreground: 210 40% 96%;
+
+    /* ==============================
+       FEEDBACK
+    ============================== */
+
+    --destructive: 0 62% 42%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* ==============================
+       BORDERS
+    ============================== */
+
+    --border: 220 18% 22%;
+    --input: 220 18% 22%;
+    --ring: 214 84% 60%;
+
+    /* ==============================
+       STATUS COLORS
+    ============================== */
+
+    --chart-1: 214 84% 60%;
+    --chart-2: 160 60% 48%;
+    --chart-3: 32 85% 60%;
+    --chart-4: 270 55% 65%;
+    --chart-5: 345 75% 62%;
+
+    /* ==============================
+       DARK SIDEBAR
+    ============================== */
+    --sidebar-background: 222 47% 4%;
+    --sidebar-foreground: 213 31% 91%;
+
+    --sidebar-primary: 217 91% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    --sidebar-accent: 217 33% 12%;
+    --sidebar-accent-foreground: 210 40% 98%;
+
+    --sidebar-border: 217 33% 12%;
+    --sidebar-ring: 217 91% 60%;
   }
 }
 
