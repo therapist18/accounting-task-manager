@@ -2461,7 +2461,7 @@ export default function ReportsPage() {
       />
 
       {/* 2. Main Content Area */}
-      <div className="flex flex-col flex-1 overflow-hidden bg-slate-100">
+      <div className="flex flex-col flex-1 overflow-hidden bg-slate-50">
         {/* Header Bar */}
         <ReportsHeader
           activeReport={activeReport}

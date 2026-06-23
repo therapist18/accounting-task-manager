@@ -21,13 +21,17 @@ const DEFAULT_COL_WIDTH = 180;
 const MIN_COL_WIDTH = 80;
 const INDEX_COL_WIDTH = 56;
 
-const DataCell = ({ val, isMissing }: { val: React.ReactNode, isMissing: boolean }) => (
+const DataCell = ({ val, isMissing, isPrimary }: { val: React.ReactNode, isMissing: boolean, isPrimary?: boolean }) => (
   <TooltipProvider delayDuration={300}>
     <Tooltip>
       <TooltipTrigger asChild>
         <div className={cn(
           "block w-full truncate text-sm cursor-default leading-snug",
-          isMissing ? "text-rose-600 font-semibold bg-rose-50/80 px-1.5 py-0.5 rounded" : "text-slate-700 font-medium"
+          isMissing 
+            ? "text-rose-600 font-semibold bg-rose-50 px-1.5 py-0.5 rounded-full text-xs" 
+            : isPrimary 
+              ? "text-slate-900 font-semibold" 
+              : "text-slate-500 font-medium"
         )}>
           {val}
         </div>
@@ -108,49 +112,54 @@ export function StandardReportView({
               {/* Main Header Row */}
               <TableRow className="hover:bg-transparent border-0">
                 {/* Index Header */}
-                <TableHead className="sticky left-0 z-50 bg-blue-600 border-r border-white text-center py-4 px-2">
-                  <span className="text-xs font-black text-white uppercase tracking-widest">#</span>
+                <TableHead className="sticky left-0 z-50 bg-blue-50 border-r border-b border-blue-100 text-center py-3 px-2">
+                  <span className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider">#</span>
                 </TableHead>
 
                 {filteredColumns.map((col: any) => {
                   const isSticky = stickyColumnIds.has(col.id);
                   const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
                   const isActive = sortConfig?.key === col.id;
+                  const isCentered = col.field === 'class' || col.field === 'duration' || col.type === 'current_stage_age' || col.type === 'total_process_age';
 
                   return (
                     <TableHead
                       key={col.id}
                       onClick={() => handleSort(col.id)}
                       className={cn(
-                          "group relative border-r border-white transition-colors cursor-pointer select-none px-4 py-4 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest",
-                          isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.1)]",
-                          isActive && "bg-slate-900"
+                          "group relative border-r border-b border-blue-100 transition-colors cursor-pointer select-none px-4 py-3 bg-blue-50",
+                          isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.05)]",
+                          isActive && "bg-blue-100",
+                          isCentered && "text-center"
                         )}
                       style={isSticky ? { left: `${left}px` } : undefined}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-black uppercase tracking-widest text-white whitespace-nowrap">
+                        <span className={cn(
+                          "text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap",
+                          isActive ? "text-blue-700" : "text-blue-600"
+                        )}>
                           {col.label}
                         </span>
 
-                        <div className="flex items-center gap-1.5 opacity-60 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-1.5">
                             {col.hasSubColumns && (
                                 <button
                                     onClick={(e) => { e.stopPropagation(); toggleStageColumns(col.stageId); }}
-                                    className="h-4 w-4 shrink-0 flex items-center justify-center rounded bg-slate-600/50 hover:bg-slate-500 text-white transition-all"
+                                    className="h-4 w-4 shrink-0 flex items-center justify-center rounded bg-blue-200 hover:bg-blue-300 text-blue-600 transition-all"
                                 >
                                     {expandedStageColumns.has(col.stageId) ? <Minus size={10} strokeWidth={2.5} /> : <Plus size={10} strokeWidth={2.5} />}
                                 </button>
                             )}
                             <ArrowUpDown className={cn(
-                                "h-3 w-3 shrink-0 text-slate-300",
-                                isActive ? "text-blue-400 opacity-100" : "opacity-0 group-hover:opacity-100"
+                                "h-3 w-3 shrink-0",
+                                isActive ? "text-blue-600" : "text-blue-300 opacity-0 group-hover:opacity-100"
                             )} />
                         </div>
                       </div>
 
                       {/* Resize Handle */}
-                      <div className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-blue-500/50 transition-colors" />
+                      <div className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-blue-400/30 transition-colors" />
                     </TableHead>
                   );
                 })}
@@ -158,14 +167,13 @@ export function StandardReportView({
 
               {/* Sub-Header Row: Estimates / Duration / Types */}
               <TableRow className="hover:bg-transparent">
-                <TableHead className="sticky left-0 z-50 bg-blue-800 border-r border-t border-white h-7" />
+                <TableHead className="sticky left-0 z-50 bg-blue-100 border-r border-b border-blue-200 h-6" />
                 {filteredColumns.map((col: any) => {
                   const isSticky = stickyColumnIds.has(col.id);
                   const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
 
                   let content: React.ReactNode = null;
                   
-                  // Calculate display content for the sub-header based on column type
                   if (col.type === 'stage_date' && col.stageId) {
                     const stage = stages?.find((s: any) => s.id === col.stageId);
                     if (stage?.estimated_time) {
@@ -183,8 +191,8 @@ export function StandardReportView({
                     <TableHead
                       key={`sub-${col.id}`}
                       className={cn(
-                        "text-[9px] font-bold uppercase tracking-widest text-center border-r border-t border-white px-2 h-7 bg-blue-800 text-slate-200",
-                        isSticky && "sticky z-40 shadow-[2px_0_4px_rgba(0,0,0,0.1)]"
+                        "text-[9px] font-medium uppercase tracking-wider text-center border-r border-b border-blue-200 px-2 h-6 bg-blue-100 text-blue-400",
+                        isSticky && "sticky z-40 shadow-[2px_0_4px_rgba(0,0,0,0.03)]"
                       )}
                       style={isSticky ? { left: `${left}px` } : undefined}
                     >
@@ -225,6 +233,11 @@ export function StandardReportView({
 
                         const val = safeRender(renderCellValue(task, col));
                         const isMissing = typeof val === 'string' && val.toLowerCase() === 'missing';
+                        
+                        // Primary columns: applicant name, company name
+                        // Secondary columns: passport, R number, duration, class
+                        const isPrimary = col.field === 'applicant_name' || col.field === 'company_name';
+                        const isCentered = col.field === 'class' || col.field === 'duration' || col.type === 'current_stage_age' || col.type === 'total_process_age';
 
                         return (
                           <TableCell
@@ -233,11 +246,12 @@ export function StandardReportView({
                               "px-4 py-3 border-r border-b border-slate-200 transition-colors max-w-0 overflow-hidden",
                               isSticky ? "sticky z-20 shadow-[2px_0_4px_rgba(0,0,0,0.02)]" : "",
                               idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
-                              "group-hover:bg-blue-50/50"
+                              "group-hover:bg-blue-50/50",
+                              isCentered && "text-center"
                             )}
                             style={isSticky ? { left: `${left}px` } : undefined}
                           >
-                            <DataCell val={val} isMissing={isMissing} />
+                            <DataCell val={val} isMissing={isMissing} isPrimary={isPrimary} />
                           </TableCell>
                         );
                       })}
@@ -263,43 +277,43 @@ export function StandardReportView({
       </div>
 
       {/* Pagination Footer */}
-      <div className="flex items-center justify-between p-4">
+      <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
         {/* Left Stats Info */}
-        <div className="text-sm text-slate-500 font-medium">
-            Showing <span className="font-semibold text-slate-700">{((currentPage - 1) * rowsPerPage) + 1}</span> to <span className="font-semibold text-slate-700">{Math.min(currentPage * rowsPerPage, allTasks.length)}</span> of <span className="font-semibold text-slate-700">{allTasks.length}</span> entries
+        <div className="text-[11px] text-slate-400">
+            Showing <span className="font-medium text-slate-600">{((currentPage - 1) * rowsPerPage) + 1}</span> to <span className="font-medium text-slate-600">{Math.min(currentPage * rowsPerPage, allTasks.length)}</span> of <span className="font-medium text-slate-600">{allTasks.length}</span>
         </div>
         
         {/* Right Controls */}
-        <div className="flex items-center gap-5">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Rows:</span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-slate-400">Rows:</span>
             <Select value={String(rowsPerPage)} onValueChange={(v) => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
-              <SelectTrigger className="w-[70px] h-8 rounded-md border-slate-200 bg-white/20 text-sm font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 shadow-sm">
+              <SelectTrigger className="w-[52px] h-7 rounded border-slate-200 text-[11px] font-medium text-slate-600">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="rounded-md">
-                {[10, 25, 50, 100].map(s => <SelectItem key={s} value={String(s)} className="text-sm">{s}</SelectItem>)}
+              <SelectContent className="rounded">
+                {[10, 25, 50, 100].map(s => <SelectItem key={s} value={String(s)} className="text-[11px]">{s}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-0.5">
             <PaginationButton onClick={() => setCurrentPage(1)} disabled={currentPage === 1}>
-              <ChevronsLeft size={14} />
+              <ChevronsLeft size={12} />
             </PaginationButton>
             <PaginationButton onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}>
-              <ChevronLeft size={14} />
+              <ChevronLeft size={12} />
             </PaginationButton>
             
-            <div className="px-3 py-1 rounded-md text-sm font-semibold text-slate-700 min-w-[32px] text-center bg-blue-50 border border-blue-200 mx-1">
+            <div className="px-2 py-0.5 text-[11px] font-medium text-slate-600 min-w-[24px] text-center">
               {currentPage}
             </div>
 
             <PaginationButton onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages}>
-              <ChevronRight size={14} />
+              <ChevronRight size={12} />
             </PaginationButton>
             <PaginationButton onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}>
-              <ChevronsRight size={14} />
+              <ChevronsRight size={12} />
             </PaginationButton>
           </div>
         </div>
@@ -311,11 +325,11 @@ export function StandardReportView({
 // Cleaned up pagination button to match SaaS standard
 const PaginationButton = ({ children, onClick, disabled }: any) => (
     <Button 
-        variant="outline" 
+        variant="ghost" 
         size="icon" 
         className={cn(
-          "h-8 w-8 rounded-md border-slate-200 bg-white/20 text-slate-600 transition-all shadow-sm",
-          disabled ? "opacity-40 cursor-not-allowed bg-slate-50 shadow-none" : "hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50"
+          "h-6 w-6 rounded text-slate-400 transition-all",
+          disabled ? "opacity-30 cursor-not-allowed" : "hover:text-slate-700 hover:bg-slate-100"
         )} 
         onClick={onClick} 
         disabled={disabled}

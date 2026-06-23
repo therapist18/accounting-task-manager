@@ -2,12 +2,12 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { ChevronDown, Filter, RotateCcw, X, Download, Search, Send, ChevronRight, ChevronLeft, Plus, Minus, ArrowUpDown, SearchX, ChevronsLeft, ChevronsRight, Shield, User, Clock, Sparkles, AlertCircle, ListChecks, Check, Layers, Settings2, TableProperties, LayoutGrid, Building2, Eye } from "lucide-react";
+import { ChevronDown, Filter, RotateCcw, X, Download, Search, Send, ChevronRight, ChevronLeft, Plus, Minus, AlertCircle, TableProperties, LayoutGrid, Building2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ReportColumnVisibilityDialog } from "./ReportColumnVisibilityDialog";
 
@@ -43,46 +43,46 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
 
   return (
     <div className={cn(
-      "border-r border-slate-200 bg-slate-100 flex flex-col max-h-screen shrink-0 transition-all duration-300 ease-in-out z-20",
-      isCollapsed ? "w-[72px]" : "w-[280px]"
+      "flex flex-col max-h-screen shrink-0 transition-all duration-300 ease-in-out z-20",
+      isCollapsed ? "w-[60px]" : "w-[260px]"
     )}>
-    <div className="border border-slate-200 rounded-lg shadow-sm m-4 flex flex-col h-full overflow-hidden bg-white">
+    <div className="flex flex-col h-full overflow-hidden bg-slate-900">
         {/* Header */}
       <div className={cn(
-        "px-6 py-6 flex items-center shrink-0 border-b border-slate-200 bg-white",
+        "px-4 py-4 flex items-center shrink-0 border-b border-slate-700/50",
         isCollapsed ? "justify-center" : "justify-between"
       )}>
         {!isCollapsed && (
-          <div className="flex flex-col gap-1">
-            <h2 className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest leading-tight">Workspace</h2>
-            <span className="text-[14px] text-slate-900 font-bold">Departments</span>
+          <div className="flex flex-col gap-0.5">
+            <h2 className="text-[9px] font-medium text-slate-400 uppercase tracking-wider">Workspace</h2>
+            <span className="text-[13px] text-white font-semibold">Departments</span>
           </div>
         )}
         {onToggleCollapse && (
           <button
             onClick={onToggleCollapse}
-            className="p-1.5 rounded-full border border-slate-200 text-slate-400 hover:text-slate-800 hover:bg-slate-50 transition-all"
+            className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 transition-all"
           >
-            {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
           </button>
         )}
       </div>
 
       {/* Search Input */}
       {!isCollapsed && (
-        <div className="p-4 bg-white border-b border-slate-200 shrink-0">
+        <div className="p-3 border-b border-slate-700/50 shrink-0">
           <div className="relative group">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
             <input
               type="text"
-              placeholder="Search department..."
+              placeholder="Search..."
               value={sidebarSearch}
               onChange={e => setSidebarSearch(e.target.value)}
-              className="w-full pl-10 pr-8 h-10 text-[11px] rounded-full border border-slate-300 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-400"
+              className="w-full pl-9 pr-7 h-8 text-[11px] rounded-lg bg-slate-800 border border-slate-700 text-white focus:bg-slate-700 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-500"
             />
             {sidebarSearch && (
-              <button onClick={() => setSidebarSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                <X className="h-4 w-4" />
+              <button onClick={() => setSidebarSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+                <X className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
@@ -90,7 +90,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
       )}
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto bg-white custom-scrollbar pb-6">
+      <div className="flex-1 overflow-y-auto custom-scrollbar py-2">
         {filteredDepartments.map((dept) => {
           const isActive = activeDeptId === dept.id.toString();
 
@@ -100,10 +100,10 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
                 key={dept.id}
                 onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
                 className={cn(
-                  "w-11 h-11 mx-auto flex items-center justify-center rounded-full text-[11px] font-bold transition-all mt-3 border",
+                  "w-9 h-9 mx-auto flex items-center justify-center rounded-lg text-[10px] font-semibold transition-all mt-1",
                   isActive
-                    ? "bg-blue-600 text-white border-blue-600"
-                    : "bg-white text-slate-400 border-slate-200 hover:border-blue-300"
+                    ? "bg-blue-600 text-white"
+                    : "text-slate-400 hover:bg-slate-800 hover:text-white"
                 )}
                 title={dept.name}
               >
@@ -113,44 +113,43 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
           }
 
           return (
-            <div key={dept.id} className="border-b border-slate-100 last:border-none">
+            <div key={dept.id} className="px-2">
               <button
                 onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
                 className={cn(
-                  "w-full flex items-center justify-between px-6 py-4 transition-all text-left",
-                  isActive ? "bg-slate-50 border-l-4 border-blue-600" : "hover:bg-slate-50 border-l-4 border-transparent"
+                  "w-full flex items-center justify-between px-3 py-2.5 transition-all text-left rounded-lg",
+                  isActive ? "bg-blue-600/10 text-white" : "text-slate-400 hover:bg-slate-800 hover:text-white"
                 )}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5">
                   <div className={cn(
-                    "h-7 w-7 rounded flex items-center justify-center text-[10px] font-bold",
-                    isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-500"
+                    "h-6 w-6 rounded flex items-center justify-center text-[9px] font-semibold",
+                    isActive ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400"
                   )}>
                     {getInitials(dept.name)}
                   </div>
                   <span className={cn(
-                    "text-[11px] font-semibold uppercase tracking-wider truncate",
-                    isActive ? "text-slate-900" : "text-slate-600"
+                    "text-[11px] font-medium truncate",
+                    isActive ? "text-white font-semibold" : "text-slate-400"
                   )}>
                     {dept.name}
                   </span>
                 </div>
-                {isActive && <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
+                {isActive && <ChevronRight className="h-3.5 w-3.5 text-blue-400 shrink-0" />}
               </button>
 
               {isActive && activeSubDepartments.length > 0 && (
-                <div className="bg-[#FAFAFC] border-y border-slate-100 py-2 flex flex-col">
+                <div className="ml-4 mt-1 mb-2 pl-3 border-l border-slate-700">
                   <button
                     onClick={() => setActiveSubDeptIds([])}
                     className={cn(
-                      "w-full text-left px-8 py-2.5 text-[11px] font-medium transition-all flex justify-between items-center",
+                      "w-full text-left px-3 py-2 text-[11px] font-medium transition-all rounded-md",
                       activeSubDeptIds.length === 0
-                        ? "bg-blue-50/80 text-blue-700"
-                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                        ? "bg-blue-600/10 text-blue-400"
+                        : "text-slate-500 hover:bg-slate-800 hover:text-slate-300"
                     )}
                   >
-                    <span>All Sub-units</span>
-                    {activeSubDeptIds.length === 0 && <Check className="h-3 w-3" />}
+                    All Sub-units
                   </button>
 
                   {activeSubDepartments.map((sub) => {
@@ -161,14 +160,13 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
                         key={sub.id}
                         onClick={() => toggleSubDept(id)}
                         className={cn(
-                          "w-full text-left px-8 py-2.5 text-[11px] font-medium transition-all truncate flex justify-between items-center",
+                          "w-full text-left px-3 py-2 text-[11px] font-medium transition-all truncate rounded-md",
                           isSelected
-                            ? "bg-blue-50/80 text-blue-700"
-                            : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                            ? "bg-blue-600/10 text-blue-400"
+                            : "text-slate-500 hover:bg-slate-800 hover:text-slate-300"
                         )}
                       >
-                        <span className="truncate">{sub.name}</span>
-                        {isSelected && <Check className="h-3 w-3" />}
+                        {sub.name}
                       </button>
                     );
                   })}
@@ -194,21 +192,40 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
   }, [activeSubDeptIds, activeSubDepartments]);
 
   return (
-    <div className="border-b border-slate-200 bg-slate-50 px-8 py-6 antialiased flex flex-col justify-center">
+    <div className="border-b border-slate-200 bg-white px-8 py-5 antialiased flex flex-col justify-center">
       <div className="flex items-center justify-between">
-        <div onClick={() => setIsReportDialogOpen(true)} className="group cursor-pointer min-w-0 flex flex-col gap-1.5">
-          <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight truncate group-hover:text-blue-600 transition-colors leading-none">
+        <div onClick={() => setIsReportDialogOpen(true)} className="group cursor-pointer min-w-0 flex flex-col gap-1">
+          <h1 className="text-[20px] font-bold text-slate-900 truncate group-hover:text-blue-600 transition-colors leading-none flex items-center gap-2">
+            <Building2 className="h-5 w-5 text-blue-600 shrink-0" />
             {activeReport?.name || "SELECT REPORT"}
           </h1>
-          <div className="flex items-center text-[12px] text-slate-500 font-semibold gap-1">
-            <Building2 className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-            <span className="text-blue-600 font-bold">{activeDepartment?.name || "Global"}</span>
-            <span className="text-slate-300 mx-0.5">/</span>
-            <span className="truncate text-slate-500">{selectedSubDeptText}</span>
+          <div className="flex items-center text-[11px] text-slate-400 gap-1 ml-7">
+            <span className="text-slate-600 font-medium">{activeDepartment?.name || "Global"}</span>
+            <span className="text-slate-300">/</span>
+            <span className="truncate">{selectedSubDeptText}</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          {/* View Toggle - underline style */}
+          <div className="flex items-end gap-0 border-b border-slate-200 mr-2">
+            <button onClick={() => setView('standard')} className={cn(
+              "h-8 px-3 text-[11px] font-semibold transition-all flex items-center gap-1.5 border-b-[3px] -mb-px",
+              view === 'standard'
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-slate-400 hover:text-slate-700"
+            )}>
+              <LayoutGrid className="h-3 w-3" /> Overall
+            </button>
+            <button onClick={() => setView('transposed')} className={cn(
+              "h-8 px-3 text-[11px] font-semibold transition-all flex items-center gap-1.5 border-b-[3px] -mb-px",
+              view === 'transposed'
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-slate-400 hover:text-slate-700"
+            )}>
+              <TableProperties className="h-3 w-3" /> Transposed
+            </button>
+          </div>
 
           <ReportColumnVisibilityDialog
             columns={columns}
@@ -220,58 +237,38 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
             setShowDocRequirementsColumns={setShowDocRequirementsColumns}
           />
 
-          <div className="h-6 w-px bg-slate-200 mx-1" />
+          <div className="h-5 w-px bg-slate-200" />
 
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-full border border-slate-200">
-            <button onClick={() => setView('standard')} className={cn(
-              "px-4 py-1.5 text-[11px] font-bold rounded-full transition-all flex items-center gap-1.5",
-              view === 'standard'
-                ? "bg-white text-blue-600 shadow-sm"
-                : "text-slate-500 hover:text-slate-900"
-            )}>
-              <LayoutGrid className="h-3 w-3" /> Overall View
-            </button>
-            <button onClick={() => setView('transposed')} className={cn(
-              "px-4 py-1.5 text-[11px] font-bold rounded-full transition-all flex items-center gap-1.5",
-              view === 'transposed'
-                ? "bg-white text-blue-600 shadow-sm"
-                : "text-slate-500 hover:text-slate-900"
-            )}>
-              <TableProperties className="h-3 w-3" /> Transposed
-            </button>
-          </div>
-
-          <div className="h-6 w-px bg-slate-200 mx-1" />
-
+          {/* Action Buttons - grouped together */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button className="h-10 px-6 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-[12px] font-bold gap-2 shadow-md transition-all">
-                <Send className="h-4 w-4" />
-                Send Report
+              <Button size="sm" className="h-8 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-semibold gap-1.5 shadow-sm">
+                <Send className="h-3.5 w-3.5" />
+                Send
                 <ChevronDown className="h-3 w-3 opacity-60" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 p-2 rounded-2xl shadow-xl border-slate-200">
-              <div className="px-3 py-2">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Officer Delivery</p>
-                <div className="flex gap-2 mt-2">
-                  <Button variant="outline" size="sm" className="flex-1 text-[10px] h-8 rounded-lg" onClick={() => handleSendReport('officer', 'excel')}>Excel</Button>
-                  <Button variant="outline" size="sm" className="flex-1 text-[10px] h-8 rounded-lg" onClick={() => handleSendReport('officer', 'pdf')}>PDF</Button>
+            <DropdownMenuContent align="end" className="w-48 p-2 rounded-lg shadow-lg border-slate-200">
+              <div className="px-2 py-1.5">
+                <p className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1.5">Officer</p>
+                <div className="flex gap-1.5">
+                  <Button variant="outline" size="sm" className="flex-1 text-[10px] h-7 rounded-md" onClick={() => handleSendReport('officer', 'excel')}>Excel</Button>
+                  <Button variant="outline" size="sm" className="flex-1 text-[10px] h-7 rounded-md" onClick={() => handleSendReport('officer', 'pdf')}>PDF</Button>
                 </div>
               </div>
-              <DropdownMenuSeparator />
-              <div className="px-3 py-2">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Manager Delivery</p>
-                <div className="flex gap-2 mt-2">
-                  <Button variant="outline" size="sm" className="flex-1 text-[10px] h-8 rounded-lg border-violet-200 hover:bg-violet-50 text-violet-700" onClick={() => handleSendReport('manager', 'excel')}>Excel</Button>
-                  <Button variant="outline" size="sm" className="flex-1 text-[10px] h-8 rounded-lg border-violet-200 hover:bg-violet-50 text-violet-700" onClick={() => handleSendReport('manager', 'pdf')}>PDF</Button>
+              <DropdownMenuSeparator className="my-1" />
+              <div className="px-2 py-1.5">
+                <p className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1.5">Manager</p>
+                <div className="flex gap-1.5">
+                  <Button variant="outline" size="sm" className="flex-1 text-[10px] h-7 rounded-md" onClick={() => handleSendReport('manager', 'excel')}>Excel</Button>
+                  <Button variant="outline" size="sm" className="flex-1 text-[10px] h-7 rounded-md" onClick={() => handleSendReport('manager', 'pdf')}>PDF</Button>
                 </div>
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <Button variant="outline" className="h-10 px-5 rounded-full border-emerald-600 text-[12px] font-bold text-emerald-700 bg-emerald-50/30 hover:bg-emerald-50">
-            <Download className="h-4 w-4 mr-2" /> Bulk Export
+          <Button variant="outline" size="sm" className="h-8 px-3 rounded-lg border-slate-200 text-[11px] font-medium text-slate-600 bg-white hover:bg-slate-50 gap-1.5">
+            <Download className="h-3.5 w-3.5 text-blue-500" /> Export
           </Button>
         </div>
       </div>
@@ -292,7 +289,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
   const currentSubDept = (activeSubDepartments || []).find((s: any) => s.id.toString() === (activeSubDeptIds[0] || activeSubDepartments?.[0]?.id.toString()));
 
   return (
-    <div className="bg-slate-50 border-b border-slate-200 antialiased flex flex-col">
+    <div className="bg-white border-b border-slate-200 antialiased flex flex-col">
       {/* Tier 1: Toolbar Row */}
       <div className="px-8 py-4 flex items-center justify-between gap-4">
         {/* Left: Global Search */}
@@ -302,18 +299,19 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
             placeholder="Search employee, ID, department..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full h-10 pl-11 pr-10 bg-white border-slate-300 rounded-full text-[13px] font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
+            className="w-full h-10 pl-11 pr-10 bg-white border-slate-200 rounded-lg text-[13px] font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors">
+            <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100 transition-colors">
               <X className="h-4 w-4" />
             </button>
           )}
         </div>
 
         {/* Right: Actions */}
-        <div className="flex items-center gap-2.5">
-          <div className="flex items-center gap-0.5 bg-slate-100 p-1 rounded-full border border-slate-200 shrink-0">
+        <div className="flex items-center gap-3">
+          {/* Perspective Tabs - underline style */}
+          <div className="flex items-end gap-0 border-b border-slate-200">
             {[
               { id: 'overview', label: 'Overview' },
               { id: 'officers', label: 'Officers' },
@@ -323,16 +321,16 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                 key={p.id}
                 onClick={() => setActivePerspective(p.id)}
                 className={cn(
-                  "h-8 px-4 text-[11px] font-bold rounded-full transition-all flex items-center gap-2 ",
+                  "h-9 px-4 text-[11px] font-semibold transition-all flex items-center gap-1.5 border-b-[3px] -mb-px",
                   activePerspective === p.id
-                    ? "bg-white text-blue-600 shadow-sm"
-                    : "text-slate-500 hover:text-slate-800"
+                    ? "border-blue-600 text-blue-600"
+                    : "border-transparent text-slate-400 hover:text-slate-700"
                 )}
               >
                 {p.label}
                 <span className={cn(
-                  "text-[10px] font-black tabular-nums px-1.5 py-0.5 rounded-full font-medium",
-                  activePerspective === p.id ? "bg-blue-50 text-blue-500" : "text-slate-400"
+                  "text-[10px] font-medium tabular-nums",
+                  activePerspective === p.id ? "text-blue-500" : "text-slate-400"
                 )}>
                   {perspectiveCounts[p.id]}
                 </span>
@@ -340,52 +338,52 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
             ))}
           </div>
 
-          <div className="h-6 w-px bg-slate-200 mx-2 shrink-0" />
-
           {/* Mode Selector for Person Perspective */}
           {(isOfficer || isManager) && (
             <Select value={mode} onValueChange={setMode}>
-              <SelectTrigger className="w-44 h-10 bg-white border-slate-300 rounded-full text-sm font-bold shadow-sm">
-                <div className="flex items-center gap-2">
-                  <SelectValue />
-                </div>
+              <SelectTrigger className="w-40 h-9 bg-white border-slate-200 rounded-lg text-[11px] font-medium text-slate-600">
+                <SelectValue />
               </SelectTrigger>
-              <SelectContent className="rounded-2xl">
+              <SelectContent className="rounded-lg">
                 <SelectItem value="current">Current Assignments</SelectItem>
                 <SelectItem value="history">Historical Activity</SelectItem>
               </SelectContent>
             </Select>
           )}
 
-          {/* Main Filter Dropdown (Class/Subclass logic) */}
+          <div className="h-5 w-px bg-slate-200" />
+
+          {/* Main Filter Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="outline"
+                size="sm"
                 className={cn(
-                  "h-10 px-5 rounded-full border-blue-500 text-[13px] font-semibold text-blue-600 bg-white hover:bg-blue-50 shrink-0",
-                  (activeClassId !== 'all') && "bg-blue-600 text-white hover:bg-blue-700 hover:text-white"
+                  "h-8 px-3 rounded-lg text-[11px] font-medium gap-1.5",
+                  (activeClassId !== 'all') 
+                    ? "bg-blue-50 border-blue-200 text-blue-600" 
+                    : "border-slate-200 text-slate-600 bg-white hover:bg-slate-50"
                 )}
               >
-                <Filter className="h-4 w-4 mr-2" /> Filter
+                <Filter className="h-3.5 w-3.5" /> Filter
                 {(activeClassId !== 'all') && (
-                  <span className="ml-2 bg-white text-blue-600 rounded-full h-5 w-5 flex items-center justify-center text-[10px] font-black">!</span>
+                  <span className="bg-blue-600 text-white rounded-full h-4 w-4 flex items-center justify-center text-[9px] font-bold">!</span>
                 )}
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-72 p-4 rounded-2xl shadow-2xl border-slate-200">
-              <div className="flex items-center justify-between mb-4 px-1">
-                <span className="text-sm font-black text-slate-900 uppercase tracking-tight">Categorization</span>
-                <Sparkles className="h-4 w-4 text-blue-500" />
+            <DropdownMenuContent align="end" className="w-64 p-4 rounded-lg shadow-lg border-slate-200">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Categorization</span>
               </div>
-              <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Task Class</label>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Task Class</label>
                   <Select value={activeClassId} onValueChange={v => { setActiveClassId(v); setActiveSubClassId('all'); }}>
-                    <SelectTrigger className="h-10 rounded-xl font-bold border-slate-200 text-[13px]">
+                    <SelectTrigger className="h-9 rounded-lg border-slate-200 text-[12px]">
                       <SelectValue placeholder="All Classes" />
                     </SelectTrigger>
-                    <SelectContent className="rounded-xl">
+                    <SelectContent className="rounded-lg">
                       <SelectItem value="all">All Classes</SelectItem>
                       {currentSubDept?.classes?.map((cls: any) => (
                         <SelectItem key={cls.id} value={cls.id.toString()}>{cls.name}</SelectItem>
@@ -397,10 +395,10 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                   <div className="space-y-1.5 animate-in slide-in-from-top-2 duration-200">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Sub-Class</label>
                     <Select value={activeSubClassId} onValueChange={setActiveSubClassId}>
-                      <SelectTrigger className="h-10 rounded-xl font-bold border-slate-200 text-[13px]">
+                      <SelectTrigger className="h-9 rounded-lg border-slate-200 text-[12px]">
                         <SelectValue placeholder="All Sub-classes" />
                       </SelectTrigger>
-                      <SelectContent className="rounded-xl">
+                      <SelectContent className="rounded-lg">
                         <SelectItem value="all">All Sub-classes</SelectItem>
                         {currentSubDept?.classes?.find((c: any) => c.id.toString() === activeClassId)?.subClasses?.map((sc: any) => (
                           <SelectItem key={sc.id} value={sc.id.toString()}>{sc.name}</SelectItem>
@@ -411,53 +409,48 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                 )}
                 <Button
                   variant="ghost"
-                  className="w-full text-[11px] h-10 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl font-bold"
+                  size="sm"
+                  className="w-full text-[11px] h-8 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
                   onClick={() => { setActiveClassId('all'); setActiveSubClassId('all'); }}
                 >
-                  Reset Categorization
+                  Reset
                 </Button>
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
 
           <Button
-            variant="outline"
+            variant="ghost"
+            size="sm"
             onClick={refreshData}
             disabled={loading}
-            className="h-10 px-5 rounded-full border-slate-200 text-[13px] font-medium text-slate-700 bg-white hover:bg-slate-50 shrink-0"
+            className="h-8 px-3 rounded-lg text-[11px] font-medium text-slate-600 hover:bg-slate-50 gap-1.5"
           >
-            <RotateCcw className={cn("h-4 w-4 mr-2 text-slate-400", loading && "animate-spin")} /> Refresh
+            <RotateCcw className={cn("h-3.5 w-3.5", loading && "animate-spin")} /> Refresh
           </Button>
         </div>
       </div>
 
       {/* Tier 1.5: Assignee Pills with Counts */}
       {(isOfficer || isManager) && (
-        <div className="px-8 pb-3 flex flex-wrap items-center gap-1.5">
-          <div className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase font-bold mr-1 shrink-0",
-            isOfficer ? "bg-blue-50 text-blue-600 border border-blue-100" : "bg-violet-50 text-violet-600 border border-violet-100"
+        <div className="px-8 pb-3 flex items-center gap-2">
+          <span className={cn(
+            "text-[10px] font-semibold uppercase tracking-wider mr-1",
+            isOfficer ? "text-blue-500" : "text-violet-500"
           )}>
-            {isOfficer ? <Shield className="h-3 w-3" /> : <User className="h-3 w-3" />}
             {isOfficer ? "Officers" : "Managers"}
-          </div>
+          </span>
 
           <button
             onClick={() => setTab('all')}
             className={cn(
-              "h-10 px-6 py-2 rounded-full text-[11px] font-bold transition-all border flex items-center gap-1.5",
+              "h-7 px-3 text-[11px] font-semibold transition-all rounded-md",
               currentActive === 'all'
-                ? "bg-slate-800 border-slate-800 text-white shadow-sm"
-                : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                ? "bg-slate-900 text-white"
+                : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
             )}
           >
-            All
-            <span className={cn(
-              "text-[10px] font-black tabular-nums font-medium",
-              currentActive === 'all' ? "text-white/60" : "text-slate-400"
-            )}>
-              {counts.all}
-            </span>
+            All <span className="ml-1 text-[10px] opacity-60">{counts.all}</span>
           </button>
 
           {currentData.map((p: any) => {
@@ -469,16 +462,17 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                 key={p.id}
                 onClick={() => setTab(isActive ? 'all' : p.id.toString())}
                 className={cn(
-                  "h-10 px-6 py-2 rounded-full text-[11px] font-bold transition-all border flex items-center gap-1.5",
+                  "h-7 px-3 text-[11px] font-semibold transition-all rounded-md flex items-center gap-1",
                   isActive
-                    ? (isOfficer ? "bg-blue-600 border-blue-600 text-white shadow-sm" : "bg-violet-600 border-violet-600 text-white shadow-sm")
-                    : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                    ? (isOfficer ? "bg-blue-600 text-white" : "bg-violet-600 text-white")
+                    : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
                 )}
               >
                 {displayName}
                 {count > 0 && (
                   <span className={cn(
-                    "text-[10px] font-black tabular-nums font-medium bg-blue-500 text-white px-1.5 py-0.5 rounded-full"
+                    "text-[9px] font-medium tabular-nums",
+                    isActive ? "opacity-70" : "text-slate-400"
                   )}>
                     {count}
                   </span>
@@ -489,19 +483,19 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
 
           {(counts.__unallocated__ ?? 0) > 0 && (
             <button
-              onClick={() => setTab(currentActive === '__unallocated__' ? 'all' : '__unallocated__')}
+              onClick={() => setTab(currentActive === '__unallocated__' ? 'all' : '__unallocated')}
               className={cn(
-                "h-10 px-3.5 rounded-full text-[11px] font-bold transition-all border flex items-center gap-1.5",
+                "h-7 px-3 text-[11px] font-medium transition-all rounded-md flex items-center gap-1",
                 currentActive === '__unallocated__'
-                  ? "bg-red-600 border-red-600 text-white shadow-sm"
-                  : "bg-red-50 border-red-100 text-red-600 hover:bg-red-100"
+                  ? "bg-red-600 text-white"
+                  : "text-red-500 hover:text-red-700 hover:bg-red-50"
               )}
             >
               <AlertCircle className="h-3 w-3" />
               Unallocated
               <span className={cn(
-                "text-[10px] font-black tabular-nums font-medium",
-                currentActive === '__unallocated__' ? "text-white/70" : "text-red-400"
+                "text-[9px] font-medium tabular-nums",
+                currentActive === '__unallocated__' ? "opacity-70" : "text-red-400"
               )}>
                 {counts.__unallocated__}
               </span>
@@ -516,15 +510,15 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
 export function StatusFilterBar({ activeStatus, setActiveStatus, allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount }: any) {
   const counts = { all: allTasksCount || 0, wip: wipTasksCount || 0, write_up_completed: writeUpCompletedCount || 0, endorsed: endorsedCount || 0, cancelled: cancelledCount || 0 };
   const tabs = [
-    { id: 'all', label: 'All Tasks', color: 'bg-blue-600', lightColor: 'bg-blue-100 text-blue-700' },
-    { id: 'wip', label: 'WIP', color: 'bg-amber-500', lightColor: 'bg-amber-100 text-amber-700' },
-    { id: 'write_up_completed', label: 'Write-up Completed', color: 'bg-emerald-600', lightColor: 'bg-emerald-100 text-emerald-700' },
-    { id: 'endorsed', label: 'Endorsed', color: 'bg-violet-600', lightColor: 'bg-violet-100 text-violet-700' },
+    { id: 'all', label: 'All Tasks', color: 'text-slate-600', activeColor: 'border-blue-600 text-blue-600' },
+    { id: 'wip', label: 'WIP', color: 'text-amber-600', activeColor: 'border-amber-500 text-amber-600' },
+    { id: 'write_up_completed', label: 'Write-up Completed', color: 'text-emerald-600', activeColor: 'border-emerald-500 text-emerald-600' },
+    { id: 'endorsed', label: 'Endorsed', color: 'text-violet-600', activeColor: 'border-violet-500 text-violet-600' },
   ];
 
   return (
-    <div className="px-8 pt-3 pb-0 flex items-center border-b border-slate-200 bg-slate-100 antialiased">
-      <div className="flex gap-1">
+    <div className="px-8 flex items-end border-b border-slate-200 bg-white antialiased">
+      <div className="flex gap-0">
         {tabs.map(s => {
           const isActive = activeStatus === s.id;
           return (
@@ -532,16 +526,16 @@ export function StatusFilterBar({ activeStatus, setActiveStatus, allTasksCount, 
               key={s.id}
               onClick={() => setActiveStatus(s.id)}
               className={cn(
-                "h-10 px-5 text-[12px] font-semibold rounded-t-xl transition-all flex items-center gap-2.5 border-x border-t",
+                "h-11 px-5 text-[12px] font-semibold transition-all flex items-center gap-2 border-b-[3px] -mb-px",
                 isActive
-                  ? `${s.color} text-white border-transparent shadow-[0_-4px_12px_rgba(0,0,0,0.08)]`
-                  : `bg-white text-slate-600 border-slate-200 hover:${s.lightColor}`
+                  ? s.activeColor
+                  : "border-transparent text-slate-400 hover:text-slate-600"
               )}
             >
               {s.label}
               <span className={cn(
-                "px-2 py-0.5 rounded-full text-[10px] font-black tabular-nums font-medium",
-                isActive ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500"
+                "text-[10px] font-medium tabular-nums",
+                isActive ? "opacity-70" : "text-slate-300"
               )}>
                 {counts[s.id]}
               </span>
