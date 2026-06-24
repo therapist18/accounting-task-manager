@@ -58,6 +58,7 @@ const navItems = [
         ],
     },
     { title: "Templates", href: "/dashboard/templates", icon: FileText, permission: "templates.view" },
+    { title: "CV Generator", href: "/dashboard/cv-generator", icon: FileText },
     { title: "Master Fields", href: "/dashboard/master-fields", icon: Database, permission: "master_fields.view" },
     {
         title: "Letters",

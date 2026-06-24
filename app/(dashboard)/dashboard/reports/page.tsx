@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
 import { ReportColumnVisibilityDialog } from "./components/ReportColumnVisibilityDialog";
-import { ReportsSidebar, ReportsToolbar, PersonFilterStrip, StatusFilterBar } from "./components/ReportsHeader";
+import { ReportsSidebar, ReportsHeader, PersonFilterStrip, StatusFilterBar, KpiSummaryCards } from "./components/ReportsHeader";
 
 const SPECIAL_STAGE_IDS = [
   '072b9710-45df-4a05-ba65-01b4ef29d61d',
@@ -68,17 +68,17 @@ const getElapsedMinutes = (from: Date | null, to: Date = new Date()): number | n
 const safeRender = (content: any) => {
   if (React.isValidElement(content)) return content;
   if (typeof content === 'string') {
-    if (content === 'N/A') return <span className="text-red-500">Missing</span>;
+    if (content === 'N/A') return <span className="text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded text-xs">Missing</span>;
     return content;
   }
   if (typeof content === 'number') return content;
-  if (content === null || content === undefined) return <span className="text-[11px] font-bold text-slate-300 uppercase tracking-widest">—</span>;
+  if (content === null || content === undefined) return <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">—</span>;
   if (Array.isArray(content)) return content.map((c, i) => <React.Fragment key={i}>{safeRender(c)}</React.Fragment>);
   if (typeof content === 'object') {
     if ('status' in content) {
       const s = content.status;
       if (typeof s === 'string' || typeof s === 'number') {
-        if (s === 'N/A') return <span className="text-red-500">Missing</span>;
+        if (s === 'N/A') return <span className="text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded text-xs">Missing</span>;
         return s;
       }
       if (React.isValidElement(s)) return s;
@@ -1206,7 +1206,7 @@ export default function ReportsPage() {
       const tracking = getCurrentStageTracking(task);
       const elapsedMinutes = getElapsedMinutes(tracking?.handledAt || null);
 
-      if (!tracking || elapsedMinutes == null) return <span className="text-sm text-slate-400">—</span>;
+      if (!tracking || elapsedMinutes == null) return <span className="text-sm text-gray-400">—</span>;
 
       return (
         <Tooltip>
@@ -1216,11 +1216,11 @@ export default function ReportsPage() {
               <span>{formatDuration(elapsedMinutes)}</span>
             </div>
           </TooltipTrigger>
-          <TooltipContent className="border-slate-200 shadow-xl text-sm bg-white text-slate-700">
+          <TooltipContent className="border-gray-200 shadow-xl text-sm bg-white text-gray-700">
             <div className="space-y-1">
-              <div><span className="font-semibold text-slate-500">Stage:</span> {tracking.stage?.name || '-'}</div>
-              <div><span className="font-semibold text-slate-500">Handled:</span> {formatDateTimeForDisplay(tracking.handledAt)}</div>
-              <div><span className="font-semibold text-slate-500">Elapsed:</span> <span className="text-blue-600">{formatDuration(elapsedMinutes)}</span></div>
+              <div><span className="font-semibold text-gray-500">Stage:</span> {tracking.stage?.name || '-'}</div>
+              <div><span className="font-semibold text-gray-500">Handled:</span> {formatDateTimeForDisplay(tracking.handledAt)}</div>
+              <div><span className="font-semibold text-gray-500">Elapsed:</span> <span className="text-blue-600">{formatDuration(elapsedMinutes)}</span></div>
             </div>
           </TooltipContent>
         </Tooltip>
@@ -1231,7 +1231,7 @@ export default function ReportsPage() {
       const initiatedAt = getTaskInitiatedDate(task);
       const elapsedMinutes = getElapsedMinutes(initiatedAt);
 
-      if (!initiatedAt || elapsedMinutes == null) return <span className="text-sm text-slate-400">—</span>;
+      if (!initiatedAt || elapsedMinutes == null) return <span className="text-sm text-gray-400">—</span>;
 
       return (
         <Tooltip>
@@ -1241,10 +1241,10 @@ export default function ReportsPage() {
               <span>{formatDuration(elapsedMinutes)}</span>
             </div>
           </TooltipTrigger>
-          <TooltipContent className="border-slate-200 shadow-xl text-sm bg-white text-slate-700">
+          <TooltipContent className="border-gray-200 shadow-xl text-sm bg-white text-gray-700">
             <div className="space-y-1">
-              <div><span className="font-semibold text-slate-500">Initiated:</span> {formatDateTimeForDisplay(initiatedAt)}</div>
-              <div><span className="font-semibold text-slate-500">Elapsed:</span> <span className="text-violet-600">{formatDuration(elapsedMinutes)}</span></div>
+              <div><span className="font-semibold text-gray-500">Initiated:</span> {formatDateTimeForDisplay(initiatedAt)}</div>
+              <div><span className="font-semibold text-gray-500">Elapsed:</span> <span className="text-violet-600">{formatDuration(elapsedMinutes)}</span></div>
             </div>
           </TooltipContent>
         </Tooltip>
@@ -1254,12 +1254,12 @@ export default function ReportsPage() {
     if (col.type === 'stage_gap') {
       const fromStage = stages.find(s => s.id === col.fromStageId);
       const toStage = stages.find(s => s.id === col.toStageId);
-      if (!fromStage || !toStage) return <span className="text-sm text-slate-400">—</span>;
+      if (!fromStage || !toStage) return <span className="text-sm text-gray-400">—</span>;
 
       const fromDate = getStageHandledDate(task, fromStage);
       const toDate = getStageHandledDate(task, toStage);
 
-      if (!fromDate || !toDate) return <span className="text-sm text-slate-400">—</span>;
+      if (!fromDate || !toDate) return <span className="text-sm text-gray-400">—</span>;
 
       const diffMs = toDate.getTime() - fromDate.getTime();
       const diffMins = Math.floor(diffMs / 60000);
@@ -1279,13 +1279,13 @@ export default function ReportsPage() {
               <span>{displayText.trim() || '0m'}</span>
             </div>
           </TooltipTrigger>
-          <TooltipContent className="bg-white text-slate-700 border-slate-200 shadow-xl p-2">
+          <TooltipContent className="bg-white text-gray-700 border-gray-200 shadow-xl p-2">
             <div className="text-sm space-y-1">
-              <div><span className="font-semibold text-slate-500">From:</span> {col.fromStageName}</div>
-              <div><span className="font-semibold text-slate-500">To:</span> {col.toStageName}</div>
-              <div><span className="font-semibold text-slate-500">Gap:</span> <span className="text-orange-600">{displayText.trim() || '0m'}</span></div>
-              <div><span className="font-semibold text-slate-500">From Date:</span> {formatDateForDisplay(fromDate)}</div>
-              <div><span className="font-semibold text-slate-500">To Date:</span> {formatDateForDisplay(toDate)}</div>
+              <div><span className="font-semibold text-gray-500">From:</span> {col.fromStageName}</div>
+              <div><span className="font-semibold text-gray-500">To:</span> {col.toStageName}</div>
+              <div><span className="font-semibold text-gray-500">Gap:</span> <span className="text-orange-600">{displayText.trim() || '0m'}</span></div>
+              <div><span className="font-semibold text-gray-500">From Date:</span> {formatDateForDisplay(fromDate)}</div>
+              <div><span className="font-semibold text-gray-500">To Date:</span> {formatDateForDisplay(toDate)}</div>
             </div>
           </TooltipContent>
         </Tooltip>
@@ -1294,10 +1294,10 @@ export default function ReportsPage() {
 
     if (col.type === 'stage_date') {
       const stage = stages.find(s => s.id === col.stageId);
-      if (!stage) return <span className="text-sm text-slate-400">—</span>;
+      if (!stage) return <span className="text-sm text-gray-400">—</span>;
 
       if (!checkStageApplicableForTask(stage, task)) {
-        return <span className="text-sm text-red-500">Missing</span>;
+        return <span className="text-sm text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded">Missing</span>;
       }
 
       const stageData = task.stages?.[col.stageId];
@@ -1336,10 +1336,10 @@ export default function ReportsPage() {
                 <AlertCircle className="h-4 w-4" /> Skipped
               </span>
             </TooltipTrigger>
-            <TooltipContent className="bg-white text-slate-700 border-slate-200 shadow-xl p-2">
+            <TooltipContent className="bg-white text-gray-700 border-gray-200 shadow-xl p-2">
               <div className="text-sm space-y-1">
-                <p><span className="font-semibold text-slate-500">Reason:</span> {reason}</p>
-                {skippedAt && <p><span className="font-semibold text-slate-500">Date:</span> {formatDateTimeForDisplay(skippedAt)}</p>}
+                <p><span className="font-semibold text-gray-500">Reason:</span> {reason}</p>
+                {skippedAt && <p><span className="font-semibold text-gray-500">Date:</span> {formatDateTimeForDisplay(skippedAt)}</p>}
               </div>
             </TooltipContent>
           </Tooltip>
@@ -1390,13 +1390,13 @@ export default function ReportsPage() {
                 {icon}<span>{formatDateForDisplay(completionDate)}</span>
               </div>
             </TooltipTrigger>
-            <TooltipContent className={`bg-white text-slate-700 border-slate-200 shadow-xl p-2`}>
+            <TooltipContent className={`bg-white text-gray-700 border-gray-200 shadow-xl p-2`}>
               <div className="space-y-2 p-1">
-                <div className={`font-semibold text-sm ${textColor} border-b border-slate-100 pb-1.5`}>{statusText}</div>
+                <div className={`font-semibold text-sm ${textColor} border-b border-gray-100 pb-1.5`}>{statusText}</div>
                 <div className="text-sm space-y-1">
-                  <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Completed:</span><span className="text-slate-700">{formatDateTimeForDisplay(completionDate)}</span></div>
-                  <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Duration:</span><span className="text-slate-700">{durationTakenText}</span></div>
-                  {estimatedMinutes > 0 && <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Allowed:</span><span className="text-slate-700">{formatDuration(estimatedMinutes)}</span></div>}
+                  <div className="flex justify-between gap-4"><span className="text-gray-500 font-semibold">Completed:</span><span className="text-gray-700">{formatDateTimeForDisplay(completionDate)}</span></div>
+                  <div className="flex justify-between gap-4"><span className="text-gray-500 font-semibold">Duration:</span><span className="text-gray-700">{durationTakenText}</span></div>
+                  {estimatedMinutes > 0 && <div className="flex justify-between gap-4"><span className="text-gray-500 font-semibold">Allowed:</span><span className="text-gray-700">{formatDuration(estimatedMinutes)}</span></div>}
                 </div>
               </div>
             </TooltipContent>
@@ -1404,7 +1404,7 @@ export default function ReportsPage() {
         );
       }
 
-      if (!effectiveStartTime || !showTimeStatuses) return <span className="text-sm text-slate-400">—</span>;
+      if (!effectiveStartTime || !showTimeStatuses) return <span className="text-sm text-gray-400">—</span>;
 
       const timeStatus = getTimeStatus(effectiveStartTime, estimatedMinutes);
       const isOverdue = timeStatus?.isOverdue || false;
@@ -1418,22 +1418,22 @@ export default function ReportsPage() {
               {icon}<span>{timeStatus?.formattedElapsed}</span>
             </div>
           </TooltipTrigger>
-          <TooltipContent className={`bg-white text-slate-700 border-slate-200 shadow-xl p-2`}>
+          <TooltipContent className={`bg-white text-gray-700 border-gray-200 shadow-xl p-2`}>
             <div className="space-y-2 p-1">
-              <div className={`font-semibold text-sm ${textColor} border-b border-slate-100 pb-1.5`}>
+              <div className={`font-semibold text-sm ${textColor} border-b border-gray-100 pb-1.5`}>
                 {isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}
               </div>
               <div className="text-sm space-y-1">
-                <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Started:</span><span className="text-slate-700">{formatDateTimeForDisplay(effectiveStartTime)}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-gray-500 font-semibold">Started:</span><span className="text-gray-700">{formatDateTimeForDisplay(effectiveStartTime)}</span></div>
                 {estimatedMinutes > 0 && (
                   <>
                     <div className="flex justify-between gap-4">
-                      <span className="text-slate-500 font-semibold">Remaining:</span>
+                      <span className="text-gray-500 font-semibold">Remaining:</span>
                       <span className={isOverdue ? 'font-semibold text-red-600' : 'text-emerald-600'}>
                         {isOverdue ? `Overdue by ${timeStatus?.formattedOverdue}` : timeStatus?.formattedRemaining}
                       </span>
                     </div>
-                    <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Estimate:</span><span className="text-slate-700">{formatDuration(estimatedMinutes)}</span></div>
+                    <div className="flex justify-between gap-4"><span className="text-gray-500 font-semibold">Estimate:</span><span className="text-gray-700">{formatDuration(estimatedMinutes)}</span></div>
                   </>
                 )}
               </div>
@@ -1445,10 +1445,10 @@ export default function ReportsPage() {
 
     if (col.type === 'extracted_field') {
       const stage = stages.find(s => s.id === col.stageId);
-      if (!stage) return <span className="text-sm text-slate-400">—</span>;
+      if (!stage) return <span className="text-sm text-gray-400">—</span>;
 
       if (!checkStageApplicableForTask(stage, task)) {
-        return <span className="text-sm text-red-500">Missing</span>;
+        return <span className="text-sm text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded">Missing</span>;
       }
 
       if (col.isAutoAdded) {
@@ -1462,8 +1462,8 @@ export default function ReportsPage() {
           if (!linked || linked.indicator) continue;
           foundValue = isDateLike
             ? (findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId])
-               || linked.extracted_details?.[col.fieldName]
-               || linked.extracted_details?.[col.fieldId])
+              || linked.extracted_details?.[col.fieldName]
+              || linked.extracted_details?.[col.fieldId])
             : linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
           if (!foundValue && isDateTimeField) {
             foundValue = (Object.values(linked.extracted_details || {}) as any[]).find(
@@ -1472,28 +1472,28 @@ export default function ReportsPage() {
           }
           if (foundValue) { foundDoc = linked; break; }
         }
-        if (!foundDoc) return <span className="text-sm text-red-500">Missing</span>;
+        if (!foundDoc) return <span className="text-sm text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded">Missing</span>;
         const display = isDateTimeField
           ? formatDateTimeForDisplay(foundValue)
           : isDateLike ? formatDateForDisplay(foundValue) : foundValue;
         const isOld = foundDoc.created_at && task.created_at && new Date(foundDoc.created_at) < new Date(task.created_at);
-        return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || <span className="text-slate-400">—</span>}</span>;
+        return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-gray-700'}`}>{display || <span className="text-gray-400">—</span>}</span>;
       }
 
       const stageDocInfo = stage?.documents?.find((d: any) => d.kycId === col.kycId);
-      if (!stageDocInfo) return <span className="text-sm text-slate-400">—</span>;
-      if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-red-500">Missing</span>;
+      if (!stageDocInfo) return <span className="text-sm text-gray-400">—</span>;
+      if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded">Missing</span>;
 
       const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
-      if (!linked) return <span className="text-sm text-red-500">Missing</span>;
-      if (linked.indicator) return <span className="inline-flex items-center rounded-sm bg-red-50 text-red-600 border border-red-200 text-xs font-medium px-2 py-1">Indicator</span>;
+      if (!linked) return <span className="text-sm text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded">Missing</span>;
+      if (linked.indicator) return <span className="inline-flex items-center rounded-md bg-amber-50 text-amber-700 border border-amber-200 text-xs font-medium px-2 py-1">Indicator</span>;
 
       const isDateTimeField2 = col.fieldType === 'date_and_time' || col.fieldName === 'date_and_time';
       const isDateLike2 = col.fieldType === 'date' || col.fieldType === 'Date' || isDateTimeField2;
       let val = isDateLike2
         ? (findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId])
-           || linked.extracted_details?.[col.fieldName]
-           || linked.extracted_details?.[col.fieldId])
+          || linked.extracted_details?.[col.fieldName]
+          || linked.extracted_details?.[col.fieldId])
         : linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
 
       // Pattern fallback: find any dd/MM/yyyy HH:mm value in extracted_details when key lookup failed
@@ -1508,7 +1508,7 @@ export default function ReportsPage() {
       const display = isDateTimeField2
         ? formatDateTimeForDisplay(val)
         : isDateLike2 ? formatDateForDisplay(val) : val;
-      return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || <span className="text-slate-400">—</span>}</span>;
+      return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-gray-700'}`}>{display || <span className="text-gray-400">—</span>}</span>;
     }
 
     if (col.type === 'task') {
@@ -1531,7 +1531,7 @@ export default function ReportsPage() {
       );
 
       if (!requirement) {
-        return <span className="text-sm text-slate-400">—</span>;
+        return <span className="text-sm text-gray-400">—</span>;
       }
 
       // Check if task has fetched reference documents
@@ -1539,7 +1539,7 @@ export default function ReportsPage() {
 
       if (referenceDocs.length === 0) {
         return (
-          <div className="text-slate-400 italic">No documents found</div>
+          <div className="text-gray-400 italic">No documents found</div>
         );
       }
 
@@ -1560,7 +1560,7 @@ export default function ReportsPage() {
 
 
       return (
-        <div className="text-slate-500"><span className="font-medium text-slate-700">{isEffectiveTo || '-'}</span></div>
+        <div className="text-gray-500"><span className="font-medium text-gray-700">{isEffectiveTo || '-'}</span></div>
       );
     }
 
@@ -1568,13 +1568,13 @@ export default function ReportsPage() {
       const currentStage = getCurrentOfficerStage(task);
 
       if (!currentStage) {
-        return <span className="text-sm text-slate-400">—</span>;
+        return <span className="text-sm text-gray-400">—</span>;
       }
 
       const officerIds = getStageOfficerIds(task, 'current');
 
       if (!officerIds || officerIds.length === 0) {
-        return <span className="text-sm text-slate-400 italic">None assigned</span>;
+        return <span className="text-sm text-gray-400 italic">None assigned</span>;
       }
 
       const officerNames = officerIds.map((id: string) => {
@@ -1583,13 +1583,13 @@ export default function ReportsPage() {
       }).filter(Boolean);
 
       if (officerNames.length === 0) {
-        return <span className="text-sm text-slate-400 italic">None assigned</span>;
+        return <span className="text-sm text-gray-400 italic">None assigned</span>;
       }
 
       return (
         <div className="flex flex-wrap gap-1">
           {officerNames.map((name: string, idx: number) => (
-            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200">
+            <Badge key={idx} variant="outline" className="text-xs px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200">
               {name}
             </Badge>
           ))}
@@ -1603,7 +1603,7 @@ export default function ReportsPage() {
         : [];
 
       if (!officerIds || officerIds.length === 0) {
-        return <span className="text-sm text-slate-400 italic">None assigned</span>;
+        return <span className="text-sm text-gray-400 italic">None assigned</span>;
       }
 
       const officerNames = officerIds.map((id: string) => {
@@ -1612,13 +1612,13 @@ export default function ReportsPage() {
       }).filter(Boolean);
 
       if (officerNames.length === 0) {
-        return <span className="text-sm text-slate-400 italic">None assigned</span>;
+        return <span className="text-sm text-gray-400 italic">None assigned</span>;
       }
 
       return (
         <div className="flex flex-wrap gap-1">
           {officerNames.map((name: string, idx: number) => (
-            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-violet-50 text-violet-700 border-violet-200">
+            <Badge key={idx} variant="outline" className="text-xs px-1.5 py-0 bg-violet-50 text-violet-700 border-violet-200">
               {name}
             </Badge>
           ))}
@@ -1626,7 +1626,7 @@ export default function ReportsPage() {
       );
     }
 
-    return <span className="text-sm text-slate-400">—</span>;
+    return <span className="text-sm text-gray-400">—</span>;
   }, [
     stages, departments, kycDocuments, allDocuments, companies,
     enhancedTasksData, taskDependants, showTimeStatuses,
@@ -1717,8 +1717,8 @@ export default function ReportsPage() {
         if (!linked || linked.indicator) continue;
         foundValue = isDateLike
           ? (findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId])
-             || linked.extracted_details?.[col.fieldName]
-             || linked.extracted_details?.[col.fieldId])
+            || linked.extracted_details?.[col.fieldName]
+            || linked.extracted_details?.[col.fieldId])
           : linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
         if (!foundValue && isDateTimeFieldExport) {
           foundValue = (Object.values(linked.extracted_details || {}) as any[]).find(
@@ -1764,9 +1764,9 @@ export default function ReportsPage() {
       wb.created = new Date();
       const ws = wb.addWorksheet('Report', { views: [{ showGridLines: false }] });
 
-      const accentArgb = 'FF4F46E5'; // indigo-600
-      const accentLightArgb = 'FFF5F3FF'; // indigo-50
-      const headerFg = 'FF1E1B4B'; // dark indigo
+      const accentArgb = 'FF4F46E5'; // blue-600
+      const accentLightArgb = 'FFF5F3FF'; // blue-50
+      const headerFg = 'FF1E1B4B'; // dark blue
       const rowAlt = 'FFF8F9FF';
       const borderColor = 'FFCBD5E1';
 
@@ -1866,31 +1866,40 @@ export default function ReportsPage() {
       const { default: jsPDF } = await import('jspdf');
       const { default: autoTable } = await import('jspdf-autotable');
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
       const accentRgb: [number, number, number] = [79, 70, 229];
-      const darkRgb: [number, number, number] = [30, 27, 75];
+      const greyDark: [number, number, number] = [15, 23, 42];
+      const greyMid: [number, number, number] = [100, 116, 139];
+      const greyLight: [number, number, number] = [226, 232, 240];
 
-      // Cover accent bar
+      // Modern header
       doc.setFillColor(...accentRgb);
-      doc.rect(0, 0, 297, 18, 'F');
+      doc.rect(0, 0, pageW, 3, 'F');
+      doc.setFillColor(255, 255, 255);
+      doc.rect(0, 3, pageW, 18, 'F');
+      doc.setTextColor(...greyDark);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(14);
-      doc.setTextColor(255, 255, 255);
-      doc.text(reportName.toUpperCase(), 14, 12);
+      doc.text(reportName.toUpperCase(), 14, 14);
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.setTextColor(180, 174, 240);
-      doc.text(`${deptLabel}  ·  ${dateStr}  ·  ${searchedTasks.length} records`, 14, 16.5);
+      doc.setFontSize(7);
+      doc.setTextColor(...greyMid);
+      doc.text(`${deptLabel}  ·  ${dateStr}  ·  ${searchedTasks.length} records`, 14, 19.5);
+      doc.setDrawColor(...greyLight);
+      doc.setLineWidth(0.3);
+      doc.line(10, 22, pageW - 10, 22);
 
       autoTable(doc, {
-        startY: 24,
+        startY: 26,
         head: [['#', ...filteredColumns.map(c => c.label)]],
         body: searchedTasks.map((t, i) => [i + 1, ...filteredColumns.map(col => getExportCellValue(t, col))]),
-        theme: 'grid',
-        headStyles: { fillColor: darkRgb, textColor: [255, 255, 255], fontSize: 8, fontStyle: 'bold', cellPadding: 3 },
-        alternateRowStyles: { fillColor: [248, 249, 255] },
-        styles: { fontSize: 8, cellPadding: 2.5, textColor: [31, 41, 55], overflow: 'linebreak' },
-        columnStyles: { 0: { cellWidth: 8, halign: 'center' } },
-        margin: { left: 10, right: 10 },
+        headStyles: { fillColor: greyDark, textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold', halign: 'center', minCellHeight: 7, lineWidth: 0 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        bodyStyles: { textColor: [31, 41, 55], lineColor: [241, 245, 249] },
+        styles: { fontSize: 6.5, cellPadding: { top: 1.5, right: 2.5, bottom: 1.5, left: 2.5 }, textColor: [31, 41, 55], overflow: 'ellipsize', lineWidth: 0.15 },
+        columnStyles: { 0: { cellWidth: 7, halign: 'center' } },
+        margin: { left: 10, right: 10, top: 26, bottom: 12 },
         didParseCell: (data) => {
           if (data.section === 'body') {
             const v = String(data.cell.raw ?? '');
@@ -1901,11 +1910,15 @@ export default function ReportsPage() {
           }
         },
         didDrawPage: (data) => {
-          const pageCount = doc.internal.getNumberOfPages();
-          doc.setFontSize(7);
-          doc.setTextColor(156, 163, 175);
-          doc.text(`${reportName}  ·  Generated ${dateStr}`, 10, 208);
-          doc.text(`Page ${data.pageNumber} of ${pageCount}`, 287, 208, { align: 'right' });
+          const pg = doc.getNumberOfPages();
+          doc.setDrawColor(226, 232, 240);
+          doc.setLineWidth(0.3);
+          doc.line(10, pageH - 8, pageW - 10, pageH - 8);
+          doc.setFontSize(6.5);
+          doc.setTextColor(148, 163, 184);
+          doc.setFont('helvetica', 'normal');
+          doc.text(`${reportName}  ·  ${dateStr}`, 14, pageH - 3.5);
+          doc.text(`Page ${pg}`, pageW - 14, pageH - 3.5, { align: 'right' });
         }
       });
 
@@ -2097,8 +2110,6 @@ export default function ReportsPage() {
       const pageW = doc.internal.pageSize.getWidth();
       const pageH = doc.internal.pageSize.getHeight();
 
-      // Use ALL visible columns — autoTable handles row pagination; we split wide tables
-      // into column groups so every column is represented across pages.
       const pdfCols = filteredColumns.length > 0 ? filteredColumns : [];
 
       const hexToRgb = (hex: string): [number, number, number] => [
@@ -2107,18 +2118,18 @@ export default function ReportsPage() {
       const accent = hexToRgb(accentHex);
 
       // ── Colour helpers ─────────────────────────────────────────────────────────
-      const GREY_DARK: [number, number, number] = [30, 41, 59];       // slate-800
-      const GREY_MID: [number, number, number] = [71, 85, 105];       // slate-600
-      const GREY_LIGHT: [number, number, number] = [226, 232, 240];   // slate-200
+      const GREY_DARK: [number, number, number] = [15, 23, 42];       // gray-950
+      const GREY_MID: [number, number, number] = [71, 85, 105];       // gray-600
+      const GREY_LIGHT: [number, number, number] = [226, 232, 240];   // gray-200
       const WHITE: [number, number, number] = [255, 255, 255];
-      const ROW_ALT: [number, number, number] = [248, 250, 252];      // slate-50
+      const ROW_ALT: [number, number, number] = [248, 250, 252];      // gray-50
       const AMBER_BG: [number, number, number] = [255, 251, 235];     // amber-50
       const AMBER_TEXT: [number, number, number] = [146, 64, 14];     // amber-800
       const RED_TEXT: [number, number, number] = [220, 38, 38];
       const ORANGE_TEXT: [number, number, number] = [234, 88, 12];
-      const SLATE_TEXT: [number, number, number] = [100, 116, 139];
+      const gray_TEXT: [number, number, number] = [100, 116, 139];
+      const GREEN_TEXT: [number, number, number] = [21, 128, 61];
 
-      // Column-type bucket for PDF styling
       const pdfBucket = (type: string) => {
         if (type === 'current_stage_age' || type === 'total_process_age') return 'duration';
         if (type === 'task' || type === 'current_stage_officer') return 'task';
@@ -2126,52 +2137,54 @@ export default function ReportsPage() {
         return 'stage';
       };
 
-      // ── Page header painter (called once per page via didDrawPage) ─────────────
+      // ── Modern page header ─────────────────────────────────────────────────────
       const paintPageHeader = (pageNum: number) => {
-        // Accent banner
+        // Thin accent top border
         doc.setFillColor(...accent);
-        doc.rect(0, 0, pageW, 16, 'F');
-        doc.setTextColor(...WHITE);
-        doc.setFontSize(13);
-        doc.setFont('helvetica', 'bold');
-        doc.text(reportTitle.toUpperCase(), pageW / 2, 10, { align: 'center' });
+        doc.rect(0, 0, pageW, 3, 'F');
 
-        // Subtitle strip
-        doc.setFillColor(241, 245, 249); // slate-100
-        doc.rect(0, 16, pageW, 8, 'F');
+        // White header area
+        doc.setFillColor(255, 255, 255);
+        doc.rect(0, 3, pageW, 20, 'F');
+
+        // Title
+        doc.setTextColor(...GREY_DARK);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text(reportTitle.toUpperCase(), 14, 15);
+
+        // Meta line
         doc.setTextColor(...GREY_MID);
         doc.setFontSize(7);
         doc.setFont('helvetica', 'normal');
         doc.text(
-          `${deptName}  ·  ${subdeptLabel}  ·  ${statusLabel}  ·  Generated: ${dateStr}  ·  Total: ${totalTasks} tasks`,
-          pageW / 2, 21, { align: 'center' }
+          `${deptName}  ·  ${subdeptLabel}  ·  ${statusLabel}  ·  ${dateStr}  ·  ${totalTasks} tasks`,
+          14, 20.5
         );
 
-        // Bottom border of header
+        // Subtle bottom line
         doc.setDrawColor(...GREY_LIGHT);
         doc.setLineWidth(0.3);
-        doc.line(0, 24, pageW, 24);
+        doc.line(10, 23, pageW - 10, 23);
       };
 
-      // ── Footer painter ─────────────────────────────────────────────────────────
+      // ── Footer ─────────────────────────────────────────────────────────────────
       const paintFooter = (pageNum: number) => {
-        doc.setFillColor(241, 245, 249);
-        doc.rect(0, pageH - 7, pageW, 7, 'F');
-        doc.setDrawColor(...GREY_LIGHT);
-        doc.line(0, pageH - 7, pageW, pageH - 7);
-        doc.setFontSize(6);
-        doc.setTextColor(...GREY_MID);
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.3);
+        doc.line(10, pageH - 8, pageW - 10, pageH - 8);
+        doc.setFontSize(6.5);
+        doc.setTextColor(148, 163, 184);
         doc.setFont('helvetica', 'normal');
-        doc.text(`${reportTitle}  ·  ${deptName}  ·  ${dateStr}`, 6, pageH - 2.5);
-        doc.text(`Page ${pageNum}`, pageW - 6, pageH - 2.5, { align: 'right' });
+        doc.text(`${reportTitle}  ·  ${deptName}  ·  ${dateStr}`, 14, pageH - 3.5);
+        doc.text(`Page ${pageNum}`, pageW - 14, pageH - 3.5, { align: 'right' });
       };
 
-      // Paint header on first page immediately
       paintPageHeader(1);
-      let startY = 27;
+      let startY = 26;
 
-      // Split columns into chunks of 12 so wide tables paginate horizontally cleanly
-      const CHUNK = 12;
+      // Wide landscape: fit ~18 columns per chunk
+      const CHUNK = 18;
       const colChunks: any[][] = [];
       for (let i = 0; i < pdfCols.length; i += CHUNK) {
         colChunks.push(pdfCols.slice(i, i + CHUNK));
@@ -2191,54 +2204,33 @@ export default function ReportsPage() {
           if (startY > pageH - 40) {
             doc.addPage();
             paintPageHeader(doc.getNumberOfPages());
-            startY = 27;
+            startY = 26;
           }
 
           // ── Group banner ───────────────────────────────────────────────────────
-          if (isFirstChunk) {
-            // Rounded-look group banner
-            doc.setFillColor(...gColor);
-            doc.roundedRect(4, startY, pageW - 8, 8, 1, 1, 'F');
-            doc.setTextColor(...WHITE);
-            doc.setFontSize(8.5);
-            doc.setFont('helvetica', 'bold');
-            const groupLabel = group.name.toUpperCase();
-            const countLabel = `${group.tasks.length} task${group.tasks.length !== 1 ? 's' : ''}`;
-            doc.text(`  ${groupLabel}`, 6, startY + 5.5);
-            doc.text(countLabel, pageW - 6, startY + 5.5, { align: 'right' });
-            startY += 10;
-          } else {
-            // Continuation banner
-            doc.setFillColor(...gColor);
-            doc.setFillColor(gColor[0], gColor[1], gColor[2]);
-            const contBg: [number, number, number] = [gColor[0] + 40 > 255 ? 255 : gColor[0] + 40, gColor[1] + 40 > 255 ? 255 : gColor[1] + 40, gColor[2] + 40 > 255 ? 255 : gColor[2] + 40];
-            doc.setFillColor(...contBg);
-            doc.roundedRect(4, startY, pageW - 8, 6, 1, 1, 'F');
-            doc.setTextColor(...gColor);
-            doc.setFontSize(7);
-            doc.setFont('helvetica', 'italic');
-            doc.text(`  ${group.name} (cont.) — columns ${ci * CHUNK + 1}–${ci * CHUNK + chunk.length}`, 6, startY + 4);
-            startY += 8;
-          }
+          doc.setFillColor(...gColor);
+          doc.roundedRect(8, startY, pageW - 16, 7, 1.5, 1.5, 'F');
+          doc.setTextColor(...WHITE);
+          doc.setFontSize(8);
+          doc.setFont('helvetica', 'bold');
+          const groupLabel = isFirstChunk
+            ? group.name.toUpperCase()
+            : `${group.name.toUpperCase()} (cont. — cols ${ci * CHUNK + 1}–${Math.min(ci * CHUNK + chunk.length, pdfCols.length)})`;
+          const countLabel = `${group.tasks.length} task${group.tasks.length !== 1 ? 's' : ''}`;
+          doc.text(`  ${groupLabel}`, 11, startY + 4.8);
+          if (isFirstChunk) doc.text(countLabel, pageW - 11, startY + 4.8, { align: 'right' });
+          startY += 9.5;
 
-          // ── Column-type headers ────────────────────────────────────────────────
-          // Build a colour header row above the data columns to replicate the
-          // table's visual column-group encoding
-          const colGroupLabels = chunk.map(col => {
-            const b = pdfBucket(col.type ?? 'stage');
-            return { label: col.label, bucket: b };
-          });
-
-          // Build colour map: head fill per column index (offset by 1 for # col)
+          // ── Build head styles per column ───────────────────────────────────────
           const buildHeadStyle = (colIndex: number): any => {
-            if (colIndex === 0) return { fillColor: [15, 23, 42], textColor: WHITE }; // slate-950 for idx
+            if (colIndex === 0) return { fillColor: GREY_DARK, textColor: WHITE };
             const col = chunk[colIndex - 1];
             if (!col) return { fillColor: GREY_DARK, textColor: WHITE };
             const b = pdfBucket(col.type ?? 'stage');
-            if (b === 'duration') return { fillColor: [180, 83, 9], textColor: WHITE };    // amber-700
-            if (b === 'reference') return { fillColor: [6, 78, 59], textColor: WHITE };    // emerald-900
-            if (b === 'stage') return { fillColor: [55, 48, 163], textColor: WHITE };      // indigo-800
-            return { fillColor: [30, 58, 138], textColor: WHITE };                         // blue-900 (task)
+            if (b === 'duration') return { fillColor: [180, 83, 9], textColor: WHITE };
+            if (b === 'reference') return { fillColor: [6, 78, 59], textColor: WHITE };
+            if (b === 'stage') return { fillColor: [55, 48, 163], textColor: WHITE };
+            return { fillColor: [30, 58, 138], textColor: WHITE };
           };
 
           const headers = ['#', ...chunk.map(c => c.label)];
@@ -2255,78 +2247,75 @@ export default function ReportsPage() {
             head: [headers],
             body: rows,
             styles: {
-              fontSize: 7,
-              cellPadding: { top: 1.8, right: 2.5, bottom: 1.8, left: 2.5 },
+              fontSize: 6.5,
+              cellPadding: { top: 1.5, right: 2, bottom: 1.5, left: 2 },
               overflow: 'ellipsize',
               lineColor: GREY_LIGHT,
-              lineWidth: 0.2,
+              lineWidth: 0.15,
               valign: 'middle',
             },
             headStyles: {
               fontStyle: 'bold',
-              fontSize: 7.5,
+              fontSize: 6.5,
               halign: 'center',
-              minCellHeight: 8,
-              lineWidth: 0.3,
-              lineColor: [255, 255, 255],
+              minCellHeight: 7,
+              lineWidth: 0,
             },
             bodyStyles: {
-              textColor: GREY_DARK,
+              textColor: [31, 41, 55],
+              lineColor: [241, 245, 249],
             },
             alternateRowStyles: { fillColor: ROW_ALT },
-            columnStyles: { 0: { halign: 'center', cellWidth: 9 } },
-            margin: { left: 4, right: 4, top: 27, bottom: 10 },
+            columnStyles: { 0: { halign: 'center', cellWidth: 7 } },
+            margin: { left: 8, right: 8, top: 26, bottom: 12 },
             didParseCell: (data: any) => {
-              // Per-column head colour
               if (data.section === 'head') {
                 const hs = buildHeadStyle(data.column.index);
                 data.cell.styles.fillColor = hs.fillColor;
                 data.cell.styles.textColor = hs.textColor;
               }
-              // Semantic value colours
               if (data.section === 'body') {
                 const raw = String(data.cell.raw ?? '');
+                const col = data.column.index > 0 ? chunk[data.column.index - 1] : null;
+
                 if (raw === 'N/A' || raw === 'Missing') {
                   data.cell.styles.textColor = RED_TEXT;
                   data.cell.styles.fontStyle = 'italic';
                 } else if (raw === 'Unallocated') {
                   data.cell.styles.textColor = ORANGE_TEXT;
                 } else if (raw.startsWith('Skipped')) {
-                  data.cell.styles.textColor = SLATE_TEXT;
+                  data.cell.styles.textColor = gray_TEXT;
                   data.cell.styles.fontStyle = 'italic';
+                } else if (raw.toLowerCase().includes('completed')) {
+                  data.cell.styles.textColor = GREEN_TEXT;
+                  data.cell.styles.fontStyle = 'bold';
                 }
-                // Duration column tint in body
-                if (data.column.index > 0) {
-                  const col = chunk[data.column.index - 1];
-                  if (col && (col.type === 'current_stage_age' || col.type === 'total_process_age')) {
-                    data.cell.styles.fillColor = AMBER_BG;
-                    data.cell.styles.textColor = AMBER_TEXT;
-                  }
+
+                if (col && (col.type === 'current_stage_age' || col.type === 'total_process_age')) {
+                  data.cell.styles.fillColor = AMBER_BG;
+                  data.cell.styles.textColor = AMBER_TEXT;
                 }
               }
             },
             didDrawPage: (data: any) => {
-              // Re-paint header and footer on every new page
               const pg = doc.getNumberOfPages();
               paintPageHeader(pg);
               paintFooter(pg);
             },
           });
 
-          startY = (doc as any).lastAutoTable.finalY + 6;
+          startY = (doc as any).lastAutoTable.finalY + 5;
 
-          // If more chunks remain for this group, start a new page
           if (ci < colChunks.length - 1) {
             doc.addPage();
             paintPageHeader(doc.getNumberOfPages());
-            startY = 27;
+            startY = 26;
           }
         }
 
-        startY += 4; // spacing between groups
+        startY += 3;
       }
 
-      // Paint footer on last page
       paintFooter(doc.getNumberOfPages());
 
       doc.save(`${fileName}.pdf`);
@@ -2448,18 +2437,18 @@ export default function ReportsPage() {
 
   if (reportLoading) {
     return (
-      <div className="flex-1 p-8 bg-slate-50 flex items-center justify-center min-h-screen">
+      <div className="flex-1 p-8 bg-slate-100 flex items-center justify-center min-h-screen">
         <div className="text-center space-y-4">
-          <Loader2 className="h-12 w-12 animate-spin text-slate-400 mx-auto" />
-          <p className="text-slate-700">Loading Reports...</p>
+          <Loader2 className="h-10 w-10 animate-spin text-slate-400 mx-auto" />
+          <p className="text-sm font-medium text-slate-500">Loading Reports...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
-      {/* 1. Sidebar: Now sits to the left of the main content */}
+    <div className="flex flex-1 overflow-hidden">
+      {/* 1. Sidebar */}
       <ReportsSidebar
         departments={departments}
         activeDeptId={activeDeptId}
@@ -2471,11 +2460,10 @@ export default function ReportsPage() {
         onToggleCollapse={handleSidebarToggle}
       />
 
-      {/* 2. Main Content Area: Takes up remaining width */}
-      <div className="flex-1 flex flex-col min-w-0">
-
-        {/* Top Row: Report Info & High-level Perspectives */}
-        <ReportsToolbar
+      {/* 2. Main Content Area — LAYER 3: "The Workspace" */}
+      <div className="flex flex-col flex-1 overflow-hidden bg-white">
+        {/* Header Bar */}
+        <ReportsHeader
           activeReport={activeReport}
           setIsReportDialogOpen={setIsReportDialogOpen}
           columns={columns}
@@ -2493,16 +2481,28 @@ export default function ReportsPage() {
           activeDepartment={activeDepartment}
           activeSubDepartments={activeSubDepartments}
           activeSubDeptIds={activeSubDeptIds}
+          allTasksCount={allTasksCount}
+          wipTasksCount={wipTasksCount}
+          writeUpCompletedCount={writeUpCompletedCount}
+          endorsedCount={endorsedCount}
+          cancelledCount={cancelledCount}
         />
 
-        {/* Second Row: Person Specific Filters (Conditional based on perspective) */}
+        {/* KPI Summary Cards */}
+        <KpiSummaryCards
+          allTasksCount={allTasksCount}
+          wipTasksCount={wipTasksCount}
+          writeUpCompletedCount={writeUpCompletedCount}
+          endorsedCount={endorsedCount}
+        />
+        {/* Person Filter Strip */}
         <PersonFilterStrip
           activePerspective={activePerspective}
-          setActivePerspective={setActivePerspective} // Added
-          allTasksCount={allTasksCount}                 // Added
+          setActivePerspective={setActivePerspective}
+          allTasksCount={allTasksCount}
           officerTaskCounts={officerTaskCounts}
           taskManagerTaskCounts={taskManagerTaskCounts}
-          clientTaskCounts={clientTaskCounts}           // Added
+          clientTaskCounts={clientTaskCounts}
           availableOfficers={availableOfficers}
           activeOfficerTab={activeOfficerTab}
           setActiveOfficerTab={setActiveOfficerTab}
@@ -2515,7 +2515,7 @@ export default function ReportsPage() {
           setTaskManagerFilterMode={setTaskManagerFilterMode}
         />
 
-        {/* Third Row: Status, Search, and Category Filters */}
+        {/* Status + Search Bar */}
         <StatusFilterBar
           activeStatus={activeStatus}
           setActiveStatus={setActiveStatus}
@@ -2535,21 +2535,22 @@ export default function ReportsPage() {
           isFiltersDropdownOpen={isFiltersDropdownOpen}
           setIsFiltersDropdownOpen={setIsFiltersDropdownOpen}
         />
+
         {/* Table Area */}
-        <div className="flex-1 overflow-hidden p-3">
+        <div className="flex-1 overflow-hidden pt-6">
           {!activeReport ? (
-            <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200">
-              <FileText className="h-16 w-16 mb-4 opacity-20 text-blue-600" />
-              <p className="text-lg font-bold text-slate-600">No Report Selected</p>
-              <p className="text-sm text-slate-400 mt-1">Select a report template to view data</p>
-              <Button size="sm" className="mt-4" onClick={() => setIsReportDialogOpen(true)}>
+            <div className="h-full flex flex-col items-center justify-center bg-white rounded-lg mx-4 shadow-sm border border-slate-200">
+              <FileText className="h-10 w-10 mb-3 text-slate-300" />
+              <p className="text-sm font-semibold text-slate-700">No Report Selected</p>
+              <p className="text-xs text-slate-400 mt-1">Select a report template to view data</p>
+              <Button size="sm" className="mt-4 bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setIsReportDialogOpen(true)}>
                 <Filter className="h-3.5 w-3.5 mr-1.5" />Select Report
               </Button>
             </div>
           ) : loading ? (
-            <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200">
-              <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-3" />
-              <p className="text-sm font-bold text-slate-500">Processing Report Data...</p>
+            <div className="h-full flex flex-col items-center justify-center bg-white rounded-lg mx-4 shadow-sm border border-slate-200">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-500 mb-3" />
+              <p className="text-sm font-medium text-slate-600">Processing Report Data...</p>
             </div>
           ) : view === 'standard' ? (
             <StandardReportView
@@ -2581,7 +2582,6 @@ export default function ReportsPage() {
             />
           )}
         </div>
-
       </div>
 
       <MemorizedReportDialog

@@ -1,163 +1,770 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import {
-  Loader2, Zap, Database, FileText, Webhook, ChevronRight, AlertCircle,
-  CheckCircle2, Edit3, X, Paperclip, ChevronDown, HelpCircle, Eye, Lock, 
-  Search, Settings, Calculator, CornerDownRight, Play, Square, FileWarning,
-  List
+  Loader2, Zap, User, Database, FileText, Webhook, ChevronRight, AlertCircle,
+  CheckCircle2, Edit3, X, Paperclip, ArrowUpDown, Filter, Check,
+  List, ChevronDown, ChevronUp, Eye, Lock, Settings, Activity, Clock
 } from 'lucide-react';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { ExtractionPreview } from "@/components/ExtractionPreview"
+import { ExtractionPreview } from "@/components/ExtractionPreview";
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { isValidValue, ETA_SCREENSHOT_DOCUMENT_ID } from '../utils/AutomationMappingDialog';
-import supabase from '@/lib/supabase/client';
 
+// Softened colors for entity tags to reduce visual noise
 const ENTITY_TYPE_COLORS: Record<string, string> = {
-  principal: 'bg-indigo-50 text-indigo-700 border-indigo-200/50',
-  dependant: 'bg-sky-50 text-sky-700 border-sky-200/50',
-  sponsor: 'bg-amber-50 text-amber-700 border-amber-200/50',
-  director: 'bg-emerald-50 text-emerald-700 border-emerald-200/50',
-  company: 'bg-slate-100 text-slate-700 border-slate-200/50',
-  understudy: 'bg-teal-50 text-teal-700 border-teal-200/50',
-};
-
-// --- Custom Circular Progress Ring ---
-const CircularProgress = ({ value, className }: { value: number, className?: string }) => {
-  const radius = 16;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (value / 100) * circumference;
-  const isComplete = value === 100;
-
-  return (
-    <div className={cn("relative flex items-center justify-center", className)}>
-      <svg className="transform -rotate-90 w-10 h-10">
-        <circle cx="20" cy="20" r={radius} stroke="currentColor" strokeWidth="3" fill="transparent" className="text-slate-100" />
-        <circle cx="20" cy="20" r={radius} stroke="currentColor" strokeWidth="3" fill="transparent"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          className={cn("transition-all duration-1000 ease-out", isComplete ? "text-emerald-500" : "text-indigo-600")}
-        />
-      </svg>
-      <span className={cn("absolute text-[10px] font-bold", isComplete ? "text-emerald-600" : "text-indigo-700")}>
-        {value}%
-      </span>
-    </div>
-  );
+  principal: 'bg-blue-50 text-blue-700',
+  dependant: 'bg-slate-100 text-slate-600',
+  sponsor: 'bg-slate-100 text-slate-600',
+  director: 'bg-slate-100 text-slate-600',
+  company: 'bg-slate-100 text-slate-600',
+  understudy: 'bg-slate-100 text-slate-600',
 };
 
 interface AutomationMappingDialogUIProps {
-  // ... (Keep existing props exactly the same)
-  isOpen: boolean; onClose: () => void; activeTab: string; setActiveTab: (v: string) => void;
-  task?: any; taskId?: string; individualName: string; selectedAutomationId: string;
-  setSelectedAutomationId: (id: string) => void; entityAutomationMappings: any[]; selectedMapping: any; activeWebEntry: any;
-  isLoading: boolean; isLoadingData: boolean; isAutomationRunning: boolean; isSavingScreenshot: boolean;
-  automationProgress: any; automationJobId: string | null; logsEndRef: React.RefObject<HTMLDivElement>;
-  getPrimaryTargetEntityId: () => string; getPrimaryEntityType: () => string; setCurrentIndividualId: (id: string) => void;
-  savedScreenshotDoc: any; sortedFields: any[]; processedFields: any[]; sortMissingFirst: boolean; setSortMissingFirst: (v: boolean) => void;
-  entitySort: 'asc' | 'desc' | null; setEntitySort: (v: any) => void; editingCell: any; editValue: string; setEditValue: (v: string) => void;
-  expandedArrayFields: Set<string>; jobFields: Record<string, any>; requirementJobQuestions: any[]; sourceData: Record<string, Record<string, any>>;
-  getArrayFieldData: (field: any) => any[]; toggleArrayFieldExpansion: (name: string) => void; getFieldValue: (id: string, entityId: string, sourceIdx?: number, extractionMode?: string) => any;
-  startEditing: (...args: any[]) => void; saveEdit: (isDropdown?: boolean, opts?: any[]) => void; cancelEditing: () => void; documentFiles: any[];
-  resolveTargetEntityId: (field: any) => any; handlePreviewDocument: (doc: any) => void; setPreviewingDocuments: (v: any) => void;
-  setShowPreviewModal: (v: boolean) => void; showPreviewModal: boolean; previewingDocuments: any; getFileUrl: (path: string) => string;
-  handleSaveEditedDocument: (doc: any, data: Record<string, any>) => Promise<void>; handlePreviewDataChange: (docId: string, field: string, value: any) => void;
-  handleRunAutomation: () => void; stopAutomation: () => void;
+  isOpen: boolean;
+  onClose: () => void;
+  isLoading: boolean;
+  isAutomationRunning: boolean;
+  isLoadingData: boolean;
+  isSavingScreenshot: boolean;
+  task: any;
+  taskId?: string;
+  individualName: string;
+  savedScreenshotDoc: any;
+  selectedAutomationId: string;
+  setSelectedAutomationId: (id: string) => void;
+  entityAutomationMappings: any[];
+  selectedMapping: any;
+  activeWebEntry: any;
+  automationProgress: any;
+  automationJobId: string | null;
+  logsEndRef: React.RefObject<HTMLDivElement>;
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
+  processedFields: any[];
+  sortedFields: any[];
+  sortMissingFirst: boolean;
+  setSortMissingFirst: (val: boolean) => void;
+  entitySort: 'asc' | 'desc' | null;
+  setEntitySort: (updater: any) => void;
+  editingCell: any;
+  editValue: string;
+  setEditValue: (val: string) => void;
+  saveEdit: (isDropdown?: boolean, dropdownOptions?: { label: string; value: string }[]) => void;
+  cancelEditing: () => void;
+  startEditing: (fieldId: string, sourceIdx: number, table: string, path: string, val: string, entityId: string, linkingVariable: string, fieldType?: string, computedFunction?: string, masterFieldId?: string | number) => void;
+  expandedArrayFields: Set<string>;
+  toggleArrayFieldExpansion: (fieldVariableName: string) => void;
+  jobFields: Record<string, any>;
+  sourceData: Record<string, Record<string, any>>;
+  requirementJobQuestions: any[];
+  documentFiles: any[];
+  computedFieldsPreview: Record<string, string>;
+  getArrayFieldData: (field: any) => any[];
+  getFieldValue: (fieldIdOrVariable: string, entityId: string, sourceIdx?: number, extractionMode?: string, preserveArray?: boolean) => any;
+  resolveTargetEntityId: (field: any) => string | undefined;
+  getFileUrl: (filePath: string) => string;
+  handlePreviewDocument: (doc: any) => void;
+  handleSaveEditedDocument: (doc: any, editedData: Record<string, any>) => Promise<void>;
+  handlePreviewDataChange: (docId: string, fieldName: string, value: any) => void;
+  getPrimaryTargetEntityId: () => string;
+  getPrimaryEntityType: () => string;
+  setCurrentIndividualId: (id: string) => void;
+  stopAutomation: () => Promise<void>;
+  handleRunAutomation: () => Promise<void>;
+  showPreviewModal: boolean;
+  setShowPreviewModal: (val: boolean) => void;
+  previewingDocuments: any;
+  setPreviewingDocuments: (val: any) => void;
+  supabase: any;
 }
 
 export const AutomationMappingDialogUI = ({
-  isOpen, onClose, activeTab, setActiveTab, task, taskId, individualName, selectedAutomationId, setSelectedAutomationId,
-  entityAutomationMappings, selectedMapping, activeWebEntry, isLoading, isLoadingData, isAutomationRunning, isSavingScreenshot,
-  automationProgress, automationJobId, logsEndRef, getPrimaryTargetEntityId, savedScreenshotDoc, sortedFields, processedFields,
-  sortMissingFirst, setSortMissingFirst, editingCell, editValue, setEditValue, expandedArrayFields, jobFields, requirementJobQuestions, sourceData,
-  getArrayFieldData, toggleArrayFieldExpansion, getFieldValue, startEditing, saveEdit, cancelEditing, documentFiles,
-  resolveTargetEntityId, handlePreviewDocument, setPreviewingDocuments, setShowPreviewModal, showPreviewModal, previewingDocuments, getFileUrl,
-  handleSaveEditedDocument, handlePreviewDataChange, handleRunAutomation, stopAutomation,
+  isOpen, onClose, isLoading, isAutomationRunning, isLoadingData, isSavingScreenshot,
+  task, taskId, individualName, savedScreenshotDoc,
+  selectedAutomationId, setSelectedAutomationId, entityAutomationMappings, selectedMapping, activeWebEntry,
+  automationProgress, automationJobId, logsEndRef,
+  activeTab, setActiveTab,
+  processedFields, sortedFields, sortMissingFirst, setSortMissingFirst, entitySort, setEntitySort,
+  editingCell, editValue, setEditValue, saveEdit, cancelEditing, startEditing,
+  expandedArrayFields, toggleArrayFieldExpansion,
+  jobFields, sourceData, requirementJobQuestions, documentFiles, computedFieldsPreview,
+  getArrayFieldData, getFieldValue, resolveTargetEntityId, getFileUrl,
+  handlePreviewDocument, handleSaveEditedDocument, handlePreviewDataChange,
+  getPrimaryTargetEntityId, getPrimaryEntityType, setCurrentIndividualId,
+  stopAutomation, handleRunAutomation,
+  showPreviewModal, setShowPreviewModal, previewingDocuments, setPreviewingDocuments, supabase
 }: AutomationMappingDialogUIProps) => {
 
-  const [searchQuery, setSearchQuery] = useState('');
+  const arrayFieldNames = useMemo(() =>
+    sortedFields.filter(f => f.fieldType === 'array').map(f => f.variableName),
+    [sortedFields]);
 
-  const missingCount = processedFields.filter(f => f.isMissing).length;
-  const totalCount = processedFields.length;
-  const readinessPct = totalCount > 0 ? Math.round(((totalCount - missingCount) / totalCount) * 100) : 0;
-  const isDocumentsView = activeTab === 'documents';
-  const showMissingOnly = activeTab === 'missing';
+  const allExpanded = arrayFieldNames.length > 0 && arrayFieldNames.every(name => expandedArrayFields.has(name));
 
-  const displayFields = useMemo(() => {
-    let fields = showMissingOnly ? sortedFields.filter(f => f.isMissing) : sortedFields;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      fields = fields.filter(f => (f.efnsDisplayName || '').toLowerCase().includes(q) || (f.variableName || '').toLowerCase().includes(q));
-    }
-    return fields;
-  }, [sortedFields, showMissingOnly, searchQuery]);
-
-  const renderDataSource = (field: any) => {
-    if (field.fieldType === 'array') return <Badge variant="outline" className="bg-blue-50/50 text-blue-600 border-blue-200"><List className="h-3 w-3 mr-1" /> Array</Badge>;
-    if (field.fieldType === 'document') return <Badge variant="outline" className="bg-amber-50/50 text-amber-600 border-amber-200"><Paperclip className="h-3 w-3 mr-1" /> Document</Badge>;
-    if (field.fieldType === 'computed') return <Badge variant="outline" className="bg-purple-50/50 text-purple-600 border-purple-200"><Calculator className="h-3 w-3 mr-1" /> Computed</Badge>;
-    if (field.isDefault) return <Badge variant="outline" className="bg-slate-50 text-slate-500 border-slate-200"><Lock className="h-3 w-3 mr-1" /> Preset</Badge>;
-    if (field.linkedMasterFields?.length > 0) return <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200"><Database className="h-3 w-3 mr-1 text-slate-400" /> System DB</Badge>;
-    if (field.linkedJobQuestionIds?.length > 0) return <Badge variant="outline" className="bg-violet-50/50 text-violet-600 border-violet-200"><HelpCircle className="h-3 w-3 mr-1" /> Questionnaire</Badge>;
-    return <Badge variant="outline" className="bg-slate-50 text-slate-400 border-slate-200"><Settings className="h-3 w-3 mr-1" /> Direct Entry</Badge>;
+  const handleToggleAllArrays = () => {
+    arrayFieldNames.forEach(name => {
+      if (allExpanded && expandedArrayFields.has(name)) {
+        toggleArrayFieldExpansion(name);
+      } else if (!allExpanded && !expandedArrayFields.has(name)) {
+        toggleArrayFieldExpansion(name);
+      }
+    });
   };
 
-  const renderMappedValue = (field: any, uniqueKey: string, persistenceSource: any, isValueMissing: boolean, editTargetId: string, customRawValue?: any, options?: any) => {
-    const isEditing = editingCell?.fieldId === uniqueKey;
-    const rawValue = customRawValue !== undefined ? customRawValue : field.resolvedValue;
-
-    if (isEditing) {
-      const isDropdown = options && options.length > 0;
+  const renderFieldsTable = () => {
+    if (!activeWebEntry?.fields || activeWebEntry.fields.length === 0) {
       return (
-        <div className="flex items-center gap-1.5 flex-1 min-w-0 justify-end animate-in fade-in zoom-in-95 duration-200">
-          {isDropdown ? (
-            <SearchableSelect value={editValue} onValueChange={setEditValue} options={options} placeholder="Select value..." buttonClassName="h-8 text-sm border-indigo-500 ring-2 ring-indigo-500/20 w-full max-w-[200px]" />
-          ) : (
-            <Input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }} className="h-8 text-sm w-full max-w-[200px] border-indigo-500 ring-2 ring-indigo-500/20 bg-white" placeholder="Enter value..." />
-          )}
-          <Button size="icon" onClick={() => saveEdit(isDropdown, options)} className="h-8 w-8 bg-indigo-600 hover:bg-indigo-700 shrink-0 shadow-sm"><CheckCircle2 className="h-4 w-4" /></Button>
-          <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-slate-400 hover:text-red-500 hover:bg-red-50 shrink-0"><X className="h-4 w-4" /></Button>
+        <div className="flex flex-col items-center justify-center h-full opacity-50">
+          <Database className="w-12 h-12 mb-4 text-slate-300" />
+          <p className="text-base font-medium text-slate-500">No fields configured for this automation.</p>
         </div>
       );
     }
 
-    if (field.isDefault) {
-      return (
-        <TooltipProvider><Tooltip><TooltipTrigger asChild>
-          <div className="text-sm text-slate-500 font-mono bg-slate-50 px-2 py-1 rounded border border-slate-100 cursor-default truncate max-w-[220px]">
-            {rawValue}
-          </div>
-        </TooltipTrigger><TooltipContent className="text-xs">System preset. Cannot be changed.</TooltipContent></Tooltip></TooltipProvider>
-      );
-    }
+    const entityGroupStats = (() => {
+      const groups: Record<string, { total: number; filled: number; missing: number; defaultCount: number }> = {};
+      processedFields.forEach(f => {
+        const types = (f.entityTypes && f.entityTypes.length > 0) ? f.entityTypes : ['—'];
+        const key = types.slice().sort().join(', ');
+        if (!groups[key]) groups[key] = { total: 0, filled: 0, missing: 0, defaultCount: 0 };
+        groups[key].total++;
+        if (f.isDefault) { groups[key].defaultCount++; groups[key].filled++; }
+        else if (!f.isMissing) groups[key].filled++;
+        else groups[key].missing++;
+      });
+      return groups;
+    })();
+    let lastGroupKey = '__init__';
 
     return (
-      <div
-        className={cn(
-          "group/val relative flex items-center justify-between gap-2 px-3 py-1.5 rounded-md transition-all border max-w-[260px] w-full",
-          persistenceSource ? "cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/50 hover:shadow-sm" : "cursor-default border-transparent",
-          isValueMissing ? "border-red-200 bg-red-50/30 text-red-600" : "border-transparent hover:border-slate-200 bg-slate-50/50 text-slate-800"
+      <div className="flex flex-col h-full bg-white relative">
+        {/* Simplified Stats Sub-Header */}
+        <div className="px-6 py-2 border-b border-slate-200 flex flex-wrap gap-6 bg-slate-50/50 sticky top-0 z-20 items-center min-h-[48px]">
+          <div className="flex flex-wrap gap-4 flex-1">
+            {Object.entries(entityGroupStats).map(([key, stats]) => {
+              const pct = Math.round((stats.filled / stats.total) * 100);
+              const allDone = stats.missing === 0;
+              return (
+                <div key={key} className="flex items-center gap-2 text-sm uppercase tracking-wide">
+                  <span className="font-medium text-slate-700">{key}</span>
+                  <div className="w-12 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                    <div className={cn("h-full rounded-full transition-all", allDone ? "bg-emerald-500" : "bg-blue-500")} style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className={cn("font-medium text-xs", allDone ? "text-emerald-600" : "text-slate-500")}>{pct}%</span>
+                  {stats.defaultCount > 0 && (
+                    <span className="text-xs text-slate-400 flex items-center ml-1">
+                      <Lock className="h-3 w-3 mr-0.5" />{stats.defaultCount}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="text-sm font-medium text-slate-600 flex items-center gap-1.5">
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+              {processedFields.filter(f => !f.isMissing).length}/{processedFields.length} Ready
+            </div>
+            {processedFields.filter(f => f.isMissing).length > 0 && (
+              <div className="text-sm font-medium text-red-500 flex items-center gap-1.5 ml-2">
+                <span className="inline-block w-2 h-2 rounded-full bg-red-500"></span>
+                {processedFields.filter(f => f.isMissing).length} Missing
+              </div>
+            )}
+            <div className="h-4 w-px bg-slate-300 mx-2" />
+
+            {arrayFieldNames.length > 0 && (
+              <Button variant="outline" size="sm" onClick={handleToggleAllArrays} className="h-8 text-sm font-medium text-slate-600">
+                {allExpanded ? <ChevronUp className="h-4 w-4 mr-1.5" /> : <ChevronDown className="h-4 w-4 mr-1.5" />}
+                {allExpanded ? "Collapse Arrays" : "Expand Arrays"}
+              </Button>
+            )}
+
+            <Button
+              variant={sortMissingFirst ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSortMissingFirst(!sortMissingFirst)}
+              className={cn("h-8 text-sm font-medium", sortMissingFirst ? "bg-blue-600 text-white" : "text-slate-600")}
+            >
+              <Filter className="h-3.5 w-3.5 mr-1.5" />
+              {sortMissingFirst ? "Show All" : "Missing First"}
+            </Button>
+          </div>
+        </div>
+
+        {/* Clean Table Area */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar relative">
+          <Table className="w-full border-collapse">
+            <TableHeader className="sticky top-0 z-10 bg-blue-600 shadow-sm border-b border-slate-200">
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-12 px-4 py-3 text-center text-sm border-r font-semibold text-white">#</TableHead>
+                <TableHead className="w-80 px-6 py-3 text-left text-sm border-r font-semibold text-white">Target Variable</TableHead>
+                <TableHead className="px-6 py-3 text-left text-sm border-r font-semibold text-white">Source Logic</TableHead>
+                <TableHead
+                  className="w-48 px-6 py-3 text-left text-sm border-r font-semibold text-white cursor-pointer select-none hover:bg-slate-50 transition-colors group"
+                  onClick={() => setEntitySort(prev => prev === 'asc' ? 'desc' : prev === 'desc' ? null : 'asc')}
+                >
+                  <div className="flex items-center justify-between">
+                    Entities
+                    <ArrowUpDown className={cn("h-3.5 w-3.5 shrink-0 transition-colors", entitySort ? "text-blue-600" : "text-slate-300 group-hover:text-slate-400")} />
+                  </div>
+                </TableHead>
+                <TableHead className="px-6 py-3 text-left text-sm border-r font-semibold text-white">Current Value</TableHead>
+              </TableRow>
+            </TableHeader>
+
+            <TableBody className="divide-y divide-slate-100">
+              {sortedFields.map((field, fIdx) => {
+                const isEditing = editingCell?.fieldId === field.variableName;
+                const entityCategory = field.entityTypes?.includes('company') ? 'company' : 'individual';
+
+                const fieldGroupKey = (field.entityTypes && field.entityTypes.length > 0)
+                  ? field.entityTypes.slice().sort().join(', ')
+                  : '—';
+
+                const showGroupHeader = !entitySort && fieldGroupKey !== lastGroupKey;
+                if (showGroupHeader) lastGroupKey = fieldGroupKey;
+
+                const groupFieldsTotal = showGroupHeader ? sortedFields.filter(f => {
+                  const k = (f.entityTypes && f.entityTypes.length > 0) ? f.entityTypes.slice().sort().join(', ') : '—';
+                  return k === fieldGroupKey;
+                }).length : 0;
+
+                const groupFieldsFilled = showGroupHeader ? sortedFields.filter(f => {
+                  const k = (f.entityTypes && f.entityTypes.length > 0) ? f.entityTypes.slice().sort().join(', ') : '—';
+                  return k === fieldGroupKey && !f.isMissing;
+                }).length : 0;
+
+                const groupHeaderRow = showGroupHeader ? (
+                  <TableRow key={`group-${fieldGroupKey}-${fIdx}`} className="bg-blue-50 hover:bg-slate-50">
+                    <TableCell colSpan={5} className="px-6 py-2 border-y border-slate-200">
+                      <div className="gap-2 flex">
+                        <div className="h-6 w-1 bg-blue-600 rounded-md"></div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-semibold text-slate-700 uppercase tracking-wide">
+                            {fieldGroupKey.replace(/, /g, ' & ')}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            ({groupFieldsFilled}/{groupFieldsTotal} Complete)
+                          </span>
+                        </div>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : null;
+
+                // =========================================================
+                // CASE: ARRAY FIELDS
+                // =========================================================
+                if (field.fieldType === 'array') {
+                  const arrayData = getArrayFieldData(field);
+                  const isExpanded = expandedArrayFields.has(field.variableName);
+
+                  return (
+                    <React.Fragment key={`field-${fIdx}`}>
+                      {groupHeaderRow}
+                      <TableRow
+                        className={cn(
+                          "transition-colors cursor-pointer group",
+                          isExpanded ? "bg-slate-50" : "bg-white hover:bg-slate-50/50"
+                        )}
+                        onClick={() => toggleArrayFieldExpansion(field.variableName)}
+                      >
+                        <TableCell className="px-4 py-3 text-center text-sm font-medium text-slate-400 border-r">
+                          {isExpanded ? <ChevronDown className="h-4 w-4 mx-auto text-slate-600" /> : <ChevronRight className="h-4 w-4 mx-auto text-slate-400 group-hover:text-slate-600 transition-colors" />}
+                        </TableCell>
+                        <TableCell colSpan={4} className="px-6 py-3 border-r">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <List className="h-4 w-4 text-slate-400" />
+                              <span className="text-sm font-medium text-slate-900">{field.efnsDisplayName || field.variableName}</span>
+                              <div className="flex flex-wrap gap-1 ml-2">
+                                {(field.entityTypes || []).map(type => (
+                                  <span key={type} className={cn("text-xs px-2 py-0.5 rounded-full font-medium", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-600')}>
+                                    {type}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                            <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                              {arrayData.length} Items
+                            </span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+
+                      {isExpanded && arrayData.map((row, rowIndex) => (
+                        (field.arrayItems || []).map((colItem, colIndex) => {
+                          const uniqueKey = `${field.variableName}-${rowIndex}-${colIndex}`;
+                          const isItemEditing = editingCell?.fieldId === uniqueKey;
+                          const rawValue = row[colItem.variableName];
+                          const isItemMissing = !isValidValue(rawValue);
+
+                          const masterFieldId = colItem.linkedMasterFields?.[0];
+                          const masterField = masterFieldId ? jobFields[String(masterFieldId)] : null;
+                          const fieldOptions = masterField?.options;
+                          const normalizedOptions = Array.isArray(fieldOptions)
+                            ? fieldOptions.map((opt: any) => typeof opt === 'string' ? { label: opt, value: opt } : opt)
+                            : [];
+                          const isDropdown = normalizedOptions.length > 0;
+
+                          const firstMasterId = colItem.linkedMasterFields?.[0];
+                          const firstQId = colItem.linkedJobQuestionIds?.[0];
+                          let arrayPersist = null;
+                          let arrayEditId = row.entityId;
+
+                          if (firstMasterId) {
+                            const mDef = jobFields[String(firstMasterId)];
+                            arrayPersist = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
+                          } else if (firstQId) {
+                            arrayPersist = { table: 'tm_tasks', path: `job_specific_answers ->> '${firstQId}'`, linking_variable: 'id' };
+                            arrayEditId = taskId;
+                          }
+
+                          return (
+                            <TableRow key={uniqueKey} className={cn("group", isItemEditing ? "bg-blue-50/50" : "bg-white hover:bg-slate-50")}>
+                              <TableCell className="px-4 py-2 text-center text-xs text-slate-400 border-r">
+                                {rowIndex + 1}.{colIndex + 1}
+                              </TableCell>
+                              <TableCell className="px-6 py-2 pl-12 relative border-r">
+                                <div className="absolute left-6 top-1/2 w-4 h-px bg-slate-200"></div>
+                                <span className="text-sm text-slate-700">{colItem.displayName || colItem.variableName}</span>
+                              </TableCell>
+                              <TableCell className="px-6 py-2 border-r">
+                                <span className="text-xs text-slate-500">{colItem.sourceLogic || 'Priority'}</span>
+                              </TableCell>
+                              <TableCell className="px-6 py-2 border-r">
+                                <div className="flex flex-wrap gap-1">
+                                  {(colItem.entityTypes || field.entityTypes || []).map(type => (
+                                    <span key={type} className={cn("text-xs px-2 py-0.5 rounded-full font-medium", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-600')}>
+                                      {type}
+                                    </span>
+                                  ))}
+                                </div>
+                              </TableCell>
+                              <TableCell className="px-6 py-1.5 border-r">
+                                {isItemEditing ? (
+                                  <div className="flex items-center gap-2">
+                                    {isDropdown ? (
+                                      <SearchableSelect
+                                        value={editValue}
+                                        onValueChange={(val) => setEditValue(val)}
+                                        options={normalizedOptions}
+                                        placeholder="Select..."
+                                        buttonClassName="h-8 text-sm border-blue-300 w-full bg-white"
+                                      />
+                                    ) : (
+                                      <Input
+                                        autoFocus
+                                        value={editValue}
+                                        onChange={e => setEditValue(e.target.value)}
+                                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }}
+                                        className="h-8 text-sm border-blue-300"
+                                      />
+                                    )}
+                                    <Button size="icon" onClick={() => saveEdit(isDropdown, normalizedOptions)} className="h-8 w-8 bg-emerald-600 hover:bg-emerald-700 shrink-0 rounded-md"><Check className="h-4 w-4" /></Button>
+                                    <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-slate-400 hover:bg-slate-100 shrink-0 rounded-md"><X className="h-4 w-4" /></Button>
+                                  </div>
+                                ) : (
+                                  (() => {
+                                    const mIds = colItem.linkedMasterFields || [];
+                                    const qIds = colItem.linkedJobQuestionIds || [];
+                                    const totalSources = mIds.length + qIds.length;
+
+                                    if (totalSources > 1) {
+                                      return (
+                                        <Popover>
+                                          <PopoverTrigger asChild>
+                                            <div className={cn(
+                                              "text-sm h-8 flex items-center px-2.5 rounded-md cursor-pointer border border-transparent transition-colors",
+                                              isItemMissing ? "text-red-500 font-medium" : "text-slate-800 hover:bg-slate-100"
+                                            )}>
+                                              <span className="truncate flex-1">{isItemMissing ? 'Missing Value' : rawValue}</span>
+                                              <ChevronDown className="h-3.5 w-3.5 ml-2 text-slate-400 shrink-0" />
+                                            </div>
+                                          </PopoverTrigger>
+                                          <PopoverContent className="w-80 p-0 shadow-lg border-slate-200 rounded-lg overflow-hidden" align="end">
+                                            <div className="p-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                                              <span className="text-xs font-semibold text-slate-600">Array Sources</span>
+                                              <span className="text-xs text-slate-500">{colItem.sourceLogic || 'Priority'}</span>
+                                            </div>
+                                            <div className="p-1 space-y-1 bg-white">
+                                              {mIds.map((mid, mIdx) => {
+                                                const mDef = jobFields[String(mid)];
+                                                const mSource = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
+                                                const val = getFieldValue(String(mid), String(row.entityId));
+                                                return (
+                                                  <div key={`am-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-md border border-transparent group transition-all">
+                                                    <div className="flex flex-col min-w-0">
+                                                      <span className="text-xs font-medium text-slate-500 mb-0.5">Source {mIdx + 1}</span>
+                                                      <span className="text-sm text-slate-800 truncate">{mDef?.label}</span>
+                                                      <span className="text-xs text-slate-400 truncate mt-0.5">{isValidValue(val) ? val : 'Empty'}</span>
+                                                    </div>
+                                                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-blue-600 hover:bg-blue-50 rounded-md" onClick={() => mSource && startEditing(uniqueKey, mIdx, mSource.table, mSource.path, isValidValue(val) ? val : '', row.entityId, mSource.linking_variable)}>
+                                                      <Edit3 className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          </PopoverContent>
+                                        </Popover>
+                                      );
+                                    } else {
+                                      return (
+                                        <div
+                                          className={cn(
+                                            "text-sm h-8 flex items-center px-2.5 rounded-md cursor-pointer border border-transparent transition-colors group",
+                                            isItemMissing ? "text-red-500 font-medium" : "text-slate-800",
+                                            arrayPersist && "hover:bg-slate-50 hover:border-slate-200"
+                                          )}
+                                          onClick={() => {
+                                            if (!arrayPersist) return;
+                                            startEditing(uniqueKey, 0, arrayPersist.table, arrayPersist.path, isItemMissing ? '' : rawValue, String(arrayEditId), arrayPersist.linking_variable || 'id');
+                                          }}
+                                        >
+                                          <span className="truncate">{isItemMissing ? 'Missing Value' : rawValue}</span>
+                                          {arrayPersist && <Edit3 className="h-3.5 w-3.5 ml-auto text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />}
+                                        </div>
+                                      );
+                                    }
+                                  })()
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
+                      ))}
+                    </React.Fragment>
+                  );
+                }
+
+                // =========================================================
+                // CASE: DOCUMENT FIELDS
+                // =========================================================
+                if (field.fieldType === 'document') {
+                  const targetId = field.targetId;
+                  const foundDoc = documentFiles.find(d => field.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId));
+
+                  return (
+                    <React.Fragment key={`doc-${fIdx}`}>
+                      {groupHeaderRow}
+                      <TableRow className="group bg-white hover:bg-slate-50">
+                        <TableCell className="px-4 py-3 text-center text-sm font-medium text-slate-400 border-r">{fIdx + 1}</TableCell>
+                        <TableCell className="px-6 py-3 border-r">
+                          <div className="flex items-center gap-2">
+                            <Paperclip className="h-4 w-4 text-slate-400" />
+                            <span className="text-sm font-medium text-slate-800">{field.efnsDisplayName || field.variableName}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="px-6 py-3 border-r">
+                          <span className="text-xs text-slate-500">Asset Mapping</span>
+                        </TableCell>
+                        <TableCell className="px-6 py-3 border-r">
+                          <div className="flex flex-wrap gap-1">
+                            {(field.entityTypes || []).map(type => (
+                              <span key={type} className={cn("text-xs px-2 py-0.5 rounded-full font-medium", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-600')}>
+                                {type}
+                              </span>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="px-6 py-3 border-r">
+                          {foundDoc ? (
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Available</span>
+                              <Button size="sm" variant="ghost" onClick={() => handlePreviewDocument(foundDoc)} className="h-7 px-2 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-md">
+                                <Eye className="h-3.5 w-3.5 mr-1" /> View
+                              </Button>
+                            </div>
+                          ) : <span className="text-xs font-medium text-red-500 bg-red-50 px-2 py-0.5 rounded-full">Missing</span>}
+                        </TableCell>
+                      </TableRow>
+                    </React.Fragment>
+                  );
+                }
+
+                // =========================================================
+                // CASE: STANDARD FIELDS (Text, Number, Date, Computed)
+                // =========================================================
+                const isValueMissing = field.isMissing;
+                const isDefaultField = field.isDefault;
+                const mIds = field.linkedMasterFields || [];
+                const qIds = field.linkedJobQuestionIds || [];
+
+                let persistenceSource = null;
+                let editTargetId = field.targetId;
+                let fieldOptions = null;
+
+                if (mIds.length > 0) {
+                  const mDef = jobFields[String(mIds[0])];
+                  persistenceSource = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
+                  fieldOptions = mDef?.options;
+                } else if (qIds.length > 0) {
+                  persistenceSource = { table: 'tm_tasks', path: `job_specific_answers ->> '${qIds[0]}'`, linking_variable: 'id' };
+                  editTargetId = taskId;
+                }
+
+                const normalizedOptions = Array.isArray(fieldOptions)
+                  ? fieldOptions.map((opt: any) => typeof opt === 'string' ? { label: opt, value: opt } : opt)
+                  : [];
+                const isDropdown = normalizedOptions.length > 0;
+
+                return (
+                  <React.Fragment key={`std-${fIdx}`}>
+                    {groupHeaderRow}
+                    <TableRow className={cn(
+                      "group transition-colors",
+                      isDefaultField ? "bg-slate-50/50" : isEditing ? "bg-blue-50/40" : (field.fieldType === 'computed' ? "bg-slate-50/30" : "bg-white hover:bg-slate-50")
+                    )}>
+                      <TableCell className="px-4 py-3 text-center text-sm font-medium text-slate-400 border-r">{fIdx + 1}</TableCell>
+                      <TableCell className="px-6 py-3 border-r">
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1.5">
+                            {isDefaultField && <Lock className="h-3.5 w-3.5 text-slate-400 shrink-0" />}
+                            <span className={cn("text-sm font-medium", isDefaultField ? "text-slate-500" : "text-slate-800")}>{field.efnsDisplayName || field.variableName}</span>
+                          </div>
+                          <span className="text-xs text-slate-400">{field.variableName}</span>
+                        </div>
+                      </TableCell>
+
+                      <TableCell className="px-6 py-3 border-r">
+                        <div className="flex flex-col gap-1 items-start">
+                          <span className="text-xs text-slate-600">{field.customFieldSource || 'System Mapping'}</span>
+                          {isDefaultField ? (
+                            <span className="text-xs text-slate-400 flex items-center">
+                              <Lock className="h-3 w-3 mr-1" /> Default
+                            </span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {field.linkedMasterFields?.length > 0 && (
+                                <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">DB Field</span>
+                              )}
+                              {field.linkedJobQuestionIds?.length > 0 && (
+                                <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">Question</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+
+                      <TableCell className="px-6 py-3 border-r">
+                        <div className="flex flex-wrap gap-1">
+                          {(field.entityTypes || []).map(type => (
+                            <span key={type} className={cn("text-xs px-2 py-0.5 rounded-full font-medium", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-600')}>
+                              {type}
+                            </span>
+                          ))}
+                          {(!field.entityTypes || field.entityTypes.length === 0) && (
+                            <span className="text-sm text-slate-400">—</span>
+                          )}
+                        </div>
+                      </TableCell>
+
+                      <TableCell className="px-6 py-2.5 border-r">
+                        {isDefaultField ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-slate-600 truncate max-w-[200px]">{field.resolvedValue}</span>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Lock className="h-3.5 w-3.5 text-slate-400 cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent side="left" className="text-sm max-w-xs font-normal">
+                                  Preset by automation configuration.
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+                        ) : isEditing ? (
+                          <div className="flex items-center gap-2">
+                            {isDropdown ? (
+                              <SearchableSelect
+                                value={editValue}
+                                onValueChange={(val) => setEditValue(val)}
+                                options={normalizedOptions}
+                                placeholder="Select..."
+                                buttonClassName="h-8 text-sm border-blue-300 w-full bg-white"
+                              />
+                            ) : (
+                              <Input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }} className="h-8 text-sm border-blue-300" />
+                            )}
+                            <Button size="icon" onClick={() => saveEdit(isDropdown, normalizedOptions)} className="h-8 w-8 bg-emerald-600 hover:bg-emerald-700 shrink-0 rounded-md"><Check className="h-4 w-4" /></Button>
+                            <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-slate-400 hover:bg-slate-100 shrink-0 rounded-md"><X className="h-4 w-4" /></Button>
+                          </div>
+                        ) : (
+                          (mIds.length + qIds.length) > 1 ? (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <div className={cn(
+                                  "text-sm h-8 flex items-center px-2.5 rounded-md cursor-pointer border border-transparent transition-all",
+                                  isValueMissing ? "text-red-500 font-medium hover:bg-red-50" : "text-slate-800 hover:bg-slate-100"
+                                )}>
+                                  <span className="truncate">{isValueMissing ? 'Missing Value' : field.resolvedValue}</span>
+                                  <ChevronDown className="h-4 w-4 ml-auto text-slate-400 shrink-0" />
+                                </div>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-80 p-0 shadow-lg border-slate-200 rounded-lg overflow-hidden" align="end">
+                                <div className="p-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                                  <span className="text-xs font-medium text-slate-600">Linked Sources</span>
+                                  <span className="text-xs text-slate-500">Priority Logic</span>
+                                </div>
+                                <div className="p-1.5 space-y-1 bg-white">
+                                  {mIds.map((mid, idx) => {
+                                    const mDef = jobFields[String(mid)];
+                                    const source = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
+                                    const sourceVal = getFieldValue(String(mid), String(field.targetId));
+
+                                    return (
+                                      <div key={`m-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-md border border-transparent group transition-all">
+                                        <div className="flex flex-col min-w-0">
+                                          <span className="text-xs font-medium text-slate-500 mb-0.5">DB Field {idx + 1}</span>
+                                          <span className="text-sm text-slate-800 truncate">{mDef?.label}</span>
+                                          <span className="text-xs text-slate-400 truncate mt-0.5">{isValidValue(sourceVal) ? sourceVal : 'Empty'}</span>
+                                        </div>
+                                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-blue-600 hover:bg-blue-50 rounded-md" onClick={() => source && startEditing(field.variableName, idx, source.table, source.path, isValidValue(sourceVal) ? sourceVal : '', field.targetId, source.linking_variable)}>
+                                          <Edit3 className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          ) : (
+                            <div
+                              className={cn(
+                                "text-sm h-8 flex items-center px-2.5 rounded-md transition-colors relative group",
+                                persistenceSource ? "cursor-pointer border border-transparent hover:bg-slate-100" : "cursor-default",
+                                isValueMissing ? "text-red-500 font-medium" : "text-slate-800"
+                              )}
+                              onClick={() => {
+                                if (!persistenceSource) return;
+                                startEditing(field.variableName, 0, persistenceSource.table, persistenceSource.path, isValueMissing ? '' : field.resolvedValue, String(editTargetId), persistenceSource.linking_variable || 'id');
+                              }}
+                            >
+                              <span className="truncate pr-6">{isValueMissing ? 'Missing Value' : field.resolvedValue}</span>
+                              {persistenceSource && !isEditing && <Edit3 className="h-4 w-4 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-3 top-1/2 -translate-y-1/2" />}
+                            </div>
+                          )
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  </React.Fragment>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDocumentsSection = () => {
+    const normalDocFields = activeWebEntry?.fields?.filter((f: any) => f.fieldType === 'document') || [];
+    const arrayDocFields = activeWebEntry?.fields?.filter((f: any) => f.fieldType === 'array')
+      ?.flatMap((field: any) => {
+        return (field.arrayItems || [])
+          .filter((colItem: any) => colItem.type === 'document')
+          .map((colItem: any) => ({
+            ...colItem,
+            arrayFieldName: field.displayName || field.efnsDisplayName || field.variableName,
+            arrayVariableName: field.variableName,
+            isFromArray: true
+          }));
+      }) || [];
+
+    const allDocFields = [...normalDocFields, ...arrayDocFields];
+
+    return (
+      <div className="space-y-6 p-8 bg-slate-50 min-h-full">
+        {savedScreenshotDoc && (
+          <Card className="border-emerald-200 bg-emerald-50 shadow-sm rounded-xl overflow-hidden">
+            <CardContent className="p-5 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="p-2 rounded-lg bg-emerald-100 text-emerald-600">
+                  <CheckCircle2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <h4 className="font-medium text-sm text-slate-900">eTA Kenya Confirmation Screenshot</h4>
+                  <p className="text-xs text-slate-500 mt-0.5">{savedScreenshotDoc.file_name}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-medium text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">Saved</span>
+                <Button size="sm" variant="outline" className="h-8 px-4 text-xs font-medium text-emerald-700 border-emerald-200 hover:bg-emerald-100 rounded-lg"
+                  onClick={() => {
+                    setPreviewingDocuments({ document_display_name: 'eTA Kenya Confirmation Screenshot', documents: [savedScreenshotDoc], person_full_name: individualName || getPrimaryTargetEntityId(), requirementId: ETA_SCREENSHOT_DOCUMENT_ID });
+                    setShowPreviewModal(true);
+                  }}>
+                  <Eye className="h-4 w-4 mr-2" /> View File
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         )}
-        onClick={() => {
-          if (!persistenceSource) return;
-          startEditing(uniqueKey, 0, persistenceSource.table, persistenceSource.path, isValueMissing ? '' : rawValue, String(editTargetId), persistenceSource.linking_variable || 'id');
-        }}
-      >
-        <span className={cn("truncate text-sm font-medium", isValueMissing && "italic opacity-80")}>
-          {isValueMissing ? 'Action Required' : rawValue}
-        </span>
-        {persistenceSource && (
-          <div className={cn("shrink-0 rounded p-1 transition-opacity", isValueMissing ? "bg-red-100 text-red-600 opacity-100" : "opacity-0 group-hover/val:opacity-100 text-indigo-500 bg-indigo-100")}>
-            <Edit3 className="h-3 w-3" />
+
+        {allDocFields.length === 0 && !savedScreenshotDoc && (
+          <div className="flex flex-col items-center justify-center p-16 opacity-50">
+            <FileText className="w-16 h-16 mb-4 text-slate-300" />
+            <p className="text-lg font-medium text-slate-500">No document assets required for this flow.</p>
+          </div>
+        )}
+
+        {allDocFields.length > 0 && (
+          <div>
+            <h3 className="text-sm font-semibold text-slate-700 mb-4">Required Documents</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {allDocFields.map((req, idx) => {
+                const targetId = resolveTargetEntityId(req);
+                const foundDoc = documentFiles.find(d => req.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId));
+                const displayName = req.isFromArray ? `${req.arrayFieldName} - ${req.displayName || req.name || req.variableName}` : req.displayName || req.efnsDisplayName || req.variableName;
+
+                return (
+                  <Card key={idx} className={cn("overflow-hidden transition-all rounded-xl", foundDoc ? "border-slate-200 shadow-sm bg-white" : "border-red-200 bg-red-50/50")}>
+                    <CardContent className="p-5 flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className={cn("p-2 rounded-lg", foundDoc ? "bg-slate-100 text-slate-500" : "bg-red-100 text-red-600")}><Paperclip className="h-5 w-5" /></div>
+                        <div className="flex-1">
+                          <h4 className="font-medium text-sm text-slate-900 line-clamp-1">{displayName}</h4>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs text-slate-500">{req.variableName}</span>
+                            {req.isFromArray && <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Array Item</span>}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {foundDoc ? (
+                          <>
+                            <Button size="sm" variant="outline" onClick={() => handlePreviewDocument(foundDoc)} className="h-8 px-3 text-xs font-medium text-blue-600 border-blue-200 hover:bg-blue-50 rounded-lg">
+                              <Eye className="h-4 w-4 mr-1.5" /> Preview
+                            </Button>
+                            <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Available</span>
+                          </>
+                        ) : (
+                          <span className="text-xs font-medium text-red-600 bg-red-50 px-2 py-0.5 rounded-full">Missing</span>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
@@ -167,429 +774,307 @@ export const AutomationMappingDialogUI = ({
   return (
     <>
       <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-        <DialogContent className="max-w-[95vw] w-[1300px] h-[90vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl bg-[#FDFDFE] rounded-xl font-sans">
+        <DialogContent className="max-w-[1500px] w-[98vw] h-[92vh] flex flex-col p-0 overflow-hidden bg-white border-none shadow-2xl rounded-2xl">
 
-          {/* --- TOP HEADER --- */}
-          <div className="bg-[#0B0F19] flex items-center justify-between px-6 py-4 shrink-0 text-white shadow-md relative z-20">
-            <div className="flex items-center gap-4">
-              <div className="h-10 w-10 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl flex items-center justify-center shrink-0 shadow-lg shadow-indigo-500/20 border border-white/10">
-                <Zap className="h-5 w-5 text-white" />
+          {/* HEADER */}
+          <div className="flex bg-white border-b border-slate-200 shrink-0 z-20">
+            <div className="px-6 py-4 flex items-center justify-between w-full">
+              <div className="flex items-center gap-4">
+                <div className="h-10 w-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-sm shrink-0">
+                  <Zap className="text-white w-5 h-5 fill-white" />
+                </div>
+                <div>
+                  <DialogTitle className="text-lg font-semibold text-slate-900 leading-none">
+                    Data Mapping: {task?.applicant_details?.name || task?.applicant_name || individualName || "Applicant"}
+                  </DialogTitle>
+                  <p className="text-sm text-slate-500 flex items-center gap-2 mt-1.5">
+                    <span className="inline-flex items-center text-slate-600">
+                      Task #{task?.id}
+                    </span>
+                    <span className="text-slate-300">•</span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-slate-400" />
+                      ID: {getPrimaryTargetEntityId() || 'N/A'}
+                    </span>
+                    {isSavingScreenshot && (
+                      <span className="inline-flex items-center gap-1.5 text-blue-600 text-xs font-medium ml-2">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving Screenshot...
+                      </span>
+                    )}
+                  </p>
+                </div>
               </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-2">
-                  <h2 className="font-semibold text-base tracking-wide">Data Mapping Engine</h2>
-                  <Badge variant="outline" className="bg-white/5 border-white/10 text-slate-300 text-[10px] px-1.5 h-4">v2.4</Badge>
-                </div>
-                <div className="text-slate-400 text-xs flex items-center gap-2 mt-0.5 font-medium">
-                  <span className="text-indigo-300">{individualName || task?.applicant_details?.name || 'Applicant'}</span>
-                  <span className="w-1 h-1 rounded-full bg-slate-600" />
-                  <span>Task #{task?.id}</span>
-                </div>
+
+              <div className="flex items-center gap-4 shrink-0">
+                {isAutomationRunning && automationJobId && (
+                  <Button onClick={stopAutomation} size="sm" variant="outline" className="h-9 px-4 text-red-600 border-red-200 hover:bg-red-50 font-medium text-sm rounded-lg transition-all">
+                    <X className="h-4 w-4 mr-1.5" /> Stop Automation
+                  </Button>
+                )}
+                <Button
+                  onClick={handleRunAutomation}
+                  disabled={isAutomationRunning || isSavingScreenshot || !selectedAutomationId}
+                  size="sm"
+                  className="h-9 px-6 bg-blue-600 text-white hover:bg-blue-700 font-medium text-sm rounded-lg transition-all"
+                >
+                  {(isAutomationRunning || isSavingScreenshot) ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Zap className="h-4 w-4 mr-2 fill-white" />
+                  )}
+                  {isSavingScreenshot ? 'Saving...' : isAutomationRunning ? 'Running...' : 'Execute Workflow'}
+                </Button>
+                <div className="h-8 w-px mx-1 bg-slate-200" />
+                <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors">
+                  <X className="h-5 w-5" />
+                </Button>
               </div>
             </div>
-
-            <div className="flex items-center gap-6">
-              {/* Readiness Score */}
-              <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-full pr-4 pl-1 py-1">
-                <CircularProgress value={readinessPct} />
-                <div className="flex flex-col">
-                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Readiness</span>
-                  {/* <span className="text-sm font-medium leading-none mt-0.5">{filledCount} <span className="text-slate-500">/ {totalCount}</span></span> */}
-                </div>
-              </div>
-
-              {/* Workflow Selector */}
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-slate-400 font-medium hidden sm:inline-block">Workflow:</span>
-                <SearchableSelect
-                  value={selectedAutomationId}
-                  onValueChange={setSelectedAutomationId}
-                  options={entityAutomationMappings.map(m => ({ value: m.automationId, label: m.automation?.name || 'Unnamed Flow' }))}
-                  placeholder="Select a workflow..."
-                  buttonClassName="w-[240px] bg-white/10 border-white/15 text-white h-9 text-sm hover:bg-white/20 focus:ring-offset-[#0B0F19]"
-                />
-              </div>
-
-              <div className="w-px h-6 bg-white/10 mx-1" />
-              <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors rounded-full p-2 hover:bg-white/10">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <DialogTitle className="sr-only">Data Mapping Engine</DialogTitle>
           </div>
 
-          {/* --- MAIN LAYOUT --- */}
-          <div className="flex-1 flex flex-col overflow-hidden relative bg-[#F4F5F8]">
-            
-            {/* TOOLBAR: Tabs & Search */}
-            <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shrink-0 shadow-sm relative z-10">
-              <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-lg border border-slate-200/50">
-                <button onClick={() => setActiveTab('fields')} className={cn("px-4 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2", activeTab === 'fields' ? "bg-white text-indigo-700 shadow-sm ring-1 ring-black/5" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50")}>
-                  All Data <Badge variant="secondary" className="bg-slate-100 text-slate-500 border-none px-1.5 font-mono">{totalCount}</Badge>
-                </button>
-                <button onClick={() => setActiveTab('missing')} className={cn("px-4 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2", activeTab === 'missing' ? "bg-white text-rose-600 shadow-sm ring-1 ring-black/5" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50")}>
-                  Action Needed 
-                  {missingCount > 0 && <Badge variant="destructive" className="bg-rose-500 px-1.5 shadow-sm">{missingCount}</Badge>}
-                </button>
-                <button onClick={() => setActiveTab('documents')} className={cn("px-4 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2", activeTab === 'documents' ? "bg-white text-indigo-700 shadow-sm ring-1 ring-black/5" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50")}>
-                  Documents
-                  {savedScreenshotDoc && <span className="h-2 w-2 rounded-full bg-emerald-500" />}
-                </button>
-              </div>
+          {/* MAIN LAYOUT */}
+          <div className="flex-1 overflow-hidden">
+            <ResizablePanelGroup direction="horizontal" className="h-full">
 
-              {!isDocumentsView && (
-                <div className="flex items-center gap-3">
-                  <div className="relative group">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
-                    <input
-                      value={searchQuery}
-                      onChange={e => setSearchQuery(e.target.value)}
-                      placeholder="Search variables..."
-                      className="w-64 pl-9 pr-3 h-9 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 focus:bg-white placeholder:text-slate-400 transition-all shadow-sm"
-                    />
-                  </div>
-                  <Button variant="outline" size="sm" onClick={() => setSortMissingFirst(!sortMissingFirst)} className={cn("h-9 border-slate-200", sortMissingFirst && "bg-indigo-50 text-indigo-700 border-indigo-200")}>
-                    <FileWarning className="h-4 w-4 mr-2" /> Prioritize Missing
-                  </Button>
-                </div>
-              )}
-            </div>
+              {/* LEFT SIDEBAR */}
+              <ResizablePanel defaultSize={20} minSize={18} className="bg-slate-50 flex flex-col relative z-10 border-r border-slate-200">
+                <div className="p-5 flex flex-col gap-6 h-full overflow-y-auto custom-scrollbar">
 
-            {/* AUTOMATION PROGRESS BANNER */}
-            {automationProgress && (
-              <div className="bg-slate-900 text-slate-300 px-6 py-4 shrink-0 shadow-inner border-b border-slate-800">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className={cn("p-2 rounded-lg", automationProgress.isRunning ? "bg-indigo-500/20 text-indigo-400" : automationProgress.error ? "bg-rose-500/20 text-rose-400" : "bg-emerald-500/20 text-emerald-400")}>
-                      {automationProgress.isRunning ? <Loader2 className="h-5 w-5 animate-spin" /> : automationProgress.error ? <AlertCircle className="h-5 w-5" /> : <CheckCircle2 className="h-5 w-5" />}
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-semibold text-white">{automationProgress.isRunning ? 'Executing Workflow...' : automationProgress.error ? 'Execution Failed' : 'Execution Complete'}</h3>
-                      <p className="text-xs text-slate-400 mt-0.5 font-mono">{automationProgress.currentStep || 'Initializing...'}</p>
-                    </div>
-                  </div>
-                  <span className="text-2xl font-light text-white tabular-nums">{automationProgress.progress}%</span>
-                </div>
-                <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden mb-3">
-                  <div className={cn("h-full rounded-full transition-all duration-500", automationProgress.error ? "bg-rose-500" : automationProgress.isRunning ? "bg-indigo-500" : "bg-emerald-500")} style={{ width: `${automationProgress.progress}%` }} />
-                </div>
-                {automationProgress.logs?.length > 0 && (
-                  <div className="bg-black/50 border border-white/10 rounded-lg p-3 font-mono text-[11px] h-32 overflow-y-auto custom-scrollbar">
-                    {automationProgress.logs.map((log: any, i: number) => (
-                      <div key={i} className={cn("leading-relaxed whitespace-pre-wrap break-all mb-1", log.level === 'error' ? 'text-rose-400' : log.level === 'warn' ? 'text-amber-400' : 'text-emerald-300/90')}>
-                        <span className="text-slate-600 mr-3 select-none">[{new Date(log.timestamp).toLocaleTimeString()}]</span>
-                        {log.message}
+                  {/* Configuration Section */}
+                  <div className="space-y-4">
+                    <span className="text-lg font-semibold text-slate-700 flex items-center gap-2">
+                      <Settings className="w-6 h-6 text-slate-400" /> Setup Environment
+                    </span>
+                    <div className="space-y-4">
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium text-slate-500">Select Workflow</label>
+                        <SearchableSelect
+                          value={selectedAutomationId}
+                          onValueChange={setSelectedAutomationId}
+                          options={entityAutomationMappings.map(m => ({ value: m.automationId, label: m.automation?.name || "Unnamed Flow" }))}
+                          placeholder="Select Workflow..."
+                          buttonClassName="w-full bg-white border-slate-200 text-slate-900 h-10 rounded-lg text-sm hover:bg-slate-50 transition-colors shadow-sm"
+                          emptyMessage="No workflows found"
+                        />
                       </div>
-                    ))}
-                    <div ref={logsEndRef} />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* CONTENT AREA */}
-            <ScrollArea className="flex-1 px-6 py-6 h-full">
-              {!selectedAutomationId ? (
-                <div className="flex flex-col items-center justify-center py-20 text-center">
-                  <div className="h-20 w-20 bg-indigo-50 rounded-full flex items-center justify-center mb-6 shadow-inner border border-indigo-100">
-                    <Webhook className="h-10 w-10 text-indigo-400" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-slate-800">No Workflow Selected</h3>
-                  <p className="text-slate-500 max-w-sm mt-2 text-sm">Please select an automation workflow from the dropdown menu above to begin mapping data.</p>
-                </div>
-              ) : isLoading ? (
-                <div className="flex flex-col items-center justify-center py-20">
-                  <Loader2 className="h-8 w-8 animate-spin text-indigo-500 mb-4" />
-                  <p className="text-slate-500 font-medium">Loading configuration mapping...</p>
-                </div>
-              ) : isDocumentsView ? (
-                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
-                   {/* Documents Logic Restyled */}
-                   {(() => {
-                      const docs = activeWebEntry?.fields?.filter((f: any) => f.fieldType === 'document') || [];
-                      const arrayDocs = activeWebEntry?.fields?.filter((f: any) => f.fieldType === 'array')?.flatMap((field: any) => (field.arrayItems || []).filter((ci: any) => ci.type === 'document').map((ci: any) => ({ ...ci, arrayFieldName: field.efnsDisplayName || field.variableName, isFromArray: true }))) || [];
-                      const all = [...docs, ...arrayDocs];
-                      
-                      if(all.length === 0 && !savedScreenshotDoc) return <div className="col-span-full py-12 text-center text-slate-500 border-2 border-dashed border-slate-200 rounded-xl">No documents required for this workflow.</div>;
-
-                      return (
-                        <>
-                          {savedScreenshotDoc && (
-                            <Card className="border-emerald-200 bg-emerald-50/50 shadow-sm hover:shadow transition-all group">
-                              <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
-                                <div className="flex items-start justify-between">
-                                  <div className="p-2.5 rounded-lg bg-emerald-100 text-emerald-600"><CheckCircle2 className="h-5 w-5" /></div>
-                                  <Badge variant="outline" className="bg-emerald-100/50 text-emerald-700 border-emerald-200">Saved</Badge>
-                                </div>
-                                <div>
-                                  <h4 className="font-semibold text-slate-900 text-sm leading-tight mb-1">eTA Confirmation</h4>
-                                  <p className="text-xs text-slate-500 truncate" title={savedScreenshotDoc.file_name}>{savedScreenshotDoc.file_name}</p>
-                                </div>
-                                <Button variant="outline" className="w-full bg-white hover:bg-emerald-50 hover:text-emerald-700 border-emerald-200 transition-colors" onClick={() => {
-                                  setPreviewingDocuments({ document_display_name: 'eTA Screenshot', documents: [savedScreenshotDoc], person_full_name: individualName });
-                                  setShowPreviewModal(true);
-                                }}><Eye className="h-4 w-4 mr-2" /> View Screenshot</Button>
-                              </CardContent>
-                            </Card>
-                          )}
-                          {all.map((req, idx) => {
-                            const targetId = resolveTargetEntityId(req);
-                            const foundDoc = documentFiles.find(d => req.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId));
-                            const name = req.isFromArray ? `${req.arrayFieldName} — ${req.displayName || req.variableName}` : req.displayName || req.variableName;
-                            
-                            return (
-                              <Card key={idx} className={cn("transition-all group", foundDoc ? "border-slate-200 hover:border-indigo-300 shadow-sm hover:shadow" : "border-rose-200 bg-rose-50/30")}>
-                                <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
-                                  <div className="flex items-start justify-between">
-                                    <div className={cn("p-2.5 rounded-lg", foundDoc ? "bg-indigo-50 text-indigo-600" : "bg-rose-100 text-rose-600")}><Paperclip className="h-5 w-5" /></div>
-                                    {foundDoc ? <Badge variant="outline" className="bg-slate-50 text-slate-600">Available</Badge> : <Badge variant="destructive" className="bg-rose-500 shadow-sm">Missing</Badge>}
-                                  </div>
-                                  <div>
-                                    <h4 className="font-semibold text-slate-900 text-sm leading-tight mb-1">{name}</h4>
-                                    <p className="text-xs text-slate-400 font-mono truncate">{req.variableName}</p>
-                                  </div>
-                                  {foundDoc ? (
-                                    <Button variant="outline" className="w-full bg-white hover:bg-indigo-50 hover:text-indigo-700 transition-colors" onClick={() => handlePreviewDocument(foundDoc)}><Eye className="h-4 w-4 mr-2" /> Preview File</Button>
-                                  ) : (
-                                    <Button variant="outline" disabled className="w-full border-rose-200 text-rose-400 bg-white/50">Upload Required</Button>
-                                  )}
-                                </CardContent>
-                              </Card>
-                            );
-                          })}
-                        </>
-                      );
-                   })()}
-                 </div>
-              ) : (
-                <div className="flex flex-col space-y-3 pb-10">
-                  {/* List Header */}
-                  <div className="grid grid-cols-12 gap-4 px-4 py-2 border-b border-slate-200 text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 sticky top-0 bg-[#F4F5F8] z-10">
-                    <div className="col-span-4">Data Point</div>
-                    <div className="col-span-3">Context & Source</div>
-                    <div className="col-span-5 text-right pr-2">Mapped Value</div>
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium text-slate-500">Target Individual ID</label>
+                        <div className="relative">
+                          <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                          <input
+                            value={getPrimaryTargetEntityId()}
+                            onChange={(e) => {
+                              if (getPrimaryEntityType() === 'principal') setCurrentIndividualId(e.target.value);
+                            }}
+                            placeholder="ID Number..."
+                            disabled={getPrimaryEntityType() !== 'principal'}
+                            className="w-full pl-9 h-10 rounded-lg outline-none text-sm text-slate-900 bg-white border border-slate-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
-                  {displayFields.length === 0 ? (
-                    <div className="text-center py-12 text-slate-400">No fields match your current filters.</div>
-                  ) : (
-                    displayFields.map((field, fIdx) => {
-                      // ARRAY ROW
-                      if (field.fieldType === 'array') {
-                        const arrayData = getArrayFieldData(field);
-                        const isExpanded = expandedArrayFields.has(field.variableName);
-                        const entityCategory = field.entityTypes?.includes('company') ? 'company' : 'individual';
+                  {/* Divider */}
+                  <div className="h-px w-full bg-slate-200" />
 
-                        return (
-                          <div key={field.variableName} className="flex flex-col bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-2">
-                            {/* Parent Row */}
-                            <div 
-                              className="grid grid-cols-12 gap-4 p-4 items-center cursor-pointer hover:bg-blue-50/30 transition-colors"
-                              onClick={() => toggleArrayFieldExpansion(field.variableName)}
-                            >
-                              <div className="col-span-4 flex items-center gap-3">
-                                <div className={cn("p-1.5 rounded transition-colors", isExpanded ? "bg-blue-100 text-blue-600" : "bg-slate-100 text-slate-400")}>
-                                  {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                                </div>
-                                <div>
-                                  <p className="text-sm font-semibold text-slate-800">{field.efnsDisplayName || field.variableName}</p>
-                                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">{field.variableName}</p>
-                                </div>
-                              </div>
-                              <div className="col-span-3 flex flex-col items-start gap-1.5">
-                                <div className="flex flex-wrap gap-1">
-                                  {(field.entityTypes || []).map((t: string) => <Badge key={t} variant="outline" className={cn("text-[9px] uppercase", ENTITY_TYPE_COLORS[t])}>{t}</Badge>)}
-                                </div>
-                                {renderDataSource(field)}
-                              </div>
-                              <div className="col-span-5 flex justify-end items-center">
-                                <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors border-blue-200">{arrayData.length} Entries</Badge>
-                              </div>
+                  {/* Progress Section */}
+                  <div className="space-y-4 flex-1 flex flex-col min-h-0">
+                    <span className="text-lg font-semibold text-slate-700 flex items-center gap-2 shrink-0">
+                      <Activity className="w-6 h-6 text-slate-400" /> Execution Status
+                    </span>
+
+                    {!automationProgress ? (
+                      <div className="flex-1 flex flex-col items-center justify-center opacity-50 text-center px-4">
+                        <Webhook className="w-10 h-10 mb-3 text-slate-400" />
+                        <p className="text-sm font-medium text-slate-500">Ready to map data and execute workflow.</p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col flex-1 min-h-0 gap-4">
+                        {/* Console-like Status Container */}
+                        <div className="bg-slate-900 rounded-lg border border-slate-700 overflow-hidden shadow-lg">
+                          <div className="px-4 py-3 bg-slate-800 border-b border-slate-700 flex items-center justify-between">
+                            <span className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+                              execution_status.log
+                            </span>
+                            <div className="flex gap-2">
+                              <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                              <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                              <div className="w-2 h-2 rounded-full bg-green-500"></div>
                             </div>
-
-                            {/* Children Rows */}
-                            {isExpanded && (
-                              <div className="bg-slate-50/50 border-t border-slate-100 relative">
-                                <div className="absolute left-6 top-0 bottom-6 w-px bg-slate-200" />
-                                {arrayData.map((row, rIdx) => 
-                                  (field.arrayItems || []).map((colItem, cIdx) => {
-                                    const uKey = `${field.variableName}-${rIdx}-${cIdx}`;
-                                    const rawVal = row[colItem.variableName];
-                                    const isMissing = !isValidValue(rawVal);
-                                    
-                                    // Persistence logic simplified for UI implementation
-                                    let pSource: any = null;
-                                    let editTargetId = row.entityId;
-                                    const mDefId = colItem.linkedMasterFields?.[0];
-                                    const qDefId = colItem.linkedJobQuestionIds?.[0];
-                                    let opts = null;
-
-                                    if (mDefId) {
-                                      const mDef = jobFields[String(mDefId)];
-                                      pSource = mDef?.sources?.find((s:any) => s.source_type === entityCategory) || mDef?.sources?.[0];
-                                      opts = Array.isArray(mDef?.options) ? mDef.options.map((o:any) => typeof o === 'string' ? {label: o, value: o} : o) : [];
-                                    } else if (qDefId) {
-                                      pSource = { table: 'tm_tasks', path: `job_specific_answers ->> '${qDefId}'`, linking_variable: 'id' };
-                                      editTargetId = taskId;
-                                    }
-
-                                    return (
-                                      <div key={uKey} className="grid grid-cols-12 gap-4 px-4 py-3 items-center group/child hover:bg-white transition-colors relative ml-8 border-b border-slate-100 last:border-0">
-                                        <div className="absolute left-[-24px] top-1/2 w-4 h-px bg-slate-200" />
-                                        <div className="col-span-4 flex items-center gap-3 pl-2">
-                                          <div className="bg-white border shadow-sm h-6 min-w-[24px] rounded text-[10px] font-bold text-slate-400 flex items-center justify-center font-mono">
-                                            {rIdx + 1}.{cIdx + 1}
-                                          </div>
-                                          <span className="text-sm text-slate-700 font-medium">{colItem.displayName || colItem.variableName}</span>
-                                        </div>
-                                        <div className="col-span-3">
-                                          <span className="text-xs text-slate-500 bg-slate-100/80 px-2 py-1 rounded border border-slate-200">{colItem.sourceLogic || 'priority'} mapping</span>
-                                        </div>
-                                        <div className="col-span-5 flex justify-end">
-                                          {renderMappedValue(colItem, uKey, pSource, isMissing, editTargetId, rawVal, opts)}
-                                        </div>
-                                      </div>
-                                    );
-                                  })
+                          </div>
+                          <div className="p-4 font-mono text-xs space-y-2">
+                            <div className="text-slate-400">
+                              <span className="text-emerald-400">$</span> <span className="text-slate-300">automation workflow</span>
+                            </div>
+                            <div className="text-slate-400">
+                              <span className="text-emerald-400">→</span> <span className="text-slate-400">Status:</span> <span className={cn(
+                                automationProgress.isRunning ? "text-blue-400 animate-pulse" : automationProgress.error ? "text-red-400" : "text-emerald-400"
+                              )}>{automationProgress.isRunning ? '[ RUNNING ]' : automationProgress.error ? '[ FAILED ]' : '[ COMPLETED ]'}</span>
+                            </div>
+                            <div className="text-slate-400">
+                              <span className="text-emerald-400">→</span> <span className="text-slate-400">Progress:</span> <span className="text-cyan-400">{automationProgress.progress}%</span>
+                            </div>
+                            <div className="w-full bg-slate-800 rounded h-1 overflow-hidden border border-slate-700 my-2">
+                              <div
+                                className={cn(
+                                  "h-full transition-all duration-500",
+                                  automationProgress.error ? "bg-red-500" : automationProgress.isRunning ? "bg-blue-500" : "bg-emerald-500"
                                 )}
+                                style={{ width: `${automationProgress.progress}%` }}
+                              >
+                                {automationProgress.isRunning && <div className="absolute inset-0 bg-white/10 animate-pulse" />}
                               </div>
-                            )}
-                          </div>
-                        );
-                      }
-
-                      // NORMAL ROW
-                      const isMissing = field.isMissing;
-                      const mIds = field.linkedMasterFields || [];
-                      const qIds = field.linkedJobQuestionIds || [];
-                      let pSource: any = null;
-                      let editTargetId = field.targetId;
-                      let opts = null;
-                      
-                      if (mIds.length > 0) {
-                        const mDef = jobFields[String(mIds[0])];
-                        pSource = mDef?.sources?.find((s:any) => s.source_type === (field.entityTypes?.includes('company') ? 'company' : 'individual')) || mDef?.sources?.[0];
-                        opts = Array.isArray(mDef?.options) ? mDef.options.map((o:any) => typeof o === 'string' ? {label: o, value: o} : o) : [];
-                      } else if (qIds.length > 0) {
-                        pSource = { table: 'tm_tasks', path: `job_specific_answers ->> '${qIds[0]}'`, linking_variable: 'id' };
-                        editTargetId = taskId;
-                      }
-
-                      return (
-                        <div key={field.variableName} className={cn(
-                          "grid grid-cols-12 gap-4 p-4 items-center bg-white rounded-xl border shadow-sm transition-all group",
-                          isMissing ? "border-rose-200/60 ring-1 ring-inset ring-rose-50" : "border-slate-200 hover:border-indigo-200 hover:shadow"
-                        )}>
-                          <div className="col-span-4 flex items-start gap-3">
-                            <div className={cn("h-8 w-8 rounded-lg flex items-center justify-center shrink-0 border", isMissing ? "bg-rose-50 border-rose-100 text-rose-500" : "bg-slate-50 border-slate-100 text-slate-400")}>
-                              {field.isDefault ? <Lock className="h-4 w-4" /> : isMissing ? <FileWarning className="h-4 w-4" /> : <Database className="h-4 w-4" />}
                             </div>
-                            <div className="min-w-0">
-                              <p className={cn("text-sm font-semibold truncate", isMissing ? "text-rose-700" : "text-slate-800")}>{field.efnsDisplayName || field.variableName}</p>
-                              <p className="text-[10px] text-slate-400 font-mono mt-0.5 truncate">{field.variableName}</p>
+                            <div className="text-slate-400">
+                              <span className="text-emerald-400">→</span> <span className="text-slate-400">Message:</span> <span className="text-slate-300">{automationProgress.message || 'Processing automation...'}</span>
                             </div>
-                          </div>
-                          <div className="col-span-3 flex flex-col items-start gap-1.5">
-                            <div className="flex flex-wrap gap-1">
-                              {(field.entityTypes || []).map((t: string) => <Badge key={t} variant="outline" className={cn("text-[9px] uppercase", ENTITY_TYPE_COLORS[t])}>{t}</Badge>)}
-                            </div>
-                            {renderDataSource(field)}
-                          </div>
-                          <div className="col-span-5 flex justify-end items-center">
-                            {field.fieldType === 'document' ? (
-                              (() => {
-                                const foundDoc = documentFiles.find(d => field.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(field.targetId));
-                                return foundDoc ? (
-                                  <Button size="sm" variant="outline" onClick={() => handlePreviewDocument(foundDoc)} className="h-8 text-xs bg-slate-50 hover:bg-slate-100 border-slate-200"><Eye className="h-3 w-3 mr-1.5" /> Preview File</Button>
-                                ) : (
-                                  <Badge variant="destructive" className="bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100 shadow-none"><AlertCircle className="h-3 w-3 mr-1" /> Missing</Badge>
-                                );
-                              })()
-                            ) : (
-                              renderMappedValue(field, field.variableName, pSource, isMissing, String(editTargetId), undefined, opts)
+                            {automationProgress.error && (
+                              <div className="text-red-400 border border-red-500/30 rounded px-2 py-1 bg-red-950/20">
+                                <span className="text-red-500">⚠</span> Error: {automationProgress.error}
+                              </div>
                             )}
                           </div>
                         </div>
-                      );
-                    })
-                  )}
+
+                        {/* Logs Terminal */}
+                        {automationProgress.logs && automationProgress.logs.length > 0 && (
+                          <div className="flex flex-col flex-1 min-h-0 bg-slate-900 rounded-lg border border-slate-700 overflow-hidden shadow-lg">
+                            <div className="px-4 py-3 bg-slate-800 border-b border-slate-700 flex justify-between items-center shrink-0">
+                              <span className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+                                output.log
+                              </span>
+                              <span className="text-xs text-slate-500">{automationProgress.logs.length} lines</span>
+                            </div>
+                            <ScrollArea className="flex-1 p-3">
+                              <div className="space-y-0.5 font-mono text-xs">
+                                {automationProgress.logs.map((log: any, i: number) => (
+                                  <div key={i} className={cn(
+                                    "break-words",
+                                    log.level === 'error' ? 'text-red-400' :
+                                      log.level === 'warn' ? 'text-yellow-400' : 'text-slate-300'
+                                  )}>
+                                    <span className="text-slate-500 mr-3 select-none">
+                                      [{new Date(log.timestamp).toLocaleTimeString()}]
+                                    </span>
+                                    {log.message}
+                                  </div>
+                                ))}
+                                <div ref={logsEndRef} />
+                              </div>
+                            </ScrollArea>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </ScrollArea>
-          </div>
+              </ResizablePanel>
 
-          {/* --- BOTTOM ACTION BAR --- */}
-          <div className="bg-white border-t border-slate-200 px-6 py-4 flex items-center justify-between shrink-0 shadow-[0_-4px_10px_rgba(0,0,0,0.02)] z-20">
-            <div className="flex items-center gap-4">
-              <div className={cn("px-3 py-1.5 rounded-lg border font-medium flex items-center gap-2 text-sm", readinessPct === 100 ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-amber-50 border-amber-200 text-amber-700")}>
-                {readinessPct === 100 ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-                {readinessPct === 100 ? "Data complete & ready" : `${missingCount} field${missingCount !== 1 ? 's' : ''} require attention`}
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" onClick={onClose} className="text-slate-500 hover:bg-slate-100 font-medium px-6 h-10">
-                Close
-              </Button>
-              {isAutomationRunning && automationJobId && (
-                <Button variant="destructive" onClick={stopAutomation} className="h-10 px-6 font-semibold shadow-sm">
-                  <Square className="mr-2 h-4 w-4 fill-current" /> Halt Execution
-                </Button>
-              )}
-              <Button
-                onClick={handleRunAutomation}
-                disabled={isAutomationRunning || isSavingScreenshot || !selectedAutomationId}
-                className={cn(
-                  "h-10 px-8 font-semibold text-white shadow-md transition-all",
-                  isAutomationRunning ? "bg-indigo-500 opacity-80" : "bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg hover:-translate-y-0.5"
-                )}
-              >
-                {(isAutomationRunning || isSavingScreenshot) ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <ResizableHandle withHandle className="bg-slate-200 border-none w-px z-20" />
+
+              {/* RIGHT MAIN PANEL */}
+              <ResizablePanel defaultSize={80} className="bg-white flex flex-col h-full relative z-0">
+                {!selectedAutomationId ? (
+                  <div className="flex-1 flex flex-col items-center justify-center opacity-50">
+                    <Webhook className="w-20 h-20 mb-4 text-slate-300" />
+                    <h2 className="text-xl font-medium text-slate-500">No Workflow Selected</h2>
+                    <p className="text-sm text-slate-400 mt-2">Choose an automation workflow from the sidebar.</p>
+                  </div>
                 ) : (
-                  <Play className="mr-2 h-4 w-4 fill-white" />
-                )}
-                {isSavingScreenshot ? 'Saving Data...' : isAutomationRunning ? 'Running...' : 'Execute Automation'}
-              </Button>
-            </div>
-          </div>
+                  <>
+                    <div className="px-6 border-b border-slate-200 flex items-center justify-between shrink-0 bg-white">
+                      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-auto -mb-px">
+                        <TabsList className="bg-transparent h-12 p-0 space-x-6">
+                          <TabsTrigger
+                            value="fields"
+                            className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 text-slate-500 font-medium text-sm rounded-none h-full px-1"
+                          >
+                            <Database className="h-4 w-4 mr-2" /> Mapping Fields
+                          </TabsTrigger>
+                          <TabsTrigger
+                            value="documents"
+                            className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 text-slate-500 font-medium text-sm rounded-none h-full px-1"
+                          >
+                            <FileText className="h-4 w-4 mr-2" /> Required Assets
+                            {savedScreenshotDoc && <span className="ml-2 h-2 w-2 rounded-full bg-emerald-500 inline-block" />}
+                          </TabsTrigger>
+                        </TabsList>
+                      </Tabs>
 
+                      {isLoadingData && (
+                        <div className="flex items-center gap-2 text-sm text-blue-600">
+                          <Loader2 className="h-4 w-4 animate-spin" /> Fetching Data...
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 overflow-hidden relative bg-white">
+                      <Tabs value={activeTab} className="h-full flex flex-col">
+                        <TabsContent value="fields" className="flex-1 overflow-hidden m-0 data-[state=active]:flex flex-col">
+                          {isLoading ? (
+                            <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                              <Loader2 className="h-8 w-8 animate-spin mb-4 text-blue-500" />
+                              <p className="text-sm font-medium">Loading configuration matrix...</p>
+                            </div>
+                          ) : renderFieldsTable()}
+                        </TabsContent>
+                        <TabsContent value="documents" className="flex-1 overflow-y-auto m-0 data-[state=active]:block">
+                          {renderDocumentsSection()}
+                        </TabsContent>
+                      </Tabs>
+                    </div>
+                  </>
+                )}
+              </ResizablePanel>
+
+            </ResizablePanelGroup>
+          </div>
         </DialogContent>
       </Dialog>
 
-      {/* --- DOCUMENT PREVIEW MODAL (Kept relatively the same but slightly restyled) --- */}
+      {/* Document Preview Modal */}
       <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
-        <DialogContent className="max-w-[95vw] w-full max-h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-50/95 backdrop-blur-sm rounded-xl border border-slate-200 shadow-2xl">
+        <DialogContent className="max-w-[95vw] w-full h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-50 border-none shadow-2xl rounded-2xl">
           {showPreviewModal && previewingDocuments && (
             <>
-              <DialogHeader className="p-4 border-b bg-white shrink-0 shadow-sm relative">
-                <div className="flex items-center justify-between pr-8">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-indigo-50 p-2.5 rounded-lg border border-indigo-100">
-                      <FileText className="h-5 w-5 text-indigo-600" />
+              <div className="flex bg-white border-b border-slate-200 shrink-0 z-20">
+                <div className="px-6 py-4 flex items-center justify-between w-full">
+                  <div className="flex items-center gap-4">
+                    <div className="h-10 w-10 bg-slate-100 rounded-xl flex items-center justify-center shrink-0">
+                      <FileText className="text-slate-600 w-5 h-5" />
                     </div>
                     <div>
-                      <DialogTitle className="text-lg font-bold text-slate-800 tracking-tight">
+                      <DialogTitle className="text-lg font-semibold text-slate-900 line-clamp-1">
                         {previewingDocuments?.document_display_name || 'Document Verification'}
                       </DialogTitle>
-                      <p className="text-xs text-slate-500 font-medium mt-0.5">Assigned to: <span className="text-slate-700">{previewingDocuments?.person_full_name || 'Unknown Entity'}</span></p>
+                      <p className="text-sm text-slate-500 mt-1 flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5">
+                          Target Entity: {previewingDocuments?.person_full_name || 'Unknown'}
+                        </span>
+                      </p>
                     </div>
                   </div>
-                  <Badge variant="secondary" className="bg-slate-100 text-slate-600 border border-slate-200 h-7 px-3">
-                    {previewingDocuments?.documents?.length || 0} File(s) Attached
-                  </Badge>
-                </div>
-                <button onClick={() => setShowPreviewModal(false)} className="absolute right-4 top-4 rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors">
-                  <X className="h-5 w-5" />
-                </button>
-                <DialogDescription className="sr-only">Document review and data extraction</DialogDescription>
-              </DialogHeader>
 
-              <div className="flex-1 overflow-auto p-4 custom-scrollbar">
+                  <div className="flex items-center gap-4 shrink-0">
+                    <span className="text-sm font-medium text-slate-600 bg-slate-100 px-3 py-1 rounded-full">
+                      {previewingDocuments?.documents?.length || 0} File(s)
+                    </span>
+                    <div className="h-8 w-px mx-1 bg-slate-200" />
+                    <Button variant="ghost" size="icon" onClick={() => setShowPreviewModal(false)} className="rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                      <X className="h-5 w-5" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-auto bg-slate-50 relative">
                 {previewingDocuments?.documents?.map((doc, index) => {
                   const docId = doc.id || `doc-${index}`;
                   return (
-                    <div key={docId} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-4 last:mb-0">
+                    <div key={docId} className="h-full">
                       <ExtractionPreview
                         documentName={previewingDocuments?.document_display_name || 'Document'}
                         extractedData={doc.edited_details || doc.extracted_details || {}}
@@ -599,7 +1084,7 @@ export const AutomationMappingDialogUI = ({
                         expanded={true}
                         showSaveButton={true}
                         onSave={(data) => handleSaveEditedDocument(doc, data)}
-                        onDataChange={(fieldName, value) => handlePreviewDataChange(docId, fieldName, value)}
+                        onDataChange={(fieldName, value) => { handlePreviewDataChange(docId, fieldName, value); }}
                         documentTypes={[]}
                         type={doc.director_id ? 'individual' : 'company'}
                         file={doc}

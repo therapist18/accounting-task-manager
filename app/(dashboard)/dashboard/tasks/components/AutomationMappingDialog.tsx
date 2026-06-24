@@ -43,7 +43,7 @@ interface AutomationMappingDialogProps {
   enhancedTasksData?: Map<string, any>;
 }
 
-export interface EntityAutomationMapping {
+interface EntityAutomationMapping {
   entityKey: string;
   entityName: string;
   entityType: string;
@@ -431,7 +431,7 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
       }
     }
     if (logic === 'all' && collectedValues.length > 0) {
-      return collectedValues.join(', ');
+      return collectedValues.join(' ');
     }
     if (fieldDef.default_value && fieldDef.default_value !== 'Missing') return fieldDef.default_value;
     return "Missing";
@@ -889,7 +889,7 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
         .select()
         .single();
       if (insertError) throw new Error(`DB insert failed: ${insertError.message} `);
-      console.log('âœ… Screenshot saved to Supabase:', docRecord);
+      console.log('✅ Screenshot saved to Supabase:', docRecord);
       return docRecord;
     } finally {
       setIsSavingScreenshot(false);
@@ -946,15 +946,15 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
 
       const response = await res.json();
 
-      console.log('ðŸ” Debug - Response:', response);
-      console.log('ðŸ” Debug - Automation ID:', mapping.automationId);
-      console.log('ðŸ” Debug - Has jobId:', !!response.jobId);
-      console.log('ðŸ” Debug - Includes eta:', mapping.automationId?.toLowerCase().includes('eta'));
+      console.log('🔍 Debug - Response:', response);
+      console.log('🔍 Debug - Automation ID:', mapping.automationId);
+      console.log('🔍 Debug - Has jobId:', !!response.jobId);
+      console.log('🔍 Debug - Includes eta:', mapping.automationId?.toLowerCase().includes('eta'));
 
-      // â”€â”€ PROGRESS TRACKING: Capture jobId and start polling for eTA Kenya â”€â”€â”€â”€â”€â”€â”€â”€
+      // ── PROGRESS TRACKING: Capture jobId and start polling for eTA Kenya ────────
       // TEMPORARY: Remove automation ID check for debugging
       if (response.jobId) {
-        console.log('âœ… Starting polling for jobId:', response.jobId);
+        console.log('✅ Starting polling for jobId:', response.jobId);
         setAutomationJobId(response.jobId);
         setAutomationProgress({ isRunning: true, progress: 0, currentStep: 'Initializing', message: 'Starting automation...' });
 
@@ -964,11 +964,11 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
         }, 2000); // Poll every 2 seconds
         setPollingInterval(interval);
       } else {
-        console.log('âŒ No jobId in response - polling will not start');
+        console.log('❌ No jobId in response - polling will not start');
       }
 
       if (response.success) {
-        // â”€â”€ SAVE SCREENSHOT TO SUPABASE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── SAVE SCREENSHOT TO SUPABASE ─────────────────────────────────────
         if (response.screenshot) {
           const directorId = getPrimaryTargetEntityId();
 
@@ -977,7 +977,7 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
               const savedDoc = await saveScreenshotToSupabase(response.screenshot, directorId);
               setSavedScreenshotDoc(savedDoc);
 
-              // â”€â”€ AUTO-OPEN PREVIEW with the saved document â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+              // ── AUTO-OPEN PREVIEW with the saved document ──────────────────
               const previewDoc = {
                 ...savedDoc,
                 file_path: savedDoc.file_path,
@@ -997,7 +997,7 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
               if (refreshDocuments) refreshDocuments();
 
               toast({
-                title: 'âœ… Automation Completed!',
+                title: '✅ Automation Completed!',
                 description: 'Screenshot saved and ready for review.',
               });
             } catch (saveErr: any) {
@@ -1009,7 +1009,7 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
               });
             }
           } else {
-            // No valid director ID â€” fall back to download
+            // No valid director ID — fall back to download
             const screenshotDataUrl = `data: image / png; base64, ${response.screenshot} `;
             const link = document.createElement('a');
             link.href = screenshotDataUrl;
@@ -1017,14 +1017,14 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
             link.click();
 
             toast({
-              title: 'âœ… Automation Completed!',
+              title: '✅ Automation Completed!',
               description: response.message || 'Screenshot downloaded (no entity ID to save against).',
             });
           }
         } else {
           // No screenshot
           toast({
-            title: 'âœ… Automation Completed!',
+            title: '✅ Automation Completed!',
             description: response.message || 'Please check your email for payment instructions.',
           });
         }
@@ -1225,29 +1225,26 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
     <AutomationMappingDialogUI
       isOpen={isOpen}
       onClose={onClose}
-      activeTab={activeTab}
-      setActiveTab={setActiveTab}
+      isLoading={isLoading}
+      isAutomationRunning={isAutomationRunning}
+      isLoadingData={isLoadingData}
+      isSavingScreenshot={isSavingScreenshot}
       task={task}
       taskId={taskId}
       individualName={individualName}
+      savedScreenshotDoc={savedScreenshotDoc}
       selectedAutomationId={selectedAutomationId}
       setSelectedAutomationId={setSelectedAutomationId}
       entityAutomationMappings={entityAutomationMappings}
       selectedMapping={selectedMapping}
       activeWebEntry={activeWebEntry}
-      isLoading={isLoading}
-      isLoadingData={isLoadingData}
-      isAutomationRunning={isAutomationRunning}
-      isSavingScreenshot={isSavingScreenshot}
       automationProgress={automationProgress}
       automationJobId={automationJobId}
       logsEndRef={logsEndRef}
-      getPrimaryTargetEntityId={getPrimaryTargetEntityId}
-      getPrimaryEntityType={getPrimaryEntityType}
-      setCurrentIndividualId={setCurrentIndividualId}
-      savedScreenshotDoc={savedScreenshotDoc}
-      sortedFields={sortedFields}
+      activeTab={activeTab}
+      setActiveTab={setActiveTab}
       processedFields={processedFields}
+      sortedFields={sortedFields}
       sortMissingFirst={sortMissingFirst}
       setSortMissingFirst={setSortMissingFirst}
       entitySort={entitySort}
@@ -1255,29 +1252,32 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
       editingCell={editingCell}
       editValue={editValue}
       setEditValue={setEditValue}
-      expandedArrayFields={expandedArrayFields}
-      jobFields={jobFields}
-      requirementJobQuestions={requirementJobQuestions}
-      sourceData={sourceData}
-      getArrayFieldData={getArrayFieldData}
-      toggleArrayFieldExpansion={toggleArrayFieldExpansion}
-      getFieldValue={getFieldValue}
-      startEditing={startEditing}
       saveEdit={saveEdit}
       cancelEditing={cancelEditing}
+      startEditing={startEditing}
+      expandedArrayFields={expandedArrayFields}
+      toggleArrayFieldExpansion={toggleArrayFieldExpansion}
+      jobFields={jobFields}
+      sourceData={sourceData}
+      requirementJobQuestions={requirementJobQuestions}
       documentFiles={documentFiles}
+      computedFieldsPreview={computedFieldsPreview}
+      getArrayFieldData={getArrayFieldData}
+      getFieldValue={getFieldValue}
       resolveTargetEntityId={resolveTargetEntityId}
-      handlePreviewDocument={handlePreviewDocument}
-      setPreviewingDocuments={setPreviewingDocuments}
-      setShowPreviewModal={setShowPreviewModal}
-      showPreviewModal={showPreviewModal}
-      previewingDocuments={previewingDocuments}
       getFileUrl={getFileUrl}
+      handlePreviewDocument={handlePreviewDocument}
       handleSaveEditedDocument={handleSaveEditedDocument}
       handlePreviewDataChange={handlePreviewDataChange}
-      handleRunAutomation={handleRunAutomation}
+      getPrimaryTargetEntityId={getPrimaryTargetEntityId}
+      getPrimaryEntityType={getPrimaryEntityType}
+      setCurrentIndividualId={setCurrentIndividualId}
       stopAutomation={stopAutomation}
+      handleRunAutomation={handleRunAutomation}
+      showPreviewModal={showPreviewModal}
+      setShowPreviewModal={setShowPreviewModal}
+      previewingDocuments={previewingDocuments}
+      setPreviewingDocuments={setPreviewingDocuments}
     />
   );
-
 }

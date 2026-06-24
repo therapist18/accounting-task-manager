@@ -110,24 +110,24 @@ export const PreviewPanel = ({
       {/* Content */}
       {isWordTemplate ? (
         /* Native DOCX rendering via docx-preview */
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto bg-slate-100/80 dark:bg-slate-900/80 p-6 md:p-8 flex justify-center items-start">
           {docxBuffer ? (
             <div
               ref={docxContainerRef}
-              className="docx-preview-container w-full min-h-full bg-white"
+              className="docx-preview-container shadow-2xl rounded-xl border border-slate-200/50 dark:border-slate-800 bg-white max-w-[800px] w-full"
             />
           ) : (
-            <div className="flex flex-col items-center justify-center py-20 px-6">
+            <div className="flex flex-col items-center justify-center py-20 px-6 w-full">
               {isPreviewLoading ? (
                 <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
               ) : (
                 <>
-                  <div className="p-4 bg-slate-50 rounded-full mb-4">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-full mb-4 shadow-inner">
                     <Sparkles className="h-8 w-8 text-slate-400" />
                   </div>
-                  <h4 className="text-sm font-medium text-slate-700 mb-1">No Preview Available</h4>
-                  <p className="text-xs text-slate-500 text-center max-w-xs">
-                    Fill in the form fields to generate a document preview
+                  <h4 className="text-sm font-bold text-slate-700 dark:text-slate-350 mb-1">No Document Preview</h4>
+                  <p className="text-xs text-slate-500 text-center max-w-xs leading-relaxed">
+                    Fill in the form fields to compile and render the Word document preview
                   </p>
                 </>
               )}
@@ -136,15 +136,15 @@ export const PreviewPanel = ({
         </div>
       ) : (
         /* HTML live preview */
-        <ScrollArea className="flex-1">
-          <div className="max-w-4xl mx-auto">
+        <ScrollArea className="flex-1 bg-slate-100/80 dark:bg-slate-900/80">
+          <div className="max-w-4xl mx-auto p-6 md:p-8">
             {hasHtmlContent ? (
               <div className="relative">
                 <div
                   className={cn(
-                    "bg-white shadow-2xl rounded-lg overflow-hidden",
-                    "border border-slate-200",
-                    "min-h-[11in] px-6 md:px-8 pt-0 pb-4",
+                    "bg-white shadow-2xl rounded-xl overflow-hidden",
+                    "border border-slate-200/60 dark:border-slate-800/60",
+                    "min-h-[11in] px-8 md:px-12 pt-8 pb-8",
                     EDITOR_PREVIEW_STYLES
                   )}
                   style={{ whiteSpace: 'pre-wrap' }}
@@ -161,13 +161,13 @@ export const PreviewPanel = ({
                 />
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-20 px-6 bg-white rounded-lg border-2 border-dashed border-slate-200 shadow-sm">
-                <div className="p-4 bg-slate-50 rounded-full mb-4">
+              <div className="flex flex-col items-center justify-center py-20 px-6 bg-white dark:bg-slate-900 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-800 shadow-sm">
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-full mb-4 shadow-inner">
                   <Sparkles className="h-8 w-8 text-slate-400" />
                 </div>
-                <h4 className="text-sm font-medium text-slate-700 mb-1">No Preview Available</h4>
-                <p className="text-xs text-slate-500 text-center max-w-xs">
-                  Fill in the form fields to generate a live preview of your document
+                <h4 className="text-sm font-bold text-slate-700 dark:text-slate-350 mb-1">No Preview Available</h4>
+                <p className="text-xs text-slate-500 text-center max-w-xs leading-relaxed">
+                  Fill in the form fields to generate a live preview of your HTML template
                 </p>
               </div>
             )}

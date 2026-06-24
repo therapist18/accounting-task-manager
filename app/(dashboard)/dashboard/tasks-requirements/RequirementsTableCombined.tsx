@@ -1419,7 +1419,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       <div className="flex items-center gap-1.5 w-full">
         <div className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-md border ${status.bgColor} ${borderColorClass} shadow-sm w-fit`}>
           <Icon className={`h-3.5 w-3.5 shrink-0 ${status.color}`} />
-          <span className={`text-[10px] font-bold uppercase tracking-wider ${status.color}`}>
+          <span className={`text-sm font-bold uppercase tracking-wider ${status.color}`}>
             {status.label}
           </span>
         </div>
@@ -1536,14 +1536,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                         {reqItem.hasTemplate && (
                           <span className="flex items-center gap-1 text-orange-600" title="Has Template">
                             <FileType className="h-3 w-3 fill-current" />
-                            <span className="text-[9px] font-medium">Template</span>
+                            <span className="text-xs font-medium">Template</span>
                           </span>
                         )}
 
                         {reqItem.web_automation?.automationId && (
                           <span className="flex items-center gap-1 text-blue-600" title={`Web Form: ${reqItem.web_automation.automationName}`}>
                             <Zap className="h-3 w-3 fill-current" />
-                            <span className="text-[9px] font-medium truncate max-w-[100px]">{reqItem.web_automation.automationName}</span>
+                            <span className="text-xs font-medium truncate max-w-[100px]">{reqItem.web_automation.automationName}</span>
                           </span>
                         )}
                       </span>
@@ -1557,7 +1557,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                     if (!isApplicable) {
                       return (
                         <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-3 align-middle bg-slate-50/30">
-                          <span className="inline-flex items-center justify-center px-2.5 py-1 text-[10px] text-slate-400 font-medium italic shadow-sm">
+                          <span className="inline-flex items-center justify-center px-2.5 py-1 text-sm text-slate-400 font-medium italic shadow-sm">
                             N/A
                           </span>
                         </TableCell>
@@ -1602,11 +1602,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                       title="Preview Latest Document"
                                     >
                                       <Eye className="h-3.5 w-3.5" />
-                                      <span className="text-[10px] font-bold uppercase tracking-wider">View Docs</span>
+                                      <span className="text-sm font-bold uppercase tracking-wider">View Docs</span>
                                     </Button>
                                   </>
                                 ) : (
-                                  <Badge variant="outline" className={`text-[10px] uppercase font-bold px-2.5 py-1 shadow-sm ${statusToDisplay.type === 'missing' ? 'border-amber-200 text-amber-600 bg-amber-50' :
+                                  <Badge variant="outline" className={`text-sm uppercase font-bold px-2.5 py-1 shadow-sm ${statusToDisplay.type === 'missing' ? 'border-amber-200 text-amber-600 bg-amber-50' :
                                     statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'border-red-200 text-red-600 bg-red-50' :
                                       'border-amber-200 text-amber-600 bg-amber-50'
                                     }`}>
@@ -1629,7 +1629,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                 disabled={isPreparingTemplate}
                               >
                                 {isPreparingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-                                <span className="text-[10px] font-bold uppercase tracking-wider">Generate</span>
+                                <span className="text-sm font-bold uppercase tracking-wider">Generate</span>
                               </Button>
                             )}
                           </div>
@@ -1654,7 +1654,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                               disabled={isPreparingTemplate}
                             >
                               {isPreparingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-                              <span className="text-[10px] font-bold uppercase tracking-wider">Generate</span>
+                              <span className="text-sm font-bold uppercase tracking-wider">Generate</span>
                             </Button>
                           )}
                         </div>
@@ -1670,13 +1670,13 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
                   return (
                     <TableRow key={`${requirementId}-doctype-${docIdx}`} className="bg-blue-50/30">
-                      <TableCell className="sticky left-0 border-r text-center text-[10px] text-gray-400 bg-blue-50/30">
+                      <TableCell className="sticky left-0 border-r text-center text-sm text-gray-400 bg-blue-50/30">
                         {reqIndex + 1}.{docIdx + 1}
                       </TableCell>
                       <TableCell className="sticky left-16 bg-blue-50/50 border-r pl-8">
                         <span className="flex items-center gap-2">
                           <FileText className="h-3 w-3 text-blue-600" />
-                          <span className="text-[11px] text-slate-700 font-medium">
+                          <span className="text-sm text-slate-700 font-medium">
                             {docMetadata.display_name || docMetadata.name}
                           </span>
                         </span>
@@ -1686,7 +1686,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                         if (!isApplicable) {
                           return (
                             <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-3 align-middle">
-                              <span className="inline-flex items-center justify-center px-2 py-1 rounded border border-slate-100 bg-slate-50 text-[10px] text-gray-300 italic">
+                              <span className="inline-flex items-center justify-center px-2 py-1 rounded border border-slate-100 bg-slate-50 text-sm text-gray-300 italic">
                                 -
                               </span>
                             </TableCell>
@@ -1721,7 +1721,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                       title={`View ${docs.length} document(s)`}
                                     >
                                       <Eye className="h-4 w-4" />
-                                      {docs.length > 1 && <span className="text-[10px] font-bold ml-1">{docs.length}</span>}
+                                      {docs.length > 1 && <span className="text-sm font-bold ml-1">{docs.length}</span>}
                                     </Button>
                                     <div className="w-[1px] h-4 bg-slate-200" />
                                     <Button
@@ -1756,7 +1756,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                 </>
                               ) : (
                                 <>
-                                  <Badge variant="outline" className="text-[10px] uppercase font-bold px-2.5 py-1 border-amber-200 text-amber-600 bg-amber-50 shadow-sm">
+                                  <Badge variant="outline" className="text-sm uppercase font-bold px-2.5 py-1 border-amber-200 text-amber-600 bg-amber-50 shadow-sm">
                                     Missing
                                   </Badge>
                                   <Button
@@ -1786,7 +1786,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                     title={`Upload ${docMetadata.display_name || docMetadata.name}`}
                                   >
                                     <UploadCloud className="h-3.5 w-3.5" />
-                                    <span className="text-[10px] font-bold uppercase tracking-wider">Upload</span>
+                                    <span className="text-sm font-bold uppercase tracking-wider">Upload</span>
                                   </Button>
                                 </>
                               )}
@@ -1801,17 +1801,17 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                 {/* Expanded Field Data Rows (for non-composite or when not showing document types) */}
                 {!isComposite && isExpanded && fieldsToRender.map((field, fIdx) => (
                   <TableRow key={`${requirementId}-field-${field.id}`} className={`${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
-                    <TableCell className={`sticky left-0 border-r text-center text-[10px] text-gray-400 ${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
+                    <TableCell className={`sticky left-0 border-r text-center text-sm text-gray-400 ${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
                       {reqIndex + 1}.{fIdx + 1}
                     </TableCell>
-                    <TableCell className="sticky left-16 bg-slate-50 border-r pl-8 text-[11px] text-slate-500 italic">
+                    <TableCell className="sticky left-16 bg-slate-50 border-r pl-8 text-sm text-slate-500 italic">
                       {field.name}
                     </TableCell>
                     {columnDefinitions.map((col, colIdx) => {
                       const isApplicable = checkApplicability(col.type, reqItem, col.roles);
                       const docData = isApplicable ? getDocumentDataForPreview(col.task, reqItem, col.type, col.id) : null;
                       return (
-                        <TableCell key={`${field.id}-val-${colIdx}`} className="text-center border p-1 text-[11px] text-slate-600">
+                        <TableCell key={`${field.id}-val-${colIdx}`} className="text-center border p-1 text-sm text-slate-600">
                           {isApplicable ? (() => {
                             const val = docData?.extracted_details?.[field.name];
                             if (val === null || val === undefined) return '-';
@@ -1909,14 +1909,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                   {reqItem.hasTemplate && (
                     <span className="flex items-center gap-1 text-orange-600" title="Has Template">
                       <FileType className="h-3 w-3 fill-current" />
-                      <span className="text-[9px] font-medium">Template</span>
+                      <span className="text-xs font-medium">Template</span>
                     </span>
                   )}
 
                   {reqItem.web_automation?.automationId && (
                     <span className="flex items-center gap-1 text-blue-600" title={`Web Form: ${reqItem.web_automation.automationName}`}>
                       <Zap className="h-3 w-3 fill-current" />
-                      <span className="text-[9px] font-medium truncate max-w-[100px]">{reqItem.web_automation.automationName}</span>
+                      <span className="text-xs font-medium truncate max-w-[100px]">{reqItem.web_automation.automationName}</span>
                     </span>
                   )}
                 </span>
@@ -1930,7 +1930,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
               if (!isApplicable) {
                 return (
                   <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-3 align-middle bg-slate-50/30">
-                    <span className="inline-flex items-center justify-center px-2.5 py-1 text-[10px] text-slate-400 font-medium italic shadow-sm">
+                    <span className="inline-flex items-center justify-center px-2.5 py-1 text-sm text-slate-400 font-medium italic shadow-sm">
                       N/A
                     </span>
                   </TableCell>
@@ -1974,11 +1974,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                 title="Preview Latest Document"
                               >
                                 <Eye className="h-3.5 w-3.5" />
-                                <span className="text-[10px] font-bold uppercase tracking-wider">View Docs</span>
+                                <span className="text-sm font-bold uppercase tracking-wider">View Docs</span>
                               </Button>
                             </>
                           ) : (
-                            <Badge variant="outline" className={`text-[10px] uppercase font-bold px-2.5 py-1 shadow-sm ${statusToDisplay.type === 'missing' ? 'border-amber-200 text-amber-600 bg-amber-50' :
+                            <Badge variant="outline" className={`text-sm uppercase font-bold px-2.5 py-1 shadow-sm ${statusToDisplay.type === 'missing' ? 'border-amber-200 text-amber-600 bg-amber-50' :
                               statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'border-red-200 text-red-600 bg-red-50' :
                                 'border-amber-200 text-amber-600 bg-amber-50'
                               }`}>
@@ -2001,7 +2001,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                           disabled={isPreparingTemplate}
                         >
                           {isPreparingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-                          <span className="text-[10px] font-bold uppercase tracking-wider">Generate</span>
+                          <span className="text-sm font-bold uppercase tracking-wider">Generate</span>
                         </Button>
                       )}
                     </div>
@@ -2025,7 +2025,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                         disabled={isPreparingTemplate}
                       >
                         {isPreparingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-                        <span className="text-[10px] font-bold uppercase tracking-wider">Generate</span>
+                        <span className="text-sm font-bold uppercase tracking-wider">Generate</span>
                       </Button>
                     )}
                   </div>
@@ -2041,13 +2041,13 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
             return (
               <TableRow key={`${requirementId}-doctype-${docIdx}`} className="bg-blue-50/30">
-                <TableCell className="sticky left-0 border-r text-center text-[10px] text-gray-400 bg-blue-50/30">
+                <TableCell className="sticky left-0 border-r text-center text-sm text-gray-400 bg-blue-50/30">
                   {reqIndex + 1}.{docIdx + 1}
                 </TableCell>
                 <TableCell className="sticky left-16 bg-blue-50/50 border-r pl-8">
                   <span className="flex items-center gap-2">
                     <FileText className="h-3 w-3 text-blue-600" />
-                    <span className="text-[11px] text-slate-700 font-medium">
+                    <span className="text-sm text-slate-700 font-medium">
                       {docMetadata.display_name || docMetadata.name}
                     </span>
                   </span>
@@ -2057,7 +2057,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                   if (!isApplicable) {
                     return (
                       <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-3 align-middle">
-                        <span className="inline-flex items-center justify-center px-2 py-1 rounded border border-slate-100 bg-slate-50 text-[10px] text-gray-300 italic">
+                        <span className="inline-flex items-center justify-center px-2 py-1 rounded border border-slate-100 bg-slate-50 text-sm text-gray-300 italic">
                           -
                         </span>
                       </TableCell>
@@ -2094,7 +2094,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                 title={`View ${docs.length} document(s)`}
                               >
                                 <Eye className="h-4 w-4" />
-                                {docs.length > 1 && <span className="text-[10px] font-bold ml-1">{docs.length}</span>}
+                                {docs.length > 1 && <span className="text-sm font-bold ml-1">{docs.length}</span>}
                               </Button>
                               <div className="w-[1px] h-4 bg-slate-200" />
                               <Button
@@ -2140,7 +2140,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                           </>
                         ) : (
                           <>
-                            <Badge variant="outline" className="text-[10px] uppercase font-bold px-2.5 py-1 border-amber-200 text-amber-600 bg-amber-50 shadow-sm">
+                            <Badge variant="outline" className="text-sm uppercase font-bold px-2.5 py-1 border-amber-200 text-amber-600 bg-amber-50 shadow-sm">
                               Missing
                             </Badge>
                             <Button
@@ -2181,7 +2181,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                               title={`Upload ${docMetadata?.display_name || 'Document'}`}
                             >
                               <UploadCloud className="h-3.5 w-3.5" />
-                              <span className="text-[10px] font-bold uppercase tracking-wider">Upload</span>
+                              <span className="text-sm font-bold uppercase tracking-wider">Upload</span>
                             </Button>
                           </>
                         )}
@@ -2196,17 +2196,17 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           {/* Expanded Field Data Rows */}
           {!isComposite && isExpanded && fieldsToRender.map((field, fIdx) => (
             <TableRow key={`${requirementId}-field-${field.id}`} className={`${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
-              <TableCell className={`sticky left-0 border-r text-center text-[10px] text-gray-400 ${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
+              <TableCell className={`sticky left-0 border-r text-center text-sm text-gray-400 ${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
                 {reqIndex + 1}.{fIdx + 1}
               </TableCell>
-              <TableCell className="sticky left-16 bg-slate-50 border-r pl-8 text-[11px] text-slate-500 italic">
+              <TableCell className="sticky left-16 bg-slate-50 border-r pl-8 text-sm text-slate-500 italic">
                 {field.name}
               </TableCell>
               {columnDefinitions.map((col, colIdx) => {
                 const isApplicable = checkApplicability(col.type, reqItem);
                 const docData = isApplicable ? getDocumentDataForPreview(col.task, reqItem, col.type, col.id) : null;
                 return (
-                  <TableCell key={`${field.id}-val-${colIdx}`} className="text-center border p-1 text-[11px] text-slate-600">
+                  <TableCell key={`${field.id}-val-${colIdx}`} className="text-center border p-1 text-sm text-slate-600">
                     {isApplicable ? (() => {
                       const val = docData?.extracted_details?.[field.name];
                       if (val === null || val === undefined) return '-';
@@ -2357,7 +2357,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                     >
                       <span className="flex items-center gap-1">
                         <Icon className="h-4 w-4 opacity-70 mb-1" />
-                        <span className="text-[11px] font-bold uppercase line-clamp-1 px-1">
+                        <span className="text-sm font-bold uppercase line-clamp-1 px-1">
                           {col.label}
                         </span>
                         <span className="flex justify-between items-center gap-2">
@@ -2370,7 +2370,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                               ))}
                             </div>
                           ) : (
-                            <span className="text-[9px] bg-black/20 rounded px-1.5 py-0.5 font-medium tracking-wider">
+                            <span className="text-xs bg-black/20 rounded px-1.5 py-0.5 font-medium tracking-wider">
                               {col.subLabel}
                             </span>
                           )}
@@ -2390,7 +2390,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                               return (
                                 <span className="flex items-center gap-1">
                                   {!isExpanded && (
-                                    <span className="text-[10px] bg-amber-500 text-white rounded-full px-2.5 py-0.5 font-bold">
+                                    <span className="text-sm bg-amber-500 text-white rounded-full px-2.5 py-0.5 font-bold">
                                       {dependants.length}
                                     </span>
                                   )}

@@ -14,7 +14,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
-import { Wand2, FileText, X, Loader2, Sparkles } from "lucide-react";
+import { Wand2, FileText, X, Loader2, Sparkles, AlertCircle, RefreshCw } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface TemplateDialogHeaderProps {
   documentName: string;
@@ -52,140 +53,168 @@ export const TemplateDialogHeader = ({
   refreshWithLiveData
 }: TemplateDialogHeaderProps) => {
   return (
-    <DialogHeader>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-500 rounded-lg">
+    <DialogHeader className="border-b border-slate-200/60 dark:border-slate-800/80 px-6 py-4 bg-white/50 backdrop-blur-md dark:bg-slate-950/50 relative z-20">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        {/* Left Section: Document title & draft status */}
+        <div className="flex items-start gap-3.5">
+          <div className="p-2.5 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl shadow-md shadow-blue-500/20 shrink-0">
             <Wand2 className="h-5 w-5 text-white" />
           </div>
-          <div>
-            <DialogTitle className="text-xl font-bold">{documentName}</DialogTitle>
-            <DialogDescription className="text-sm">Auto-populate and generate</DialogDescription>
+          <div className="space-y-1 min-w-0">
+            <DialogTitle className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 truncate">
+              {documentName}
+            </DialogTitle>
+            <DialogDescription className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <span>Auto-populate, refine fields, and generate files</span>
+            </DialogDescription>
+
             {loadedDraft && (
-              <div className="flex items-center gap-2 mt-2">
-                <Badge variant="outline" className="ml-2 text-[8px] bg-amber-50 text-amber-700 border-amber-200">
+              <div className="flex flex-wrap items-center gap-2 mt-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                <Badge variant="outline" className="text-[10px] font-bold px-2 py-0.5 bg-amber-500/10 text-amber-700 border-amber-500/20 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30 flex items-center gap-1">
                   <FileText className="h-3 w-3" />
-                  <span className="font-medium">Draft in Progress</span>
+                  <span>Draft Restored</span>
                 </Badge>
-                <span className="text-xs text-muted-foreground">
-                  Last saved {new Date(loadedDraft.created_at).toLocaleString()}
+                <span className="text-[10px] text-slate-400 font-medium">
+                  Saved: {new Date(loadedDraft.created_at).toLocaleString()}
                 </span>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={discardDraft}
                   disabled={isLoadingDraft}
-                  className="h-6 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                  className="h-5 px-2 text-[10px] font-bold text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-md transition-all gap-1 border border-transparent hover:border-red-200/50"
                 >
-                  <X className="h-3 w-3 mr-1" />
+                  <X className="h-2.5 w-2.5" />
                   Discard Draft
                 </Button>
               </div>
             )}
 
             {isLoadingDraft && (
-              <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading draft...
+              <div className="flex items-center gap-2 mt-1.5 text-xs text-slate-400 font-medium animate-pulse">
+                <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                Loading draft from storage...
               </div>
             )}
           </div>
         </div>
-        <div className="flex items-center justify-between">
-          <Label>{documentName}</Label>
-        </div>
-        <div className="flex items-center gap-2">
+
+        {/* Right Section: Action Controls */}
+        <div className="flex items-center flex-wrap gap-2.5 self-end md:self-center">
           <Button
             variant="outline"
             size="sm"
             onClick={refineAllFieldsWithAI}
             disabled={isGenerating}
-            className="border-purple-200 text-purple-700 hover:bg-purple-50"
+            className="h-9 px-4 border-purple-200 hover:border-purple-300 hover:bg-purple-50 text-purple-700 dark:border-purple-950 dark:hover:bg-purple-950/40 dark:text-purple-400 font-bold text-xs rounded-xl shadow-sm hover:shadow transition-all duration-200 gap-1.5"
           >
-            <Sparkles className="h-4 w-4 mr-2" />
+            {isGenerating ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5 text-purple-500 fill-purple-200 dark:fill-transparent" />
+            )}
             AI Refine
           </Button>
+
           {availableTemplates.length > 1 && (
             <Select value={selectedTemplate?.id} onValueChange={handleTemplateSelect}>
-              <SelectTrigger className="w-64 h-9">
+              <SelectTrigger className="w-56 h-9 rounded-xl border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold shadow-sm focus:ring-blue-500/20">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="rounded-xl border-slate-200/80 dark:border-slate-800">
                 {availableTemplates.map((t: any) => (
-                  <SelectItem key={t.id} value={t.id}>{t.file_name}</SelectItem>
+                  <SelectItem key={t.id} value={t.id} className="text-xs font-medium rounded-lg">{t.file_name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           )}
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <X className="h-5 w-5" />
+
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={onClose} 
+            className="h-9 w-9 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:text-slate-300 dark:hover:bg-slate-900 shrink-0"
+          >
+            <X className="h-4 w-4" />
           </Button>
         </div>
       </div>
-      <div className="mt-2 space-y-1">
+
+      {/* Progress Section */}
+      <div className="mt-4 space-y-1.5 bg-slate-50/50 dark:bg-slate-900/30 p-2.5 px-3.5 rounded-xl border border-slate-100 dark:border-slate-900/50">
         <div className="flex items-center justify-between text-xs">
-          <span className="font-medium">
-            {completionStats.filled}/{completionStats.total} Fields
+          <span className="font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+            <span>Progress:</span>
+            <span className="text-blue-600 dark:text-blue-400 font-extrabold">{completionStats.filled}/{completionStats.total} Fields</span>
             {loadedDraft && (
-              <Badge variant="outline" className="ml-2 text-[8px] bg-amber-50 text-amber-700 border-amber-200">
+              <Badge variant="outline" className="text-[8px] font-black h-4 px-1.5 bg-amber-500/10 text-amber-600 border-amber-500/20">
                 DRAFT
               </Badge>
             )}
           </span>
-          <span>{completionStats.percentage}%</span>
+          <span className="font-extrabold text-slate-700 dark:text-slate-300">{completionStats.percentage}%</span>
         </div>
         <Progress
           value={completionStats.percentage}
-          className={`h-1.5 ${loadedDraft ? '[&>div]:bg-amber-500' : ''}`}
+          className={cn(
+            "h-1.5 rounded-full overflow-hidden bg-slate-200/60 dark:bg-slate-800/80 shadow-inner",
+            loadedDraft 
+              ? "[&>div]:bg-gradient-to-r [&>div]:from-amber-400 [&>div]:to-orange-500" 
+              : "[&>div]:bg-gradient-to-r [&>div]:from-blue-500 [&>div]:to-indigo-600"
+          )}
         />
       </div>
+
+      {/* Conflict Warning card */}
       {showConflictBanner && dataConflicts.length > 0 && loadedDraft && (
-        <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-          <div className="flex items-start gap-3">
-            <div className="flex-shrink-0 mt-0.5">
-              <svg className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
+        <div className="mt-3 p-4 bg-amber-50/50 border border-amber-200/80 rounded-xl shadow-sm dark:bg-amber-950/20 dark:border-amber-950/40 animate-in slide-in-from-top-2 duration-350">
+          <div className="flex items-start gap-3.5">
+            <div className="p-1.5 bg-amber-100 rounded-lg text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 shrink-0">
+              <AlertCircle className="h-4 w-4" />
             </div>
-            <div className="flex-1">
-              <h4 className="text-sm font-semibold text-amber-900 mb-1">
-                ⚠️ Data Changes Detected
-              </h4>
-              <p className="text-xs text-amber-800 mb-2">
-                The following fields have been updated in the database since this draft was saved:
-              </p>
-              <div className="space-y-1 mb-3">
-                {dataConflicts.slice(0, 3).map((conflict: any, idx: number) => (
-                  <div key={idx} className="text-xs text-amber-700 font-mono bg-white/50 p-2 rounded">
-                    <span className="font-semibold">{conflict.field}:</span>{' '}
-                    <span className="line-through opacity-60">{String(conflict.draftValue).substring(0, 30)}</span>
-                    {' → '}
-                    <span className="font-semibold text-green-700">{String(conflict.liveValue).substring(0, 30)}</span>
+            <div className="flex-1 space-y-2">
+              <div>
+                <h4 className="text-xs font-black text-amber-900 dark:text-amber-300 uppercase tracking-wider">
+                  Data Updates Detected in Profile
+                </h4>
+                <p className="text-[11px] text-amber-700/90 dark:text-amber-400/90 leading-relaxed mt-0.5">
+                  The client database was updated since this draft was saved. Choose whether to import updates or continue editing draft values:
+                </p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[140px] overflow-y-auto pr-1">
+                {dataConflicts.slice(0, 4).map((conflict: any, idx: number) => (
+                  <div key={idx} className="text-[10px] text-amber-800 dark:text-amber-400 font-mono bg-white/70 dark:bg-slate-900/60 p-2 rounded-lg border border-amber-200/40 dark:border-amber-950/30 flex flex-col justify-between">
+                    <span className="font-bold text-amber-900 dark:text-amber-300 truncate mb-1">
+                      {conflict.field.replace(/_/g, ' ')}
+                    </span>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="line-through opacity-50 truncate max-w-[45%]">{String(conflict.draftValue || 'empty')}</span>
+                      <span className="text-[9px] text-slate-400">→</span>
+                      <span className="font-bold text-emerald-600 dark:text-emerald-400 truncate max-w-[45%]">{String(conflict.liveValue || 'empty')}</span>
+                    </div>
                   </div>
                 ))}
-                {dataConflicts.length > 3 && (
-                  <div className="text-xs text-amber-600 italic">
-                    ...and {dataConflicts.length - 3} more field{dataConflicts.length - 3 > 1 ? 's' : ''}
+                {dataConflicts.length > 4 && (
+                  <div className="text-[10px] text-amber-600 dark:text-amber-400 italic font-semibold p-1 col-span-2">
+                    ...and {dataConflicts.length - 4} more field conflicts.
                   </div>
                 )}
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 pt-1">
                 <Button
                   size="sm"
                   variant="default"
                   onClick={refreshWithLiveData}
-                  className="h-7 text-xs bg-amber-600 hover:bg-amber-700"
+                  className="h-7 px-3 text-[10px] font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg gap-1.5 shadow-sm"
                 >
-                  <svg className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.001 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  Refresh with Latest Data
+                  <RefreshCw className="h-3 w-3 animate-spin-slow" />
+                  Apply Database Updates
                 </Button>
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="outline"
                   onClick={() => setShowConflictBanner(false)}
-                  className="h-7 text-xs text-amber-700 hover:bg-amber-100"
+                  className="h-7 px-3 text-[10px] font-bold text-amber-700 hover:bg-amber-100/50 border-amber-200 dark:text-amber-300 dark:border-amber-950 rounded-lg"
                 >
                   Keep Draft Values
                 </Button>

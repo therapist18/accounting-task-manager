@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, View, MousePointer2, Layout, Code, ChevronDown, Layers } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, View, MousePointer2, Layout, Code, ChevronDown, Database, Layers, Edit3 } from "lucide-react";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { saveAs } from 'file-saver';
@@ -24,15 +25,7 @@ import { EntityType, ENTITY_TYPES, DEPENDANT_RELATIONSHIPS } from "@/lib/constan
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { executeComputedField } from '../tasks/utils/automationComputedFunctions';
-import { formatWhitespace, isDate, processDigitSplit, formatDate, base64Parser, toBase64, fetchImageAsBase64, parseJsonValue, normalizeString, findPrimaryDirector, getOrdinalNumber, getOrdinalWord, parseImageDimension, checkDocumentStatus, generateDocumentChecklist, EDITOR_PREVIEW_STYLES, extractDisplayValue } from './utils/templateUtils';
-import { getTargetEntity, processPlaceholderValue, processTextField, isValidValue, resolveArrayData, resolveArrayDataWithExtractionMode } from './utils/placeholderProcessors';
-import { extractHeadersFooters, convertWordXmlToHtml, fetchTemplateBuffer as fetchTemplateBufferUtil } from './utils/wordDocumentUtils';
-import { TemplateDialogHeader } from './components/TemplateDialogHeader';
-import { TemplateSourcePanel } from './components/TemplateSourcePanel';
 import { PreviewPanel } from './components/PreviewPanel';
-import { PlaceholderInput } from './components/PlaceholderInput';
-import { ArrayInputsPanel } from './components/ArrayInputsPanel';
-import { Separator } from '@/components/ui/separator';
 
 // Common docxtemplater format functions
 const formatFunctions = new Set([
@@ -43,55 +36,1365 @@ const formatFunctions = new Set([
 
 const formatRegex = /\{\{\s*([a-zA-Z0-9_]+)\s*(\/([a-zA-Z0-9_]+))?\s*\}\}/g;
 
-const applyFormat = (val, format) => {
-    if (!val || typeof val !== 'string') return val;
-    const str = String(val);
+const EDITOR_PREVIEW_STYLES = `
+  prose prose-sm sm:prose-base dark:prose-invert max-w-full focus:outline-none 
+  font-serif
+  [&_*]:whitespace-pre-wrap
+  [&_p]:min-h-[1em]
+  [&_p]:my-0 
+  [&_first-child]:mt-0
+  [&_last-child]:mb-0
+  [&_table]:border-collapse [&_table]:border [&_table]:border-border [&_table]:w-full [&_table]:my-4
+  [&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:p-2 [&_th]:text-left
+  [&_td]:border [&_td]:border-border [&_td]:p-2 relative
+`.replace(/\s+/g, ' ').trim();
+// Around line 43
+const formatWhitespace = (val) => {
+    if (val === null || val === undefined) return '';
+    return String(val)
+        // Convert 2 or more spaces to non-breaking spaces (&nbsp;)
+        .replace(/  +/g, (match) => '&nbsp;'.repeat(match.length))
+        // Ensure literal newlines are converted to HTML breaks
+        .replace(/\n/g, '<br />');
+};
 
-    switch (format?.toLowerCase()) {
-        case 'upper':
-        case 'uppercase':
-            return str.toUpperCase();
-        case 'lower':
-        case 'lowercase':
-            return str.toLowerCase();
-        case 'capital':
-        case 'capitalize':
-            return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
-        case 'title':
-            return str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
-        case 'prettify':
-            return JSON.stringify(val, null, 2);
-        case 'escape':
-            return escape(str);
-        case 'unescape':
-            return unescape(str);
-        case 'html':
-            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        case 'raw':
-            return str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-        case 'json':
-            return JSON.stringify(val);
-        case 'parse':
-            return JSON.parse(val);
-        case 'stringify':
-            return JSON.stringify(val, null, 2);
-        default:
-            return str;
+const isDate = (str) => {
+    if (!str || typeof str !== 'string') return false;
+
+    const datePatterns = [
+        /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/,
+        /^\d{4}[\/\-]\d{2}[\/\-]\d{2}$/,
+        /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/,
+    ];
+
+    return datePatterns.some(pattern => pattern.test(str.trim()));
+};
+
+const processDigitSplit = (value, digitCount = 8) => {
+    if (!value) return [];
+
+    const strValue = String(value);
+    const chars = isDate(strValue)
+        ? strValue.replace(/\D/g, '').split('')
+        : strValue.split('');
+
+    const result = [];
+    for (let i = 1; i <= digitCount; i++) {
+        result.push(chars[i - 1] || '');
+    }
+    return result;
+};
+
+const formatDate = (date, formatStr) => {
+    if (!date) return '';
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return '';
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+
+    if (!formatStr) return `${year}-${month}-${day}`;
+
+    return formatStr
+        .replace('YYYY', year)
+        .replace('MM', month)
+        .replace('DD', day);
+};
+
+const base64Parser = async (dataURL) => {
+    try {
+        if (!dataURL) return null;
+
+        if (typeof dataURL === 'string' && dataURL.startsWith('data:')) {
+            const matches = dataURL.match(/^data:(image\/[^;]+);base64,(.*)$/);
+            if (!matches) return null;
+
+            const mimeType = matches[1];
+            const base64 = matches[2];
+            const binaryStr = atob(base64);
+            const len = binaryStr.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryStr.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        if (typeof dataURL === 'string' && (dataURL.startsWith('http') || dataURL.startsWith('blob:'))) {
+            const response = await fetch(dataURL);
+            if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
+            const blob = await response.blob();
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(blob);
+            });
+        }
+
+        return null;
+    } catch (error) {
+        console.error('Error in base64Parser:', error);
+        return null;
     }
 };
 
-export default function TemplateGenerationDialog({
-    task, isOpen, onClose, template, availableTemplates = [],
-    documentName, masterFields, entityIdMap, sourceDataCache,
-    extractedData = {}, personData = {}, companyData = {},
-    relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null },
-    onDraftDiscarded, jobLevel,
-    activeEntityType,
-    activeEntityId, refreshDocuments
-}) {
-    // Debug: Log props at component start
-    console.log('[TemplateGenerationDialog] Component render - task?.job_level:', task?.job_level, 'jobLevel prop:', jobLevel, 'isOpen:', isOpen);
+const toBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = error => reject(error);
+});
 
+const fetchImageAsBase64 = async (url) => {
+    try {
+        // If private, use Supabase to get a temporary authorized URL
+        const path = url.split('/public/kyc-documents/')[1];
+        const { data, error } = await supabase.storage
+            .from('kyc-documents')
+            .createSignedUrl(path, 60);
+
+        const finalUrl = data?.signedUrl || url;
+        const response = await fetch(finalUrl, { mode: 'cors' });
+        if (!response.ok) return null;
+        const blob = await response.blob();
+        return await toBase64(blob);
+    } catch (error) {
+        return null;
+    }
+};
+
+const parseJsonValue = (data, path) => {
+    if (!path || !data) return '';
+    try {
+        let currentValue = data;
+        const normalizedPath = path.replace(/->>/g, '->').replace(/'/g, '');
+
+        const parts = normalizedPath.split(/->|\./);
+
+        for (let i = 0; i < parts.length; i++) {
+            const key = parts[i].trim();
+            if (!key) continue;
+            if (currentValue && currentValue.current !== undefined && key === 'current') {
+                currentValue = currentValue.current;
+            }
+
+            if (Array.isArray(currentValue)) {
+                currentValue = currentValue[0];
+            }
+
+            if (currentValue && typeof currentValue === 'object') {
+                if (currentValue[key] !== undefined) {
+                    currentValue = currentValue[key];
+                } else {
+                    const lowerKey = key.toLowerCase();
+                    const foundKey = Object.keys(currentValue).find(k => k.toLowerCase() === lowerKey);
+                    if (foundKey) {
+                        currentValue = currentValue[foundKey];
+                    } else {
+                        currentValue = undefined;
+                    }
+                }
+            } else if (i < parts.length - 1) {
+                return '';
+            }
+        }
+
+        const finalValue = currentValue !== undefined && currentValue !== null ? String(currentValue) : '';
+        return finalValue;
+    } catch (error) {
+        return '';
+    }
+};
+
+const normalizeString = (str) => !str ? '' : str.toLowerCase().replace(/[_\s-]/g, '');
+
+const findPrimaryDirector = (relationshipData) => {
+    if (!relationshipData?.directors?.length) return null;
+    const directors = Array.isArray(relationshipData.directors)
+        ? relationshipData.directors
+        : [relationshipData.directors];
+    return directors.find(d => d.is_primary) || directors[0];
+};
+
+const getOrdinalNumber = (index: number): string => {
+    const num = index + 1;
+
+    if (num % 100 >= 11 && num % 100 <= 13) {
+        return `${num}th`;
+    }
+
+    switch (num % 10) {
+        case 1: return `${num}st`;
+        case 2: return `${num}nd`;
+        case 3: return `${num}rd`;
+        default: return `${num}th`;
+    }
+};
+
+const getOrdinalWord = (index: number): string => {
+    const words = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth'];
+    return words[index] || getOrdinalNumber(index);
+};
+
+const parseImageDimension = (dimension: string | undefined): number | null => {
+    if (!dimension) return null;
+
+    const cleaned = dimension.toString().trim();
+    const numericValue = parseFloat(cleaned);
+
+    if (isNaN(numericValue)) return null;
+
+    return numericValue;
+};
+
+const checkDocumentStatus = (
+    documentId: string,
+    entityId: string,
+    entityType: string,
+    sourceDataCache: Record<string, Record<number, any>>,
+    dataSourceConfig?: {
+        table: string;
+        linking_variable: string;
+        document_id_field: string;
+    }
+): boolean => {
+    // Use provided config or fallback to defaults
+    const config = dataSourceConfig || {
+        table: 'acc_portal_kyc_uploads',
+        linking_variable: entityType === 'company' ? 'company_id' : 'individual_id',
+        document_id_field: 'document_id'
+    };
+    const uploads = sourceDataCache[config.table] || {};
+    const documentFound = Object.values(uploads).some(upload => {
+        const uploadDocId = upload[config.document_id_field];
+        const uploadEntityId = upload[config.linking_variable];
+        return uploadDocId === documentId && uploadEntityId === entityId;
+        return String(upload[config.linking_variable]) === String(entityId);
+    });
+    return documentFound;
+};
+
+const generateDocumentChecklist = (
+    placeholder: any,
+    entityId: string,
+    entityType: string,
+    sourceDataCache: Record<string, Record<number, any>>,
+    availableDocuments: Array<{ id: string; display_name: string; name: string }>
+): string => {
+    const linkedDocs = placeholder.linked_document_ids || [];
+    const format = placeholder.checklist_display_format || 'checkboxes';
+    const dataSourceConfig = placeholder.checklist_data_source;
+    if (linkedDocs.length === 0) {
+        return '';
+    }
+    const checklist = linkedDocs.map(docId => {
+        const doc = availableDocuments.find(d => d.id === docId);
+        const isFound = checkDocumentStatus(
+            docId,
+            entityId,
+            entityType,
+            sourceDataCache,
+            dataSourceConfig
+        );
+
+        const docName = doc?.display_name || doc?.name || 'Unknown Document';
+        const symbol = isFound ? '✓' : '';
+
+        switch (format) {
+            case 'bullets':
+                return `• ${docName}${isFound ? ' ✓' : ''}`;
+            case 'table':
+                return `| ${symbol} | ${docName} | ${isFound ? 'Submitted' : 'Pending'} |`;
+            default: // checkboxes
+                return `${symbol}`;
+        }
+    });
+
+    if (format === 'table') {
+        return `| Status | Document | Notes |\n|--------|----------|-------|\n${checklist.join('\n')}`;
+    }
+
+    return checklist.join('\n');
+};
+
+const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourceArray = null, entityIdMap = null, combinedCache = null, extractedData = null, companyData = null) => {
+    if (sourceArray && arrayIndex !== null && sourceArray[arrayIndex]) {
+        return sourceArray[arrayIndex];
+    }
+
+    let entityType = 'company';
+    if (Array.isArray(placeholder.entity_type)) {
+        entityType = placeholder.entity_type[0];
+    } else if (placeholder.entity_type) {
+        entityType = placeholder.entity_type;
+    }
+    const normType = entityType?.toLowerCase()?.trim();
+    if (entityIdMap) {
+        if (normType === 'director' && entityIdMap.director) {
+            const dirId = entityIdMap.director;
+            return relationshipData?.directors?.find(d => String(d.id) === String(dirId)) ||
+                combinedCache?.['registry_individuals']?.[dirId];
+        }
+        if (normType === 'principal' && entityIdMap.principal) {
+            return relationshipData?.principal || extractedData;
+        }
+    }
+    if (normType === 'principal') {
+        return relationshipData?.principal || extractedData || personData;
+    }
+
+    if (normType === 'sponsor') {
+        if (entityIdMap?.sponsor) {
+            if (relationshipData?.sponsor && String(relationshipData.sponsor.id) === String(entityIdMap.sponsor)) {
+                return relationshipData.sponsor;
+            }
+        }
+        const sponsorResult = relationshipData?.sponsor || null;
+        return sponsorResult;
+    }
+
+    if (['dependant', 'dependant', 'spouse', 'child'].includes(normType)) {
+        if (placeholder.dependant_relationship?.[0]) {
+            const targetRel = placeholder.dependant_relationship[0].toLowerCase();
+            return relationshipData?.dependants?.find(d => d.relationship?.toLowerCase() === targetRel);
+        }
+        return relationshipData?.dependants?.[0];
+    }
+
+    if (normType === 'director') {
+        const dir = placeholder.director_type === 'primary'
+            ? relationshipData?.directors?.find(d => d.is_primary)
+            : relationshipData?.directors?.[0];
+        return dir || null;
+    }
+
+    if (normType === 'company') {
+        return relationshipData?.company || companyData || extractedData;
+    }
+
+    return null;
+};
+
+const processOrdinalField = (placeholder, arrayIndex) => {
+    const ordinalFormat = placeholder.ordinal_format || 'number';
+
+    if (ordinalFormat === 'word') {
+        return {
+            value: getOrdinalWord(arrayIndex),
+            source: 'Ordinal Generator'
+        };
+    } else if (ordinalFormat === 'custom') {
+        const customFormat = placeholder.custom_ordinal_format || '.';
+        const num = arrayIndex + 1;
+        return {
+            value: `${num}${customFormat}`,
+            source: 'Custom Ordinal Generator'
+        };
+    } else {
+        return {
+            value: getOrdinalNumber(arrayIndex),
+            source: 'Ordinal Generator'
+        };
+    }
+};
+
+const processCurrentDateField = (placeholder, masterFields) => {
+    if (!placeholder.master_field_ids?.length || !masterFields) {
+        return { value: '', source: null };
+    }
+
+    for (const id of placeholder.master_field_ids) {
+        const mf = masterFields.get(parseInt(id, 10));
+        if (mf?.date_config?.useCurrentDate) {
+            return {
+                value: formatDate(new Date(), mf.date_config.format || 'DD/MM/YYYY'),
+                source: 'System Date'
+            };
+        }
+    }
+
+    return { value: '', source: null };
+};
+
+const processConditionalField = (placeholder, targetEntity, combinedCache, masterFields, computedFieldCache) => {
+    if (!placeholder.conditions || !targetEntity) return { value: '', source: null };
+
+    const targetId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
+
+    for (const condition of placeholder.conditions) {
+        if (condition.comparison) {
+            const { field, operator, value: compareValue } = condition.comparison;
+
+            if (!field) continue;
+
+            let fieldValue = null;
+
+            if (condition.master_field_id) {
+                const mf = masterFields.get(parseInt(condition.master_field_id, 10));
+                if (mf?.sources) {
+                    for (const source of mf.sources) {
+                        // Handle computed fields
+                        if (source.is_computed && computedFieldCache) {
+                            const extractionMode = 'latest';
+                            const cacheKey = `${mf.id}_${targetId}_${extractionMode}`;
+                            const computedVal = computedFieldCache[cacheKey];
+
+                            if (computedVal !== undefined && computedVal !== null && computedVal !== '' &&
+                                !['Document Not Found', 'Missing Document', 'Field Not Found', 'Missing', 'No Source'].includes(computedVal)) {
+                                fieldValue = computedVal;
+                                break;
+                            }
+                            continue;
+                        }
+
+                        // Handle regular database fields
+                        const tableData = combinedCache[source.table];
+                        if (!tableData) continue;
+
+                        const linkingVar = source.linking_variable || 'id';
+                        const record = Object.values(tableData).find(rec =>
+                            String(rec[linkingVar] || rec.id) === targetId
+                        );
+
+                        if (record) {
+                            fieldValue = source.path
+                                ? parseJsonValue(record, source.path)
+                                : record[field || mf.field_key];
+
+                            if (fieldValue && typeof fieldValue === 'object') {
+                                fieldValue = fieldValue.number || fieldValue.value || fieldValue.name || String(fieldValue);
+                            }
+                            break;
+                        }
+                    }
+                }
+            } else {
+                fieldValue = targetEntity[field];
+            }
+
+            if (fieldValue === null || fieldValue === undefined) continue;
+
+            const strFieldValue = String(fieldValue).trim().toLowerCase();
+            const strCompareValue = String(compareValue || '').trim().toLowerCase();
+
+            let conditionMet = false;
+            switch (operator) {
+                case 'equals':
+                    conditionMet = strFieldValue === strCompareValue;
+                    break;
+                case 'not_equals':
+                    conditionMet = strFieldValue !== strCompareValue;
+                    break;
+                case 'contains':
+                    conditionMet = strFieldValue.includes(strCompareValue);
+                    break;
+                default:
+                    conditionMet = Boolean(fieldValue);
+            }
+
+            if (conditionMet) {
+                return {
+                    value: `${condition.label || ''}${fieldValue}`,
+                    source: 'Conditional Match'
+                };
+            }
+        } else if (condition.master_field_id) {
+            const mf = masterFields.get(parseInt(condition.master_field_id, 10));
+            if (!mf?.sources) continue;
+
+            for (const source of mf.sources) {
+                // Handle computed fields
+                if (source.is_computed && computedFieldCache) {
+                    const extractionMode = 'latest';
+                    const cacheKey = `${mf.id}_${targetId}_${extractionMode}`;
+                    const computedVal = computedFieldCache[cacheKey];
+
+                    if (computedVal !== undefined && computedVal !== null && computedVal !== '' &&
+                        !['Document Not Found', 'Missing Document', 'Field Not Found', 'Missing', 'No Source'].includes(computedVal)) {
+                        return {
+                            value: `${condition.label || ''}${computedVal}`,
+                            source: `Conditional: ${mf.label || 'Computed'}`
+                        };
+                    }
+                    continue;
+                }
+
+                // Handle regular database fields
+                const tableData = combinedCache[source.table];
+                if (!tableData) continue;
+
+                const linkingVar = source.linking_variable || 'id';
+                const record = Object.values(tableData).find(rec =>
+                    String(rec[linkingVar] || rec.id) === targetId
+                );
+
+                if (record) {
+                    let rawVal = source.path
+                        ? parseJsonValue(record, source.path)
+                        : record[condition.tag || mf.field_key];
+
+                    if (rawVal && typeof rawVal === 'object') {
+                        rawVal = rawVal.number || rawVal.value || rawVal.name || JSON.stringify(rawVal);
+                    }
+
+                    if (rawVal && String(rawVal).trim() !== '' && String(rawVal) !== '[object Object]') {
+                        return {
+                            value: `${condition.label || ''}${rawVal}`,
+                            source: `Conditional: ${mf.label || source.table}`
+                        };
+                    }
+                }
+            }
+        }
+    }
+    return { value: '', source: null };
+};
+
+const processBooleanField = (placeholder, targetEntity, combinedCache, masterFields, task) => {
+    if (!placeholder.boolean_conditions) return { value: [], source: null };
+
+    const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
+    const taskRecord = (combinedCache?.['tm_tasks'] && Object.values(combinedCache['tm_tasks'])[0]) || task;
+    const jobAnswers = taskRecord?.job_specific_answers || {};
+
+    const results = placeholder.boolean_conditions.map(condition => {
+        let isChecked = false;
+
+        // 1. Job Questions (Keep existing)
+        const qId = condition.linked_job_question_id || placeholder.linked_job_question_id;
+        if (qId && jobAnswers[qId]) {
+            const actualAnswer = String(jobAnswers[qId]).trim().toLowerCase();
+            const targetValue = String(condition.comparison?.value || '').trim().toLowerCase();
+            if (condition.comparison?.operator === 'equals') isChecked = actualAnswer === targetValue;
+            else if (condition.comparison?.operator === 'contains') isChecked = actualAnswer.includes(targetValue);
+        }
+        // 2. Master Field Logic
+        else if (condition.master_field_id && targetId) {
+            const mf = masterFields.get(parseInt(condition.master_field_id, 10));
+            if (mf?.sources) {
+                for (const source of mf.sources) {
+                    const tableData = combinedCache[source.table];
+                    if (!tableData) continue;
+
+                    // Improved record lookup
+                    const record = Object.values(tableData).find(r =>
+                        String(r[source.linking_variable || 'id']) === targetId ||
+                        String(r.id) === targetId ||
+                        String(r.individual_id) === targetId
+                    );
+
+                    if (record) {
+                        const fieldValue = source.path
+                            ? parseJsonValue(record, source.path)
+                            : record[condition.comparison?.field || mf.field_key || condition.tag];
+
+                        if (fieldValue !== undefined && fieldValue !== null) {
+                            if (condition.comparison) {
+                                const { operator, value } = condition.comparison;
+                                const strFieldValue = String(fieldValue).trim().toLowerCase();
+                                const compareValue = String(value || '').trim().toLowerCase();
+
+                                switch (operator) {
+                                    case 'equals': isChecked = strFieldValue === compareValue; break;
+                                    case 'not_equals': isChecked = strFieldValue !== compareValue; break;
+                                    case 'contains': isChecked = strFieldValue.includes(compareValue); break;
+                                    default: isChecked = Boolean(fieldValue);
+                                }
+                            } else {
+                                isChecked = Boolean(fieldValue);
+                            }
+                        }
+                        if (isChecked) break;
+                    }
+                }
+            }
+        }
+
+        return {
+            ...condition,
+            checked: isChecked,
+            hasDbLink: !!(qId || condition.master_field_id)
+        };
+    });
+
+    return {
+        value: results,
+        source: results.some(r => r.checked) ? 'Logic Resolved' : null
+    };
+};
+
+const processDocumentChecklistField = (placeholder, targetEntity, combinedCache) => {
+    const checklistDataSources = placeholder.checklist_data_sources || [];
+    const displayFormat = placeholder.checklist_display_format || 'bullets';
+    const successLabel = placeholder.checklist_success_label || '✔';
+    const notFoundLabel = placeholder.checklist_not_found_label || '✗';
+
+    if (checklistDataSources.length === 0) {
+        return { value: '', source: null };
+    }
+
+    const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
+    const checklistResults = [];
+    for (const dataSource of checklistDataSources) {
+        const { table, linking_variable, linked_document_ids = [], execution_mode = 'latest', label } = dataSource;
+        const tableData = combinedCache[table];
+        if (!tableData) {
+            const itemLabel = label || placeholder.display_value || placeholder.name;
+            checklistResults.push(`${notFoundLabel} ${itemLabel}`);
+            continue;
+        }
+        let matches = Object.values(tableData).filter(d => {
+            const entityIdMatch = String(d[linking_variable] || d.id) === searchId;
+            if (!entityIdMatch) return false;
+
+            if (linked_document_ids.length > 0) {
+                return linked_document_ids.includes(d.document_id);
+            }
+
+            return true;
+        });
+        if (execution_mode === 'latest' && matches.length > 0) {
+            matches = matches.sort((a, b) => {
+                const aDate = a.issue_date ? new Date(a.issue_date).getTime() : 0;
+                const bDate = b.issue_date ? new Date(b.issue_date).getTime() : 0;
+                return bDate - aDate;
+            });
+            matches = [matches[0]];
+        }
+
+        // Use label from data source or placeholder display_value as fallback
+        const itemLabel = label || placeholder.display_value || placeholder.name;
+
+        if (matches.length > 0) {
+            checklistResults.push(`${successLabel} ${itemLabel}`);
+        } else {
+            checklistResults.push(`${notFoundLabel} ${itemLabel}`);
+        }
+    }
+
+    if (checklistResults.length === 0) {
+        return { value: '', source: null };
+    }
+
+    // Join all checklist items with newlines
+    return {
+        value: checklistResults.join('\n'),
+        source: 'Document Checklist'
+    };
+};
+
+const processImageField = (placeholder, targetEntity, combinedCache, masterFields) => {
+    const sourceTable = placeholder.source_table;
+    const linkingVariable = placeholder.linking_variable;
+    const documentTypeIds = placeholder.document_type_ids || [];
+    const computedFunction = placeholder.computed_function || 'none';
+    const executionMode = placeholder.execution_mode || 'latest';
+
+    if (!sourceTable || !linkingVariable) {
+        return { value: '', source: null };
+    }
+
+    const tableData = combinedCache[sourceTable];
+    if (!tableData) {
+        return { value: '', source: null };
+    }
+
+    const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
+
+    let matches = Object.values(tableData).filter(d => {
+        const entityIdMatch = String(d[linkingVariable] || d.id) === searchId;
+        if (!entityIdMatch) return false;
+
+        if (documentTypeIds.length > 0) {
+            return documentTypeIds.includes(d.document_id);
+        }
+
+        return true;
+    });
+
+    if (matches.length === 0) {
+        return { value: '', source: null };
+    }
+
+    if (executionMode === 'latest' || computedFunction.includes('Latest')) {
+        matches = matches.sort((a, b) => {
+            const aDate = a.issue_date ? new Date(a.issue_date).getTime() : 0;
+            const bDate = b.issue_date ? new Date(b.issue_date).getTime() : 0;
+            return bDate - aDate;
+        });
+    }
+
+    const match = matches[0];
+    if (match?.file_path) {
+        const imageUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`;
+        return {
+            value: imageUrl,
+            source: `Image: ${sourceTable}`
+        };
+    }
+
+    return { value: '', source: null };
+};
+
+const processTextField = (
+    placeholder: any,
+    targetEntity: any,
+    combinedCache: Record<string, any>,
+    masterFields: Map<number, any>,
+    computedFieldCache: Record<string, any> | null,
+) => {
+    if (!placeholder.master_field_ids?.length) {
+        return { value: '', source: null };
+    }
+
+    const candidateIds = [
+        targetEntity?.id,
+        targetEntity?.director_id,
+        targetEntity?.individual_id,
+        targetEntity?.company_id,
+    ]
+        .filter(Boolean)
+        .map(String)
+        .filter((v, i, arr) => arr.indexOf(v) === i);
+
+    if (candidateIds.length === 0) {
+        return { value: '', source: null };
+    }
+
+    const allValues: string[] = [];
+    const allSources: string[] = [];
+
+    for (const id of placeholder.master_field_ids) {
+        const mf = masterFields.get(parseInt(id, 10));
+        if (!mf?.sources) continue;
+
+        // Sort by priority ascending so lower number = higher priority
+        const sortedSources = [...mf.sources].sort(
+            (a, b) => (a.priority ?? 999) - (b.priority ?? 999)
+        );
+
+        for (const source of sortedSources) {
+
+            // ── COMPUTED SOURCE ──────────────────────────────────────────────
+            if (source.is_computed) {
+                if (!computedFieldCache) continue;
+
+                const extractionMode = 'latest';
+                let computedVal: any;
+
+                for (const candidateId of candidateIds) {
+                    const ck = `${mf.id}_${candidateId}_${extractionMode}`;
+                    if (computedFieldCache[ck] !== undefined) {
+                        computedVal = computedFieldCache[ck];
+                        break;
+                    }
+                }
+
+                if (computedVal === undefined) continue; // still loading
+
+                const errorStrings = [
+                    'Document Not Found', 'Missing Document', 'No Document Specified',
+                    'Field Not Found', 'Number Not Found', 'Missing', 'No Source',
+                ];
+
+                if (computedVal !== null && !errorStrings.includes(computedVal)) {
+                    let finalVal = computedVal;
+
+                    if (typeof computedVal === 'object' && computedVal !== null && source.path) {
+                        const pathMatch = source.path.match(/['"]([\w_]+)['"]$/);
+                        const fieldName = pathMatch ? pathMatch[1] : null;
+                        if (fieldName && computedVal[fieldName]) {
+                            finalVal = String(computedVal[fieldName]);
+                        } else {
+                            finalVal = computedVal.en || computedVal.name || computedVal.title ||
+                                String(Object.values(computedVal)[0] || '');
+                        }
+                    }
+
+                    if (finalVal && String(finalVal).trim() !== '') {
+                        allValues.push(String(finalVal));
+                        allSources.push(`Computed: ${mf.label || source.table}`);
+                        break; // found for this master field — stop trying sources
+                    }
+                }
+                continue; // computed error → try next priority source
+            }
+
+            // ── STANDARD DB SOURCE ───────────────────────────────────────────
+            const tableData = combinedCache[source.table];
+            if (!tableData) continue;
+
+            const linkingVar = source.linking_variable || 'id';
+
+            // Document-scoped sources (source_type === 'document' or has document_id[])
+            // are cached under a composite key: doc_<docId>_<entityId>
+            const docIds: string[] = Array.isArray(source.document_id)
+                ? source.document_id
+                : (source.document_id ? [source.document_id] : []);
+
+            let record: any = null;
+
+            if (docIds.length > 0) {
+                // Try composite key first: doc_<documentId>_<entityId>
+                for (const docId of docIds) {
+                    for (const candidateId of candidateIds) {
+                        const compositeKey = `doc_${docId}_${candidateId}`;
+                        if (tableData[compositeKey]) {
+                            record = tableData[compositeKey];
+                            break;
+                        }
+                    }
+                    if (record) break;
+                }
+
+                // Fallback: scan table rows matching both entity ID and document_id
+                if (!record) {
+                    const allRows = Object.values(tableData);
+                    for (const candidateId of candidateIds) {
+                        record = allRows.find((r: any) =>
+                            String(r[linkingVar]) === candidateId &&
+                            docIds.includes(r.document_id)
+                        ) || null;
+                        if (record) break;
+                    }
+                }
+            } else {
+                // Standard entity-ID lookup
+                for (const candidateId of candidateIds) {
+                    record = Object.values(tableData).find((r: any) =>
+                        String((r as any)[linkingVar]) === candidateId
+                    ) || null;
+                    if (record) break;
+                }
+            }
+
+            if (record) {
+                let val = source.path
+                    ? parseJsonValue(record, source.path)
+                    : ((record as any)[mf.field_key] || (record as any)[placeholder.name]);
+
+                if (val && String(val).trim() !== '') {
+                    allValues.push(String(val));
+                    allSources.push(`DB(p${source.priority ?? '?'}): ${source.table}`);
+                    break; // found a value at this priority — stop trying lower priorities
+                }
+                // value was empty → fall through to next priority source
+            }
+            // record not found → fall through to next priority source
+        }
+    }
+
+    if (allValues.length > 0) {
+        return { value: allValues.join(' '), source: allSources[0] };
+    }
+
+    return { value: '', source: null };
+};
+
+const isValidValue = (val: any, placeholderType?: string): boolean => {
+    if (val === null || val === undefined) return false;
+
+    // FIX: For booleans, an array of options is only valid if one is checked
+    if (placeholderType === 'boolean' && Array.isArray(val)) {
+        return val.some(opt => opt && opt.checked === true);
+    }
+
+    if (Array.isArray(val)) {
+        return val.length > 0;
+    }
+    if (typeof val === 'string') {
+        if (val === '') return false;
+        const errorStrings = ['Missing', 'Missing Config', 'No Source', 'Computing...', 'Document Not Found', 'Field Not Found'];
+        return !errorStrings.includes(val);
+    }
+    return Boolean(val);
+};
+
+const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null, task = null, computedFieldCache = null) => {
+    const logic = placeholder.source_logic || 'priority';
+    const collectedValues: string[] = [];
+    const sourceMetadata: string[] = [];
+    const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData);
+    const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
+    if (placeholder.master_field_ids?.length > 0 && targetEntity) {
+        for (const mid of placeholder.master_field_ids) {
+            let result = { value: '', source: null };
+            const mf = masterFields.get(parseInt(mid, 10));
+            if (mf?.date_config?.useCurrentDate) {
+                result = processCurrentDateField({ ...placeholder, master_field_ids: [mid] }, masterFields);
+            } else {
+                if (placeholder.type === 'ordinal') {
+                    result = processOrdinalField(placeholder, arrayIndex);
+                } else if (placeholder.type === 'image') {
+                    result = processImageField(placeholder, targetEntity, combinedCache, masterFields);
+                } else if (placeholder.type === 'boolean') {
+                    result = processBooleanField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields);
+                } else {
+                    result = processTextField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields, computedFieldCache);
+                }
+            }
+            if (isValidValue(result.value, placeholder.type)) {
+                if (logic === 'priority') {
+                    console.groupEnd();
+                    return result;
+                }
+                collectedValues.push(String(result.value));
+                sourceMetadata.push(result.source || 'DB');
+            }
+        }
+    }
+    if (placeholder.type === 'boolean' && placeholder.boolean_conditions?.length > 0 && targetEntity) {
+        const result = processBooleanField(placeholder, targetEntity, combinedCache, masterFields, task);
+        if (isValidValue(result.value, placeholder.type)) {
+            const matchedLabel = result.value.find(v => v.checked)?.label;
+            if (logic === 'priority') { console.groupEnd(); return result; }
+            collectedValues.push(result.value);
+            sourceMetadata.push(result.source || 'Boolean (DB)');
+        }
+    }
+
+    if (placeholder.type === 'conditional' && placeholder.conditions?.length > 0 && targetEntity) {
+        const result = processConditionalField(placeholder, targetEntity, combinedCache, masterFields, computedFieldCache);
+        if (isValidValue(result.value)) {
+            if (logic === 'priority') { console.groupEnd(); return result; }
+            collectedValues.push(String(result.value));
+            sourceMetadata.push(result.source || 'Conditional (DB)');
+        }
+    }
+
+    if (placeholder.type === 'document_checklist' && placeholder.checklist_data_sources?.length > 0 && targetEntity) {
+        const result = processDocumentChecklistField(placeholder, targetEntity, combinedCache);
+        if (isValidValue(result.value)) {
+            if (logic === 'priority') { console.groupEnd(); return result; }
+            collectedValues.push(String(result.value));
+            sourceMetadata.push(result.source || 'Document Checklist');
+        }
+    }
+
+    if (placeholder.type === 'image' && placeholder.source_table && placeholder.linking_variable && targetEntity) {
+        const result = processImageField(placeholder, targetEntity, combinedCache, masterFields);
+        if (isValidValue(result.value)) {
+            if (logic === 'priority') { console.groupEnd(); return result; }
+            collectedValues.push(String(result.value));
+            sourceMetadata.push(result.source || 'Image');
+        }
+    }
+
+    const qIds = placeholder.linked_job_question_ids || (placeholder.linked_job_question_id ? [placeholder.linked_job_question_id] : []);
+    if (qIds.length > 0) {
+        const taskRecord = (combinedCache?.['tm_tasks'] && Object.values(combinedCache['tm_tasks'])[0]) || task;
+        const answers = taskRecord?.job_specific_answers || {};
+
+        for (const qId of qIds) {
+            const answer = answers[String(qId)] ?? answers[Number(qId)];
+            if (isValidValue(answer)) {
+                if (logic === 'priority') return { value: String(answer), source: 'Job Question' };
+                collectedValues.push(String(answer));
+                sourceMetadata.push('Job Question');
+            }
+        }
+    }
+    const reqIds = placeholder.linked_requirement_ids || [];
+    if (reqIds.length > 0 && targetId) {
+        for (const rId of reqIds) {
+            const isFound = checkDocumentStatus(rId, targetId, placeholder.entity_type?.[0] || 'company', combinedCache);
+            if (isFound) {
+                const val = "✓ Submitted";
+                if (logic === 'priority') return { value: val, source: 'Requirement' };
+                collectedValues.push(val);
+                sourceMetadata.push('Requirement');
+            }
+        }
+    }
+    if (logic === 'all' && collectedValues.length > 0) {
+        const finalResult = {
+            value: collectedValues.join(' '),
+            source: `Merged (${sourceMetadata[0]})`
+        };
+        return finalResult;
+    }
+    if (placeholder.default_value) {
+        const defaultResult = { value: placeholder.default_value, source: 'Default' };
+        return defaultResult;
+    }
+
+    const emptyResult = { value: '', source: null };
+    return emptyResult;
+};
+
+const extractDisplayValue = (value) => {
+    if (value === null || value === undefined) return '';
+
+    if (Array.isArray(value)) {
+        const checkedItems = value.filter(opt => opt && opt.checked);
+
+        if (checkedItems.length > 0) {
+            return checkedItems.map(opt => {
+                return opt.label || opt.tag || opt.value || '';
+            }).join(', ');
+        }
+        return '';
+    }
+
+    if (typeof value === 'object') {
+        return value.value !== undefined ? String(value.value) : '';
+    }
+
+    return String(value);
+};
+
+const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
+    const sizeMap = { small: '25%', medium: '50%', large: '75%', 'full-width': '100%' };
+    const currentSizeKey = Object.keys(sizeMap).find(key => sizeMap[key] === styles.maxWidth) || 'full-width';
+
+    return (
+        <div className="space-y-3 pt-2 border-t mt-2">
+            <div className="flex items-center gap-2">
+                <ToggleGroup
+                    type="single"
+                    value={styles.textAlign || 'center'}
+                    onValueChange={(align) => align && onStyleChange('textAlign', align)}
+                    className="bg-background rounded-md border h-8"
+                >
+                    <ToggleGroupItem value="left" className="px-2"><AlignLeft className="h-3 w-3" /></ToggleGroupItem>
+                    <ToggleGroupItem value="center" className="px-2"><AlignCenter className="h-3 w-3" /></ToggleGroupItem>
+                    <ToggleGroupItem value="right" className="px-2"><AlignRight className="h-3 w-3" /></ToggleGroupItem>
+                </ToggleGroup>
+                <Select value={currentSizeKey} onValueChange={(size) => onStyleChange('maxWidth', sizeMap[size])}>
+                    <SelectTrigger className="w-14 h-8"><SelectValue><Expand className="h-3 w-3" /></SelectValue></SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="small">25%</SelectItem>
+                        <SelectItem value="medium">50%</SelectItem>
+                        <SelectItem value="large">75%</SelectItem>
+                        <SelectItem value="full-width">100%</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+                <div>
+                    <Label className="text-[10px]">Width (px)</Label>
+                    <Input
+                        type="number"
+                        min="50"
+                        max="600"
+                        value={styles.imageWidth || 300}
+                        onChange={(e) => onStyleChange('imageWidth', parseInt(e.target.value) || 300)}
+                        className="h-7 text-xs"
+                    />
+                </div>
+                <div>
+                    <Label className="text-[10px]">Height (px)</Label>
+                    <Input
+                        type="number"
+                        min="50"
+                        max="600"
+                        value={styles.imageHeight || 200}
+                        onChange={(e) => onStyleChange('imageHeight', parseInt(e.target.value) || 200)}
+                        className="h-7 text-xs"
+                    />
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const getDisplayLabel = (value, options) => {
+    if (!options || !Array.isArray(options)) return value;
+    const option = options.find(o =>
+        String(o.value) === String(value) ||
+        o.label === value ||
+        o.value === value
+    );
+    return option ? option.label : value;
+};
+
+const PlaceholderInput = ({
+    resolveSourceValue, placeholder, value, originalValue, onChange, onSaveToDb, isSaving, onFileChange, imageStyles, onImageStyleChange, autoPopulated, isArrayItem = false, arrayIndex = null, blockName = null, onAIRefine, isAIRefining, resolvedOptions = [], masterFields, showLabel = true
+}) => {
+    const fieldKey = isArrayItem ? `${blockName}_${arrayIndex}_${placeholder.name}` : placeholder.name;
+
+    // tracks which specific source (Table/ID) is being edited inline
+    const [editingSource, setEditingSource] = useState(null);
+    const [editValue, setEditValue] = useState("");
+    const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+    const hasChanged = JSON.stringify(value) !== JSON.stringify(originalValue);
+    const canSave = (placeholder.master_field_ids?.length > 0) || (placeholder.linked_job_question_ids?.length > 0);
+
+    const mIds = placeholder.master_field_ids || [];
+    const qIds = placeholder.linked_job_question_ids || (placeholder.linked_job_question_id ? [placeholder.linked_job_question_id] : []);
+    const totalSources = mIds.length + qIds.length;
+
+    const options = resolvedOptions.length > 0
+        ? resolvedOptions
+        : (placeholder.options || []).map(o => typeof o === 'string' ? { label: o, value: o } : o);
+
+    const handleStartEdit = (val, type, id, label) => {
+        setEditValue(val || '');
+        setEditingSource({ type, id, label });
+        setIsPopoverOpen(false);
+    };
+
+    const handleCancelEdit = () => {
+        setEditingSource(null);
+        setEditValue("");
+    };
+
+    const handleSaveEdit = async () => {
+        await onSaveToDb(placeholder, editValue, editingSource, arrayIndex);
+        setEditingSource(null);
+    };
+    const inputRef = useRef(null);
+
+    // --- STATE A: INLINE EDITING MODE (Triggered by Pencil) ---
+    if (editingSource) {
+        return (
+            <div className="space-y-1 animate-in fade-in zoom-in-95 duration-200">
+                {showLabel && (
+                    <Label className="text-[10px] font-bold text-blue-600 uppercase tracking-tight flex items-center gap-1">
+                        <Edit3 className="h-2.5 w-2.5" /> Editing {editingSource.label}
+                    </Label>
+                )}
+                <div className="flex items-center gap-2">
+                    <Input
+                        autoFocus
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveEdit();
+                            if (e.key === 'Escape') handleCancelEdit();
+                        }}
+                        className="h-8 text-xs border-blue-400 ring-2 ring-blue-50"
+                    />
+                    <Button size="icon" onClick={handleSaveEdit} className="h-8 w-8 bg-green-600 hover:bg-green-700 shrink-0">
+                        <CheckCircle2 className="h-4 w-4" />
+                    </Button>
+                    <Button size="icon" variant="ghost" onClick={handleCancelEdit} className="h-8 w-8 text-red-500 shrink-0">
+                        <X className="h-4 w-4" />
+                    </Button>
+                </div>
+            </div>
+        );
+    }
+
+    // --- STATE B: MULTI-SOURCE VIEW (Popover) ---
+    if (totalSources > 1 && placeholder.type !== 'image' && placeholder.type !== 'boolean') {
+        return (
+            <div className="space-y-1">
+                {showLabel && <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{placeholder.display_value || placeholder.name.replace(/_/g, ' ')}</Label>}
+                <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
+                    <PopoverTrigger asChild>
+                        <div className={cn(
+                            "text-xs h-8 flex items-center px-2 rounded cursor-pointer border border-dashed border-blue-200 bg-blue-50/20 hover:bg-blue-50 transition-colors",
+                            !isValidValue(value) ? "text-red-500 italic" : "text-slate-900 font-medium"
+                        )}>
+                            <span className="truncate flex-1">{isValidValue(value) ? value : 'Missing'}</span>
+                            <div className="flex items-center gap-1.5 ml-2">
+                                <Badge variant="outline" className="text-[8px] h-4 px-1 uppercase bg-white border-blue-200 text-blue-600 font-bold">
+                                    {placeholder.source_logic || 'priority'}
+                                </Badge>
+                                <ChevronDown className="h-3 w-3 text-blue-400 shrink-0" />
+                            </div>
+                        </div>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80 p-0 shadow-xl border-blue-100" align="end">
+                        <div className="p-2 bg-slate-50 border-b flex justify-between items-center">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Select Source to Edit</span>
+                            <Layers className="h-3 w-3 text-slate-400" />
+                        </div>
+
+                        <div className="p-1 space-y-1 max-h-[300px] overflow-y-auto bg-white">
+                            {mIds.map((mid, idx) => {
+                                const mf = masterFields?.get ? masterFields.get(parseInt(mid)) : null;
+                                const sourceValue = resolveSourceValue ? resolveSourceValue('db', mid, placeholder, arrayIndex) : '';
+                                return (
+                                    <div key={`m-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group transition-all">
+                                        <div className="flex flex-col min-w-0 pr-2">
+                                            <span className="text-[9px] font-bold text-blue-600 flex items-center gap-1 uppercase">
+                                                <Database className="h-2.5 w-2.5" /> DB FIELD {idx + 1}
+                                            </span>
+                                            <span className="text-xs font-medium truncate text-slate-700 mt-0.5">{mf?.label || `Field #${mid}`}</span>
+                                            <span className="text-[10px] text-slate-400 italic truncate">{isValidValue(sourceValue) ? sourceValue : 'Empty'}</span>
+                                        </div>
+                                        <Button
+                                            size="sm" variant="ghost"
+                                            className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={() => handleStartEdit(sourceValue, 'db', mid, mf?.label || `Field #${mid}`)}
+                                        >
+                                            <Edit3 className="h-4 w-4 text-blue-500" />
+                                        </Button>
+                                    </div>
+                                );
+                            })}
+
+                            {qIds.map((qid, idx) => {
+                                const sourceValue = resolveSourceValue ? resolveSourceValue('job', qid, placeholder, arrayIndex) : '';
+                                return (
+                                    <div key={`q-${qid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group transition-all">
+                                        <div className="flex flex-col min-w-0 pr-2">
+                                            <span className="text-[9px] font-bold text-purple-600 flex items-center gap-1 uppercase">
+                                                <HelpCircle className="h-2.5 w-2.5" /> QUESTION
+                                            </span>
+                                            <span className="text-xs font-medium truncate text-slate-700 mt-0.5">ID: {qid}</span>
+                                            <span className="text-[10px] text-slate-400 italic truncate">{isValidValue(sourceValue) ? sourceValue : 'Empty'}</span>
+                                        </div>
+                                        <Button
+                                            size="sm" variant="ghost"
+                                            className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={() => handleStartEdit(sourceValue, 'job', qid, `Question ${qid}`)}
+                                        >
+                                            <Edit3 className="h-4 w-4 text-purple-500" />
+                                        </Button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </PopoverContent>
+                </Popover>
+            </div>
+        );
+    }
+
+    // --- STATE C: SINGLE SOURCE VIEW (Direct Input) ---
+    const FieldHeader = () => {
+        const hasDefault = placeholder.default_value && placeholder.default_value.trim() !== '';
+        return (
+            <div className="flex items-center justify-between mb-1.5">
+                {showLabel && (
+                    <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">
+                        {placeholder.display_value || placeholder.name.replace(/_/g, ' ')}
+                    </Label>
+                )}
+                <div className="flex items-center gap-2 ml-auto">
+                    {canSave && hasChanged && (
+                        <Button
+                            size="sm" variant="ghost"
+                            className="h-6 px-2 text-green-600 hover:text-green-700 hover:bg-green-50 border border-green-200"
+                            onClick={() => onSaveToDb(placeholder, value, null, arrayIndex)}
+                            disabled={isSaving}
+                        >
+                            <Save className="h-3 w-3 mr-1" />
+                            <span className="text-xs font-bold">Save To Profile</span>
+                        </Button>
+                    )}
+                </div>
+            </div>
+        );
+    };
+
+    if (placeholder.is_digit_split) {
+        const chars = processDigitSplit(value || '', placeholder.digit_count || 8);
+        return (
+            <div className="">
+                <FieldHeader />
+                <div className={cn("flex flex-wrap gap-1 p-1 rounded", hasChanged && canSave ? "bg-amber-50 border border-amber-200" : "")}>
+                    {Array.from({ length: placeholder.digit_count || 8 }).map((_, idx) => (
+                        <input key={idx} maxLength={1} value={chars[idx] || ''} onChange={(e) => {
+                            const char = e.target.value.slice(-1);
+                            let str = (value || '').padEnd(placeholder.digit_count, ' ');
+                            const newStr = str.substring(0, idx) + char + str.substring(idx + 1);
+                            onChange(newStr.trimEnd());
+                        }} className="w-7 h-8 text-center border rounded font-mono font-bold text-sm bg-white" />
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
+    if (placeholder.type === 'image') {
+        const style = imageStyles[fieldKey] || {};
+        const defaultWidth = placeholder.image_width ? parseInt(placeholder.image_width) : 300;
+        const defaultHeight = placeholder.image_height ? parseInt(placeholder.image_height) : 200;
+        const imageWidth = style.imageWidth || defaultWidth;
+        const imageHeight = style.imageHeight || defaultHeight;
+
+        return (
+            <div className="">
+                <FieldHeader />
+                {value ? (
+                    <div className={cn("relative border rounded overflow-hidden flex items-center justify-center bg-white", hasChanged && canSave ? "border-amber-400" : "")} style={{ maxWidth: `${imageWidth}px`, height: `${imageHeight}px` }}>
+                        <img src={value} className="max-h-full object-contain" style={{ textAlign: style.textAlign || 'center', maxWidth: style.maxWidth || '100%', width: `${imageWidth}px`, height: `${imageHeight}px` }} />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                            <Button size="sm" variant="secondary" className="h-7 text-[10px]" onClick={() => document.getElementById(`file-${fieldKey}`).click()}>Replace</Button>
+                            <Button size="sm" variant="destructive" className="h-7 text-[10px]" onClick={() => onChange('')}>Remove</Button>
+                        </div>
+                    </div>
+                ) : <div className="text-xs italic border-2 border-dashed rounded p-4 text-center">Upload {placeholder.display_value || placeholder.name}</div>}
+                <input id={`file-${fieldKey}`} type="file" className="hidden" accept="image/jpeg,image/jpg,image/png" onChange={onFileChange} />
+                {value && onImageStyleChange && (
+                    <ImagePlaceholderControls
+                        styles={style}
+                        onStyleChange={(key, val) => onImageStyleChange(fieldKey, key, val)}
+                    />
+                )}
+            </div>
+        );
+    }
+
+    if (placeholder.type === 'boolean') {
+        const opts = Array.isArray(value) ? value : (placeholder.boolean_conditions || []);
+        return (
+            <div className="">
+                <FieldHeader />
+                <div className={cn("space-y-2 p-2 rounded border", hasChanged && canSave ? "bg-amber-50 border-amber-300" : "bg-slate-50")}>
+                    {opts.map((opt, idx) => (
+                        <div key={idx} className="flex items-center gap-2 p-2 border rounded bg-white shadow-sm">
+                            <Checkbox checked={opt.checked || false} disabled={opt.hasDbLink} onCheckedChange={(checked) => {
+                                const newOpts = [...opts];
+                                if (placeholder.boolean_type === 'single') {
+                                    newOpts.forEach((o, i) => { if (!o.hasDbLink) o.checked = i === idx ? checked : false; });
+                                } else { if (!newOpts[idx].hasDbLink) newOpts[idx].checked = checked; }
+                                onChange(newOpts);
+                            }} />
+                            <Label className="text-xs flex-1">
+                                {opt.label && opt.label !== '✔' ? opt.label :
+                                    opt.comparison?.value ? opt.comparison.value :
+                                        opt.tag ? opt.tag.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) :
+                                            'Option'}
+                            </Label>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
+    if (placeholder.type === 'select' || resolvedOptions.length > 0) {
+        return (
+            <div className="">
+                <FieldHeader />
+                <Select value={String(value || '')} onValueChange={(val) => {
+                    const selected = options.find(o => String(o.value) === val);
+                    onChange(selected ? selected.label : val);
+                }}>
+                    <SelectTrigger className={cn("w-full bg-white h-8 text-xs", hasChanged && canSave ? "border-amber-400 ring-2 ring-amber-50" : "")}>
+                        <SelectValue>{getDisplayLabel(value, options)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                        {options.map((o, i) => <SelectItem key={i} value={String(o.value)}>{o.label}</SelectItem>)}
+                    </SelectContent>
+                </Select>
+            </div>
+        );
+    }
+
+    return (
+        <div className="">
+            <FieldHeader />
+            <div className="relative">
+                <Input
+                    ref={inputRef}
+                    value={value || ''}
+                    onChange={(e) => onChange(e.target.value)}
+                    className={cn("bg-white h-8 text-xs transition-all pr-8", hasChanged && canSave ? "border-amber-400 ring-2 ring-amber-50" : "focus:border-blue-400")}
+                />
+                {hasChanged && canSave && <div className="absolute right-2.5 top-1/2 -translate-y-1/2 h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />}
+            </div>
+        </div>
+    );
+};
+
+export default function TemplateGenerationDialog({ task, isOpen, onClose, template, availableTemplates = [], documentName, masterFields, entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {}, relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null }, onDraftDiscarded, jobLevel, activeEntityType, activeEntityId, refreshDocuments }) {
     const [panelsVisible, setPanelsVisible] = useState({ form: true, preview: true, source: true });
     const { toast } = useToast();
     const [formData, setFormData] = useState(() => {
@@ -99,7 +1402,6 @@ export default function TemplateGenerationDialog({
             acc[placeholder.name] = placeholder.default_value || '';
             return acc;
         }, {});
-
         return {
             ...extractedData,
             ...personData,
@@ -115,7 +1417,6 @@ export default function TemplateGenerationDialog({
     const [isGenerating, setIsGenerating] = useState(false);
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
     const [previewContent, setPreviewContent] = useState('');
-    const [docxPreviewBuffer, setDocxPreviewBuffer] = useState<ArrayBuffer | null>(null);
     const [docPreviewUrl, setDocPreviewUrl] = useState(null);
     const [autoPopulatedFields, setAutoPopulatedFields] = useState(new Map());
     const [manuallyEditedFields, setManuallyEditedFields] = useState(new Set());
@@ -129,23 +1430,8 @@ export default function TemplateGenerationDialog({
     const [headerContent, setHeaderContent] = useState('');
     const [footerContent, setFooterContent] = useState('');
     const docxTemplateBuffer = useRef(null);
-    const templateZipBuffer = useRef<ArrayBuffer | null>(null); // Store raw zip data for preview
-    const loadedTemplateId = useRef<string | null>(null);
     const isWordTemplate = selectedTemplate?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-
-    // Centralized function to fetch template buffer with caching
-    const fetchTemplateBuffer = useCallback(async (templateId: string, filePath: string): Promise<ArrayBuffer | null> => {
-        const buffer = await fetchTemplateBufferUtil(templateId, filePath, templateZipBuffer.current, loadedTemplateId.current);
-
-        // Cache the buffer and template ID if successful
-        if (buffer) {
-            templateZipBuffer.current = buffer;
-            loadedTemplateId.current = templateId;
-        }
-
-        return buffer;
-    }, []);
-
+    const [docxPreviewBuffer, setDocxPreviewBuffer] = useState<ArrayBuffer | null>(null);
     const [loadedDraft, setLoadedDraft] = useState(null);
     const [isLoadingDraft, setIsLoadingDraft] = useState(false);
     const [dataConflicts, setDataConflicts] = useState([]);
@@ -154,50 +1440,50 @@ export default function TemplateGenerationDialog({
     const [requirementJobQuestions, setRequirementJobQuestions] = useState<any[]>([]);
     const [computedFieldCache, setComputedFieldCache] = useState<Record<string, any>>({});
     const [documentTablesReady, setDocumentTablesReady] = useState(false);
+    const templateZipBuffer = useRef<ArrayBuffer | null>(null); // Store raw zip data for preview
+    const loadedTemplateId = useRef<string | null>(null);
+
+    const fetchTemplateBuffer = useCallback(async (templateId: string, filePath: string): Promise<ArrayBuffer | null> => {
+        const buffer = await fetchTemplateBufferUtil(templateId, filePath, templateZipBuffer.current, loadedTemplateId.current);
+        if (buffer) {
+            templateZipBuffer.current = buffer;
+            loadedTemplateId.current = templateId;
+        }
+
+        return buffer;
+    }, []);
 
     useEffect(() => {
-        const effectiveJobLevel = task?.job_level || jobLevel;
-
         const fetchJobQuestions = async () => {
-            if (effectiveJobLevel?.level) {
-                const jl = effectiveJobLevel;
-                const jobLevelObject = {
-                    level: jl.level,
-                    department_id: jl.department_id,
-                    subdepartment_id: jl.subdepartment_id,
-                    class_id: jl.class_id,
-                    subclass_id: jl.subclass_id
-                };
+            if (!task?.job_level) return;
 
-                const { data: requirement, error } = await supabase
-                    .from('tm_class_requirements')
-                    .select('*')
-                    .filter('job_level', 'eq', JSON.stringify(jobLevelObject))
-                    .maybeSingle();
-
-                if (!error && requirement?.job_specific_questions?.length) {
-                    setRequirementJobQuestions(requirement.job_specific_questions);
-                    return;
-                }
-            }
-
-            // Fallback: fetch all requirements and deduplicate by id
-            const { data: allRequirements, error: allError } = await supabase
+            const jl = task.job_level;
+            let query = supabase
                 .from('tm_class_requirements')
-                .select('job_specific_questions');
+                .select('*')
+                .eq('job_level->>department_id', String(jl.department_id))
+                .eq('job_level->>subdepartment_id', String(jl.subdepartment_id));
 
-            if (allError) {
-                console.error('[TemplateGenerationDialog] Error fetching job questions:', allError);
-                return;
+            if (jl.class_id) {
+                query = query.eq('job_level->>class_id', String(jl.class_id));
+            } else {
+                query = query.is('job_level->>class_id', null);
             }
 
-            const allQuestions = allRequirements?.flatMap(r => r.job_specific_questions || []) || [];
-            const uniqueQuestions = Array.from(new Map(allQuestions.map(q => [q.id || q.label, q])).values());
-            setRequirementJobQuestions(uniqueQuestions);
+            if (jl.subclass_id) {
+                query = query.eq('job_level->>subclass_id', String(jl.subclass_id));
+            } else {
+                query = query.is('job_level->>subclass_id', null);
+            }
+
+            const { data: requirement } = await query.maybeSingle();
+            if (requirement) {
+                setRequirementJobQuestions(requirement.job_specific_questions || []);
+            }
         };
 
         fetchJobQuestions();
-    }, [task?.job_level, jobLevel, isOpen]);
+    }, [task?.job_level, isOpen]);
 
     useEffect(() => {
         if (!selectedTemplate?.placeholders) return;
@@ -218,7 +1504,7 @@ export default function TemplateGenerationDialog({
                 }
 
                 if (placeholder.image_height) {
-                    // Extract numeric value from "150px" format
+                    // Extract numeric value from "150px" format  
                     const heightValue = parseInt(placeholder.image_height.replace('px', ''));
                     if (!isNaN(heightValue)) {
                         style.imageHeight = heightValue;
@@ -237,7 +1523,6 @@ export default function TemplateGenerationDialog({
         }
     }, [selectedTemplate]);
 
-    // Clear buffer when template changes
     useEffect(() => {
         if (selectedTemplate?.id && loadedTemplateId.current !== selectedTemplate.id) {
             docxTemplateBuffer.current = null;
@@ -248,15 +1533,11 @@ export default function TemplateGenerationDialog({
     }, [selectedTemplate?.id]);
 
     const groupedPlaceholders = useMemo(() => {
-        if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {}, questionGroups: new Map() };
+        if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
 
         const topLevel = [];
         const blocks = {};
-        // Map<questionId, { members: Placeholder[] }>
-        const questionGroups = new Map();
         const seenDisplayValues = new Set();
-
-        console.log('[TemplateGenerationDialog] Processing', selectedTemplate.placeholders.length, 'placeholders for grouping');
 
         selectedTemplate.placeholders.forEach(p => {
             if (p.is_block_start) {
@@ -264,17 +1545,6 @@ export default function TemplateGenerationDialog({
             } else if (p.parent_name && blocks[p.parent_name]) {
                 blocks[p.parent_name].children.push(p);
             } else if (!p.parent_name) {
-                // Collapse option-mapped placeholders into one question group control
-                // Support both singular (linked_job_question_id) and array (linked_job_question_ids) formats
-                const jobQuestionId = p.linked_job_question_id || p.linked_job_question_ids?.[0];
-                if (jobQuestionId && p.linked_job_question_option) {
-                    const qId = jobQuestionId;
-                    console.log(`[TemplateGenerationDialog] Grouping placeholder {${p.name}} to question ${qId} (option: ${p.linked_job_question_option})`);
-                    if (!questionGroups.has(qId)) questionGroups.set(qId, { members: [] });
-                    questionGroups.get(qId).members.push(p);
-                    return;
-                }
-
                 const qId = p.boolean_conditions?.[0]?.linked_job_question_id;
                 const uniqueKey = qId ? `q_${qId}` : p.display_value || p.name;
 
@@ -286,36 +1556,8 @@ export default function TemplateGenerationDialog({
                 topLevel.push(p);
             }
         });
-
-        console.log('[TemplateGenerationDialog] Grouped result:', {
-            topLevelCount: topLevel.length,
-            blocksCount: Object.keys(blocks).length,
-            questionGroupsCount: questionGroups.size,
-            questionGroupIds: Array.from(questionGroups.keys())
-        });
-
-        return { topLevel, blocks, questionGroups };
+        return { topLevel, blocks };
     }, [selectedTemplate]);
-
-    // Auto-populate formData for question-group placeholders from task.job_specific_answers
-    useEffect(() => {
-        if (!task?.job_specific_answers || !groupedPlaceholders.questionGroups.size) return;
-
-        const updates: Record<string, string> = {};
-
-        groupedPlaceholders.questionGroups.forEach(({ members }, qId) => {
-            const answer = task.job_specific_answers[String(qId)] ?? task.job_specific_answers[qId];
-            if (!answer) return;
-
-            members.forEach(m => {
-                updates[m.name] = m.linked_job_question_option === answer ? String(answer) : '';
-            });
-        });
-
-        if (Object.keys(updates).length > 0) {
-            setFormData(prev => ({ ...prev, ...updates }));
-        }
-    }, [task?.job_specific_answers, groupedPlaceholders.questionGroups]);
 
     const resolveSpecificSourceValue = useCallback((type, id, placeholder, arrayIndex = null, computedFieldCache = null) => {
         if (!isOpen) return '';
@@ -347,6 +1589,9 @@ export default function TemplateGenerationDialog({
             }
         }
 
+        // Reusing the getTargetEntity logic we defined outside (make sure getTargetEntity is imported or available)
+        // If getTargetEntity is defined outside component, we pass args. If inside, we use it directly.
+        // Assuming getTargetEntity is defined at module level (top of file):
         const combinedCacheWithAdditional = { ...sourceDataCache, ...additionalCache };
         const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCacheWithAdditional, extractedData, companyData);
 
@@ -360,6 +1605,8 @@ export default function TemplateGenerationDialog({
         if (type === 'db' && targetEntity) {
             const mf = masterFields.get(parseInt(id));
             if (!mf) return '';
+
+            // Construct a temp placeholder to use the existing resolver logic for a single field
             const tempPlaceholder = { ...placeholder, master_field_ids: [id] };
             const result = processTextField(tempPlaceholder, targetEntity, combinedCacheWithAdditional, masterFields, computedFieldCache);
             return result.value || '';
@@ -371,9 +1618,9 @@ export default function TemplateGenerationDialog({
     const panelClasses = useMemo(() => {
         const { form, preview, source } = panelsVisible;
         const count = [form, preview, source].filter(Boolean).length;
-        if (count === 3) return { form: 'col-span-3', preview: 'col-span-6', source: 'col-span-3' };
+        if (count === 3) return { form: 'col-span-3', preview: 'col-span-5', source: 'col-span-4' };
         if (count === 2) {
-            if (!form) return { form: 'hidden', preview: 'col-span-8', source: 'col-span-4' };
+            if (!form) return { form: 'hidden', preview: 'col-span-7', source: 'col-span-5' };
             if (!preview) return { form: 'col-span-5', preview: 'hidden', source: 'col-span-7' };
             return { form: 'col-span-4', preview: 'col-span-8', source: 'hidden' };
         }
@@ -494,6 +1741,7 @@ export default function TemplateGenerationDialog({
             source: string;
         }> = [];
 
+        // Check top-level placeholders
         selectedTemplate?.placeholders?.forEach(placeholder => {
             const fieldName = placeholder.name;
             const draftValue = draftFormData[fieldName];
@@ -564,6 +1812,7 @@ export default function TemplateGenerationDialog({
                     const draftFormData = draft.metadata.formData;
                     const liveData = {};
                     const liveAutoMap = new Map();
+
                     groupedPlaceholders.topLevel.forEach(p => {
                         const match = processPlaceholderValue(
                             p,
@@ -578,11 +1827,15 @@ export default function TemplateGenerationDialog({
                             task,
                             computedFieldCache
                         );
+
                         let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
+
                         if (val) {
                             liveData[p.name] = val;
                             if (match.source) liveAutoMap.set(p.name, match.source);
                         }
+
+                        // Smart Match fallback
                         if (!liveData[p.name]) {
                             const smartMatch = smartFieldMatch(p.name);
                             if (smartMatch.value) {
@@ -591,6 +1844,8 @@ export default function TemplateGenerationDialog({
                             }
                         }
                     });
+
+                    // Generate live data for array items fields
                     Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
                         const blockConfig = groupedPlaceholders.blocks[blockName].config;
                         const children = groupedPlaceholders.blocks[blockName].children;
@@ -606,10 +1861,12 @@ export default function TemplateGenerationDialog({
                             task,
                             computedFieldCache
                         );
+
                         if (resolvedArray.length > 0) {
                             liveData[blockName] = resolvedArray;
                         }
                     });
+
                     const conflicts = await detectDataConflicts(draftFormData, liveData);
                     setFormData(draftFormData);
                     setOriginalFormData(JSON.parse(JSON.stringify(draftFormData)));
@@ -972,14 +2229,19 @@ export default function TemplateGenerationDialog({
 
     const resolveComputedFields = useCallback(async (_updatedCache: Record<string, any>) => {
         if (!selectedTemplate?.placeholders || !masterFields) return;
+
+        // ── 1. Collect every entity ID we might need ──────────────────────────────
         const allEntityIds = new Set<string>();
+
         if (entityIdMap?.company) allEntityIds.add(String(entityIdMap.company));
         if (entityIdMap?.principal) allEntityIds.add(String(entityIdMap.principal));
         if (entityIdMap?.sponsor) allEntityIds.add(String(entityIdMap.sponsor));
+
         const dirIds = Array.isArray(entityIdMap?.directors)
             ? entityIdMap.directors
             : (entityIdMap?.director ? [entityIdMap.director] : []);
         dirIds.forEach((id: any) => id && allEntityIds.add(String(id)));
+
         const addAllIds = (obj: any) => {
             if (!obj) return;
             if (typeof obj !== 'object') { allEntityIds.add(String(obj)); return; }
@@ -1078,7 +2340,6 @@ export default function TemplateGenerationDialog({
 
         try {
             const fetchPromises: Promise<void>[] = [];
-            const localCacheUpdate: Record<string, any> = {};
 
             tableFetchPlan.forEach((entry, table) => {
                 const { linkingVar, docIds, isDocScoped } = entry;
@@ -1125,7 +2386,10 @@ export default function TemplateGenerationDialog({
                             }
                         });
 
-                        localCacheUpdate[table] = { ...(localCacheUpdate[table] || {}), ...tableCache };
+                        setAdditionalCache(prev => ({
+                            ...prev,
+                            [table]: { ...(prev[table] || {}), ...tableCache },
+                        }));
                     }).catch(err => {
                         console.error(`❌ [resolveComputedFields] fetch ${table}:`, err);
                     })
@@ -1147,9 +2411,6 @@ export default function TemplateGenerationDialog({
             }
 
             await Promise.all(fetchPromises);
-            if (Object.keys(localCacheUpdate).length > 0) {
-                setAdditionalCache(prev => ({ ...prev, ...localCacheUpdate }));
-            }
         } catch (err) {
             console.error('❌ [resolveComputedFields] fetch phase failed:', err);
         }
@@ -1215,6 +2476,7 @@ export default function TemplateGenerationDialog({
 
     useEffect(() => {
         if (!isOpen || !selectedTemplate?.id) return;
+
         const loadAndResolve = async () => {
             await fetchMissingDataSources();
             const freshDocCache = await resolveComputedFields(combinedCache);
@@ -1222,8 +2484,15 @@ export default function TemplateGenerationDialog({
                 setAdditionalCache(prev => ({ ...prev, ...freshDocCache }));
             }
         };
+
         loadAndResolve();
-    }, [isOpen, selectedTemplate?.id]);
+    }, [isOpen, selectedTemplate?.id, fetchMissingDataSources]);
+
+    useEffect(() => {
+        if (isOpen && selectedTemplate?.id && masterFields) {
+            resolveComputedFields(combinedCache);
+        }
+    }, [isOpen, selectedTemplate?.id, masterFields, resolveComputedFields]);
 
     useEffect(() => {
         if (!isOpen || !selectedTemplate) return;
@@ -1299,25 +2568,6 @@ export default function TemplateGenerationDialog({
             }
         });
 
-        // Auto-populate question-group placeholders from the job answer array
-        const taskRecord = (combinedCache['tm_tasks'] && Object.values(combinedCache['tm_tasks'])[0]) || task;
-        const jobAnswers = taskRecord?.job_specific_answers || {};
-        groupedPlaceholders.questionGroups.forEach(({ members }, qId) => {
-            const answer = jobAnswers[String(qId)] ?? jobAnswers[Number(qId)];
-            if (!answer) return;
-            const selectedOptions = Array.isArray(answer) ? answer : [String(answer)];
-            members.forEach(member => {
-                if (!init[member.name]) {
-                    const isSelected = selectedOptions.includes(member.linked_job_question_option);
-                    init[member.name] = isSelected ? member.linked_job_question_option : '';
-                    if (isSelected) {
-                        autoMap.set(member.name, `Job Answer: ${member.linked_job_question_option}`);
-                        hasChanged = true;
-                    }
-                }
-            });
-        });
-
         if (hasChanged) {
             setFormData(init);
             setOriginalFormData(JSON.parse(JSON.stringify(init)));
@@ -1328,19 +2578,24 @@ export default function TemplateGenerationDialog({
     useEffect(() => {
         const fetchAvailableDocuments = async () => {
             if (!isOpen) return;
+
             try {
                 const { data, error } = await supabase
                     .from('acc_portal_kyc')
                     .select('id, name, display_name, category')
                     .order('display_name');
+
                 if (error) throw error;
+
                 setAvailableDocuments(data || []);
                 window.__availableDocuments = data || [];
             } catch (error) {
                 console.error('Error fetching available documents:', error);
             }
         };
+
         fetchAvailableDocuments();
+
         return () => {
             window.__availableDocuments = undefined;
         };
@@ -1475,25 +2730,49 @@ export default function TemplateGenerationDialog({
 
         console.groupEnd();
         return result;
-    }, [combinedCache, masterFields, entityIdMap, relationshipData, extractedData, companyData, computedFieldCache]);
+    }, [extractedData, personData, companyData, task]);
 
     const handleInputChange = (name, val) => {
         setFormData(prev => {
             const newState = { ...prev, [name]: val };
+
+            // DEDUPLICATION SYNC: 
+            // If 'val' is a boolean array (the checkboxes), check if other 
+            // placeholders need to be updated based on this selection.
             if (Array.isArray(val) && val[0]?.linked_job_question_id) {
                 const selectedTag = val.find(opt => opt.checked)?.tag;
+
+                // Look for other placeholders in the template linked to the same question
                 selectedTemplate.placeholders.forEach(otherPh => {
-                    if (otherPh.name === name) return;
+                    if (otherPh.name === name) return; // skip self
+
                     const otherQId = otherPh.boolean_conditions?.[0]?.linked_job_question_id;
                     const masterQId = val[0].linked_job_question_id;
+
                     if (otherQId === masterQId) {
+                        // This other placeholder (e.g. between_10_99p) is part of the same group.
+                        // We set its formData value to '✔' or '' based on the selection.
                         const isMatch = otherPh.boolean_conditions[0].tag === selectedTag;
+                        // Note: Generation logic usually expects the boolean array or the processed string
+                        // For document generation, we update its individual state
                         newState[otherPh.name] = isMatch ? val : val.map(v => ({ ...v, checked: false }));
                     }
                 });
             }
+
+            if (docxTemplateBuffer.current) {
+                updateWordPreview(newState, imageStyles);
+            } else {
+                // Use async update for HTML templates to convert images to base64
+                (async () => {
+                    const base64Data = await prepareRenderData(newState);
+                    setPreviewContent(populateHtmlContent(base64Data, selectedTemplate?.placeholders || [], imageStyles));
+                })();
+            }
+
             return newState;
         });
+
         if (!manuallyEditedFields.has(name)) {
             setManuallyEditedFields(prev => new Set(prev).add(name));
         }
@@ -1510,7 +2789,21 @@ export default function TemplateGenerationDialog({
     };
 
     const handleImageStyleChange = (name, key, value) => {
-        setImageStyles(prev => ({ ...prev, [name]: { ...(prev[name] || {}), [key]: value } }));
+        setImageStyles(prev => {
+            const newStyles = { ...prev, [name]: { ...(prev[name] || {}), [key]: value } };
+
+            if (docxTemplateBuffer.current) {
+                updateWordPreview(formData, newStyles);
+            } else {
+                // Use async update for HTML templates to convert images to base64
+                (async () => {
+                    const base64Data = await prepareRenderData(formData);
+                    setPreviewContent(populateHtmlContent(base64Data, selectedTemplate?.placeholders || [], newStyles));
+                })();
+            }
+
+            return newStyles;
+        });
     };
 
     const handleArrayInputChange = (blockName, index, fieldName, value) => {
@@ -1518,82 +2811,291 @@ export default function TemplateGenerationDialog({
             const updatedArray = [...(prev[blockName] || [])];
             if (!updatedArray[index]) updatedArray[index] = {};
             updatedArray[index] = { ...updatedArray[index], [fieldName]: value };
+
             const newState = { ...prev, [blockName]: updatedArray };
+
+            if (docxTemplateBuffer.current) {
+                updateWordPreview(newState, imageStyles);
+            } else {
+                // Use async update for HTML templates to convert images to base64
+                (async () => {
+                    const base64Data = await prepareRenderData(newState);
+                    setPreviewContent(populateHtmlContent(base64Data, selectedTemplate?.placeholders || [], imageStyles));
+                })();
+            }
+
             return newState;
         });
+
         setManuallyEditedFields(prev => new Set(prev).add(`${blockName}[${index}].${fieldName}`));
+    };
+
+    const extractHeadersFooters = async (templateBuffer) => {
+        const zip = new PizZip(templateBuffer);
+        const headers = [];
+        const footers = [];
+        for (let i = 1; i <= 3; i++) {
+            const headerFile = zip.file(`word/header${i}.xml`);
+            if (headerFile) {
+                const headerXml = headerFile.asText();
+                headers.push({
+                    index: i,
+                    xml: headerXml,
+                    html: await convertWordXmlToHtml(headerXml)
+                });
+            }
+        }
+        for (let i = 1; i <= 3; i++) {
+            const footerFile = zip.file(`word/footer${i}.xml`);
+            if (footerFile) {
+                const footerXml = footerFile.asText();
+                footers.push({
+                    index: i,
+                    xml: footerXml,
+                    html: await convertWordXmlToHtml(footerXml)
+                });
+            }
+        }
+
+        return { headers, footers };
+    };
+
+    const convertWordXmlToHtml = async (xml) => {
+        const tempZip = new PizZip();
+        tempZip.file('word/document.xml', xml);
+        tempZip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+            <Default Extension="xml" ContentType="application/xml"/>
+            <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+            <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+        </Types>`);
+
+        const arrayBuffer = tempZip.generate({ type: 'arraybuffer' });
+
+        // Convert using Mammoth
+        const result = await mammoth.convertToHtml({ arrayBuffer });
+        return result.value;
+    };
+
+    const renderArrayInputs = (blockName, blockData) => {
+        const rows = Array.isArray(formData[blockName]) ? formData[blockName] : [];
+        const isHorizontal = blockData?.config?.array_direction === 'horizontal';
+        const children = blockData.children || [];
+
+        if (isHorizontal) {
+            // Keep existing horizontal digit-split rendering
+            return (
+                <div className="space-y-4 mt-2 border-l-2 border-blue-200 pl-4 py-2 bg-blue-50/20 rounded-r-lg">
+                    <Badge className="bg-orange-600 uppercase text-[9px] tracking-tighter">
+                        {blockName} (Horizontal)
+                    </Badge>
+                    {rows.length === 0 ? (
+                        <div className="p-3 bg-white border rounded shadow-sm italic text-xs text-muted-foreground">
+                            No items in {blockName}
+                        </div>
+                    ) : (
+                        rows.map((row, idx) => (
+                            <div key={idx} className="p-3 bg-white border rounded shadow-sm space-y-3">
+                                {children.map(child => {
+                                    let resolvedOptions = [];
+                                    if (child.master_field_ids?.length > 0) {
+                                        const mf = masterFields.get(parseInt(child.master_field_ids[0]));
+                                        if (mf?.type === 'select') resolvedOptions = getDependentDropdownOptions(child, mf, row);
+                                    }
+                                    return (
+                                        <PlaceholderInput
+                                            key={child.id}
+                                            placeholder={child}
+                                            value={row[child.name]}
+                                            originalValue={originalFormData[blockName]?.[idx]?.[child.name]}
+                                            onChange={(val) => handleArrayInputChange(blockName, idx, child.name, val)}
+                                            onSaveToDb={saveFieldToDatabase}
+                                            resolvedOptions={resolvedOptions}
+                                            masterFields={masterFields}
+                                            imageStyles={imageStyles}
+                                            onImageStyleChange={handleImageStyleChange}
+                                            isArrayItem={true}
+                                            arrayIndex={idx}
+                                            blockName={blockName}
+                                            resolveSourceValue={resolveSpecificSourceValue}
+                                        />
+                                    );
+                                })}
+                            </div>
+                        ))
+                    )}
+                </div>
+            );
+        }
+
+        // --- TRANSPOSED TABLE LAYOUT ---
+        // Columns: [Field Label] [Entity 1] [Entity 2] [Entity 3] ...
+        const entityLabel = blockData?.config?.entity_type?.[0] || blockData?.config?.entity_type || blockName;
+        const colCount = rows.length + 1; // +1 for the field label column
+
+        return (
+            <div className="mt-2 space-y-2">
+                <div className="flex items-center justify-between">
+                    <Badge className="bg-blue-600 uppercase text-[9px] tracking-tighter">
+                        {blockName} — {rows.length} {String(entityLabel).toLowerCase()}(s)
+                    </Badge>
+                    <div className="flex gap-1">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 text-[10px] px-2 text-blue-600 border-blue-200"
+                            onClick={() => {
+                                const emptyRow = children.reduce((acc, child) => ({ ...acc, [child.name]: '' }), {});
+                                setFormData(prev => ({ ...prev, [blockName]: [...(prev[blockName] || []), emptyRow] }));
+                            }}
+                        >
+                            + Add Row
+                        </Button>
+                    </div>
+                </div>
+
+                {rows.length === 0 ? (
+                    <div className="p-4 bg-white border-2 border-dashed rounded text-xs text-muted-foreground italic text-center">
+                        No {String(entityLabel).toLowerCase()}s found for {blockName}
+                    </div>
+                ) : (
+                    <div className="overflow-x-auto rounded-lg border border-slate-200 shadow-sm">
+                        <table className="w-full text-xs border-collapse">
+                            <thead>
+                                <tr className="bg-slate-50 border-b border-slate-200">
+                                    {/* Field column header */}
+                                    <th className="text-left px-3 py-2 font-bold text-slate-500 uppercase tracking-wider text-[10px] w-[140px] border-r border-slate-200 sticky left-0 bg-slate-50 z-10">
+                                        Field
+                                    </th>
+                                    {rows.map((_, idx) => (
+                                        <th key={idx} className="px-3 py-2 text-center border-r border-slate-200 last:border-r-0 min-w-[180px]">
+                                            <div className="flex items-center justify-between gap-1">
+                                                <span className="font-bold text-blue-700 text-[10px] uppercase tracking-tight">
+                                                    {String(entityLabel).charAt(0).toUpperCase() + String(entityLabel).slice(1)} {idx + 1}
+                                                </span>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-4 w-4 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full shrink-0"
+                                                    onClick={() => {
+                                                        const newRows = rows.filter((_, i) => i !== idx);
+                                                        setFormData(prev => ({ ...prev, [blockName]: newRows }));
+                                                    }}
+                                                >
+                                                    <X className="h-2.5 w-2.5" />
+                                                </Button>
+                                            </div>
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {children.map((child, childIdx) => {
+                                    const isEvenRow = childIdx % 2 === 0;
+                                    return (
+                                        <tr
+                                            key={child.id || child.name}
+                                            className={cn(
+                                                "border-b border-slate-100 last:border-b-0 hover:bg-blue-50/30 transition-colors",
+                                                isEvenRow ? "bg-white" : "bg-slate-50/50"
+                                            )}
+                                        >
+                                            {/* Field label column */}
+                                            <td className="px-3 py-2 font-medium text-slate-700 text-[11px] border-r border-slate-200 sticky left-0 bg-inherit z-10">
+                                                {child.display_value || child.name.replace(/_/g, ' ')}
+                                            </td>
+
+                                            {/* One input cell per entity/row */}
+                                            {rows.map((row, rowIdx) => {
+                                                let resolvedOptions = [];
+                                                if (child.master_field_ids?.length > 0) {
+                                                    const mf = masterFields.get(parseInt(child.master_field_ids[0]));
+                                                    if (mf?.type === 'select') resolvedOptions = getDependentDropdownOptions(child, mf, row);
+                                                }
+                                                return (
+                                                    <td
+                                                        key={rowIdx}
+                                                        className="px-2 py-1.5 border-r border-slate-100 last:border-r-0 align-middle"
+                                                    >
+                                                        <PlaceholderInput
+                                                            placeholder={child}
+                                                            value={row[child.name]}
+                                                            originalValue={originalFormData[blockName]?.[rowIdx]?.[child.name]}
+                                                            onChange={(val) => handleArrayInputChange(blockName, rowIdx, child.name, val)}
+                                                            onSaveToDb={saveFieldToDatabase}
+                                                            resolvedOptions={resolvedOptions}
+                                                            onFileChange={(e) => {
+                                                                const file = e.target.files[0];
+                                                                if (file) {
+                                                                    const r = new FileReader();
+                                                                    r.onloadend = () => handleArrayInputChange(blockName, rowIdx, child.name, r.result);
+                                                                    r.readAsDataURL(file);
+                                                                }
+                                                            }}
+                                                            masterFields={masterFields}
+                                                            imageStyles={imageStyles}
+                                                            onImageStyleChange={handleImageStyleChange}
+                                                            isArrayItem={true}
+                                                            arrayIndex={rowIdx}
+                                                            blockName={blockName}
+                                                            requirementJobQuestions={requirementJobQuestions}
+                                                            task={task}
+                                                            formData={formData}
+                                                            showLabel={false}
+                                                            resolveSourceValue={resolveSpecificSourceValue}
+                                                            isSaving={isSavingProfile}
+                                                        />
+                                                    </td>
+                                                );
+                                            })}
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+        );
     };
 
     const populateHtmlContent = useCallback((data, placeholders, styles) => {
         if (!selectedTemplate?.content) return '[NO TEMPLATE CONTENT]';
+
+        // FIRST: Process the raw template content to preserve its native spaces/newlines
         let content = selectedTemplate.content
-            .trimStart() // Remove leading whitespace/newlines
             .replace(/  +/g, (match) => '&nbsp;'.repeat(match.length))
-            .replace(/\n/g, '<br />')
-            .replace(/^(<br\s*\/?>)+/, '') // Remove leading <br> tags
-            .replace(/^(<p[^>]*>\s*<\/p>)+/, '') // Remove leading empty <p> tags
-            .replace(/^(<div[^>]*>\s*<\/div>)+/, ''); // Remove leading empty <div> tags
+            .replace(/\n/g, '<br />');
+
         let processedHeader = (headerContent || '')
-            .trimStart()
             .replace(/  +/g, (match) => '&nbsp;'.repeat(match.length))
-            .replace(/\n/g, '<br />')
-            .replace(/^(<br\s*\/?>)+/, '')
-            .replace(/^(<p[^>]*>\s*<\/p>)+/, '')
-            .replace(/^(<div[^>]*>\s*<\/div>)+/, '');
+            .replace(/\n/g, '<br />');
+
         let processedFooter = (footerContent || '')
-            .trimStart()
             .replace(/  +/g, (match) => '&nbsp;'.repeat(match.length))
-            .replace(/\n/g, '<br />')
-            .replace(/^(<br\s*\/?>)+/, '')
-            .replace(/^(<p[^>]*>\s*<\/p>)+/, '')
-            .replace(/^(<div[^>]*>\s*<\/div>)+/, '');
-        const tableRegex = /(<table[^>]*>)([\s\S]*?)(<\/table>)/gi;
-        const blockPlaceholders = Object.keys(groupedPlaceholders.blocks);
-        content = content.replace(tableRegex, (match, tableOpen, tableContent, tableClose) => {
-            const hasBlockPlaceholder = blockPlaceholders.some(blockName =>
-                tableContent.includes(`{#${blockName}}`) || tableContent.includes(`{/${blockName}}`)
-            );
-            if (!hasBlockPlaceholder) return match;
-            const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-            const rows = [];
-            let trMatch;
-            while ((trMatch = trRegex.exec(tableContent)) !== null) {
-                rows.push(trMatch[0]);
-            }
-            if (rows.length < 2) return match;
-            const headerRow = rows[0];
-            const dataRows = rows.slice(1);
-            const dataRowsHavePlaceholders = dataRows.some(row =>
-                blockPlaceholders.some(blockName =>
-                    row.includes(`{${blockName}.`) || row.includes(`{#${blockName}}`)
-                )
-            );
-            if (!dataRowsHavePlaceholders) return match;
-            let targetBlock = null;
-            for (const blockName of blockPlaceholders) {
-                if (dataRows.some(row => row.includes(`{${blockName}.`))) {
-                    targetBlock = blockName;
-                    break;
-                }
-            }
-            if (!targetBlock) return match;
-            const newDataRows = dataRows.map(row => row).join('\n');
-            return `${tableOpen}${headerRow}\n{#${targetBlock}}\n${newDataRows}\n{/${targetBlock}}\n${tableClose}`;
-        });
+            .replace(/\n/g, '<br />');
+
         const universalReplace = (regex, replacement) => {
             content = content.replace(regex, replacement);
             processedHeader = processedHeader.replace(regex, replacement);
             processedFooter = processedFooter.replace(regex, replacement);
         };
+
+        // 1. PROCESS REPEATING BLOCKS/TABLES
         Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
             const block = groupedPlaceholders.blocks[blockName];
             const blockConfig = block.config || {};
             const isHorizontal = blockConfig.array_direction === 'horizontal';
+
             const blockRegex = new RegExp(`\\{#${blockName}\\}([\\s\\S]*?)\\{/${blockName}\\}`, 'g');
             const rows = Array.isArray(data[blockName]) ? data[blockName] : [];
+
+            // Handle the block replacement in content, header, and footer
             const processBlockInText = (text) => {
                 return text.replace(blockRegex, (_, innerTemplate) => {
                     if (rows.length === 0) return '';
+
+                    // Handle Horizontal Logic (often used for digit-splitting styles)
                     if (isHorizontal) {
                         const childName = block.children[0]?.name || 'd';
                         const cells = rows.map(row => {
@@ -1602,24 +3104,31 @@ export default function TemplateGenerationDialog({
                         }).join('');
                         return `<div style="display:flex;align-items:center;">${cells}</div>`;
                     }
+
+                    // Handle Standard Vertical Rows
                     return rows.map((row, rowIndex) => {
                         let rowHtml = innerTemplate;
                         block.children.forEach(child => {
                             const rawValue = row?.[child.name];
-                            const cleanChildName = child.name.replace(/[{}]/g, '').trim();
-                            const childFormatRegex = new RegExp(`\\{+\\s*%?\\s*${cleanChildName}\\s*(?:\\/\\s*([a-zA-Z0-9_]+))?\\s*\\}+`, 'g');
+                            const childFormatSuffix = child.format || '';
+                            const childRegex = new RegExp(`\\{+\\s*%?\\s*${child.name}${childFormatSuffix ? '\\s*\\/\\s*' + childFormatSuffix : ''}\\s*\\}+`, 'g');
+
                             if (child.type === 'image') {
                                 const value = typeof rawValue === 'string' ? rawValue : extractDisplayValue(rawValue);
                                 if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
                                     const styleKey = `${blockName}_${rowIndex}_${child.name}`;
                                     const style = styles[styleKey] || styles[child.name] || {};
-                                    let imgWidth = "120px";
+
+                                    // Use custom style if available, otherwise use default values from placeholder configuration
+                                    let imgWidth = "120px"; // default fallback for blocks
                                     if (style.imageWidth) {
                                         imgWidth = `${style.imageWidth}px`;
                                     } else if (child.image_width) {
                                         imgWidth = child.image_width;
                                     }
+
                                     const textAlign = style.textAlign || 'center';
+
                                     const imageHtml = `<div style="text-align:${textAlign};">
                                     <img src="${value}" style="width:${imgWidth}; height:auto; display:block; margin:${textAlign === 'center' ? '0 auto' : '0'}; border-radius: 2px;" 
                                          onerror="console.error('[HTML IMAGE DEBUG] Failed to load image:', '${value}'); this.style.display='none'; this.nextElementSibling.style.display='block';" />
@@ -1627,36 +3136,36 @@ export default function TemplateGenerationDialog({
                                         ❌ Failed to load: ${value.substring(0, 50)}...
                                     </div>
                                 </div>`;
-                                    rowHtml = rowHtml.replace(childFormatRegex, imageHtml);
+                                    rowHtml = rowHtml.replace(childRegex, imageHtml);
                                 } else {
-                                    rowHtml = rowHtml.replace(childFormatRegex, `<span style="color:#ccc; font-size: 8px;">[Empty Image: ${child.display_value || child.name}]</span>`);
+                                    rowHtml = rowHtml.replace(childRegex, `<span style="color:#ccc; font-size: 8px;">[Empty Image: ${child.display_value || child.name}]</span>`);
                                 }
                             } else {
+                                // Standard text inside block
                                 const value = extractDisplayValue(rawValue);
-                                rowHtml = rowHtml.replace(childFormatRegex, (match, formatSuffix) => {
-                                    let formattedValue = value;
-                                    if (formatSuffix) {
-                                        formattedValue = applyFormat(value, formatSuffix);
-                                    }
-                                    return String(formattedValue || '');
-                                });
+                                rowHtml = rowHtml.replace(childRegex, String(value || ''));
                             }
                         });
                         return rowHtml;
                     }).join('');
                 });
             };
+
             content = processBlockInText(content);
             processedHeader = processBlockInText(processedHeader);
             processedFooter = processBlockInText(processedFooter);
         });
 
+        // 2. PROCESS TOP LEVEL PLACEHOLDERS
         (placeholders || []).forEach(placeholder => {
             if (placeholder.parent_name) return;
+
             const rawValue = data[placeholder.name];
             const cleanName = placeholder.name.replace(/[{}]/g, '').trim();
             const formatSuffix = placeholder.format || '';
             const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}${formatSuffix ? '\\s*\\/\\s*' + formatSuffix : ''}\\s*\\}+`, 'gi');
+
+            // Handle Digit Splitting (Sequences like {passport_1}, {passport_2})
             if (placeholder.is_digit_split) {
                 const chars = processDigitSplit(rawValue, placeholder.digit_count || 8);
                 for (let i = 1; i <= (placeholder.digit_count || 8); i++) {
@@ -1671,13 +3180,17 @@ export default function TemplateGenerationDialog({
                 const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}${imageFormatSuffix ? '\\s*\\/\\s*' + imageFormatSuffix : ''}\\s*\\}+`, 'gi');
                 if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
                     const style = styles[placeholder.name] || {};
-                    let imgWidth = "200px";
+
+                    // Use custom style if available, otherwise use default values from placeholder configuration
+                    let imgWidth = "200px"; // default fallback
                     if (style.imageWidth) {
                         imgWidth = `${style.imageWidth}px`;
                     } else if (placeholder.image_width) {
                         imgWidth = placeholder.image_width;
                     }
+
                     const textAlign = style.textAlign || 'center';
+
                     const imageHtml = `<div style="text-align:${textAlign};">
         <img src="${value}" style="width:${imgWidth}; height:auto; max-width:100%; display:inline-block; border-radius: 4px;" 
              onerror="console.error('[HTML IMAGE DEBUG] Failed to load image:', '${value}'); this.style.display='none'; this.nextElementSibling.style.display='block';" />
@@ -1685,89 +3198,71 @@ export default function TemplateGenerationDialog({
             ❌ Failed to load: ${value.substring(0, 50)}...
         </div>
     </div>`;
+
                     universalReplace(regex, imageHtml);
                 } else {
                     universalReplace(regex, `<div style="border:1px dashed #cbd5e1; padding:10px; text-align:center; color:#94a3b8; font-size:10px; border-radius:4px;">[Upload Image: ${placeholder.display_value || placeholder.name}]</div>`);
                 }
-            } else if (placeholder.type === 'boolean' && placeholder.boolean_conditions?.length) {
-                const value = extractDisplayValue(rawValue);
-                const boolNameRegex = new RegExp(`\\{+\\s*%?\\s*${cleanName}\\s*\\}+`, 'gi');
-                universalReplace(boolNameRegex, formatWhitespace(value) || '');
-                const options = Array.isArray(rawValue) ? rawValue : null;
-                const strVal = String(rawValue || '').trim().toLowerCase();
-                placeholder.boolean_conditions.forEach((condition: any) => {
-                    if (!condition.tag) return;
-                    const tagClean = condition.tag.replace(/[{}]/g, '').trim();
-                    const tagRegex = new RegExp(`\\{+\\s*${tagClean}\\s*\\}+`, 'gi');
-                    let isChecked = false;
-                    if (options) {
-                        const opt = options.find((o: any) => o.tag === condition.tag);
-                        isChecked = !!opt?.checked;
-                    } else if (condition.comparison) {
-                        const cmpVal = String(condition.comparison.value || '').trim().toLowerCase();
-                        switch (condition.comparison.operator) {
-                            case 'equals': isChecked = strVal === cmpVal; break;
-                            case 'not_equals': isChecked = strVal !== cmpVal && !!strVal; break;
-                            case 'contains': isChecked = strVal.includes(cmpVal); break;
-                            default: isChecked = !!strVal;
-                        }
-                    } else {
-                        isChecked = !!strVal;
-                    }
-                    universalReplace(tagRegex, isChecked ? (condition.label || '✔') : '');
-                });
             } else {
                 const value = extractDisplayValue(rawValue);
-                const formatRegex = new RegExp(`\\{+\\s*%?\\s*${cleanName}\\s*(?:\\/\\s*([a-zA-Z0-9_]+))?\\s*\\}+`, 'gi');
-                universalReplace(formatRegex, (match, formatSuffix) => {
-                    let formattedValue = value;
-                    if (formatSuffix) {
-                        formattedValue = applyFormat(value, formatSuffix);
-                    }
-                    formattedValue = formatWhitespace(formattedValue);
-                    return formattedValue ||
-                        `<span style="background-color: #fef9c3; color: #854d0e; padding: 0 2px; border-radius: 2px;">[${placeholder.display_value || placeholder.name}]</span>`;
-                });
+                // Apply formatting to the data being injected
+                const formattedValue = formatWhitespace(value);
+
+                const replacement = formattedValue ||
+                    `<span style="background-color: #fef9c3; color: #854d0e; padding: 0 2px; border-radius: 2px;">[${placeholder.display_value || placeholder.name}]</span>`;
+
+                universalReplace(regex, replacement);
             }
         });
+
         return `
-        ${processedHeader ? `<div class="doc-header" style="margin: 0; padding: 0;">${processedHeader}</div>` : ''}
-        <div class="doc-body" style="font-family: 'Times New Roman', Times, serif; line-height: 1.5; color: #000; white-space: pre-wrap; margin: 0; padding: 0;">
+    <div class="generated-document-container" style="font-family: 'Times New Roman', Times, serif; line-height: 1.5; color: #000; white-space: pre-wrap;">
+        ${processedHeader ? `<div class="doc-header">${processedHeader}</div>` : ''}
+        <div class="doc-body" style="min-height:800px; position: relative;">
             ${content}
         </div>
-        ${processedFooter ? `<div class="doc-footer" style="border-top:0.5px solid #e2e8f0; font-size: 10px; margin: 0; padding: 0;">${processedFooter}</div>` : ''}
+        ${processedFooter ? `<div class="doc-footer" style="border-top:0.5px solid #e2e8f0; font-size: 10px;">${processedFooter}</div>` : ''}
+    </div>
 `;
     }, [selectedTemplate, groupedPlaceholders, headerContent, footerContent]);
 
     const prepareRenderData = useCallback(async (data) => {
         const renderData = {};
         const imagePromises = [];
+
         for (const blockName of Object.keys(groupedPlaceholders.blocks)) {
             const block = groupedPlaceholders.blocks[blockName];
             const rows = JSON.parse(JSON.stringify(data[blockName] || []));
             for (const row of rows) {
                 for (const child of block.children) {
+                    // Use raw value for images
                     const displayValue = child.type === 'image' && typeof row[child.name] === 'string'
-                        ? row[child.name]
+                        ? row[child.name]  // ✅ Preserve raw string
                         : extractDisplayValue(row[child.name]);
+
                     row[child.name] = displayValue;
+
                     if (child.type === 'image' && displayValue && displayValue.startsWith('http')) {
                         const promise = fetchImageAsBase64(displayValue).then(b64 => {
                             if (b64) {
                                 row[child.name] = b64;
                             }
                         });
-                        imagePromises.push(promise);
+                        imagePromises.push(promise);  // ← THIS LINE WAS MISSING
                     }
                 }
             }
             renderData[blockName] = rows;
         }
+
         if (!selectedTemplate) return renderData;
+
         (selectedTemplate.placeholders || []).forEach(p => {
             const val = data[p.name];
             const baseKey = p.name.replace(/[%#{}]/g, '').trim();
+
             if (p.parent_name || p.is_block_start) return;
+
             if (p.is_digit_split) {
                 const strVal = extractDisplayValue(val);
                 const chars = processDigitSplit(strVal, p.digit_count || 8);
@@ -1780,35 +3275,12 @@ export default function TemplateGenerationDialog({
             }
             else if (p.type === 'boolean') {
                 const options = Array.isArray(val) ? val : [];
-                if (options.length > 0) {
-                    options.forEach(opt => {
-                        if (opt && opt.tag) {
-                            renderData[opt.tag] = opt.checked ? extractDisplayValue([opt].filter(o => o.checked)) : "";
-                        }
-                    });
-                    renderData[baseKey] = extractDisplayValue(val);
-                } else if (p.boolean_conditions?.length) {
-                    const strVal = String(val || '').trim().toLowerCase();
-                    p.boolean_conditions.forEach((condition: any) => {
-                        if (!condition.tag) return;
-                        let isChecked = false;
-                        if (condition.comparison) {
-                            const cmpVal = String(condition.comparison.value || '').trim().toLowerCase();
-                            switch (condition.comparison.operator) {
-                                case 'equals': isChecked = strVal === cmpVal; break;
-                                case 'not_equals': isChecked = strVal !== cmpVal && !!strVal; break;
-                                case 'contains': isChecked = strVal.includes(cmpVal); break;
-                                default: isChecked = !!strVal;
-                            }
-                        } else {
-                            isChecked = !!strVal;
-                        }
-                        renderData[condition.tag] = isChecked ? (condition.label || '✔') : '';
-                    });
-                    renderData[baseKey] = val || '';
-                } else {
-                    renderData[baseKey] = extractDisplayValue(val);
-                }
+                options.forEach(opt => {
+                    if (opt && opt.tag) {
+                        renderData[opt.tag] = opt.checked ? extractDisplayValue([opt].filter(o => o.checked)) : "";
+                    }
+                });
+                renderData[baseKey] = extractDisplayValue(val);
             }
             else if (p.type === 'image') {
                 const displayValue = typeof val === 'string' ? val : extractDisplayValue(val);
@@ -1830,11 +3302,20 @@ export default function TemplateGenerationDialog({
     }, [groupedPlaceholders, selectedTemplate]);
 
     const updateWordPreview = useCallback(async (data, styles) => {
-        if (!templateZipBuffer.current) return;
+        if (!docxTemplateBuffer.current) return;
+
         try {
             setIsPreviewLoading(true);
-            const zip = new PizZip(templateZipBuffer.current);
+            let templateBuffer = docxTemplateBuffer.current;
+            if (templateBuffer && typeof templateBuffer.then === 'function') {
+                templateBuffer = await templateBuffer;
+            }
+
+            if (!templateBuffer) return;
+
+            const zip = new PizZip(templateBuffer);
             const renderData = await prepareRenderData(data);
+
             const processedData = { ...renderData };
             const imagePromises = Object.entries(renderData)
                 .filter(([_, value]) => value && typeof value === 'string' &&
@@ -1893,8 +3374,10 @@ export default function TemplateGenerationDialog({
                 },
             });
 
-            const doc = new Docxtemplater(zip, {
-                modules: [imageModule],
+            const doc = new Docxtemplater();
+            doc.loadZip(zip);
+            doc.attachModule(imageModule);
+            doc.setOptions({
                 paragraphLoop: true,
                 linebreaks: true,
                 nullGetter: () => ""
@@ -1905,7 +3388,29 @@ export default function TemplateGenerationDialog({
 
             const out = doc.getZip().generate({ type: "arraybuffer" });
 
-            setDocxPreviewBuffer(out);
+            const result = await mammoth.convertToHtml(
+                { arrayBuffer: out },
+                {
+                    styleMap: [
+                        "p => p:fresh",
+                        "table => table.border-collapse.table-auto.w-full.my-4",
+                        "td => td.border.p-2",
+                        "th => th.border.bg-muted.p-2.font-bold"
+                    ],
+                    convertImage: mammoth.images.imgElement(function (image) {
+                        return image.read("base64").then(function (imageBuffer) {
+                            return {
+                                src: "data:" + (image.contentType || 'image/png') + ";base64," + imageBuffer
+                            };
+                        }).catch(err => {
+                            console.warn('Failed to convert image in preview:', err);
+                            return { src: '' };
+                        });
+                    })
+                }
+            );
+
+            setPreviewContent(result.value);
 
         } catch (err) {
             console.error("❌ [updateWordPreview] Error:", err);
@@ -1919,24 +3424,10 @@ export default function TemplateGenerationDialog({
         }
     }, [selectedTemplate, toast, prepareRenderData]);
 
-    // Debounced preview update to prevent excessive processing
-    const debouncedFormDataRef = useRef(formData);
-    const debouncedImageStylesRef = useRef(imageStyles);
-    const previewTimeoutRef = useRef<NodeJS.Timeout>();
-
     useEffect(() => {
-        debouncedFormDataRef.current = formData;
-        debouncedImageStylesRef.current = imageStyles;
+        if (!isOpen) return;
 
-        // Clear existing timeout
-        if (previewTimeoutRef.current) {
-            clearTimeout(previewTimeoutRef.current);
-        }
-
-        // Set new timeout for preview update
-        previewTimeoutRef.current = setTimeout(async () => {
-            if (!isOpen) return;
-
+        const updatePreview = async () => {
             const current = availableTemplates.find(t => t.id === selectedTemplate?.id) || availableTemplates[0] || template;
 
             if (current?.file_path && current?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
@@ -1945,10 +3436,7 @@ export default function TemplateGenerationDialog({
 
                     // Fix: Handle both old and new storage path structures
                     let publicUrl;
-                    if (current.file_path.startsWith('http')) {
-                        // file_path is already a full URL - use it directly
-                        publicUrl = current.file_path;
-                    } else if (current.file_path.startsWith('kyc-templates/')) {
+                    if (current.file_path.startsWith('kyc-templates/')) {
                         // New structure: use signed URL for private bucket
                         const { data, error } = await supabase.storage
                             .from('templates')
@@ -1961,88 +3449,52 @@ export default function TemplateGenerationDialog({
                         }
                         publicUrl = data.signedUrl;
                     } else {
-                        // Legacy structure: use public URL
+                        // Old structure: use public URL
                         publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${current.file_path}`;
                     }
 
+                    // Use Microsoft Office Online Viewer for consistent preview
+                    setDocPreviewUrl(`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}`);
+
                     try {
-                        const response = await fetch(publicUrl);
-                        if (!response.ok) throw new Error(`Failed to fetch template: ${response.statusText}`);
-                        const arrayBuffer = await response.arrayBuffer();
+                        const res = await fetch(publicUrl);
+                        if (!res.ok) throw new Error(`Failed to fetch template: ${res.statusText}`);
+                        const arrayBuffer = await res.arrayBuffer();
+                        docxTemplateBuffer.current = arrayBuffer;
 
-                        const zip = new PizZip(arrayBuffer);
-                        const doc = new Docxtemplater(zip, {
-                            modules: [new ImageModule({
-                                centered: false,
-                                getImage: (tagValue, tagName) => {
-                                    if (tagValue.startsWith('http')) {
-                                        return new Promise((resolve) => {
-                                            fetch(tagValue)
-                                                .then((res) => res.arrayBuffer())
-                                                .then((buffer) => resolve(buffer))
-                                                .catch(() => resolve(null));
-                                        });
-                                    }
-                                    return base64Parser(tagValue);
-                                },
-                                getSize: (img, tagValue, tagName) => {
-                                    if (tagValue.startsWith('http')) {
-                                        return new Promise((resolve) => {
-                                            const img = new Image();
-                                            img.onload = () => resolve([img.width, img.height]);
-                                            img.src = tagValue;
-                                            img.onerror = () => resolve([200, 200]);
-                                        });
-                                    } else {
-                                        const img = new Image();
-                                        img.src = tagValue;
-                                        return [img.width, img.height];
-                                    }
-                                },
-                            })],
-                            paragraphLoop: true,
-                            linebreaks: true,
-                        });
-
-                        // Extract headers and footers for HTML preview
-                        // Need to pass arrayBuffer, not the zip instance
-                        const { headerContent, footerContent } = await extractHeadersFooters(arrayBuffer);
-                        setHeaderContent(headerContent);
-                        setFooterContent(footerContent);
-
-                        // Store both the doc instance and the raw zip buffer
-                        docxTemplateBuffer.current = doc;
-                        templateZipBuffer.current = arrayBuffer;
-                        loadedTemplateId.current = current.id;
-
-                        // Generate preview after template is loaded
-                        await updateWordPreview(debouncedFormDataRef.current, debouncedImageStylesRef.current);
+                        // Update preview after loading
+                        setTimeout(() => {
+                            updateWordPreview(formData, imageStyles);
+                        }, 100);
                     } catch (error) {
                         console.error('Error loading template:', error);
                         toast({
-                            title: 'Error loading template',
-                            description: 'Failed to load the document template for preview.',
-                            variant: 'destructive',
+                            title: "Template Loading Error",
+                            description: "Could not load the Word document template",
+                            variant: "destructive"
                         });
                     } finally {
                         setIsPreviewLoading(false);
                     }
                 } else {
-                    // Template already loaded, just update preview
-                    await updateWordPreview(debouncedFormDataRef.current, debouncedImageStylesRef.current);
+                    updateWordPreview(formData, imageStyles);
                 }
             } else {
                 // HTML template
-                setPreviewContent(populateHtmlContent(debouncedFormDataRef.current, selectedTemplate?.placeholders || [], debouncedImageStylesRef.current));
-            }
-        }, 500); // Increased debounce time to reduce processing
-
-        return () => {
-            if (previewTimeoutRef.current) {
-                clearTimeout(previewTimeoutRef.current);
+                setIsPreviewLoading(true);
+                try {
+                    const base64Data = await prepareRenderData(formData);
+                    setPreviewContent(populateHtmlContent(base64Data, current?.placeholders || [], imageStyles));
+                } catch (err) {
+                    console.error('Preview error:', err);
+                } finally {
+                    setIsPreviewLoading(false);
+                }
             }
         };
-    }, [isOpen, selectedTemplate?.id, fetchTemplateBuffer]); // Removed formData and imageStyles from dependencies
+
+        updatePreview();
+    }, [isOpen, selectedTemplate?.id, formData, imageStyles]); // Added dependencies to refresh on change
 
     useEffect(() => {
         if (isOpen && (headerContent || footerContent) && formData) {
@@ -2057,8 +3509,7 @@ export default function TemplateGenerationDialog({
     const changedFields = useMemo(() => {
         const changes = [];
 
-        // Only track changes for visible placeholders (not ui_hidden)
-        groupedPlaceholders.topLevel.filter(p => !p.ui_hidden).forEach(placeholder => {
+        groupedPlaceholders.topLevel.forEach(placeholder => {
             const original = originalFormData[placeholder.name];
             const current = formData[placeholder.name];
 
@@ -2203,15 +3654,10 @@ export default function TemplateGenerationDialog({
 
                         if (nestedPath.length > 0) {
                             // It's a JSON column update
-                            const existingRaw = recordToUpdate[column];
-                            const effectivePath = nestedPath.filter((p: string) => !/^\d+$/.test(p));
-                            if (Array.isArray(existingRaw) && existingRaw[0]?.branch_id !== undefined) {
-                                // Branch-linked array — update only the main-branch item, keep array structure
-                                updatePayload[column] = setDeepValueInArray(existingRaw, effectivePath, valueToSave, recordToUpdate['branch']);
-                            } else {
-                                const existingJson = { ...(existingRaw || {}) };
-                                updatePayload[column] = setDeepValue(existingJson, effectivePath, valueToSave);
-                            }
+                            // Initialize with existing JSON data if available
+                            const existingJson = { ...(recordToUpdate[column] || {}) };
+                            const updatedJson = setDeepValue(existingJson, nestedPath, valueToSave);
+                            updatePayload[column] = updatedJson;
                         } else {
                             // Standard column update
                             updatePayload[column] = valueToSave;
@@ -2262,27 +3708,6 @@ export default function TemplateGenerationDialog({
         }
         current[pathParts[pathParts.length - 1]] = value;
         return obj;
-    };
-
-    // Sets a field on the main-branch item inside a branch_id array, preserving the array structure.
-    const setDeepValueInArray = (arr, pathParts, value, branchData) => {
-        const mainBranch = Array.isArray(branchData) ? branchData.find((b: any) => b.is_main === true) : null;
-        const targetBranchId = mainBranch ? String(mainBranch.branch_id) : null;
-        return arr.map((item: any, idx: number) => {
-            const isTarget = targetBranchId
-                ? String(item.branch_id) === targetBranchId
-                : idx === 0;
-            if (!isTarget) return item;
-            const updatedItem = { ...item };
-            let current: any = updatedItem;
-            for (let i = 0; i < pathParts.length - 1; i++) {
-                const key = pathParts[i];
-                if (!(key in current) || typeof current[key] !== 'object') current[key] = {};
-                current = current[key];
-            }
-            current[pathParts[pathParts.length - 1]] = value;
-            return updatedItem;
-        });
     };
 
     const saveFieldToDatabase = async (placeholder, newValue, specificSource = null, arrayIndex = null) => {
@@ -2389,25 +3814,21 @@ export default function TemplateGenerationDialog({
                 const pathParts = path.split(/->>|->|\./).map(p => p.trim().replace(/['"]/g, '')).filter(Boolean);
                 const column = pathParts[0];
                 const nestedPath = pathParts.slice(1);
-                const existingRaw = existing ? existing[column] : null;
-                const effectivePath = nestedPath.filter((p: string) => !/^\d+$/.test(p));
-                if (Array.isArray(existingRaw) && existingRaw[0]?.branch_id !== undefined) {
-                    // Branch-linked array — update only the main-branch item, keep array structure
-                    updatePayload[column] = setDeepValueInArray(existingRaw, effectivePath, newValue, existing?.branch);
-                } else {
-                    const existingJson = existingRaw ? { ...existingRaw } : {};
-                    const localSetDeep = (obj, parts, val) => {
-                        let current = obj;
-                        for (let i = 0; i < parts.length - 1; i++) {
-                            const key = parts[i];
-                            if (!(key in current) || typeof current[key] !== 'object') current[key] = {};
-                            current = current[key];
+                const existingJson = existing ? { ...(existing[column] || {}) } : {};
+                const setDeepValue = (obj, parts, val) => {
+                    let current = obj;
+                    for (let i = 0; i < parts.length - 1; i++) {
+                        const key = parts[i];
+                        if (!(key in current) || typeof current[key] !== 'object') {
+                            current[key] = {};
                         }
-                        current[parts[parts.length - 1]] = val;
-                        return obj;
-                    };
-                    updatePayload[column] = localSetDeep(existingJson, effectivePath, newValue);
-                }
+                        current = current[key];
+                    }
+                    current[parts[parts.length - 1]] = val;
+                    return obj;
+                };
+
+                updatePayload[column] = setDeepValue(existingJson, nestedPath, newValue);
             } else {
                 updatePayload[path || placeholder.name] = newValue;
             }
@@ -2610,22 +4031,18 @@ export default function TemplateGenerationDialog({
     };
 
     const completionStats = useMemo(() => {
-        // Exclude ui_hidden placeholders from completion stats (users don't fill these - backend does)
-        const visibleTopLevel = groupedPlaceholders.topLevel.filter(p => !p.ui_hidden);
-        let totalFields = visibleTopLevel.length;
-        let filledFields = visibleTopLevel.filter(p =>
+        let totalFields = groupedPlaceholders.topLevel.length;
+        let filledFields = groupedPlaceholders.topLevel.filter(p =>
             formData[p.name] && String(formData[p.name]).trim() !== ''
         ).length;
 
         Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
             const rows = Array.isArray(formData[blockName]) ? formData[blockName] : [];
-            // Also filter out ui_hidden children from blocks
-            const visibleChildren = groupedPlaceholders.blocks[blockName].children.filter(c => !c.ui_hidden);
-            if (rows.length > 0 && visibleChildren.length > 0) {
-                totalFields += rows.length * visibleChildren.length;
+            if (rows.length > 0) {
+                totalFields += rows.length * groupedPlaceholders.blocks[blockName].children.length;
                 rows.forEach(row => {
                     if (row && typeof row === 'object') {
-                        visibleChildren.forEach(child => {
+                        groupedPlaceholders.blocks[blockName].children.forEach(child => {
                             if (row[child.name] && String(row[child.name]).trim() !== '') {
                                 filledFields++;
                             }
@@ -2653,14 +4070,18 @@ export default function TemplateGenerationDialog({
         try {
             const kycDocId = selectedTemplate?.document_id || template?.document_id;
             // --- 1. ROBUST BUFFER RECOVERY ---
-            let templateBuffer = templateZipBuffer.current;
+            let templateBuffer = docxTemplateBuffer.current;
             // If buffer is missing and it's a Word template, try fetching it now
             if (!templateBuffer && isWordTemplate) {
-                templateBuffer = await fetchTemplateBuffer(selectedTemplate.id, selectedTemplate.file_path);
-                if (!templateBuffer) {
+                const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${selectedTemplate.file_path}`;
+                const res = await fetch(publicUrl);
+
+                if (!res.ok) {
                     throw new Error("Failed to fetch template source from storage");
                 }
-                templateZipBuffer.current = templateBuffer; // Cache it for next time
+
+                templateBuffer = await res.arrayBuffer();
+                docxTemplateBuffer.current = templateBuffer; // Cache it for next time
             }
 
             let storagePath = null;
@@ -2813,18 +4234,33 @@ export default function TemplateGenerationDialog({
             });
             await Promise.all(imageConversionPromises);
             if (isWordTemplate) {
-                let templateBuffer = templateZipBuffer.current;
+                let templateBuffer = docxTemplateBuffer.current;
+
+                // Resolve promise if the ref was set before the fetch completed
+                if (templateBuffer && typeof (templateBuffer as any).then === 'function') {
+                    templateBuffer = await templateBuffer;
+                }
 
                 // If still missing, fetch it now (same pattern as saveAsDraft)
                 if (!templateBuffer) {
                     const filePath = selectedTemplate?.file_path;
                     if (!filePath) throw new Error('No template file path available');
 
-                    templateBuffer = await fetchTemplateBuffer(selectedTemplate.id, filePath);
-                    if (!templateBuffer) {
-                        throw new Error('Failed to fetch template buffer');
+                    let publicUrl: string;
+                    if (filePath.startsWith('kyc-templates/')) {
+                        const { data, error } = await supabase.storage
+                            .from('templates')
+                            .createSignedUrl(filePath, 3600);
+                        if (error || !data?.signedUrl) throw new Error('Could not create signed URL for template');
+                        publicUrl = data.signedUrl;
+                    } else {
+                        publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${filePath}`;
                     }
-                    templateZipBuffer.current = templateBuffer;   // cache for next time
+
+                    const res = await fetch(publicUrl);
+                    if (!res.ok) throw new Error(`Failed to fetch template: ${res.statusText}`);
+                    templateBuffer = await res.arrayBuffer();
+                    docxTemplateBuffer.current = templateBuffer;   // cache for next time
                 }
 
                 // At this point templateBuffer is guaranteed to be an ArrayBuffer
@@ -2969,211 +4405,266 @@ export default function TemplateGenerationDialog({
             setIsGenerating(false);
         }
     };
+
     return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-[99vw] w-[99vw] h-[98vh] flex flex-col p-0 overflow-hidden border-slate-200/80 dark:border-slate-800 shadow-2xl rounded-2xl">
-                {/* ── AMBIENT BACKGROUND GLOWS ── */}
-                <div className="pointer-events-none absolute -top-40 right-0 z-0 h-[600px] w-[600px] rounded-full bg-blue-100/30 opacity-40 blur-3xl dark:bg-blue-900/10" />
-                <div className="pointer-events-none absolute bottom-0 -left-20 z-0 h-[400px] w-[400px] rounded-full bg-indigo-100/20 opacity-30 blur-3xl dark:bg-indigo-900/10" />
+        <>
+            <Dialog open={isOpen} onOpenChange={onClose}>
+                <DialogContent className="max-w-[98vw] w-full h-[95vh] flex flex-col p-0">
+                    <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50 flex-shrink-0">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-blue-500 rounded-lg">
+                                    <Wand2 className="h-5 w-5 text-white" />
+                                </div>
+                                <div>
+                                    <DialogTitle className="text-xl font-bold">{documentName}</DialogTitle>
+                                    <DialogDescription className="text-sm">Auto-populate and generate</DialogDescription>
+                                    {loadedDraft && (
+                                        <div className="flex items-center gap-2 mt-2">
+                                            <Badge variant="outline" className="ml-2 text-[8px] bg-amber-50 text-amber-700 border-amber-200">
+                                                <FileText className="h-3 w-3" />
+                                                <span className="font-medium">Draft in Progress</span>
+                                            </Badge>
+                                            <span className="text-xs text-muted-foreground">
+                                                Last saved {new Date(loadedDraft.created_at).toLocaleString()}
+                                            </span>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={discardDraft}
+                                                disabled={isLoadingDraft}
+                                                className="h-6 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                                            >
+                                                <X className="h-3 w-3 mr-1" />
+                                                Discard Draft
+                                            </Button>
+                                        </div>
+                                    )}
 
-                <div className="relative z-10 flex h-full flex-col">
-                    <TemplateDialogHeader
-                        documentName={documentName}
-                        onClose={onClose}
-                        isGenerating={isGenerating}
-                        refineAllFieldsWithAI={refineAllFieldsWithAI}
-                        availableTemplates={availableTemplates}
-                        selectedTemplate={selectedTemplate}
-                        handleTemplateSelect={handleTemplateSelect}
-                        loadedDraft={loadedDraft}
-                        isLoadingDraft={isLoadingDraft}
-                        discardDraft={discardDraft}
-                        completionStats={completionStats}
-                        showConflictBanner={showConflictBanner}
-                        dataConflicts={dataConflicts}
-                        setShowConflictBanner={setShowConflictBanner}
-                        refreshWithLiveData={refreshWithLiveData}
-                    />
-
-                    {/* ── TOOLBAR / PANEL SELECTOR ── */}
-                    <div className="flex items-center justify-between px-6 py-3 border-b border-slate-200/60 bg-white/60 backdrop-blur-md dark:bg-slate-950/60 dark:border-slate-800">
-                        <div className="flex items-center gap-3">
-                            <div className="flex h-8 items-center gap-2 rounded-xl bg-slate-100/80 dark:bg-slate-900/80 p-1 shadow-inner border border-slate-200/50 dark:border-slate-800">
+                                    {isLoadingDraft && (
+                                        <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                            Loading draft...
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <Label>{documentName}</Label>
+                            </div>
+                            <div className="flex items-center gap-2">
                                 <Button
-                                    variant={panelsVisible.form ? 'secondary' : 'ghost'}
+                                    variant="outline"
                                     size="sm"
-                                    className={cn("h-6 rounded-lg px-3 text-[11px] font-bold uppercase tracking-wider transition-all",
-                                        panelsVisible.form ? "bg-white dark:bg-slate-800 shadow-sm text-blue-600 dark:text-blue-400" : "text-slate-500")}
-                                    onClick={() => togglePanel('form')}
+                                    onClick={refineAllFieldsWithAI}
+                                    disabled={isGenerating}
+                                    className="border-purple-200 text-purple-700 hover:bg-purple-50"
                                 >
-                                    <MousePointer2 className="h-3 w-3 mr-1.5" /> Fields
+                                    <Sparkles className="h-4 w-4 mr-2" />
+                                    AI Refine
                                 </Button>
-                                <Button
-                                    variant={panelsVisible.preview ? 'secondary' : 'ghost'}
-                                    size="sm"
-                                    className={cn("h-6 rounded-lg px-3 text-[11px] font-bold uppercase tracking-wider transition-all",
-                                        panelsVisible.preview ? "bg-white dark:bg-slate-800 shadow-sm text-blue-600 dark:text-blue-400" : "text-slate-500")}
-                                    onClick={() => togglePanel('preview')}
-                                >
-                                    <Layout className="h-3 w-3 mr-1.5" /> Preview
-                                </Button>
-                                <Button
-                                    variant={panelsVisible.source ? 'secondary' : 'ghost'}
-                                    size="sm"
-                                    className={cn("h-6 rounded-lg px-3 text-[11px] font-bold uppercase tracking-wider transition-all",
-                                        panelsVisible.source ? "bg-white dark:bg-slate-800 shadow-sm text-blue-600 dark:text-blue-400" : "text-slate-500")}
-                                    onClick={() => togglePanel('source')}
-                                >
-                                    <FileText className="h-3 w-3 mr-1.5" /> Source
+                                {availableTemplates.length > 1 && (
+                                    <Select value={selectedTemplate?.id} onValueChange={handleTemplateSelect}>
+                                        <SelectTrigger className="w-64 h-9">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {availableTemplates.map(t => (
+                                                <SelectItem key={t.id} value={t.id}>{t.file_name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                )}
+                                <Button variant="ghost" size="icon" onClick={onClose}>
+                                    <X className="h-5 w-5" />
                                 </Button>
                             </div>
                         </div>
-
-                        <div className="flex items-center gap-4">
-                            <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50 dark:bg-slate-900 px-3 py-1 rounded-full border border-slate-200/50 dark:border-slate-800">
-                                <Layers className="h-3 w-3" />
-                                {selectedTemplate?.category || 'Standard Document'}
+                        <div className="mt-2 space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                                <span className="font-medium">
+                                    {completionStats.filled}/{completionStats.total} Fields
+                                    {loadedDraft && (
+                                        <Badge variant="outline" className="ml-2 text-[8px] bg-amber-50 text-amber-700 border-amber-200">
+                                            DRAFT
+                                        </Badge>
+                                    )}
+                                </span>
+                                <span>{completionStats.percentage}%</span>
                             </div>
+                            <Progress
+                                value={completionStats.percentage}
+                                className={`h-1.5 ${loadedDraft ? '[&>div]:bg-amber-500' : ''}`}
+                            />
+                        </div>
+                        {showConflictBanner && dataConflicts.length > 0 && loadedDraft && (
+                            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                <div className="flex items-start gap-3">
+                                    <div className="flex-shrink-0 mt-0.5">
+                                        <svg className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                        </svg>
+                                    </div>
+                                    <div className="flex-1">
+                                        <h4 className="text-sm font-semibold text-amber-900 mb-1">
+                                            ⚠️ Data Changes Detected
+                                        </h4>
+                                        <p className="text-xs text-amber-800 mb-2">
+                                            The following fields have been updated in the database since this draft was saved:
+                                        </p>
+                                        <div className="space-y-1 mb-3">
+                                            {dataConflicts.slice(0, 3).map((conflict, idx) => (
+                                                <div key={idx} className="text-xs text-amber-700 font-mono bg-white/50 p-2 rounded">
+                                                    <span className="font-semibold">{conflict.field}:</span>{' '}
+                                                    <span className="line-through opacity-60">{String(conflict.draftValue).substring(0, 30)}</span>
+                                                    {' → '}
+                                                    <span className="font-semibold text-green-700">{String(conflict.liveValue).substring(0, 30)}</span>
+                                                </div>
+                                            ))}
+                                            {dataConflicts.length > 3 && (
+                                                <div className="text-xs text-amber-600 italic">
+                                                    ...and {dataConflicts.length - 3} more field{dataConflicts.length - 3 > 1 ? 's' : ''}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <Button
+                                                size="sm"
+                                                variant="default"
+                                                onClick={refreshWithLiveData}
+                                                className="h-7 text-xs bg-amber-600 hover:bg-amber-700"
+                                            >
+                                                <svg className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                                </svg>
+                                                Refresh with Latest Data
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() => setShowConflictBanner(false)}
+                                                className="h-7 text-xs text-amber-700 hover:bg-amber-100"
+                                            >
+                                                Keep Draft Values
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </DialogHeader>
+
+                    <div className="flex items-center gap-2 px-6 py-2 border-b bg-white">
+                        <View className="h-4 w-4 text-muted-foreground" />
+                        <Label className="text-xs font-semibold mr-2">View Panels:</Label>
+                        <div className="flex bg-slate-100 p-1 rounded-md">
+                            <Button
+                                variant={panelsVisible.form ? 'secondary' : 'ghost'}
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => togglePanel('form')}
+                            >
+                                <MousePointer2 className="h-3 w-3 mr-1" />
+                                Form Fields
+                            </Button>
+                            <Button
+                                variant={panelsVisible.preview ? 'secondary' : 'ghost'}
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => togglePanel('preview')}
+                            >
+                                <Layout className="h-3 w-3 mr-1" />
+                                Live Preview
+                            </Button>
+                            <Button
+                                variant={panelsVisible.source ? 'secondary' : 'ghost'}
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => togglePanel('source')}
+                            >
+                                <FileText className="h-3 w-3 mr-1" />
+                                Template Source
+                            </Button>
                         </div>
                     </div>
 
                     <div className="flex-1 overflow-hidden grid grid-cols-12 gap-0">
-                        {/* ── FORM PANEL ── */}
-                        <ScrollArea className={`${panelClasses.form} border-r border-slate-200/60 bg-slate-50/50 dark:bg-slate-950/50 dark:border-slate-800`}>
+                        <ScrollArea className={`${panelClasses.form} border-r bg-white`}>
                             <div className="p-6 space-y-8">
-                                <div className="space-y-6">
-                                    <h4 className="flex items-center gap-2.5 font-black text-blue-600 dark:text-blue-400 text-[10px] tracking-widest uppercase border-b border-slate-200 dark:border-slate-800 pb-3">
-                                        <div className="h-5 w-5 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center">
-                                            <Layout className="h-3 w-3" />
-                                        </div>
-                                        General Document Fields
+                                {/* Section Header */}
+                                <div className="space-y-4">
+                                    <h4 className="flex items-center gap-2 font-black text-blue-600 text-[10px] tracking-widest uppercase border-b pb-2">
+                                        <Layout className="h-3 w-3" /> General Document Fields
                                     </h4>
 
-                                    <div className="space-y-1">
-                                        {/* Question-option groups */}
-                                        {Array.from(groupedPlaceholders.questionGroups.entries()).map(([qId, { members }]) => {
-                                            const question = requirementJobQuestions.find(q => q.id === qId);
-                                            const options = question?.options || [...new Set(members.map(m => m.linked_job_question_option).filter(Boolean))];
-                                            if (!options.length) return null;
-                                            const label = question?.label || members[0]?.display_value || members[0]?.name || qId;
-                                            const category = question?.category;
-                                            const taskAnswer = task?.job_specific_answers?.[String(qId)] ?? task?.job_specific_answers?.[qId];
+                                    <div className="grid grid-cols-1 gap-y-1">
+                                        {groupedPlaceholders.topLevel.map((p, idx) => {
+                                            let resolvedOptions = [];
+                                            if (p.master_field_ids?.length > 0) {
+                                                const mf = masterFields.get(parseInt(p.master_field_ids[0]));
+                                                if (mf?.type === 'select') {
+                                                    resolvedOptions = getDependentDropdownOptions(p, mf);
+                                                }
+                                            }
+
                                             return (
-                                                <div key={qId} className="flex flex-col gap-3 p-4 rounded-xl border border-slate-200/60 bg-white dark:bg-slate-900 dark:border-slate-800 shadow-sm mb-4">
-                                                    <div className="flex items-start justify-between">
-                                                        <Label className="font-bold text-slate-700 dark:text-slate-300 text-[11px] leading-relaxed uppercase tracking-tight max-w-[80%]">
-                                                            {label}
+                                                <div
+                                                    key={`${p.id || p.name}-${p.name}`}
+                                                    className="flex flex-row items-start gap-6 p-2 border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors"
+                                                >
+                                                    {/* COLUMN 1: ID Badge + Right Aligned Label */}
+                                                    <div className="w-1/3 flex items-start">
+                                                        <Label className="font-bold text-slate-700 text-xs leading-relaxed uppercase tracking-tight">
+                                                            {p.name.replace(/_/g, ' ')}
                                                         </Label>
-                                                        {category && (
-                                                            <Badge variant="outline" className="text-[8px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800">
-                                                                {category}
-                                                            </Badge>
-                                                        )}
                                                     </div>
-                                                    <div className="flex flex-wrap gap-2">
-                                                        {options.map(opt => {
-                                                            const member = members.find(m => m.linked_job_question_option === opt);
-                                                            if (!member) return null;
-                                                            const isChecked = !!formData[member.name];
-                                                            const isFromTask = taskAnswer === opt;
-                                                            return (
-                                                                <button
-                                                                    key={opt}
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        if (question?.type === 'multiselect') {
-                                                                            handleInputChange(member.name, isChecked ? '' : opt);
-                                                                        } else {
-                                                                            members.forEach(m => {
-                                                                                if (formData[m.name]) handleInputChange(m.name, '');
-                                                                            });
-                                                                            handleInputChange(member.name, isChecked ? '' : opt);
-                                                                        }
-                                                                    }}
-                                                                    className={cn(
-                                                                        "px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-all flex items-center gap-1.5 shadow-sm",
-                                                                        isChecked
-                                                                            ? isFromTask
-                                                                                ? "bg-emerald-600 text-white border-emerald-600 shadow-emerald-600/20"
-                                                                                : "bg-blue-600 text-white border-blue-600 shadow-blue-600/20"
-                                                                            : "bg-white dark:bg-slate-800 text-slate-400 border-slate-200 hover:border-blue-400 hover:text-blue-600 dark:border-slate-700"
-                                                                    )}
-                                                                >
-                                                                    {isChecked && <CheckCircle2 className="h-3 w-3 shrink-0" />}
-                                                                    {opt}
-                                                                </button>
-                                                            );
-                                                        })}
+
+                                                    {/* COLUMN 2: Input Control */}
+                                                    <div className="flex-1 min-w-0">
+                                                        <PlaceholderInput
+                                                            placeholder={p}
+                                                            value={formData[p.name]}
+                                                            onChange={(val) => handleInputChange(p.name, val)}
+                                                            onSaveToDb={saveFieldToDatabase}
+                                                            masterFields={masterFields}
+                                                            resolvedOptions={resolvedOptions}
+                                                            onFileChange={(e) => handleFileChange(p.name, e)}
+                                                            imageStyles={imageStyles}
+                                                            onImageStyleChange={handleImageStyleChange}
+                                                            autoPopulated={autoPopulatedFields.get(p.name)}
+                                                            originalValue={originalFormData[p.name]}
+                                                            requirementJobQuestions={requirementJobQuestions}  // NEW
+                                                            task={task}                                         // NEW
+                                                            formData={formData}
+                                                            isArrayItem={false}
+                                                            onAIRefine={handleSingleFieldAIRefine}
+                                                            isAIRefining={refiningFields.has(p.name)}
+                                                            showLabel={false} // Hides the internal vertical label
+                                                            resolveSourceValue={resolveSpecificSourceValue}
+                                                        />
                                                     </div>
                                                 </div>
                                             );
                                         })}
-
-                                        {/* Top level fields */}
-                                        <div className="grid grid-cols-1 gap-2">
-                                            {groupedPlaceholders.topLevel.filter(p => !p.ui_hidden).map((p) => (
-                                                <div key={p.name} className="flex flex-col gap-1.5 p-3 rounded-xl hover:bg-white dark:hover:bg-slate-900 transition-colors border border-transparent hover:border-slate-200/60 dark:hover:border-slate-800 group">
-                                                    <Label className="font-bold text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-widest px-1">
-                                                        {p.display_value || p.name.replace(/_/g, ' ')}
-                                                    </Label>
-                                                    <PlaceholderInput
-                                                        placeholder={p}
-                                                        value={formData[p.name]}
-                                                        onChange={(val) => handleInputChange(p.name, val)}
-                                                        onSaveToDb={saveFieldToDatabase}
-                                                        masterFields={masterFields}
-                                                        onFileChange={(e) => handleFileChange(p.name, e)}
-                                                        imageStyles={imageStyles}
-                                                        onImageStyleChange={handleImageStyleChange}
-                                                        autoPopulated={autoPopulatedFields.get(p.name)}
-                                                        requirementJobQuestions={requirementJobQuestions}
-                                                        task={task}
-                                                        formData={formData}
-                                                        isArrayItem={false}
-                                                        onAIRefine={handleSingleFieldAIRefine}
-                                                        isAIRefining={refiningFields.has(p.name)}
-                                                        showLabel={false}
-                                                        resolveSourceValue={resolveSpecificSourceValue}
-                                                    />
-                                                </div>
-                                            ))}
-                                        </div>
                                     </div>
                                 </div>
 
-                                {/* Repeating Sections */}
+                                {/* Repeating Sections Logic */}
                                 {Object.keys(groupedPlaceholders.blocks).length > 0 && (
-                                    <div className="space-y-6 pt-6 border-t border-slate-200 dark:border-slate-800">
-                                        <h4 className="flex items-center gap-2.5 font-black text-blue-600 dark:text-blue-400 text-[10px] tracking-widest uppercase border-b border-slate-200 dark:border-slate-800 pb-3">
-                                            <div className="h-5 w-5 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center">
-                                                <Layers className="h-3 w-3" />
-                                            </div>
-                                            Repeating Tables / Blocks
+                                    <div className="space-y-4 pt-4 border-t">
+                                        <h4 className="flex items-center gap-2 font-black text-blue-600 text-[10px] tracking-widest uppercase border-b pb-2">
+                                            <Layers className="h-3 w-3" /> Repeating Tables / Blocks
                                         </h4>
                                         {Object.keys(groupedPlaceholders.blocks).map(blockName => (
-                                            <ArrayInputsPanel
-                                                key={blockName}
-                                                blockName={blockName}
-                                                blockData={groupedPlaceholders.blocks[blockName]}
-                                                formData={formData}
-                                                originalFormData={originalFormData}
-                                                onArrayInputChange={handleArrayInputChange}
-                                                onFileChange={handleFileChange}
-                                                handleImageStyleChange={handleImageStyleChange}
-                                                imageStyles={imageStyles}
-                                                masterFields={masterFields}
-                                                saveFieldToDatabase={saveFieldToDatabase}
-                                                isSavingProfile={isSavingProfile}
-                                                resolveSpecificSourceValue={resolveSpecificSourceValue}
-                                                getDependentDropdownOptions={getDependentDropdownOptions}
-                                            />
+                                            <div key={blockName}>
+                                                {renderArrayInputs(blockName, groupedPlaceholders.blocks[blockName])}
+                                            </div>
                                         ))}
                                     </div>
                                 )}
                             </div>
                         </ScrollArea>
 
-                        {/* ── PREVIEW PANEL ── */}
                         <PreviewPanel
                             previewContent={previewContent}
                             isPreviewLoading={isPreviewLoading}
@@ -3183,77 +4674,83 @@ export default function TemplateGenerationDialog({
                             docxBuffer={docxPreviewBuffer}
                         />
 
-                        {/* ── SOURCE PANEL ── */}
-                        <TemplateSourcePanel
-                            panelClasses={panelClasses.source}
-                            isWordTemplate={isWordTemplate}
-                            docPreviewUrl={docPreviewUrl}
-                            setDocPreviewUrl={setDocPreviewUrl}
-                        />
-                    </div>
-
-                    <DialogFooter className="border-t border-slate-200 dark:border-slate-800 px-6 py-4 bg-white/80 backdrop-blur-xl dark:bg-slate-950/80 flex items-center justify-between flex-shrink-0 relative z-20">
-                        <div className="flex items-center gap-3">
-                            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200/60 dark:border-slate-800">
-                                <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                                    Format: {isWordTemplate ? 'Word + Images' : 'HTML View'}
-                                </span>
+                        {/* RIGHT PANEL: Original Template Reference */}
+                        <div className={`${panelClasses.source} bg-slate-50 overflow-y-auto transition-all duration-300`}>
+                            <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b flex justify-between">
+                                <span className="text-[10px] font-bold text-slate-500">ORIGINAL REFERENCE</span>
+                            </div>
+                            <div className="p-4">
+                                {isWordTemplate ? (
+                                    docPreviewUrl ? (
+                                        <iframe
+                                            src={docPreviewUrl}
+                                            className="w-full h-[calc(100vh-250px)] border-0 rounded shadow bg-white"
+                                            title="Original"
+                                            onError={() => setDocPreviewUrl(null)}
+                                        />
+                                    ) : (
+                                        <div className="h-[300px] flex flex-col items-center justify-center text-slate-400 border-2 border-dashed rounded">
+                                            <FileText className="h-12 w-12 mb-2" />
+                                            <p className="text-xs">Preview unavailable</p>
+                                        </div>
+                                    )
+                                ) : (
+                                    <div className="bg-white rounded border p-6">
+                                        <Code className="h-8 w-8 text-blue-500 mb-3" />
+                                        <h3 className="font-semibold text-sm mb-2">HTML Template Source</h3>
+                                        <p className="text-xs text-slate-600 italic">This template is HTML based. Use the Live Preview to see the output.</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
-
-                        <div className='flex items-center gap-3'>
+                    </div>
+                    <DialogFooter className="border-t px-6 py-3 bg-white flex justify-between flex-shrink-0">
+                        <div className="text-[10px] flex items-center gap-1.5">
+                            <CheckCircle2 className="h-3 w-3 text-green-500" />
+                            {isWordTemplate ? 'Word + Images' : 'HTML'}
+                        </div>
+                        <div className='flex gap-2'>
                             <Button
                                 variant="outline"
+                                size="sm"
                                 onClick={saveAsDraft}
+                                // ADD isPreviewLoading here
                                 disabled={isGenerating || isPreviewLoading}
-                                className="h-10 rounded-xl border-slate-200 dark:border-slate-800 font-bold text-xs shadow-sm"
                             >
                                 {isGenerating || isPreviewLoading ? (
                                     <Loader2 className="animate-spin mr-2 h-4 w-4" />
                                 ) : (
-                                    <Save className="mr-2 h-4 w-4 text-slate-400" />
+                                    <Save className="mr-2 h-4 w-4" />
                                 )}
                                 {loadedDraft ? 'Update Draft' : 'Save as Draft'}
                             </Button>
-
+                            <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button disabled={isGenerating} className="h-10 rounded-xl bg-blue-600 px-6 font-bold text-white shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-all active:scale-[0.98]">
+                                    <Button size="sm" disabled={isGenerating} className="bg-blue-600">
                                         {isGenerating ? (
                                             <Loader2 className="animate-spin mr-2 h-4 w-4" />
                                         ) : (
                                             <Download className="mr-2 h-4 w-4" />
                                         )}
-                                        Generate & Download
-                                        <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
+                                        Download
                                     </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="w-48 rounded-xl border-slate-200/80 dark:border-slate-800 shadow-xl">
-                                    <DropdownMenuItem onClick={() => generateAndDownload('word')} className="flex items-center gap-3 py-2.5 font-semibold text-sm cursor-pointer">
-                                        <div className="h-8 w-8 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center">
-                                            <FileText className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                                        </div>
-                                        Word Document
+                                <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={() => generateAndDownload('word')}>
+                                        <FileText className="h-4 w-4 mr-2 text-blue-600" />
+                                        Word
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => generateAndDownload('pdf')} className="flex items-center gap-3 py-2.5 font-semibold text-sm cursor-pointer">
-                                        <div className="h-8 w-8 rounded-lg bg-red-50 dark:bg-red-900/30 flex items-center justify-center">
-                                            <FileText className="h-4 w-4 text-red-600 dark:text-red-400" />
-                                        </div>
-                                        PDF Format
+                                    <DropdownMenuItem onClick={() => generateAndDownload('pdf')}>
+                                        <FileText className="h-4 w-4 mr-2 text-red-600" />
+                                        PDF
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
-
-                            <Separator orientation="vertical" className="h-6 mx-1" />
-
-                            <Button variant="ghost" size="icon" onClick={onClose} className="h-10 w-10 rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800">
-                                <X className="h-5 w-5" />
-                            </Button>
                         </div>
                     </DialogFooter>
-                </div>
-            </DialogContent>
-        </Dialog>
+                </DialogContent>
+            </Dialog>
+        </>
     );
 }
