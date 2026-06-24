@@ -96,9 +96,9 @@ export function StandardReportView({
   const totalPages = Math.max(1, Math.ceil(allTasks.length / rowsPerPage));
 
   return (
-    <div className="flex flex-col h-full antialiased pt-0 bg-slate-100">
-      {/* Table Wrapper: pure white card */}
-      <div className="relative overflow-hidden border border-slate-200 rounded-lg shadow-sm bg-white">
+    <div className="flex flex-col h-full antialiased pt-0 bg-white">
+      {/* Table Wrapper: white card with subtle border */}
+      <div className="relative overflow-hidden border border-slate-200 shadow-sm bg-white">
         <div className="overflow-auto max-h-[calc(100vh-280px)] custom-scrollbar">
           <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
             <colgroup>
@@ -109,11 +109,11 @@ export function StandardReportView({
             </colgroup>
 
             <TableHeader className="sticky top-0 z-40">
-              {/* Main Header Row — Medium Blue Tint */}
+              {/* Main Header Row — Dark Navy */}
               <TableRow className="hover:bg-transparent border-0">
                 {/* Index Header */}
-                <TableHead className="sticky left-0 z-50 bg-blue-100/80 border-r border-b border-blue-200 text-center py-3 px-2">
-                  <span className="text-[10px] font-semibold text-blue-700 uppercase tracking-wider">#</span>
+                <TableHead className="sticky left-0 z-50 border-r border-b border-slate-600 text-center py-3 px-2" style={{background: "#1E3A5F"}}>
+                  <span className="text-[10px] font-semibold text-slate-300 uppercase tracking-wider">#</span>
                 </TableHead>
 
                 {filteredColumns.map((col: any) => {
@@ -127,17 +127,20 @@ export function StandardReportView({
                       key={col.id}
                       onClick={() => handleSort(col.id)}
                       className={cn(
-                          "group relative border-r border-b border-blue-200 transition-colors cursor-pointer select-none px-4 py-3 bg-blue-100/80",
-                          isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.05)]",
-                          isActive && "bg-blue-200/80",
-                          isCentered && "text-center"
+                          "group relative border-r border-b border-slate-600 transition-colors cursor-pointer select-none px-4 py-3",
+                          isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.15)]",
+                          isActive && "bg-slate-700",
+                          isCentered && "text-center",
                         )}
-                      style={isSticky ? { left: `${left}px` } : undefined}
+                      style={{
+                        background: "#1E3A5F",
+                        ...(isSticky ? { left: `${left}px` } : undefined),
+                      }}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className={cn(
                           "text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap",
-                          isActive ? "text-blue-800" : "text-blue-700"
+                          isActive ? "text-white" : "text-slate-300"
                         )}>
                           {col.label}
                         </span>
@@ -146,20 +149,20 @@ export function StandardReportView({
                             {col.hasSubColumns && (
                                 <button
                                     onClick={(e) => { e.stopPropagation(); toggleStageColumns(col.stageId); }}
-                                    className="h-4 w-4 shrink-0 flex items-center justify-center rounded bg-blue-300 hover:bg-blue-400 text-blue-700 transition-all"
+                                    className="h-4 w-4 shrink-0 flex items-center justify-center rounded bg-slate-600 hover:bg-slate-500 text-slate-300 transition-all"
                                 >
                                     {expandedStageColumns.has(col.stageId) ? <Minus size={10} strokeWidth={2.5} /> : <Plus size={10} strokeWidth={2.5} />}
                                 </button>
                             )}
                             <ArrowUpDown className={cn(
                                 "h-3 w-3 shrink-0",
-                                isActive ? "text-blue-700" : "text-blue-400 opacity-0 group-hover:opacity-100"
+                                isActive ? "text-white" : "text-slate-500 opacity-0 group-hover:opacity-100"
                             )} />
                         </div>
                       </div>
 
                       {/* Resize Handle */}
-                      <div className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-blue-500/30 transition-colors" />
+                      <div className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-slate-400/30 transition-colors" />
                     </TableHead>
                   );
                 })}
@@ -167,7 +170,7 @@ export function StandardReportView({
 
               {/* Sub-Header Row: Estimates / Duration / Types */}
               <TableRow className="hover:bg-transparent">
-                <TableHead className="sticky left-0 z-50 bg-blue-200/60 border-r border-b border-blue-200 h-6" />
+                <TableHead className="sticky left-0 z-50 bg-slate-700 border-r border-b border-slate-600 h-6" />
                 {filteredColumns.map((col: any) => {
                   const isSticky = stickyColumnIds.has(col.id);
                   const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
@@ -191,8 +194,8 @@ export function StandardReportView({
                     <TableHead
                       key={`sub-${col.id}`}
                       className={cn(
-                        "text-[9px] font-medium uppercase tracking-wider text-center border-r border-b border-blue-200 px-2 h-6 bg-blue-200/60 text-blue-600",
-                        isSticky && "sticky z-40 shadow-[2px_0_4px_rgba(0,0,0,0.03)]"
+                        "text-[9px] font-medium uppercase tracking-wider text-center border-r border-b border-slate-600 px-2 h-6 bg-slate-700 text-slate-400",
+                        isSticky && "sticky z-40 shadow-[2px_0_4px_rgba(0,0,0,0.1)]"
                       )}
                       style={isSticky ? { left: `${left}px` } : undefined}
                     >

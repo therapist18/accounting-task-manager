@@ -46,139 +46,145 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
       "border-r border-slate-200 bg-[#FAFAFC] flex flex-col max-h-screen shrink-0 transition-all duration-300 ease-in-out z-20",
       isCollapsed ? "w-[72px]" : "w-[280px]"
     )}>
-    <div className="border rounded-lg shadow-md m-4 flex flex-col h-full overflow-hidden">
+      <div className="shadow-md flex flex-col h-full overflow-hidden">
         {/* Header */}
-      <div className={cn(
-        "px-6 py-6 flex items-center shrink-0 border-b border-slate-200 bg-white",
-        isCollapsed ? "justify-center" : "justify-between"
-      )}>
-        {!isCollapsed && (
-          <div className="flex flex-col gap-1">
-            <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-widest leading-tight">Workspace</h2>
-            <span className="text-[14px] text-slate-900 font-bold">Departments</span>
-          </div>
-        )}
-        {onToggleCollapse && (
-          <button
-            onClick={onToggleCollapse}
-            className="p-1.5 rounded-full border border-slate-200 text-slate-400 hover:text-slate-800 hover:bg-slate-50 transition-all"
-          >
-            {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-          </button>
-        )}
-      </div>
-
-      {/* Search Input */}
-      {!isCollapsed && (
-        <div className="p-4 bg-white border-b border-slate-200 shrink-0">
-          <div className="relative group">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search department..."
-              value={sidebarSearch}
-              onChange={e => setSidebarSearch(e.target.value)}
-              className="w-full pl-10 pr-8 h-10 text-sm rounded-full border border-slate-300 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-400"
-            />
-            {sidebarSearch && (
-              <button onClick={() => setSidebarSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
+        <div className={cn(
+          "px-4 py-6 flex items-center shrink-0 border-b border-slate-200 bg-white",
+          isCollapsed ? "justify-center" : "justify-between"
+        )}>
+          {!isCollapsed && (
+            <div className="flex gap-2">
+              <span className="bg-blue-600 text-white p-2 rounded-sm"><Building2 className="h-6 w-6 text-white" /></span>
+              <div className="flex flex-col">
+                <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-widest leading-tight">Workspace</h2>
+                <span className="text-[14px] text-slate-900 font-bold">Departments</span>
+              </div>
+            </div>
+          )}
+          {onToggleCollapse && (
+            <button
+              onClick={onToggleCollapse}
+              className="p-1.5 rounded-full border border-slate-200 text-slate-400 hover:text-slate-800 hover:bg-slate-50 transition-all"
+            >
+              {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            </button>
+          )}
         </div>
-      )}
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto bg-white custom-scrollbar pb-6">
-        {filteredDepartments.map((dept) => {
-          const isActive = activeDeptId === dept.id.toString();
-
-          if (isCollapsed) {
-            return (
-              <button
-                key={dept.id}
-                onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
-                className={cn(
-                  "w-11 h-11 mx-auto flex items-center justify-center rounded-full text-sm font-bold transition-all mt-3 border",
-                  isActive
-                    ? "bg-blue-600 text-white border-blue-600"
-                    : "bg-white text-slate-400 border-slate-200 hover:border-blue-300"
-                )}
-                title={dept.name}
-              >
-                {getInitials(dept.name)}
-              </button>
-            );
-          }
-
-          return (
-            <div key={dept.id} className="border-b border-slate-100 last:border-none">
-              <button
-                onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
-                className={cn(
-                  "w-full flex items-center justify-between px-6 py-4 transition-all text-left",
-                  isActive ? "bg-slate-50 border-l-4 border-blue-600" : "hover:bg-slate-50 border-l-4 border-transparent"
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={cn(
-                    "h-7 w-7 rounded flex items-center justify-center text-sm font-bold",
-                    isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-500"
-                  )}>
-                    {getInitials(dept.name)}
-                  </div>
-                  <span className={cn(
-                    "text-sm font-semibold uppercase tracking-wider truncate",
-                    isActive ? "text-slate-900" : "text-slate-600"
-                  )}>
-                    {dept.name}
-                  </span>
-                </div>
-                {isActive && <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
-              </button>
-
-              {isActive && activeSubDepartments.length > 0 && (
-                <div className="bg-[#FAFAFC] border-y border-slate-100 py-2 flex flex-col">
-                  <button
-                    onClick={() => setActiveSubDeptIds([])}
-                    className={cn(
-                      "w-full text-left px-8 py-2.5 text-sm font-medium transition-all flex justify-between items-center",
-                      activeSubDeptIds.length === 0
-                        ? "bg-blue-50/80 text-blue-700"
-                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                    )}
-                  >
-                    <span>All Sub-units</span>
-                    {activeSubDeptIds.length === 0 && <Check className="h-3 w-3" />}
-                  </button>
-
-                  {activeSubDepartments.map((sub) => {
-                    const id = sub.id.toString();
-                    const isSelected = activeSubDeptIds.includes(id);
-                    return (
-                      <button
-                        key={sub.id}
-                        onClick={() => toggleSubDept(id)}
-                        className={cn(
-                          "w-full text-left px-8 py-2.5 text-sm font-medium transition-all truncate flex justify-between items-center",
-                          isSelected
-                            ? "bg-blue-50/80 text-blue-700"
-                            : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                        )}
-                      >
-                        <span className="truncate">{sub.name}</span>
-                        {isSelected && <Check className="h-3 w-3" />}
-                      </button>
-                    );
-                  })}
-                </div>
+        {/* Search Input */}
+        {!isCollapsed && (
+          <div className="p-4 bg-white border-b border-slate-200 shrink-0">
+            <div className="relative group">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search department..."
+                value={sidebarSearch}
+                onChange={e => setSidebarSearch(e.target.value)}
+                className="w-full pl-10 pr-8 h-10 text-sm rounded-full border border-slate-300 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-400"
+              />
+              {sidebarSearch && (
+                <button onClick={() => setSidebarSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                  <X className="h-4 w-4" />
+                </button>
               )}
             </div>
-          );
-        })}
+          </div>
+        )}
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto bg-white custom-scrollbar pb-6">
+          {filteredDepartments.map((dept) => {
+            const isActive = activeDeptId === dept.id.toString();
+
+            if (isCollapsed) {
+              return (
+                <button
+                  key={dept.id}
+                  onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
+                  className={cn(
+                    "w-11 h-11 mx-auto flex items-center justify-center rounded-full text-sm font-bold transition-all mt-3 border",
+                    isActive
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "bg-white text-slate-400 border-slate-200 hover:border-blue-300"
+                  )}
+                  title={dept.name}
+                >
+                  {getInitials(dept.name)}
+                </button>
+              );
+            }
+
+            return (
+              <div key={dept.id} className="border-b border-slate-100 last:border-none">
+                <button
+                  onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
+                  className={cn(
+                    "w-full flex items-center justify-between px-6 py-4 transition-all text-left",
+                    isActive ? "bg-slate-50 border-l-4 border-blue-600" : "hover:bg-slate-50 border-l-4 border-transparent"
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={cn(
+                      "h-7 w-7 rounded flex items-center justify-center text-sm font-bold",
+                      isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-500"
+                    )}>
+                      {getInitials(dept.name)}
+                    </div>
+                    <span className={cn(
+                      "text-sm font-semibold uppercase tracking-wider truncate",
+                      isActive ? "text-slate-900" : "text-slate-600"
+                    )}>
+                      {dept.name}
+                    </span>
+                  </div>
+                  {isActive && <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
+                </button>
+
+                {isActive && activeSubDepartments.length > 0 && (
+                  <div className="bg-blue-50 border-y border-slate-100 py-2 px-4 flex flex-col">
+                    <button
+                      onClick={() => setActiveSubDeptIds([])}
+                      className={cn(
+                        "w-full text-left px-8 py-2.5 text-sm font-medium transition-all flex justify-between items-center",
+                        activeSubDeptIds.length === 0
+                          ? "bg-blue-500 text-white border mx-2 rounded-xl"
+                          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                      )}
+                    >
+                      <span>All Sub-units</span>
+                      {activeSubDeptIds.length === 0 && <Check className="h-3 w-3" />}
+                    </button>
+
+                    {activeSubDepartments.map((sub) => {
+                      const id = sub.id.toString();
+                      const isSelected = activeSubDeptIds.includes(id);
+                      return (
+                        <button
+                          key={sub.id}
+                          onClick={() => toggleSubDept(id)}
+                          className={cn(
+                            "text-left px-8 py-2.5 text-sm font-medium transition-all truncate flex justify-between items-center",
+                            isSelected
+                              ? "h-10 text-sm rounded-sm border border-slate-300 transition-all bg-blue-600 text-white"
+                              : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                          )}
+                        >
+                          <div className="flex gap-2">
+                            {isSelected && <span className="h-4 w-1 bg-white"></span>}
+                            <span className="truncate">{sub.name}</span>
+                          </div>
+                          {isSelected && <Check className="h-3 w-3" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
-    </div>
     </div>
   );
 }
@@ -194,7 +200,7 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
   }, [activeSubDeptIds, activeSubDepartments]);
 
   return (
-    <div className="border-b border-slate-200 bg-white px-8 py-6 antialiased flex flex-col justify-center">
+    <div className="border-b border-slate-200 bg-white px-8 py-5 antialiased flex flex-col justify-center">
       <div className="flex items-center justify-between">
         <div onClick={() => setIsReportDialogOpen(true)} className="group cursor-pointer min-w-0 flex flex-col gap-1.5">
           <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight truncate group-hover:text-blue-600 transition-colors leading-none">
@@ -209,18 +215,6 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-
-          <ReportColumnVisibilityDialog
-            columns={columns}
-            visibleColumnIds={visibleColumnIds}
-            setVisibleColumnIds={setVisibleColumnIds}
-            showTimeTrackingColumns={showTimeTrackingColumns}
-            setShowTimeTrackingColumns={setShowTimeTrackingColumns}
-            showDocRequirementsColumns={showDocRequirementsColumns}
-            setShowDocRequirementsColumns={setShowDocRequirementsColumns}
-          />
-
-          <div className="h-6 w-px bg-slate-200 mx-1" />
 
           <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-full border border-slate-200">
             <button onClick={() => setView('standard')} className={cn(
@@ -241,6 +235,17 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
             </button>
           </div>
 
+          <div className="h-6 w-px bg-slate-200 mx-1" />
+
+          <ReportColumnVisibilityDialog
+            columns={columns}
+            visibleColumnIds={visibleColumnIds}
+            setVisibleColumnIds={setVisibleColumnIds}
+            showTimeTrackingColumns={showTimeTrackingColumns}
+            setShowTimeTrackingColumns={setShowTimeTrackingColumns}
+            showDocRequirementsColumns={showDocRequirementsColumns}
+            setShowDocRequirementsColumns={setShowDocRequirementsColumns}
+          />
           <div className="h-6 w-px bg-slate-200 mx-1" />
 
           <DropdownMenu>
@@ -292,9 +297,9 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
   const currentSubDept = (activeSubDepartments || []).find((s: any) => s.id.toString() === (activeSubDeptIds[0] || activeSubDepartments?.[0]?.id.toString()));
 
   return (
-    <div className="bg-white border-b border-slate-200 antialiased flex flex-col">
+    <div className="border-b border-slate-200 antialiased flex flex-col">
       {/* Tier 1: Toolbar Row */}
-      <div className="px-8 py-4 flex items-center justify-between gap-4">
+      <div className="px-8 py-4 flex items-center justify-between gap-4 border-b border-t border-slate-200">
         {/* Left: Global Search */}
         <div className="relative group w-[320px]">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -302,7 +307,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
             placeholder="Search employee, ID, department..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full h-10 pl-11 pr-10 bg-white border-slate-300 rounded-full text-[13px] font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
+            className="w-full h-10 pl-11 pr-10 bg-white border-slate-300 rounded-full text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
           />
           {searchQuery && (
             <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors">
@@ -315,9 +320,9 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
         <div className="flex items-center gap-2.5">
           <div className="flex items-center gap-0.5 bg-slate-100 p-1 rounded-full border border-slate-200 shrink-0">
             {[
-              { id: 'overview', label: 'Overview' },
-              { id: 'officers', label: 'Officers' },
-              { id: 'managers', label: 'Managers' }
+              { id: 'overview', label: 'Overview', activeBg: 'bg-white', activeText: 'text-blue-600' },
+              { id: 'officers', label: 'Officers', activeBg: 'bg-white', activeText: 'text-blue-600' },
+              { id: 'managers', label: 'Managers', activeBg: 'bg-white', activeText: 'text-blue-600' }
             ].map(p => (
               <button
                 key={p.id}
@@ -325,7 +330,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                 className={cn(
                   "h-8 px-4 text-sm font-bold rounded-full transition-all flex items-center gap-2 ",
                   activePerspective === p.id
-                    ? "bg-white text-blue-600 shadow-sm"
+                    ? `${p.activeBg} ${p.activeText} shadow-sm`
                     : "text-slate-500 hover:text-slate-800"
                 )}
               >
@@ -363,7 +368,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
               <Button
                 variant="outline"
                 className={cn(
-                  "h-10 px-5 rounded-full border-blue-500 text-[13px] font-semibold text-blue-600 bg-white hover:bg-blue-50 shrink-0",
+                  "h-10 px-5 rounded-full border-blue-500 text-sm font-semibold text-blue-600 bg-white hover:bg-blue-50 shrink-0",
                   (activeClassId !== 'all') && "bg-blue-600 text-white hover:bg-blue-700 hover:text-white"
                 )}
               >
@@ -382,7 +387,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                 <div className="space-y-1.5">
                   <label className="text-sm font-black text-slate-400 uppercase tracking-widest ml-1">Task Class</label>
                   <Select value={activeClassId} onValueChange={v => { setActiveClassId(v); setActiveSubClassId('all'); }}>
-                    <SelectTrigger className="h-10 rounded-xl font-bold border-slate-200 text-[13px]">
+                    <SelectTrigger className="h-10 rounded-xl font-bold border-slate-200 text-sm">
                       <SelectValue placeholder="All Classes" />
                     </SelectTrigger>
                     <SelectContent className="rounded-xl">
@@ -397,7 +402,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                   <div className="space-y-1.5 animate-in slide-in-from-top-2 duration-200">
                     <label className="text-sm font-black text-slate-400 uppercase tracking-widest ml-1">Sub-Class</label>
                     <Select value={activeSubClassId} onValueChange={setActiveSubClassId}>
-                      <SelectTrigger className="h-10 rounded-xl font-bold border-slate-200 text-[13px]">
+                      <SelectTrigger className="h-10 rounded-xl font-bold border-slate-200 text-sm">
                         <SelectValue placeholder="All Sub-classes" />
                       </SelectTrigger>
                       <SelectContent className="rounded-xl">
@@ -424,7 +429,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
             variant="outline"
             onClick={refreshData}
             disabled={loading}
-            className="h-10 px-5 rounded-full border-slate-200 text-[13px] font-medium text-slate-700 bg-white hover:bg-slate-50 shrink-0"
+            className="h-10 px-5 rounded-full border-slate-200 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 shrink-0"
           >
             <RotateCcw className={cn("h-4 w-4 mr-2 text-slate-400", loading && "animate-spin")} /> Refresh
           </Button>
@@ -433,7 +438,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
 
       {/* Tier 1.5: Assignee Pills with Counts */}
       {(isOfficer || isManager) && (
-        <div className="px-8 pb-3 flex flex-wrap items-center gap-1.5">
+        <div className="px-8 py-4 flex flex-wrap items-center gap-1.5">
           <div className={cn(
             "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-black uppercase font-bold mr-1 shrink-0",
             isOfficer ? "bg-blue-50 text-blue-600 border border-blue-100" : "bg-violet-50 text-violet-600 border border-violet-100"
@@ -513,17 +518,54 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
   );
 }
 
-export function StatusFilterBar({ activeStatus, setActiveStatus, allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount }: any) {
-  const counts = { all: allTasksCount || 0, wip: wipTasksCount || 0, write_up_completed: writeUpCompletedCount || 0, endorsed: endorsedCount || 0, cancelled: cancelledCount || 0 };
-  const tabs = [
-    { id: 'all', label: 'All Tasks', color: 'bg-blue-600' },
-    { id: 'wip', label: 'WIP', color: 'bg-amber-500' },
-    { id: 'write_up_completed', label: 'Write-up Completed', color: 'bg-emerald-600' },
-    { id: 'endorsed', label: 'Endorsed', color: 'bg-violet-600' },
+export function KpiSummaryCards({ allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount }: any) {
+  const cards = [
+    { label: 'ALL TASKS', value: allTasksCount || 0, icon: Layers, iconBg: 'bg-blue-500', cardBg: 'bg-blue-50/60 border-blue-100', valueColor: 'text-blue-700', accentBorder: 'border-l-blue-500' },
+    { label: 'WIP', value: wipTasksCount || 0, icon: Clock, iconBg: 'bg-amber-500', cardBg: 'bg-amber-50/60 border-amber-100', valueColor: 'text-amber-700', accentBorder: 'border-l-amber-500' },
+    { label: 'WRITE-UP COMPLETED', value: writeUpCompletedCount || 0, icon: Check, iconBg: 'bg-emerald-500', cardBg: 'bg-emerald-50/60 border-emerald-100', valueColor: 'text-emerald-700', accentBorder: 'border-l-emerald-500' },
+    { label: 'ENDORSED', value: endorsedCount || 0, icon: Sparkles, iconBg: 'bg-teal-500', cardBg: 'bg-teal-50/60 border-teal-100', valueColor: 'text-teal-700', accentBorder: 'border-l-teal-500' },
   ];
 
   return (
-    <div className="px-8 pt-3 pb-0 flex items-center border-b border-slate-200 bg-[#FAFAFC] antialiased">
+    <div className="px-8 pt-4 pb-2 flex items-center gap-4">
+      {cards.map((card) => {
+        const Icon = card.icon;
+        return (
+          <div
+            key={card.label}
+            className={cn(
+              "flex-1 flex items-center gap-4 px-5 py-4 rounded-xl border border-l-4 transition-all hover:shadow-sm",
+              card.cardBg,
+              card.accentBorder
+            )}
+          >
+            <div className={cn("h-10 w-10 rounded-lg flex items-center justify-center shrink-0", card.iconBg)}>
+              <Icon className="h-5 w-5 text-white" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{card.label}</span>
+              <span className={cn("text-2xl font-black tabular-nums leading-none mt-0.5", card.valueColor)}>
+                {card.value.toLocaleString()}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function StatusFilterBar({ activeStatus, setActiveStatus, allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount }: any) {
+  const counts = { all: allTasksCount || 0, wip: wipTasksCount || 0, write_up_completed: writeUpCompletedCount || 0, endorsed: endorsedCount || 0, cancelled: cancelledCount || 0 };
+  const tabs = [
+    { id: 'all', label: 'All Tasks', color: 'bg-blue-600', lightBg: 'bg-blue-50', lightText: 'text-blue-700', ringColor: 'ring-blue-200' },
+    { id: 'wip', label: 'WIP', color: 'bg-amber-500', lightBg: 'bg-amber-50', lightText: 'text-amber-700', ringColor: 'ring-amber-200' },
+    { id: 'write_up_completed', label: 'Write-up Completed', color: 'bg-emerald-600', lightBg: 'bg-emerald-50', lightText: 'text-emerald-700', ringColor: 'ring-emerald-200' },
+    { id: 'endorsed', label: 'Endorsed', color: 'bg-violet-600', lightBg: 'bg-violet-50', lightText: 'text-violet-700', ringColor: 'ring-violet-200' },
+  ];
+
+  return (
+    <div className="px-8 py-4 pb-0 flex items-center border-b border-slate-200 antialiased">
       <div className="flex gap-1">
         {tabs.map(s => {
           const isActive = activeStatus === s.id;

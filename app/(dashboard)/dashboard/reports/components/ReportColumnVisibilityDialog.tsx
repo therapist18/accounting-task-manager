@@ -89,7 +89,7 @@ export function ReportColumnVisibilityDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="h-10 px-5 rounded-full border-slate-200 text-[13px] font-bold text-slate-700 bg-white hover:bg-slate-50 shrink-0 gap-2">
+        <Button variant="outline" className="h-10 px-5 rounded-full border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 shrink-0 gap-2">
           <Eye className="h-4 w-4" />
           Columns
         </Button>

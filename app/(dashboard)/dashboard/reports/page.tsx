@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
 import { ReportColumnVisibilityDialog } from "./components/ReportColumnVisibilityDialog";
-import { ReportsSidebar, ReportsHeader, PersonFilterStrip, StatusFilterBar } from "./components/ReportsHeader";
+import { ReportsSidebar, ReportsHeader, PersonFilterStrip, StatusFilterBar, KpiSummaryCards } from "./components/ReportsHeader";
 
 const SPECIAL_STAGE_IDS = [
   '072b9710-45df-4a05-ba65-01b4ef29d61d',
@@ -72,7 +72,7 @@ const safeRender = (content: any) => {
     return content;
   }
   if (typeof content === 'number') return content;
-    if (content === null || content === undefined) return <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">—</span>;
+  if (content === null || content === undefined) return <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">—</span>;
   if (Array.isArray(content)) return content.map((c, i) => <React.Fragment key={i}>{safeRender(c)}</React.Fragment>);
   if (typeof content === 'object') {
     if ('status' in content) {
@@ -2446,7 +2446,7 @@ export default function ReportsPage() {
     );
   }
 
-  return ( 
+  return (
     <div className="flex flex-1 overflow-hidden">
       {/* 1. Sidebar */}
       <ReportsSidebar
@@ -2461,7 +2461,7 @@ export default function ReportsPage() {
       />
 
       {/* 2. Main Content Area — LAYER 3: "The Workspace" */}
-      <div className="flex flex-col flex-1 overflow-hidden bg-slate-100">
+      <div className="flex flex-col flex-1 overflow-hidden bg-white">
         {/* Header Bar */}
         <ReportsHeader
           activeReport={activeReport}
@@ -2488,8 +2488,14 @@ export default function ReportsPage() {
           cancelledCount={cancelledCount}
         />
 
-       <div className="border border-slate-200 rounded-lg shadow-sm m-4 bg-white">
-         {/* Person Filter Strip */}
+        {/* KPI Summary Cards */}
+        <KpiSummaryCards
+          allTasksCount={allTasksCount}
+          wipTasksCount={wipTasksCount}
+          writeUpCompletedCount={writeUpCompletedCount}
+          endorsedCount={endorsedCount}
+        />
+        {/* Person Filter Strip */}
         <PersonFilterStrip
           activePerspective={activePerspective}
           setActivePerspective={setActivePerspective}
@@ -2576,7 +2582,6 @@ export default function ReportsPage() {
             />
           )}
         </div>
-       </div>
       </div>
 
       <MemorizedReportDialog
