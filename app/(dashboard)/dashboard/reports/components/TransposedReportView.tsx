@@ -131,10 +131,10 @@ export function TransposedReportView({
             <TableHeader className="sticky top-0 z-30">
               {/* Context Row */}
               <TableRow className="hover:bg-transparent">
-                <TableHead className={cn("sticky left-0 z-40 bg-slate-50 border-r border-b border-slate-200", INDEX_WIDTH)} />
-                <TableHead className={cn("sticky left-[56px] z-40 bg-slate-50 border-r border-b border-slate-200 px-6 py-4", LABEL_WIDTH)}>
+                <TableHead className={cn("sticky left-0 z-40 bg-blue-100/80 border-r border-b border-blue-200", INDEX_WIDTH)} />
+                <TableHead className={cn("sticky left-[56px] z-40 bg-blue-100/80 border-r border-b border-blue-200 px-6 py-4", LABEL_WIDTH)}>
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Field Attribute</span>
+                    <span className="text-[11px] font-black text-blue-700 uppercase tracking-widest">Field Attribute</span>
                     <Button 
                       variant="outline" size="sm" 
                       onClick={() => toggleSection('task_details')}
@@ -145,10 +145,10 @@ export function TransposedReportView({
                   </div>
                 </TableHead>
                 {paginatedColumns.map(task => (
-                  <TableHead key={task.id} className={cn("bg-slate-50 border-b border-slate-200 py-4 px-4 text-center", DATA_COLUMN_WIDTH)}>
+                  <TableHead key={task.id} className={cn("bg-blue-100/80 border-b border-blue-200 py-4 px-4 text-center", DATA_COLUMN_WIDTH)}>
                      <div className="flex flex-col items-center gap-1">
                         <span className="text-[13px] font-black text-slate-900 truncate w-full">{task.applicant_name || 'Unnamed'}</span>
-                        <Badge className="bg-blue-100 text-blue-700 text-[10px] font-bold border-transparent px-2">ID: {task.id}</Badge>
+                        <Badge className="bg-blue-600 text-white text-[10px] font-bold border-transparent px-2">ID: {task.id}</Badge>
                      </div>
                   </TableHead>
                 ))}
@@ -173,11 +173,11 @@ export function TransposedReportView({
               {bodyRows.map((row, rIdx) => {
                 if (row.type === 'section_header') {
                   return (
-                    <TableRow key={row.id} className="bg-slate-50/80 hover:bg-slate-50 border-y border-slate-200">
+                    <TableRow key={row.id} className="bg-blue-50/80 hover:bg-blue-50 border-y border-blue-200">
                       <TableCell colSpan={paginatedColumns.length + 2} className="p-0">
                         <div className="flex items-center justify-between px-6 py-3 sticky left-0 w-max min-w-full border-l-4 border-l-blue-500">
                            <div className="flex items-center gap-3">
-                              <div className="h-8 w-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center">
+                              <div className="h-8 w-8 rounded-lg bg-blue-600 text-white flex items-center justify-center">
                                  {row.icon ? <row.icon size={16}/> : <Layers size={16}/>}
                               </div>
                               <span className="text-[13px] font-bold text-slate-900 tracking-tight">{row.label}</span>

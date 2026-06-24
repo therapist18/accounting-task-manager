@@ -431,7 +431,7 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
       }
     }
     if (logic === 'all' && collectedValues.length > 0) {
-      return collectedValues.join(', ');
+      return collectedValues.join(' ');
     }
     if (fieldDef.default_value && fieldDef.default_value !== 'Missing') return fieldDef.default_value;
     return "Missing";

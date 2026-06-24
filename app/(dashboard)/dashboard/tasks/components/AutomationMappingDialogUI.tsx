@@ -9,7 +9,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import {
   Loader2, Zap, User, Database, FileText, Webhook, ChevronRight, AlertCircle,
   CheckCircle2, Edit3, X, Paperclip, ArrowUpDown, Filter, Check,
-  List, ChevronDown, HelpCircle, Eye, Lock, Settings, Activity, Clock
+  List, ChevronDown, ChevronUp, Eye, Lock, Settings, Activity, Clock
 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -23,14 +23,14 @@ import { ExtractionPreview } from "@/components/ExtractionPreview";
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { isValidValue, ETA_SCREENSHOT_DOCUMENT_ID } from '../utils/AutomationMappingDialog';
 
-// Refined colors to match the new aesthetic
+// Softened colors for entity tags to reduce visual noise
 const ENTITY_TYPE_COLORS: Record<string, string> = {
-  principal: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-  dependant: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200',
-  sponsor: 'bg-amber-50 text-amber-700 border-amber-200',
-  director: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  company: 'bg-slate-100 text-slate-700 border-slate-200',
-  understudy: 'bg-cyan-50 text-cyan-700 border-cyan-200',
+  principal: 'bg-blue-50 text-blue-700',
+  dependant: 'bg-slate-100 text-slate-600',
+  sponsor: 'bg-slate-100 text-slate-600',
+  director: 'bg-slate-100 text-slate-600',
+  company: 'bg-slate-100 text-slate-600',
+  understudy: 'bg-slate-100 text-slate-600',
 };
 
 interface AutomationMappingDialogUIProps {
@@ -89,7 +89,7 @@ interface AutomationMappingDialogUIProps {
   setShowPreviewModal: (val: boolean) => void;
   previewingDocuments: any;
   setPreviewingDocuments: (val: any) => void;
-  supabase: any; // Assuming passed for ExtractionPreview
+  supabase: any;
 }
 
 export const AutomationMappingDialogUI = ({
@@ -109,16 +109,32 @@ export const AutomationMappingDialogUI = ({
   showPreviewModal, setShowPreviewModal, previewingDocuments, setPreviewingDocuments, supabase
 }: AutomationMappingDialogUIProps) => {
 
+  const arrayFieldNames = useMemo(() =>
+    sortedFields.filter(f => f.fieldType === 'array').map(f => f.variableName),
+    [sortedFields]);
+
+  const allExpanded = arrayFieldNames.length > 0 && arrayFieldNames.every(name => expandedArrayFields.has(name));
+
+  const handleToggleAllArrays = () => {
+    arrayFieldNames.forEach(name => {
+      if (allExpanded && expandedArrayFields.has(name)) {
+        toggleArrayFieldExpansion(name);
+      } else if (!allExpanded && !expandedArrayFields.has(name)) {
+        toggleArrayFieldExpansion(name);
+      }
+    });
+  };
+
   const renderFieldsTable = () => {
     if (!activeWebEntry?.fields || activeWebEntry.fields.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center h-full opacity-50">
-          <Database className="w-16 h-16 mb-4 text-slate-300" />
-          <p className="text-lg font-bold text-slate-400">No fields configured for this automation.</p>
+          <Database className="w-12 h-12 mb-4 text-slate-300" />
+          <p className="text-base font-medium text-slate-500">No fields configured for this automation.</p>
         </div>
       );
     }
-    
+
     const entityGroupStats = (() => {
       const groups: Record<string, { total: number; filled: number; missing: number; defaultCount: number }> = {};
       processedFields.forEach(f => {
@@ -136,83 +152,79 @@ export const AutomationMappingDialogUI = ({
 
     return (
       <div className="flex flex-col h-full bg-white relative">
-        {/* Stats Sub-Header */}
-        <div className="px-6 py-3 border-b border-slate-100 flex flex-wrap gap-3 bg-slate-50/60 sticky top-0 z-20">
-          {Object.entries(entityGroupStats).map(([key, stats]) => {
-            const pct = Math.round((stats.filled / stats.total) * 100);
-            const allDone = stats.missing === 0;
-            return (
-              <div key={key} className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs shadow-sm",
-                allDone ? "bg-emerald-50 border-emerald-200" : "bg-white border-slate-200"
-              )}>
-                <div className="flex flex-wrap gap-1">
-                  {key.split(', ').map(t => (
-                    <span key={t} className={cn(
-                      "text-[9px] px-1.5 py-0.5 rounded-md uppercase font-bold tracking-wider",
-                      ENTITY_TYPE_COLORS[t] || 'bg-slate-100 text-slate-600 border border-slate-200'
-                    )}>{t}</span>
-                  ))}
-                </div>
-                <div className="flex items-center gap-1.5 border-l border-slate-200 pl-2 ml-1">
-                  <div className="w-12 h-1.5 bg-slate-100 rounded-full overflow-hidden inset-shadow-sm">
-                    <div className={cn("h-full rounded-full transition-all", allDone ? "bg-emerald-500" : "bg-amber-500")} style={{ width: `${pct}%` }} />
+        {/* Simplified Stats Sub-Header */}
+        <div className="px-6 py-2 border-b border-slate-200 flex flex-wrap gap-6 bg-slate-50/50 sticky top-0 z-20 items-center min-h-[48px]">
+          <div className="flex flex-wrap gap-4 flex-1">
+            {Object.entries(entityGroupStats).map(([key, stats]) => {
+              const pct = Math.round((stats.filled / stats.total) * 100);
+              const allDone = stats.missing === 0;
+              return (
+                <div key={key} className="flex items-center gap-2 text-sm uppercase tracking-wide">
+                  <span className="font-medium text-slate-700">{key}</span>
+                  <div className="w-12 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                    <div className={cn("h-full rounded-full transition-all", allDone ? "bg-emerald-500" : "bg-blue-500")} style={{ width: `${pct}%` }} />
                   </div>
-                  <span className={cn("font-bold text-[10px]", allDone ? "text-emerald-700" : "text-amber-700")}>{pct}%</span>
+                  <span className={cn("font-medium text-xs", allDone ? "text-emerald-600" : "text-slate-500")}>{pct}%</span>
+                  {stats.defaultCount > 0 && (
+                    <span className="text-xs text-slate-400 flex items-center ml-1">
+                      <Lock className="h-3 w-3 mr-0.5" />{stats.defaultCount}
+                    </span>
+                  )}
                 </div>
-                {stats.defaultCount > 0 && (
-                  <span className="text-[10px] text-slate-400 font-semibold flex items-center gap-0.5 ml-1">
-                    <Lock className="h-3 w-3" />{stats.defaultCount}
-                  </span>
-                )}
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="text-sm font-medium text-slate-600 flex items-center gap-1.5">
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+              {processedFields.filter(f => !f.isMissing).length}/{processedFields.length} Ready
+            </div>
+            {processedFields.filter(f => f.isMissing).length > 0 && (
+              <div className="text-sm font-medium text-red-500 flex items-center gap-1.5 ml-2">
+                <span className="inline-block w-2 h-2 rounded-full bg-red-500"></span>
+                {processedFields.filter(f => f.isMissing).length} Missing
               </div>
-            );
-          })}
-          <div className="ml-auto flex items-center gap-4">
-             <div className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
-               <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
-               {processedFields.filter(f => !f.isMissing).length}/{processedFields.length} Ready
-             </div>
-             {processedFields.filter(f => f.isMissing).length > 0 && (
-               <div className="text-[11px] font-bold text-rose-500 flex items-center gap-1.5">
-                 <span className="inline-block w-2 h-2 rounded-full bg-rose-500"></span>
-                 {processedFields.filter(f => f.isMissing).length} Missing
-               </div>
-             )}
-             <div className="h-4 w-px bg-slate-300 mx-1" />
+            )}
+            <div className="h-4 w-px bg-slate-300 mx-2" />
+
+            {arrayFieldNames.length > 0 && (
+              <Button variant="outline" size="sm" onClick={handleToggleAllArrays} className="h-8 text-sm font-medium text-slate-600">
+                {allExpanded ? <ChevronUp className="h-4 w-4 mr-1.5" /> : <ChevronDown className="h-4 w-4 mr-1.5" />}
+                {allExpanded ? "Collapse Arrays" : "Expand Arrays"}
+              </Button>
+            )}
+
             <Button
               variant={sortMissingFirst ? "default" : "outline"}
               size="sm"
               onClick={() => setSortMissingFirst(!sortMissingFirst)}
-              className={cn(
-                "h-7 text-[10px] font-bold uppercase tracking-wider px-3",
-                sortMissingFirst ? "bg-indigo-600 hover:bg-indigo-700 text-white" : "border-slate-300 text-slate-600 hover:bg-slate-50"
-              )}
+              className={cn("h-8 text-sm font-medium", sortMissingFirst ? "bg-blue-600 text-white" : "text-slate-600")}
             >
-              <Filter className="h-3 w-3 mr-1.5" />
+              <Filter className="h-3.5 w-3.5 mr-1.5" />
               {sortMissingFirst ? "Show All" : "Missing First"}
             </Button>
           </div>
         </div>
 
-        {/* Table Area */}
+        {/* Clean Table Area */}
         <div className="flex-1 overflow-y-auto custom-scrollbar relative">
           <Table className="w-full border-collapse">
-            <TableHeader className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm shadow-[0_1px_3px_rgba(0,0,0,0.05)] border-b border-slate-200">
+            <TableHeader className="sticky top-0 z-10 bg-blue-600 shadow-sm border-b border-slate-200">
               <TableRow className="hover:bg-transparent">
-                <TableHead className="w-12 px-4 py-3 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest border-r border-slate-100">#</TableHead>
-                <TableHead className="w-80 px-6 py-3 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest border-r border-slate-100">Target Variable</TableHead>
-                <TableHead className="px-6 py-3 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest border-r border-slate-100">Source Logic</TableHead>
+                <TableHead className="w-12 px-4 py-3 text-center text-sm border-r font-semibold text-white">#</TableHead>
+                <TableHead className="w-80 px-6 py-3 text-left text-sm border-r font-semibold text-white">Target Variable</TableHead>
+                <TableHead className="px-6 py-3 text-left text-sm border-r font-semibold text-white">Source Logic</TableHead>
                 <TableHead
-                  className="w-48 px-6 py-3 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest border-r border-slate-100 cursor-pointer select-none hover:bg-slate-50 transition-colors group"
+                  className="w-48 px-6 py-3 text-left text-sm border-r font-semibold text-white cursor-pointer select-none hover:bg-slate-50 transition-colors group"
                   onClick={() => setEntitySort(prev => prev === 'asc' ? 'desc' : prev === 'desc' ? null : 'asc')}
                 >
                   <div className="flex items-center justify-between">
                     Entities
-                    <ArrowUpDown className={cn("h-3.5 w-3.5 shrink-0 transition-colors", entitySort ? "text-indigo-600" : "text-slate-300 group-hover:text-slate-400")} />
+                    <ArrowUpDown className={cn("h-3.5 w-3.5 shrink-0 transition-colors", entitySort ? "text-blue-600" : "text-slate-300 group-hover:text-slate-400")} />
                   </div>
                 </TableHead>
-                <TableHead className="px-6 py-3 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Current Value</TableHead>
+                <TableHead className="px-6 py-3 text-left text-sm border-r font-semibold text-white">Current Value</TableHead>
               </TableRow>
             </TableHeader>
 
@@ -224,30 +236,33 @@ export const AutomationMappingDialogUI = ({
                 const fieldGroupKey = (field.entityTypes && field.entityTypes.length > 0)
                   ? field.entityTypes.slice().sort().join(', ')
                   : '—';
-                
+
                 const showGroupHeader = !entitySort && fieldGroupKey !== lastGroupKey;
                 if (showGroupHeader) lastGroupKey = fieldGroupKey;
-                
+
                 const groupFieldsTotal = showGroupHeader ? sortedFields.filter(f => {
                   const k = (f.entityTypes && f.entityTypes.length > 0) ? f.entityTypes.slice().sort().join(', ') : '—';
                   return k === fieldGroupKey;
                 }).length : 0;
-                
+
                 const groupFieldsFilled = showGroupHeader ? sortedFields.filter(f => {
                   const k = (f.entityTypes && f.entityTypes.length > 0) ? f.entityTypes.slice().sort().join(', ') : '—';
                   return k === fieldGroupKey && !f.isMissing;
                 }).length : 0;
 
                 const groupHeaderRow = showGroupHeader ? (
-                  <TableRow key={`group-${fieldGroupKey}-${fIdx}`} className="bg-indigo-50/40 hover:bg-indigo-50/40">
-                    <TableCell colSpan={5} className="px-6 py-2 border-y border-indigo-100/50">
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1.5 text-[9px] font-black text-indigo-500 uppercase tracking-[0.15em]">
-                          <Database className="w-3.5 h-3.5" /> {fieldGroupKey.replace(/, /g, ' & ')}
+                  <TableRow key={`group-${fieldGroupKey}-${fIdx}`} className="bg-blue-50 hover:bg-slate-50">
+                    <TableCell colSpan={5} className="px-6 py-2 border-y border-slate-200">
+                      <div className="gap-2 flex">
+                        <div className="h-6 w-1 bg-blue-600 rounded-md"></div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-semibold text-slate-700 uppercase tracking-wide">
+                            {fieldGroupKey.replace(/, /g, ' & ')}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            ({groupFieldsFilled}/{groupFieldsTotal} Complete)
+                          </span>
                         </div>
-                        <span className="text-[10px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-200">
-                          {groupFieldsFilled}/{groupFieldsTotal} Complete
-                        </span>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -265,30 +280,30 @@ export const AutomationMappingDialogUI = ({
                       {groupHeaderRow}
                       <TableRow
                         className={cn(
-                           "transition-colors cursor-pointer group border-b border-slate-200",
-                           isExpanded ? "bg-indigo-50/20 hover:bg-indigo-50/40" : "bg-white hover:bg-slate-50/50"
+                          "transition-colors cursor-pointer group",
+                          isExpanded ? "bg-slate-50" : "bg-white hover:bg-slate-50/50"
                         )}
                         onClick={() => toggleArrayFieldExpansion(field.variableName)}
                       >
-                        <TableCell className="px-4 py-3.5 text-center text-[11px] font-bold text-slate-400 border-r border-slate-100">
-                           {isExpanded ? <ChevronDown className="h-4 w-4 mx-auto text-indigo-500" /> : <ChevronRight className="h-4 w-4 mx-auto text-slate-400 group-hover:text-indigo-400 transition-colors" />}
+                        <TableCell className="px-4 py-3 text-center text-sm font-medium text-slate-400 border-r">
+                          {isExpanded ? <ChevronDown className="h-4 w-4 mx-auto text-slate-600" /> : <ChevronRight className="h-4 w-4 mx-auto text-slate-400 group-hover:text-slate-600 transition-colors" />}
                         </TableCell>
-                        <TableCell colSpan={4} className="px-6 py-3.5">
+                        <TableCell colSpan={4} className="px-6 py-3 border-r">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                              <div className="bg-indigo-100/80 p-1.5 rounded-md text-indigo-600 shadow-sm"><List className="h-3.5 w-3.5" /></div>
-                              <span className="text-xs font-bold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
+                              <List className="h-4 w-4 text-slate-400" />
+                              <span className="text-sm font-medium text-slate-900">{field.efnsDisplayName || field.variableName}</span>
                               <div className="flex flex-wrap gap-1 ml-2">
                                 {(field.entityTypes || []).map(type => (
-                                  <Badge key={type} variant="outline" className={cn("text-[9px] h-5 px-1.5 uppercase font-bold tracking-wider", ENTITY_TYPE_COLORS[type] || 'bg-slate-50 text-slate-600 border-slate-200')}>
+                                  <span key={type} className={cn("text-xs px-2 py-0.5 rounded-full font-medium", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-600')}>
                                     {type}
-                                  </Badge>
+                                  </span>
                                 ))}
                               </div>
                             </div>
-                            <Badge className="bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border-indigo-200 font-bold text-[10px] px-2 shadow-sm">
+                            <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
                               {arrayData.length} Items
-                            </Badge>
+                            </span>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -322,30 +337,27 @@ export const AutomationMappingDialogUI = ({
                           }
 
                           return (
-                            <TableRow key={uniqueKey} className={cn("group border-b border-slate-100", isItemEditing ? "bg-indigo-50/50" : "bg-slate-50/30 hover:bg-slate-50")}>
-                              <TableCell className="px-4 py-2 text-center text-[10px] font-mono font-semibold text-slate-400 border-r border-slate-100 relative">
-                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-100"></div>
+                            <TableRow key={uniqueKey} className={cn("group", isItemEditing ? "bg-blue-50/50" : "bg-white hover:bg-slate-50")}>
+                              <TableCell className="px-4 py-2 text-center text-xs text-slate-400 border-r">
                                 {rowIndex + 1}.{colIndex + 1}
                               </TableCell>
-                              <TableCell className="px-6 py-2 border-r border-slate-100 relative">
-                                <div className="flex items-center gap-2 pl-4 relative">
-                                  <div className="absolute left-0 top-1/2 w-3 h-px bg-indigo-200"></div>
-                                  <span className="text-[11px] text-slate-700 font-semibold">{colItem.displayName || colItem.variableName}</span>
-                                </div>
+                              <TableCell className="px-6 py-2 pl-12 relative border-r">
+                                <div className="absolute left-6 top-1/2 w-4 h-px bg-slate-200"></div>
+                                <span className="text-sm text-slate-700">{colItem.displayName || colItem.variableName}</span>
                               </TableCell>
-                              <TableCell className="px-6 py-2 border-r border-slate-100">
-                                <Badge variant="outline" className="text-[9px] h-5 uppercase font-bold tracking-wider text-slate-500 bg-white">{colItem.sourceLogic || 'priority'}</Badge>
+                              <TableCell className="px-6 py-2 border-r">
+                                <span className="text-xs text-slate-500">{colItem.sourceLogic || 'Priority'}</span>
                               </TableCell>
-                              <TableCell className="px-6 py-2 border-r border-slate-100">
+                              <TableCell className="px-6 py-2 border-r">
                                 <div className="flex flex-wrap gap-1">
                                   {(colItem.entityTypes || field.entityTypes || []).map(type => (
-                                    <Badge key={type} variant="outline" className={cn("text-[8px] h-4 px-1.5 uppercase font-bold tracking-wider", ENTITY_TYPE_COLORS[type] || 'bg-slate-50 text-slate-600')}>
+                                    <span key={type} className={cn("text-xs px-2 py-0.5 rounded-full font-medium", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-600')}>
                                       {type}
-                                    </Badge>
+                                    </span>
                                   ))}
                                 </div>
                               </TableCell>
-                              <TableCell className="px-6 py-1.5">
+                              <TableCell className="px-6 py-1.5 border-r">
                                 {isItemEditing ? (
                                   <div className="flex items-center gap-2">
                                     {isDropdown ? (
@@ -354,7 +366,7 @@ export const AutomationMappingDialogUI = ({
                                         onValueChange={(val) => setEditValue(val)}
                                         options={normalizedOptions}
                                         placeholder="Select..."
-                                        buttonClassName="h-8 text-xs border-indigo-400 ring-2 ring-indigo-100 w-full bg-white shadow-sm"
+                                        buttonClassName="h-8 text-sm border-blue-300 w-full bg-white"
                                       />
                                     ) : (
                                       <Input
@@ -362,11 +374,11 @@ export const AutomationMappingDialogUI = ({
                                         value={editValue}
                                         onChange={e => setEditValue(e.target.value)}
                                         onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }}
-                                        className="h-8 text-xs border-indigo-400 ring-2 ring-indigo-100 shadow-sm"
+                                        className="h-8 text-sm border-blue-300"
                                       />
                                     )}
-                                    <Button size="icon" onClick={() => saveEdit(isDropdown, normalizedOptions)} className="h-8 w-8 bg-emerald-600 hover:bg-emerald-700 shrink-0 shadow-sm rounded-lg"><Check className="h-4 w-4" /></Button>
-                                    <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-rose-500 hover:bg-rose-50 shrink-0 rounded-lg"><X className="h-4 w-4" /></Button>
+                                    <Button size="icon" onClick={() => saveEdit(isDropdown, normalizedOptions)} className="h-8 w-8 bg-emerald-600 hover:bg-emerald-700 shrink-0 rounded-md"><Check className="h-4 w-4" /></Button>
+                                    <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-slate-400 hover:bg-slate-100 shrink-0 rounded-md"><X className="h-4 w-4" /></Button>
                                   </div>
                                 ) : (
                                   (() => {
@@ -379,40 +391,36 @@ export const AutomationMappingDialogUI = ({
                                         <Popover>
                                           <PopoverTrigger asChild>
                                             <div className={cn(
-                                              "text-[11px] h-7 flex items-center px-2.5 rounded-md cursor-pointer border border-dashed transition-colors shadow-sm",
-                                              isItemMissing ? "border-rose-300 bg-rose-50/50 text-rose-600 font-bold" : "border-indigo-200 bg-white hover:border-indigo-400 text-slate-900 font-medium"
+                                              "text-sm h-8 flex items-center px-2.5 rounded-md cursor-pointer border border-transparent transition-colors",
+                                              isItemMissing ? "text-red-500 font-medium" : "text-slate-800 hover:bg-slate-100"
                                             )}>
                                               <span className="truncate flex-1">{isItemMissing ? 'Missing Value' : rawValue}</span>
-                                              <ChevronDown className="h-3.5 w-3.5 ml-2 text-indigo-400 shrink-0" />
+                                              <ChevronDown className="h-3.5 w-3.5 ml-2 text-slate-400 shrink-0" />
                                             </div>
                                           </PopoverTrigger>
-                                          <PopoverContent className="w-80 p-0 shadow-xl border-indigo-100 rounded-xl overflow-hidden" align="end">
+                                          <PopoverContent className="w-80 p-0 shadow-lg border-slate-200 rounded-lg overflow-hidden" align="end">
                                             <div className="p-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
-                                              <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Array Sources</span>
-                                              <Badge className="text-[9px] h-5 bg-indigo-100 text-indigo-700 hover:bg-indigo-100 uppercase tracking-wider">{colItem.sourceLogic || 'priority'}</Badge>
+                                              <span className="text-xs font-semibold text-slate-600">Array Sources</span>
+                                              <span className="text-xs text-slate-500">{colItem.sourceLogic || 'Priority'}</span>
                                             </div>
-                                            <div className="p-1.5 space-y-1 bg-white">
-                                              {/* Source rendering identical logic but updated styles */}
+                                            <div className="p-1 space-y-1 bg-white">
                                               {mIds.map((mid, mIdx) => {
                                                 const mDef = jobFields[String(mid)];
                                                 const mSource = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
                                                 const val = getFieldValue(String(mid), String(row.entityId));
                                                 return (
-                                                  <div key={`am-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-200 group transition-all">
+                                                  <div key={`am-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-md border border-transparent group transition-all">
                                                     <div className="flex flex-col min-w-0">
-                                                      <span className="text-[9px] font-bold text-indigo-600 flex items-center gap-1 uppercase tracking-widest mb-0.5">
-                                                        <Database className="h-2.5 w-2.5" /> Source {mIdx + 1}
-                                                      </span>
-                                                      <span className="text-xs font-bold truncate text-slate-800">{mDef?.label}</span>
-                                                      <span className="text-[10px] text-slate-500 italic truncate mt-0.5">{isValidValue(val) ? val : 'Empty'}</span>
+                                                      <span className="text-xs font-medium text-slate-500 mb-0.5">Source {mIdx + 1}</span>
+                                                      <span className="text-sm text-slate-800 truncate">{mDef?.label}</span>
+                                                      <span className="text-xs text-slate-400 truncate mt-0.5">{isValidValue(val) ? val : 'Empty'}</span>
                                                     </div>
-                                                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-indigo-600 hover:bg-indigo-50 rounded-md" onClick={() => mSource && startEditing(uniqueKey, mIdx, mSource.table, mSource.path, isValidValue(val) ? val : '', row.entityId, mSource.linking_variable)}>
+                                                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-blue-600 hover:bg-blue-50 rounded-md" onClick={() => mSource && startEditing(uniqueKey, mIdx, mSource.table, mSource.path, isValidValue(val) ? val : '', row.entityId, mSource.linking_variable)}>
                                                       <Edit3 className="h-3.5 w-3.5" />
                                                     </Button>
                                                   </div>
                                                 );
                                               })}
-                                              {/* Questions similarly... */}
                                             </div>
                                           </PopoverContent>
                                         </Popover>
@@ -421,9 +429,9 @@ export const AutomationMappingDialogUI = ({
                                       return (
                                         <div
                                           className={cn(
-                                            "text-[11px] h-7 flex items-center px-2.5 rounded-md cursor-pointer border border-transparent transition-colors",
-                                            isItemMissing ? "text-rose-600 font-bold" : "text-slate-900 font-medium",
-                                            arrayPersist && "hover:bg-indigo-50/50 hover:border-indigo-200"
+                                            "text-sm h-8 flex items-center px-2.5 rounded-md cursor-pointer border border-transparent transition-colors group",
+                                            isItemMissing ? "text-red-500 font-medium" : "text-slate-800",
+                                            arrayPersist && "hover:bg-slate-50 hover:border-slate-200"
                                           )}
                                           onClick={() => {
                                             if (!arrayPersist) return;
@@ -431,7 +439,7 @@ export const AutomationMappingDialogUI = ({
                                           }}
                                         >
                                           <span className="truncate">{isItemMissing ? 'Missing Value' : rawValue}</span>
-                                          {arrayPersist && <Edit3 className="h-3.5 w-3.5 ml-auto text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity" />}
+                                          {arrayPersist && <Edit3 className="h-3.5 w-3.5 ml-auto text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />}
                                         </div>
                                       );
                                     }
@@ -456,35 +464,35 @@ export const AutomationMappingDialogUI = ({
                   return (
                     <React.Fragment key={`doc-${fIdx}`}>
                       {groupHeaderRow}
-                      <TableRow className="group border-b border-slate-100 hover:bg-slate-50/50 bg-white">
-                        <TableCell className="px-4 py-3.5 text-center text-[11px] font-bold text-slate-400 border-r border-slate-100">{fIdx + 1}</TableCell>
-                        <TableCell className="px-6 py-3.5 border-r border-slate-100">
-                          <div className="flex items-center gap-3">
-                            <div className="p-1.5 rounded-md bg-amber-50 text-amber-600 border border-amber-100 shadow-sm"><Paperclip className="h-3.5 w-3.5" /></div>
-                            <span className="text-[11px] font-bold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
+                      <TableRow className="group bg-white hover:bg-slate-50">
+                        <TableCell className="px-4 py-3 text-center text-sm font-medium text-slate-400 border-r">{fIdx + 1}</TableCell>
+                        <TableCell className="px-6 py-3 border-r">
+                          <div className="flex items-center gap-2">
+                            <Paperclip className="h-4 w-4 text-slate-400" />
+                            <span className="text-sm font-medium text-slate-800">{field.efnsDisplayName || field.variableName}</span>
                           </div>
                         </TableCell>
-                        <TableCell className="px-6 py-3.5 border-r border-slate-100">
-                          <Badge variant="outline" className="text-[9px] border-amber-200 text-amber-700 bg-amber-50 uppercase tracking-wider font-bold">Asset Mapping</Badge>
+                        <TableCell className="px-6 py-3 border-r">
+                          <span className="text-xs text-slate-500">Asset Mapping</span>
                         </TableCell>
-                        <TableCell className="px-6 py-3.5 border-r border-slate-100">
+                        <TableCell className="px-6 py-3 border-r">
                           <div className="flex flex-wrap gap-1">
                             {(field.entityTypes || []).map(type => (
-                              <Badge key={type} variant="outline" className={cn("text-[8px] h-4 px-1.5 uppercase font-bold tracking-wider", ENTITY_TYPE_COLORS[type] || 'bg-slate-50 text-slate-600')}>
+                              <span key={type} className={cn("text-xs px-2 py-0.5 rounded-full font-medium", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-600')}>
                                 {type}
-                              </Badge>
+                              </span>
                             ))}
                           </div>
                         </TableCell>
-                        <TableCell className="px-6 py-3.5">
+                        <TableCell className="px-6 py-3 border-r">
                           {foundDoc ? (
                             <div className="flex items-center gap-3">
-                              <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-emerald-200 shadow-sm font-bold text-[10px] px-2.5 py-0.5">Available</Badge>
-                              <Button size="sm" variant="outline" onClick={() => handlePreviewDocument(foundDoc)} className="h-7 px-3 text-[10px] font-bold text-indigo-600 border-indigo-200 hover:bg-indigo-50 rounded-md">
-                                <Eye className="h-3.5 w-3.5 mr-1.5" /> View
+                              <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Available</span>
+                              <Button size="sm" variant="ghost" onClick={() => handlePreviewDocument(foundDoc)} className="h-7 px-2 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-md">
+                                <Eye className="h-3.5 w-3.5 mr-1" /> View
                               </Button>
                             </div>
-                          ) : <Badge variant="outline" className="bg-rose-50 text-rose-600 border-rose-200 shadow-sm font-bold text-[10px] px-2.5 py-0.5">Missing</Badge>}
+                          ) : <span className="text-xs font-medium text-red-500 bg-red-50 px-2 py-0.5 rounded-full">Missing</span>}
                         </TableCell>
                       </TableRow>
                     </React.Fragment>
@@ -502,7 +510,7 @@ export const AutomationMappingDialogUI = ({
                 let persistenceSource = null;
                 let editTargetId = field.targetId;
                 let fieldOptions = null;
-                
+
                 if (mIds.length > 0) {
                   const mDef = jobFields[String(mIds[0])];
                   persistenceSource = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
@@ -521,69 +529,64 @@ export const AutomationMappingDialogUI = ({
                   <React.Fragment key={`std-${fIdx}`}>
                     {groupHeaderRow}
                     <TableRow className={cn(
-                      "group border-b border-slate-100 transition-colors", 
-                      isDefaultField ? "bg-slate-50/50" : isEditing ? "bg-indigo-50/40" : (field.fieldType === 'computed' ? "bg-fuchsia-50/10 hover:bg-fuchsia-50/30" : "bg-white hover:bg-slate-50/50")
+                      "group transition-colors",
+                      isDefaultField ? "bg-slate-50/50" : isEditing ? "bg-blue-50/40" : (field.fieldType === 'computed' ? "bg-slate-50/30" : "bg-white hover:bg-slate-50")
                     )}>
-                      <TableCell className="px-4 py-3.5 text-center text-[11px] font-bold text-slate-400 border-r border-slate-100">{fIdx + 1}</TableCell>
-                      <TableCell className="px-6 py-3.5 border-r border-slate-100">
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2">
+                      <TableCell className="px-4 py-3 text-center text-sm font-medium text-slate-400 border-r">{fIdx + 1}</TableCell>
+                      <TableCell className="px-6 py-3 border-r">
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1.5">
                             {isDefaultField && <Lock className="h-3.5 w-3.5 text-slate-400 shrink-0" />}
-                            <span className={cn("text-[11px] font-bold", isDefaultField ? "text-slate-500" : "text-slate-900")}>{field.efnsDisplayName || field.variableName}</span>
+                            <span className={cn("text-sm font-medium", isDefaultField ? "text-slate-500" : "text-slate-800")}>{field.efnsDisplayName || field.variableName}</span>
                           </div>
-                          <span className="text-[9px] text-slate-400 font-mono tracking-tight">{field.variableName}</span>
+                          <span className="text-xs text-slate-400">{field.variableName}</span>
                         </div>
                       </TableCell>
 
-                      <TableCell className="px-6 py-3.5 border-r border-slate-100">
-                        <div className="flex flex-col gap-1.5 items-start">
-                          <span className="text-[11px] font-semibold text-slate-600">{field.customFieldSource || 'System Mapping'}</span>
+                      <TableCell className="px-6 py-3 border-r">
+                        <div className="flex flex-col gap-1 items-start">
+                          <span className="text-xs text-slate-600">{field.customFieldSource || 'System Mapping'}</span>
                           {isDefaultField ? (
-                            <Badge variant="outline" className="text-[9px] h-5 border-slate-200 text-slate-500 bg-slate-100 gap-1 font-bold uppercase tracking-wider">
-                              <Lock className="h-2.5 w-2.5" /> Preset Default
-                            </Badge>
+                            <span className="text-xs text-slate-400 flex items-center">
+                              <Lock className="h-3 w-3 mr-1" /> Default
+                            </span>
                           ) : (
                             <div className="flex flex-wrap gap-1">
                               {field.linkedMasterFields?.length > 0 && (
-                                <Badge variant="outline" className="text-[9px] h-5 border-indigo-200 text-indigo-700 bg-indigo-50 uppercase tracking-wider font-bold">DB Field</Badge>
+                                <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">DB Field</span>
                               )}
                               {field.linkedJobQuestionIds?.length > 0 && (
-                                <Badge variant="outline" className="text-[9px] h-5 border-fuchsia-200 text-fuchsia-700 bg-fuchsia-50 uppercase tracking-wider font-bold">Question</Badge>
-                              )}
-                              {(!field.linkedMasterFields?.length && !field.linkedJobQuestionIds?.length) && (
-                                <Badge variant="outline" className="text-[9px] h-5 border-slate-200 text-slate-500 uppercase tracking-wider font-bold">Requirement</Badge>
+                                <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">Question</span>
                               )}
                             </div>
                           )}
                         </div>
                       </TableCell>
 
-                      <TableCell className="px-6 py-3.5 border-r border-slate-100">
+                      <TableCell className="px-6 py-3 border-r">
                         <div className="flex flex-wrap gap-1">
                           {(field.entityTypes || []).map(type => (
-                            <Badge key={type} variant="outline" className={cn("text-[8px] h-4 px-1.5 uppercase font-bold tracking-wider", ENTITY_TYPE_COLORS[type] || 'bg-slate-50 text-slate-600')}>
+                            <span key={type} className={cn("text-xs px-2 py-0.5 rounded-full font-medium", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-600')}>
                               {type}
-                            </Badge>
+                            </span>
                           ))}
                           {(!field.entityTypes || field.entityTypes.length === 0) && (
-                            <span className="text-[10px] text-slate-400 font-bold">—</span>
+                            <span className="text-sm text-slate-400">—</span>
                           )}
                         </div>
                       </TableCell>
 
-                      <TableCell className="px-6 py-2.5">
+                      <TableCell className="px-6 py-2.5 border-r">
                         {isDefaultField ? (
-                          <div className="flex items-center gap-3">
-                            <span className="text-[11px] font-medium text-slate-600 truncate max-w-[200px]">{field.resolvedValue}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-slate-600 truncate max-w-[200px]">{field.resolvedValue}</span>
                             <TooltipProvider>
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <Badge variant="outline" className="bg-slate-100 border-slate-200 text-slate-500 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 cursor-help">
-                                    <Lock className="h-2.5 w-2.5 mr-1" /> Locked
-                                  </Badge>
+                                  <Lock className="h-3.5 w-3.5 text-slate-400 cursor-help" />
                                 </TooltipTrigger>
-                                <TooltipContent side="left" className="text-xs max-w-xs font-medium">
-                                  This value is preset by the automation configuration and cannot be edited.
+                                <TooltipContent side="left" className="text-sm max-w-xs font-normal">
+                                  Preset by automation configuration.
                                 </TooltipContent>
                               </Tooltip>
                             </TooltipProvider>
@@ -596,63 +599,59 @@ export const AutomationMappingDialogUI = ({
                                 onValueChange={(val) => setEditValue(val)}
                                 options={normalizedOptions}
                                 placeholder="Select..."
-                                buttonClassName="h-8 text-xs border-indigo-400 ring-2 ring-indigo-100 w-full bg-white shadow-sm"
+                                buttonClassName="h-8 text-sm border-blue-300 w-full bg-white"
                               />
                             ) : (
-                              <Input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }} className="h-8 text-xs border-indigo-400 ring-2 ring-indigo-100 shadow-sm" />
+                              <Input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }} className="h-8 text-sm border-blue-300" />
                             )}
-                            <Button size="icon" onClick={() => saveEdit(isDropdown, normalizedOptions)} className="h-8 w-8 bg-emerald-600 hover:bg-emerald-700 shrink-0 shadow-sm rounded-lg"><Check className="h-4 w-4" /></Button>
-                            <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-rose-500 hover:bg-rose-50 shrink-0 rounded-lg"><X className="h-4 w-4" /></Button>
+                            <Button size="icon" onClick={() => saveEdit(isDropdown, normalizedOptions)} className="h-8 w-8 bg-emerald-600 hover:bg-emerald-700 shrink-0 rounded-md"><Check className="h-4 w-4" /></Button>
+                            <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-slate-400 hover:bg-slate-100 shrink-0 rounded-md"><X className="h-4 w-4" /></Button>
                           </div>
                         ) : (
                           (mIds.length + qIds.length) > 1 ? (
                             <Popover>
                               <PopoverTrigger asChild>
                                 <div className={cn(
-                                  "text-[11px] h-8 flex items-center px-3 rounded-md cursor-pointer border border-dashed transition-all shadow-sm",
-                                  isValueMissing ? "border-rose-300 bg-rose-50/50 text-rose-600 font-bold" : "border-indigo-200 bg-white hover:border-indigo-400 text-slate-900 font-medium"
+                                  "text-sm h-8 flex items-center px-2.5 rounded-md cursor-pointer border border-transparent transition-all",
+                                  isValueMissing ? "text-red-500 font-medium hover:bg-red-50" : "text-slate-800 hover:bg-slate-100"
                                 )}>
                                   <span className="truncate">{isValueMissing ? 'Missing Value' : field.resolvedValue}</span>
-                                  <ChevronDown className="h-3.5 w-3.5 ml-auto text-indigo-400 shrink-0" />
+                                  <ChevronDown className="h-4 w-4 ml-auto text-slate-400 shrink-0" />
                                 </div>
                               </PopoverTrigger>
-                              <PopoverContent className="w-80 p-0 shadow-xl border-indigo-100 rounded-xl overflow-hidden" align="end">
+                              <PopoverContent className="w-80 p-0 shadow-lg border-slate-200 rounded-lg overflow-hidden" align="end">
                                 <div className="p-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
-                                  <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Linked Sources</span>
-                                  <Badge className="text-[9px] h-5 bg-indigo-100 text-indigo-700 hover:bg-indigo-100 uppercase tracking-wider">Priority Logic</Badge>
+                                  <span className="text-xs font-medium text-slate-600">Linked Sources</span>
+                                  <span className="text-xs text-slate-500">Priority Logic</span>
                                 </div>
                                 <div className="p-1.5 space-y-1 bg-white">
-                                  {/* Rendering logic similar to original, updated styles */}
                                   {mIds.map((mid, idx) => {
-                                      const mDef = jobFields[String(mid)];
-                                      const source = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
-                                      const sourceVal = getFieldValue(String(mid), String(field.targetId));
+                                    const mDef = jobFields[String(mid)];
+                                    const source = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
+                                    const sourceVal = getFieldValue(String(mid), String(field.targetId));
 
-                                      return (
-                                        <div key={`m-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-200 group transition-all">
-                                          <div className="flex flex-col min-w-0">
-                                            <span className="text-[9px] font-bold text-indigo-600 flex items-center gap-1 uppercase tracking-widest mb-0.5">
-                                              <Database className="h-2.5 w-2.5" /> DB FIELD {idx + 1}
-                                            </span>
-                                            <span className="text-xs font-bold truncate text-slate-800">{mDef?.label}</span>
-                                            <span className="text-[10px] text-slate-500 truncate italic mt-0.5">{isValidValue(sourceVal) ? sourceVal : 'Empty'}</span>
-                                          </div>
-                                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-indigo-600 hover:bg-indigo-50 rounded-md" onClick={() => source && startEditing(field.variableName, idx, source.table, source.path, isValidValue(sourceVal) ? sourceVal : '', field.targetId, source.linking_variable)}>
-                                            <Edit3 className="h-3.5 w-3.5" />
-                                          </Button>
+                                    return (
+                                      <div key={`m-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-md border border-transparent group transition-all">
+                                        <div className="flex flex-col min-w-0">
+                                          <span className="text-xs font-medium text-slate-500 mb-0.5">DB Field {idx + 1}</span>
+                                          <span className="text-sm text-slate-800 truncate">{mDef?.label}</span>
+                                          <span className="text-xs text-slate-400 truncate mt-0.5">{isValidValue(sourceVal) ? sourceVal : 'Empty'}</span>
                                         </div>
-                                      );
+                                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-blue-600 hover:bg-blue-50 rounded-md" onClick={() => source && startEditing(field.variableName, idx, source.table, source.path, isValidValue(sourceVal) ? sourceVal : '', field.targetId, source.linking_variable)}>
+                                          <Edit3 className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </div>
+                                    );
                                   })}
-                                  {/* ... Questions loop ... */}
                                 </div>
                               </PopoverContent>
                             </Popover>
                           ) : (
                             <div
                               className={cn(
-                                "text-[11px] h-8 flex items-center px-3 rounded-md transition-colors relative",
-                                persistenceSource ? "cursor-pointer border border-transparent hover:border-indigo-300 hover:bg-indigo-50 hover:shadow-sm" : "cursor-default",
-                                isValueMissing ? "text-rose-600 font-bold" : "text-slate-900 font-medium"
+                                "text-sm h-8 flex items-center px-2.5 rounded-md transition-colors relative group",
+                                persistenceSource ? "cursor-pointer border border-transparent hover:bg-slate-100" : "cursor-default",
+                                isValueMissing ? "text-red-500 font-medium" : "text-slate-800"
                               )}
                               onClick={() => {
                                 if (!persistenceSource) return;
@@ -660,7 +659,7 @@ export const AutomationMappingDialogUI = ({
                               }}
                             >
                               <span className="truncate pr-6">{isValueMissing ? 'Missing Value' : field.resolvedValue}</span>
-                              {persistenceSource && !isEditing && <Edit3 className="h-3.5 w-3.5 text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-3 top-1/2 -translate-y-1/2" />}
+                              {persistenceSource && !isEditing && <Edit3 className="h-4 w-4 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-3 top-1/2 -translate-y-1/2" />}
                             </div>
                           )
                         )}
@@ -677,7 +676,6 @@ export const AutomationMappingDialogUI = ({
   };
 
   const renderDocumentsSection = () => {
-    // Document tab remains mostly the same logically, updated visually to match the new styling.
     const normalDocFields = activeWebEntry?.fields?.filter((f: any) => f.fieldType === 'document') || [];
     const arrayDocFields = activeWebEntry?.fields?.filter((f: any) => f.fieldType === 'array')
       ?.flatMap((field: any) => {
@@ -694,27 +692,27 @@ export const AutomationMappingDialogUI = ({
     const allDocFields = [...normalDocFields, ...arrayDocFields];
 
     return (
-      <div className="space-y-6 p-8 bg-slate-50/50 min-h-full">
+      <div className="space-y-6 p-8 bg-slate-50 min-h-full">
         {savedScreenshotDoc && (
-          <Card className="border-emerald-300 bg-emerald-50 shadow-sm rounded-xl overflow-hidden">
+          <Card className="border-emerald-200 bg-emerald-50 shadow-sm rounded-xl overflow-hidden">
             <CardContent className="p-5 flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div className="p-3 rounded-xl bg-emerald-100 text-emerald-600 shadow-inner">
-                  <CheckCircle2 className="h-6 w-6" />
+                <div className="p-2 rounded-lg bg-emerald-100 text-emerald-600">
+                  <CheckCircle2 className="h-5 w-5" />
                 </div>
                 <div>
-                  <h4 className="font-bold text-sm text-slate-900 tracking-tight">eTA Kenya Confirmation Screenshot</h4>
-                  <p className="text-[11px] text-slate-500 mt-0.5 font-medium">{savedScreenshotDoc.file_name}</p>
+                  <h4 className="font-medium text-sm text-slate-900">eTA Kenya Confirmation Screenshot</h4>
+                  <p className="text-xs text-slate-500 mt-0.5">{savedScreenshotDoc.file_name}</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <Badge className="bg-emerald-600 text-white font-bold text-[10px] px-3 py-1 shadow-sm">Saved</Badge>
-                <Button size="sm" variant="outline" className="h-8 px-4 text-xs font-bold text-emerald-700 border-emerald-200 hover:bg-emerald-100 rounded-lg"
+                <span className="text-xs font-medium text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">Saved</span>
+                <Button size="sm" variant="outline" className="h-8 px-4 text-xs font-medium text-emerald-700 border-emerald-200 hover:bg-emerald-100 rounded-lg"
                   onClick={() => {
                     setPreviewingDocuments({ document_display_name: 'eTA Kenya Confirmation Screenshot', documents: [savedScreenshotDoc], person_full_name: individualName || getPrimaryTargetEntityId(), requirementId: ETA_SCREENSHOT_DOCUMENT_ID });
                     setShowPreviewModal(true);
                   }}>
-                  <Eye className="h-3.5 w-3.5 mr-2" /> View File
+                  <Eye className="h-4 w-4 mr-2" /> View File
                 </Button>
               </div>
             </CardContent>
@@ -724,13 +722,13 @@ export const AutomationMappingDialogUI = ({
         {allDocFields.length === 0 && !savedScreenshotDoc && (
           <div className="flex flex-col items-center justify-center p-16 opacity-50">
             <FileText className="w-16 h-16 mb-4 text-slate-300" />
-            <p className="text-lg font-bold text-slate-400">No document assets required for this flow.</p>
+            <p className="text-lg font-medium text-slate-500">No document assets required for this flow.</p>
           </div>
         )}
 
         {allDocFields.length > 0 && (
           <div>
-             <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4">Required Documents</h3>
+            <h3 className="text-sm font-semibold text-slate-700 mb-4">Required Documents</h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {allDocFields.map((req, idx) => {
                 const targetId = resolveTargetEntityId(req);
@@ -738,28 +736,28 @@ export const AutomationMappingDialogUI = ({
                 const displayName = req.isFromArray ? `${req.arrayFieldName} - ${req.displayName || req.name || req.variableName}` : req.displayName || req.efnsDisplayName || req.variableName;
 
                 return (
-                  <Card key={idx} className={cn("overflow-hidden border transition-all rounded-xl", foundDoc ? "border-emerald-200 shadow-sm bg-white" : "border-rose-200 bg-rose-50/30")}>
+                  <Card key={idx} className={cn("overflow-hidden transition-all rounded-xl", foundDoc ? "border-slate-200 shadow-sm bg-white" : "border-red-200 bg-red-50/50")}>
                     <CardContent className="p-5 flex items-center justify-between">
                       <div className="flex items-center gap-4">
-                        <div className={cn("p-2.5 rounded-xl shadow-inner", foundDoc ? "bg-emerald-100 text-emerald-600" : "bg-rose-100 text-rose-600")}><Paperclip className="h-5 w-5" /></div>
+                        <div className={cn("p-2 rounded-lg", foundDoc ? "bg-slate-100 text-slate-500" : "bg-red-100 text-red-600")}><Paperclip className="h-5 w-5" /></div>
                         <div className="flex-1">
-                          <h4 className="font-bold text-sm text-slate-900 line-clamp-1">{displayName}</h4>
+                          <h4 className="font-medium text-sm text-slate-900 line-clamp-1">{displayName}</h4>
                           <div className="flex items-center gap-2 mt-1">
-                             <span className="text-[10px] text-slate-500 font-mono tracking-tight">{req.variableName}</span>
-                             {req.isFromArray && <Badge variant="outline" className="text-[8px] h-4 px-1.5 uppercase font-bold tracking-wider text-indigo-600 border-indigo-200 bg-indigo-50">Array Item</Badge>}
+                            <span className="text-xs text-slate-500">{req.variableName}</span>
+                            {req.isFromArray && <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Array Item</span>}
                           </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
                         {foundDoc ? (
                           <>
-                            <Button size="sm" variant="outline" onClick={() => handlePreviewDocument(foundDoc)} className="h-8 px-3 text-[10px] font-bold text-indigo-600 border-indigo-200 hover:bg-indigo-50 rounded-lg">
-                              <Eye className="h-3.5 w-3.5 mr-1.5" /> Preview
+                            <Button size="sm" variant="outline" onClick={() => handlePreviewDocument(foundDoc)} className="h-8 px-3 text-xs font-medium text-blue-600 border-blue-200 hover:bg-blue-50 rounded-lg">
+                              <Eye className="h-4 w-4 mr-1.5" /> Preview
                             </Button>
-                            <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-emerald-200 shadow-sm font-bold text-[10px] px-2.5 py-0.5">Available</Badge>
+                            <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Available</span>
                           </>
                         ) : (
-                           <Badge variant="outline" className="bg-rose-50 text-rose-600 border-rose-200 shadow-sm font-bold text-[10px] px-2.5 py-0.5">Missing</Badge>
+                          <span className="text-xs font-medium text-red-600 bg-red-50 px-2 py-0.5 rounded-full">Missing</span>
                         )}
                       </div>
                     </CardContent>
@@ -776,51 +774,48 @@ export const AutomationMappingDialogUI = ({
   return (
     <>
       <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-        <DialogContent className="max-w-[1500px] w-[98vw] h-[92vh] flex flex-col p-0 overflow-hidden bg-[#F8FAFC] border-none shadow-2xl rounded-2xl">
-          
-          {/* HEADER (Matches DocsColumnVisibility) */}
+        <DialogContent className="max-w-[1500px] w-[98vw] h-[92vh] flex flex-col p-0 overflow-hidden bg-white border-none shadow-2xl rounded-2xl">
+
+          {/* HEADER */}
           <div className="flex bg-white border-b border-slate-200 shrink-0 z-20">
             <div className="px-6 py-4 flex items-center justify-between w-full">
               <div className="flex items-center gap-4">
-                <div className="h-10 w-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-100 shrink-0">
+                <div className="h-10 w-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-sm shrink-0">
                   <Zap className="text-white w-5 h-5 fill-white" />
                 </div>
                 <div>
-                  <DialogTitle className="text-lg font-bold text-slate-900 tracking-tight leading-none">
+                  <DialogTitle className="text-lg font-semibold text-slate-900 leading-none">
                     Data Mapping: {task?.applicant_details?.name || task?.applicant_name || individualName || "Applicant"}
                   </DialogTitle>
-                  <p className="text-xs font-medium text-slate-500 flex items-center gap-2 mt-1.5">
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-bold font-mono border border-slate-200">
+                  <p className="text-sm text-slate-500 flex items-center gap-2 mt-1.5">
+                    <span className="inline-flex items-center text-slate-600">
                       Task #{task?.id}
                     </span>
-                    <span className="inline-flex items-center gap-1.5 ml-1">
-                      <User className="w-3 h-3 text-indigo-500" />
-                      Entity ID: {getPrimaryTargetEntityId() || 'N/A'}
+                    <span className="text-slate-300">•</span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-slate-400" />
+                      ID: {getPrimaryTargetEntityId() || 'N/A'}
                     </span>
                     {isSavingScreenshot && (
-                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-600 text-[10px] font-bold border border-indigo-100 ml-2">
-                         <Loader2 className="w-3 h-3 animate-spin" /> Saving Screenshot...
-                       </span>
+                      <span className="inline-flex items-center gap-1.5 text-blue-600 text-xs font-medium ml-2">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving Screenshot...
+                      </span>
                     )}
                   </p>
                 </div>
               </div>
 
-              <div className="flex flex-1 items-center justify-center px-8">
-                 {/* Empty space in header, workflow select moved to sidebar */}
-              </div>
-
-              <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center gap-4 shrink-0">
                 {isAutomationRunning && automationJobId && (
-                  <Button onClick={stopAutomation} size="sm" className="h-9 px-4 bg-rose-100 hover:bg-rose-200 text-rose-700 border border-rose-300 font-bold text-xs rounded-md shadow-sm transition-all">
-                    <X className="h-3.5 w-3.5 mr-1.5" /> Stop Automation
+                  <Button onClick={stopAutomation} size="sm" variant="outline" className="h-9 px-4 text-red-600 border-red-200 hover:bg-red-50 font-medium text-sm rounded-lg transition-all">
+                    <X className="h-4 w-4 mr-1.5" /> Stop Automation
                   </Button>
                 )}
                 <Button
                   onClick={handleRunAutomation}
                   disabled={isAutomationRunning || isSavingScreenshot || !selectedAutomationId}
                   size="sm"
-                  className="h-9 px-6 bg-indigo-600 text-white hover:bg-indigo-700 font-black text-xs shadow-md rounded-md transition-all uppercase tracking-wide"
+                  className="h-9 px-6 bg-blue-600 text-white hover:bg-blue-700 font-medium text-sm rounded-lg transition-all"
                 >
                   {(isAutomationRunning || isSavingScreenshot) ? (
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -829,7 +824,7 @@ export const AutomationMappingDialogUI = ({
                   )}
                   {isSavingScreenshot ? 'Saving...' : isAutomationRunning ? 'Running...' : 'Execute Workflow'}
                 </Button>
-                <div className="h-8 w-[1px] mx-1 bg-slate-200" />
+                <div className="h-8 w-px mx-1 bg-slate-200" />
                 <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors">
                   <X className="h-5 w-5" />
                 </Button>
@@ -840,187 +835,189 @@ export const AutomationMappingDialogUI = ({
           {/* MAIN LAYOUT */}
           <div className="flex-1 overflow-hidden">
             <ResizablePanelGroup direction="horizontal" className="h-full">
-              
-              {/* LEFT SIDEBAR (Dark Mode Aesthetic) */}
-              <ResizablePanel defaultSize={20} minSize={18} className="bg-[#0F172A] flex flex-col relative z-10 shadow-[4px_0_24px_rgba(0,0,0,0.1)] border-r border-slate-800">
+
+              {/* LEFT SIDEBAR */}
+              <ResizablePanel defaultSize={20} minSize={18} className="bg-slate-50 flex flex-col relative z-10 border-r border-slate-200">
                 <div className="p-5 flex flex-col gap-6 h-full overflow-y-auto custom-scrollbar">
-                  
+
                   {/* Configuration Section */}
-                  <div className="space-y-3">
-                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-1.5">
-                       <Settings className="w-3.5 h-3.5" /> Setup Environment
-                     </span>
-                     <div className="space-y-4">
-                        <div className="space-y-1.5">
-                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Select Workflow</label>
-                           <SearchableSelect
-                             value={selectedAutomationId}
-                             onValueChange={setSelectedAutomationId}
-                             options={entityAutomationMappings.map(m => ({ value: m.automationId, label: m.automation?.name || "Unnamed Flow" }))}
-                             placeholder="Select Workflow..."
-                             buttonClassName="w-full bg-[#1E293B] border-slate-700 text-white h-10 rounded-lg text-xs font-semibold hover:bg-slate-800 transition-colors shadow-inner"
-                             emptyMessage="No workflows found"
-                           />
+                  <div className="space-y-4">
+                    <span className="text-lg font-semibold text-slate-700 flex items-center gap-2">
+                      <Settings className="w-6 h-6 text-slate-400" /> Setup Environment
+                    </span>
+                    <div className="space-y-4">
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium text-slate-500">Select Workflow</label>
+                        <SearchableSelect
+                          value={selectedAutomationId}
+                          onValueChange={setSelectedAutomationId}
+                          options={entityAutomationMappings.map(m => ({ value: m.automationId, label: m.automation?.name || "Unnamed Flow" }))}
+                          placeholder="Select Workflow..."
+                          buttonClassName="w-full bg-white border-slate-200 text-slate-900 h-10 rounded-lg text-sm hover:bg-slate-50 transition-colors shadow-sm"
+                          emptyMessage="No workflows found"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium text-slate-500">Target Individual ID</label>
+                        <div className="relative">
+                          <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                          <input
+                            value={getPrimaryTargetEntityId()}
+                            onChange={(e) => {
+                              if (getPrimaryEntityType() === 'principal') setCurrentIndividualId(e.target.value);
+                            }}
+                            placeholder="ID Number..."
+                            disabled={getPrimaryEntityType() !== 'principal'}
+                            className="w-full pl-9 h-10 rounded-lg outline-none text-sm text-slate-900 bg-white border border-slate-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                          />
                         </div>
-                        <div className="space-y-1.5">
-                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Target Individual ID</label>
-                           <div className="relative">
-                             <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
-                             <input
-                               value={getPrimaryTargetEntityId()}
-                               onChange={(e) => {
-                                 if (getPrimaryEntityType() === 'principal') setCurrentIndividualId(e.target.value);
-                               }}
-                               placeholder="ID Number..."
-                               disabled={getPrimaryEntityType() !== 'principal'}
-                               className="w-full pl-9 h-10 rounded-lg outline-none text-xs font-semibold text-white bg-[#1E293B] border border-slate-700 placeholder:text-slate-600 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all shadow-inner disabled:opacity-50 disabled:cursor-not-allowed"
-                             />
-                           </div>
-                        </div>
-                     </div>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Divider */}
-                  <div className="h-px w-full bg-slate-800/50" />
+                  <div className="h-px w-full bg-slate-200" />
 
-                  {/* Progress Section (Dynamic) */}
-                  <div className="space-y-3 flex-1 flex flex-col min-h-0">
-                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-1.5 shrink-0">
-                       <Activity className="w-3.5 h-3.5" /> Execution Status
-                     </span>
-                     
-                     {!automationProgress ? (
-                        <div className="flex-1 flex flex-col items-center justify-center opacity-30 text-center px-4">
-                           <Webhook className="w-12 h-12 mb-3 text-slate-400" />
-                           <p className="text-[11px] font-bold text-slate-400 leading-tight">Ready to map data and execute workflow.</p>
+                  {/* Progress Section */}
+                  <div className="space-y-4 flex-1 flex flex-col min-h-0">
+                    <span className="text-lg font-semibold text-slate-700 flex items-center gap-2 shrink-0">
+                      <Activity className="w-6 h-6 text-slate-400" /> Execution Status
+                    </span>
+
+                    {!automationProgress ? (
+                      <div className="flex-1 flex flex-col items-center justify-center opacity-50 text-center px-4">
+                        <Webhook className="w-10 h-10 mb-3 text-slate-400" />
+                        <p className="text-sm font-medium text-slate-500">Ready to map data and execute workflow.</p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col flex-1 min-h-0 gap-4">
+                        {/* Console-like Status Container */}
+                        <div className="bg-slate-900 rounded-lg border border-slate-700 overflow-hidden shadow-lg">
+                          <div className="px-4 py-3 bg-slate-800 border-b border-slate-700 flex items-center justify-between">
+                            <span className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+                              execution_status.log
+                            </span>
+                            <div className="flex gap-2">
+                              <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                              <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                              <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                            </div>
+                          </div>
+                          <div className="p-4 font-mono text-xs space-y-2">
+                            <div className="text-slate-400">
+                              <span className="text-emerald-400">$</span> <span className="text-slate-300">automation workflow</span>
+                            </div>
+                            <div className="text-slate-400">
+                              <span className="text-emerald-400">→</span> <span className="text-slate-400">Status:</span> <span className={cn(
+                                automationProgress.isRunning ? "text-blue-400 animate-pulse" : automationProgress.error ? "text-red-400" : "text-emerald-400"
+                              )}>{automationProgress.isRunning ? '[ RUNNING ]' : automationProgress.error ? '[ FAILED ]' : '[ COMPLETED ]'}</span>
+                            </div>
+                            <div className="text-slate-400">
+                              <span className="text-emerald-400">→</span> <span className="text-slate-400">Progress:</span> <span className="text-cyan-400">{automationProgress.progress}%</span>
+                            </div>
+                            <div className="w-full bg-slate-800 rounded h-1 overflow-hidden border border-slate-700 my-2">
+                              <div
+                                className={cn(
+                                  "h-full transition-all duration-500",
+                                  automationProgress.error ? "bg-red-500" : automationProgress.isRunning ? "bg-blue-500" : "bg-emerald-500"
+                                )}
+                                style={{ width: `${automationProgress.progress}%` }}
+                              >
+                                {automationProgress.isRunning && <div className="absolute inset-0 bg-white/10 animate-pulse" />}
+                              </div>
+                            </div>
+                            <div className="text-slate-400">
+                              <span className="text-emerald-400">→</span> <span className="text-slate-400">Message:</span> <span className="text-slate-300">{automationProgress.message || 'Processing automation...'}</span>
+                            </div>
+                            {automationProgress.error && (
+                              <div className="text-red-400 border border-red-500/30 rounded px-2 py-1 bg-red-950/20">
+                                <span className="text-red-500">⚠</span> Error: {automationProgress.error}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                     ) : (
-                        <div className="flex flex-col flex-1 min-h-0 gap-4">
-                           {/* Status Card */}
-                           <div className={cn(
-                              "p-3.5 rounded-xl border flex flex-col gap-3 shadow-lg",
-                              automationProgress.isRunning ? "bg-indigo-950/40 border-indigo-500/30 shadow-indigo-900/20" : 
-                              automationProgress.error ? "bg-rose-950/40 border-rose-500/30 shadow-rose-900/20" : 
-                              "bg-emerald-950/40 border-emerald-500/30 shadow-emerald-900/20"
-                           )}>
-                              <div className="flex items-center justify-between">
-                                 <div className="flex items-center gap-2.5">
-                                    {automationProgress.isRunning ? (
-                                      <Loader2 className="h-4 w-4 animate-spin text-indigo-400" />
-                                    ) : automationProgress.error ? (
-                                      <AlertCircle className="h-4 w-4 text-rose-400" />
-                                    ) : (
-                                      <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                                    )}
-                                    <span className={cn(
-                                       "text-xs font-bold",
-                                       automationProgress.isRunning ? "text-indigo-300" : automationProgress.error ? "text-rose-300" : "text-emerald-300"
-                                    )}>
-                                       {automationProgress.isRunning ? 'Running' : automationProgress.error ? 'Failed' : 'Completed'}
+
+                        {/* Logs Terminal */}
+                        {automationProgress.logs && automationProgress.logs.length > 0 && (
+                          <div className="flex flex-col flex-1 min-h-0 bg-slate-900 rounded-lg border border-slate-700 overflow-hidden shadow-lg">
+                            <div className="px-4 py-3 bg-slate-800 border-b border-slate-700 flex justify-between items-center shrink-0">
+                              <span className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+                                output.log
+                              </span>
+                              <span className="text-xs text-slate-500">{automationProgress.logs.length} lines</span>
+                            </div>
+                            <ScrollArea className="flex-1 p-3">
+                              <div className="space-y-0.5 font-mono text-xs">
+                                {automationProgress.logs.map((log: any, i: number) => (
+                                  <div key={i} className={cn(
+                                    "break-words",
+                                    log.level === 'error' ? 'text-red-400' :
+                                      log.level === 'warn' ? 'text-yellow-400' : 'text-slate-300'
+                                  )}>
+                                    <span className="text-slate-500 mr-3 select-none">
+                                      [{new Date(log.timestamp).toLocaleTimeString()}]
                                     </span>
-                                 </div>
-                                 <span className="text-xl font-black text-white">{automationProgress.progress}%</span>
+                                    {log.message}
+                                  </div>
+                                ))}
+                                <div ref={logsEndRef} />
                               </div>
-                              
-                              <div className="w-full bg-[#0F172A] rounded-full h-2 overflow-hidden border border-slate-800">
-                                <div
-                                  className={cn(
-                                     "h-full rounded-full transition-all duration-500 relative overflow-hidden", 
-                                     automationProgress.error ? "bg-rose-500" : automationProgress.isRunning ? "bg-indigo-500" : "bg-emerald-500"
-                                  )}
-                                  style={{ width: `${automationProgress.progress}%` }}
-                                >
-                                   {automationProgress.isRunning && <div className="absolute inset-0 bg-white/20 animate-pulse" />}
-                                </div>
-                              </div>
-                              
-                              <p className="text-[11px] text-slate-300 font-medium leading-tight">
-                                {automationProgress.message || 'Processing automation...'}
-                              </p>
-                              {automationProgress.error && (
-                                <p className="text-[10px] text-rose-400 font-medium mt-1 bg-rose-950/50 p-2 rounded-md border border-rose-900/50">
-                                  {automationProgress.error}
-                                </p>
-                              )}
-                           </div>
-
-                           {/* Logs Terminal */}
-                           {automationProgress.logs && automationProgress.logs.length > 0 && (
-                             <div className="flex flex-col flex-1 min-h-0 bg-[#020617] rounded-xl border border-slate-800 shadow-inner overflow-hidden">
-                               <div className="px-3 py-2 bg-[#0F172A] border-b border-slate-800 flex justify-between items-center shrink-0">
-                                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5"><Clock className="w-3 h-3" /> System Logs</span>
-                                  <span className="text-[9px] font-mono text-slate-600">{automationProgress.logs.length} lines</span>
-                               </div>
-                               <ScrollArea className="flex-1 p-3">
-                                 <div className="space-y-1.5 font-mono text-[10px]">
-                                   {automationProgress.logs.map((log: any, i: number) => (
-                                     <div key={i} className={cn(
-                                       "leading-relaxed break-words",
-                                       log.level === 'error' ? 'text-rose-400' :
-                                       log.level === 'warn' ? 'text-amber-400' : 'text-emerald-300/90'
-                                     )}>
-                                       <span className="text-slate-600 mr-2 select-none">
-                                         [{new Date(log.timestamp).toLocaleTimeString()}]
-                                       </span>
-                                       {log.message}
-                                     </div>
-                                   ))}
-                                   <div ref={logsEndRef} />
-                                 </div>
-                               </ScrollArea>
-                             </div>
-                           )}
-                        </div>
-                     )}
+                            </ScrollArea>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </ResizablePanel>
 
-              <ResizableHandle withHandle className="bg-slate-300 border-none w-px z-20" />
+              <ResizableHandle withHandle className="bg-slate-200 border-none w-px z-20" />
 
-              {/* RIGHT MAIN PANEL (Light Mode Aesthetic) */}
+              {/* RIGHT MAIN PANEL */}
               <ResizablePanel defaultSize={80} className="bg-white flex flex-col h-full relative z-0">
                 {!selectedAutomationId ? (
-                   <div className="flex-1 flex flex-col items-center justify-center opacity-30">
-                     <Webhook className="w-24 h-24 mb-6 text-slate-300" />
-                     <h2 className="text-2xl font-black text-slate-400 tracking-tight">No Workflow Selected</h2>
-                     <p className="text-sm font-semibold text-slate-500 mt-2">Choose an automation workflow from the left sidebar to begin mapping.</p>
-                   </div>
+                  <div className="flex-1 flex flex-col items-center justify-center opacity-50">
+                    <Webhook className="w-20 h-20 mb-4 text-slate-300" />
+                    <h2 className="text-xl font-medium text-slate-500">No Workflow Selected</h2>
+                    <p className="text-sm text-slate-400 mt-2">Choose an automation workflow from the sidebar.</p>
+                  </div>
                 ) : (
                   <>
                     <div className="px-6 border-b border-slate-200 flex items-center justify-between shrink-0 bg-white">
                       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-auto -mb-px">
                         <TabsList className="bg-transparent h-12 p-0 space-x-6">
-                          <TabsTrigger 
-                             value="fields" 
-                             className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-indigo-600 data-[state=active]:text-indigo-600 text-slate-500 font-bold text-xs uppercase tracking-wider rounded-none h-full px-1"
+                          <TabsTrigger
+                            value="fields"
+                            className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 text-slate-500 font-medium text-sm rounded-none h-full px-1"
                           >
                             <Database className="h-4 w-4 mr-2" /> Mapping Fields
                           </TabsTrigger>
-                          <TabsTrigger 
-                             value="documents" 
-                             className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-indigo-600 data-[state=active]:text-indigo-600 text-slate-500 font-bold text-xs uppercase tracking-wider rounded-none h-full px-1"
+                          <TabsTrigger
+                            value="documents"
+                            className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 text-slate-500 font-medium text-sm rounded-none h-full px-1"
                           >
                             <FileText className="h-4 w-4 mr-2" /> Required Assets
-                            {savedScreenshotDoc && <span className="ml-2 h-2 w-2 rounded-full bg-emerald-500 inline-block shadow-[0_0_8px_rgba(16,185,129,0.8)]" />}
+                            {savedScreenshotDoc && <span className="ml-2 h-2 w-2 rounded-full bg-emerald-500 inline-block" />}
                           </TabsTrigger>
                         </TabsList>
                       </Tabs>
-                      
+
                       {isLoadingData && (
-                        <div className="flex items-center gap-2 text-xs font-bold text-indigo-500 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-100">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Fetching Source Data...
+                        <div className="flex items-center gap-2 text-sm text-blue-600">
+                          <Loader2 className="h-4 w-4 animate-spin" /> Fetching Data...
                         </div>
                       )}
                     </div>
 
-                    <div className="flex-1 overflow-hidden relative bg-slate-50/30">
+                    <div className="flex-1 overflow-hidden relative bg-white">
                       <Tabs value={activeTab} className="h-full flex flex-col">
                         <TabsContent value="fields" className="flex-1 overflow-hidden m-0 data-[state=active]:flex flex-col">
                           {isLoading ? (
-                            <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-50">
-                              <Loader2 className="h-10 w-10 animate-spin mb-4 text-indigo-500" />
-                              <p className="text-sm font-bold">Loading configuration matrix...</p>
+                            <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                              <Loader2 className="h-8 w-8 animate-spin mb-4 text-blue-500" />
+                              <p className="text-sm font-medium">Loading configuration matrix...</p>
                             </div>
                           ) : renderFieldsTable()}
                         </TabsContent>
@@ -1038,24 +1035,23 @@ export const AutomationMappingDialogUI = ({
         </DialogContent>
       </Dialog>
 
-      {/* Document Preview Modal (Updated Header Aesthetic) */}
+      {/* Document Preview Modal */}
       <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
-        <DialogContent className="max-w-[95vw] w-full h-[95vh] flex flex-col p-0 overflow-hidden bg-[#F8FAFC] border-none shadow-2xl rounded-2xl">
+        <DialogContent className="max-w-[95vw] w-full h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-50 border-none shadow-2xl rounded-2xl">
           {showPreviewModal && previewingDocuments && (
             <>
               <div className="flex bg-white border-b border-slate-200 shrink-0 z-20">
                 <div className="px-6 py-4 flex items-center justify-between w-full">
                   <div className="flex items-center gap-4">
-                    <div className="h-10 w-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-100 shrink-0">
-                      <FileText className="text-white w-5 h-5" />
+                    <div className="h-10 w-10 bg-slate-100 rounded-xl flex items-center justify-center shrink-0">
+                      <FileText className="text-slate-600 w-5 h-5" />
                     </div>
                     <div>
-                      <DialogTitle className="text-lg font-bold text-slate-900 tracking-tight leading-none line-clamp-1">
+                      <DialogTitle className="text-lg font-semibold text-slate-900 line-clamp-1">
                         {previewingDocuments?.document_display_name || 'Document Verification'}
                       </DialogTitle>
-                      <p className="text-xs font-medium text-slate-500 mt-1.5 flex items-center gap-2">
+                      <p className="text-sm text-slate-500 mt-1 flex items-center gap-2">
                         <span className="inline-flex items-center gap-1.5">
-                          <User className="w-3.5 h-3.5 text-indigo-500" />
                           Target Entity: {previewingDocuments?.person_full_name || 'Unknown'}
                         </span>
                       </p>
@@ -1063,10 +1059,10 @@ export const AutomationMappingDialogUI = ({
                   </div>
 
                   <div className="flex items-center gap-4 shrink-0">
-                    <Badge className="bg-indigo-50 text-indigo-700 border-indigo-200 font-bold text-xs px-3 py-1 shadow-sm">
-                      {previewingDocuments?.documents?.length || 0} File(s) Extracted
-                    </Badge>
-                    <div className="h-8 w-[1px] mx-1 bg-slate-200" />
+                    <span className="text-sm font-medium text-slate-600 bg-slate-100 px-3 py-1 rounded-full">
+                      {previewingDocuments?.documents?.length || 0} File(s)
+                    </span>
+                    <div className="h-8 w-px mx-1 bg-slate-200" />
                     <Button variant="ghost" size="icon" onClick={() => setShowPreviewModal(false)} className="rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700">
                       <X className="h-5 w-5" />
                     </Button>
