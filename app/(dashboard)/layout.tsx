@@ -29,7 +29,7 @@ export default async function DashboardLayout({
           <Navbar />
           {/* {!pathname.startsWith("/dashboard/reports") && <Navbar />}*/}
           {/* Add margin and rounded corners to create the 'card' effect */}
-          <main className="flex-1 relative bg-gray-100 dark:bg-zinc-900">
+          <main className="flex-1 relative dark:bg-zinc-900">
             {children}
           </main>
         </SidebarInset>

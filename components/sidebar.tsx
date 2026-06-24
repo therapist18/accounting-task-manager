@@ -161,16 +161,16 @@ const NavGroup = ({ item, isCollapsed, setIsCollapsed, pathname }) => {
             onClick={handleToggle}
             className={cn(
                 "flex w-full items-center gap-3.5 rounded-lg px-4 py-2.5 text-[12px] font-medium transition-colors duration-200 mb-1",
-                "text-[hsl(var(--sidebar-foreground))] hover:bg-white/80 hover:text-blue-600 hover:font-bold",
-                isActive ? "bg-white text-blue-600 border-blue-100 shadow-md" : "opacity-80",
+                "text-white/90 hover:bg-white hover:text-[#376bae] hover:font-bold",
+                isActive ? "bg-white text-[#376bae] shadow-md opacity-100" : "opacity-90",
                 isCollapsed && "justify-center px-0"
             )}
         >
-            <item.icon className={cn("h-5 w-5 shrink-0", isActive ? "text-blue-600" : "opacity-70")} />
+            <item.icon className={cn("h-5 w-5 shrink-0", isActive ? "text-[#376bae]" : "text-white/90")} />
             {!isCollapsed && (
                 <>
                     <span className="flex-1 text-left truncate">{item.title}</span>
-                    {isOpen ? <ChevronDown className="h-4 w-4 opacity-50 text-blue-600" /> : <ChevronRight className="h-4 w-4 opacity-50" />}
+                    {isOpen ? <ChevronDown className="h-4 w-4 opacity-70" /> : <ChevronRight className="h-4 w-4 opacity-70" />}
                 </>
             )}
         </button>
@@ -190,7 +190,7 @@ const NavGroup = ({ item, isCollapsed, setIsCollapsed, pathname }) => {
             )}
 
             {!isCollapsed && isOpen && (
-                <div className="ml-[22px] mt-1 mb-2 flex flex-col space-y-1 border-l border-[hsl(var(--sidebar-border))] pl-4">
+                <div className="ml-[22px] mt-1 mb-2 flex flex-col space-y-1 border-l border-white/20 pl-4">
                     {item.items.map((sub: any) => {
                         const isSubActive = pathname === sub.href;
                         return (
@@ -198,10 +198,10 @@ const NavGroup = ({ item, isCollapsed, setIsCollapsed, pathname }) => {
                                 key={sub.href}
                                 href={sub.href}
                                 className={cn(
-                                    "py-2 text-[12px] transition-colors duration-200",
+                                    "py-2 text-[12px] transition-all duration-200",
                                     isSubActive 
-                                      ? "text-blue-600 border-blue-100 rounded-md pl-2 font-semibold bg-white shadow-md" 
-                                      : "text-[hsl(var(--sidebar-foreground))] opacity-70 hover:opacity-100 hover:bg-white/80 hover:text-blue-600 hover:font-bold"
+                                      ? "text-[#376bae] bg-white rounded-md pl-2 font-bold shadow-md" 
+                                      : "text-white/70 hover:opacity-100 hover:bg-white/10 hover:text-white px-2 rounded-md"
                                 )}
                             >
                                 {sub.title}
@@ -221,12 +221,12 @@ const NavItem = ({ item, isCollapsed, pathname }) => {
             href={item.href}
             className={cn(
                 "relative flex items-center gap-3.5 rounded-lg px-4 py-2.5 text-[12px] font-medium transition-colors duration-200 mb-1",
-                "text-[hsl(var(--sidebar-foreground))] hover:bg-white/80 hover:text-blue-600 hover:font-bold",
-                active ? "bg-white text-blue-600 rounded-md border border-blue-100 font-semibold shadow-md" : "opacity-80",
+                "text-white/90 hover:bg-white hover:text-[#376bae] hover:font-bold",
+                active ? "bg-white text-[#376bae] rounded-md font-bold shadow-md opacity-100" : "opacity-90",
                 isCollapsed && "justify-center px-0"
             )}
         >
-            <item.icon className={cn("h-5 w-5 shrink-0", active ? "text-blue-600" : "opacity-70")} />
+            <item.icon className={cn("h-5 w-5 shrink-0", active ? "text-[#376bae]" : "text-white/90")} />
             {!isCollapsed && (
                 <span className="flex-1 truncate">{item.title}</span>
             )}
@@ -297,7 +297,7 @@ const AppSidebar = () => {
 
     const utilityButtonClass = cn(
         "flex w-full items-center gap-3.5 rounded-lg px-4 py-2.5 text-[12px] font-medium transition-all",
-        "text-[hsl(var(--sidebar-foreground))] opacity-80 hover:opacity-100 hover:bg-white/80 hover:text-blue-600 hover:font-bold",
+        "text-white/80 hover:opacity-100 hover:bg-white/10 hover:text-white",
         isCollapsed && "justify-center px-0"
     );
 
@@ -305,8 +305,8 @@ const AppSidebar = () => {
         <TooltipProvider delayDuration={100}>
             <aside
                 className={cn(
-                    "fixed inset-y-0 left-0 z-40 flex h-screen flex-col border-r border-blue-50 bg-blue-50 text-[hsl(var(--sidebar-foreground))] transition-all duration-300 ease-in-out lg:sticky lg:top-0 shadow-md",
-                    isCollapsed ? "w-[70px]" : "w-[260px]",
+                    "fixed inset-y-0 left-0 z-40 flex h-screen flex-col bg-gradient-to-b from-[#376bae] to-[#1a365d] text-white transition-all duration-300 ease-in-out lg:sticky lg:top-0 shadow-xl border-r border-[#1a365d]/50",
+                    isCollapsed ? "w-[70px]" : "w-[240px]",
                     isMobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
                 )}
             >
@@ -321,7 +321,7 @@ const AppSidebar = () => {
                         {/* Logo and Text Wrapper */}
                         <div className="flex items-center gap-3 overflow-hidden">
                             {/* Logo */}
-                            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-white">
+                            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm">
                                 <Image
                                     src="/BCL logo.png"
                                     alt="BCL Tasks"
@@ -334,10 +334,10 @@ const AppSidebar = () => {
                             {/* Company Name */}
                             {!isCollapsed && (
                                 <div className="flex flex-col justify-center min-w-0">
-                                    <div className="truncate text-[16px] font-bold leading-tight text-[hsl(var(--sidebar-foreground))]">
+                                    <div className="truncate text-[16px] font-bold leading-tight text-white">
                                         BCL Task Manager
                                     </div>
-                                    <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-[hsl(var(--sidebar-primary))]">
+                                    <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-white/70">
                                         Booksmart
                                     </div>
                                 </div>
@@ -350,7 +350,7 @@ const AppSidebar = () => {
                             size="icon"
                             onClick={() => setIsCollapsed(!isCollapsed)}
                             className={cn(
-                                "shrink-0 text-[hsl(var(--sidebar-foreground))] opacity-70 hover:opacity-100 hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-accent-foreground))]",
+                                "shrink-0 text-white hover:bg-white/20 hover:text-white transition-colors",
                                 isCollapsed ? "h-10 w-10" : "h-8 w-8"
                             )}
                         >
@@ -366,13 +366,13 @@ const AppSidebar = () => {
                 {/* Search */}
                 {!isCollapsed && (
                     <div className="relative mx-5 mb-4 mt-8">
-                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[hsl(var(--sidebar-foreground))] opacity-50" />
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/50" />
                         <Input
                             type="text"
                             placeholder="Search modules..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="h-10 rounded-lg shadow-sm border border-blue-100 bg-white pl-9 text-sm text-[hsl(var(--sidebar-foreground))] placeholder:text-[hsl(var(--sidebar-foreground))] placeholder:opacity-50 focus:bg-[hsl(var(--sidebar-accent))] focus:ring-[hsl(var(--sidebar-ring))] focus:border-transparent"
+                            className="h-10 rounded-lg shadow-sm border border-white/20 bg-white/10 pl-9 text-sm text-white placeholder:text-white/60 focus:bg-white/20 focus:ring-white/30 focus:border-transparent transition-all"
                         />
                     </div>
                 )}
@@ -380,7 +380,7 @@ const AppSidebar = () => {
                 {/* Navigation Content */}
                 <div className={cn("sidebar-scroll mt-4 flex-1 overflow-y-auto px-3 pb-4", isCollapsed && "px-2")}>
                     {loading ? (
-                        <div className="flex items-center justify-center py-10 opacity-50 text-sm text-[hsl(var(--sidebar-foreground))]">
+                        <div className="flex items-center justify-center py-10 opacity-70 text-sm text-white">
                             Loading...
                         </div>
                     ) : (
@@ -408,14 +408,14 @@ const AppSidebar = () => {
                 </div>
 
                 {/* Footer Section */}
-                <div className={cn("mt-auto p-4 border-t border-blue-100", isCollapsed && "p-2")}>
+                <div className={cn("mt-auto p-4 border-t border-white/20", isCollapsed && "p-2")}>
                     <div className="flex flex-col gap-1">
                         <NavItemComponent isCollapsed={isCollapsed} href="/settings" icon={Settings} label="Settings" className={utilityButtonClass} />
                         <NavItemComponent isCollapsed={isCollapsed} href="/help" icon={HelpCircle} label="Support" className={utilityButtonClass} />
 
                         {mounted && (
                             <button className={cn(utilityButtonClass, "mb-2")} onClick={toggleTheme}>
-                                {theme === "dark" ? <Sun className="h-5 w-5 opacity-70" /> : <Moon className="h-5 w-5 opacity-70" />}
+                                {theme === "dark" ? <Sun className="h-5 w-5 opacity-80" /> : <Moon className="h-5 w-5 opacity-80" />}
                                 {!isCollapsed && <span>{theme === "dark" ? "Light Mode" : "Dark Mode"}</span>}
                             </button>
                         )}
@@ -426,23 +426,23 @@ const AppSidebar = () => {
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                                 <button className={cn(
-                                    "flex w-full items-center gap-3 rounded-md p-2 text-left hover:bg-white/80 hover:text-blue-600 hover:font-bold hover:shadow-md transition-colors outline-none",
+                                    "flex w-full items-center gap-3 rounded-md p-2 text-left hover:bg-white/10 hover:shadow-md transition-colors outline-none",
                                     isCollapsed && "justify-center px-0"
                                 )}>
-                                    <div className="h-9 w-9 shrink-0 flex items-center justify-center rounded-lg bg-[hsl(var(--sidebar-primary))] text-[11px] font-bold text-white shadow-sm">
+                                    <div className="h-11 w-11 shrink-0 flex items-center justify-center rounded-full bg-white text-lg font-bold text-[#376bae] shadow-sm">
                                         {getInitials(user)}
                                     </div>
                                     {!isCollapsed && (
                                         <>
                                             <div className="flex flex-col min-w-0 flex-1">
-                                                <span className="text-[12px] font-semibold text-[hsl(var(--sidebar-foreground))] truncate leading-tight">
+                                                <span className="text-[12px] font-semibold text-white truncate leading-tight">
                                                     {user.displayName || user.name}
                                                 </span>
-                                                <span className="text-[10px] text-[hsl(var(--sidebar-foreground))] opacity-50 truncate uppercase tracking-tighter">
+                                                <span className="text-[10px] text-white/70 truncate uppercase tracking-tighter">
                                                     {user.role?.replace(/_/g, " ")}
                                                 </span>
                                             </div>
-                                            <ChevronDown className="h-3 w-3 text-[hsl(var(--sidebar-foreground))] opacity-50 shrink-0" />
+                                            <ChevronDown className="h-3 w-3 text-white/60 shrink-0" />
                                         </>
                                     )}
                                 </button>
@@ -498,7 +498,7 @@ const AppSidebar = () => {
 const NavItemComponent = ({ isCollapsed, href, icon: Icon, label, className }) => {
     const content = (
         <Link href={href} className={className}>
-            <Icon className="h-5 w-5 shrink-0 opacity-70" />
+            <Icon className="h-5 w-5 shrink-0 opacity-80" />
             {!isCollapsed && <span>{label}</span>}
         </Link>
     );

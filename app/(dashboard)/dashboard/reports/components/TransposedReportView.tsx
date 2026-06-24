@@ -34,7 +34,7 @@ function UserDetailsPopover({ userId, users, officers = [], role, children, depa
         <div className="cursor-pointer transition-all hover:translate-y-[-1px] active:translate-y-0">{children}</div>
       </PopoverTrigger>
       <PopoverContent className="w-72 p-0 shadow-2xl border-slate-200 rounded-2xl overflow-hidden" align="start">
-        <div className="bg-blue-600 px-4 py-6 text-white">
+        <div className="bg-custom-blue px-4 py-6 text-white">
           <div className="flex items-center gap-3">
              <div className="h-12 w-12 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center font-bold text-lg">
                 {user.name?.slice(0, 2).toUpperCase()}
@@ -148,7 +148,7 @@ export function TransposedReportView({
                   <TableHead key={task.id} className={cn("bg-blue-100/80 border-b border-blue-200 py-4 px-4 text-center", DATA_COLUMN_WIDTH)}>
                      <div className="flex flex-col items-center gap-1">
                         <span className="text-[13px] font-black text-slate-900 truncate w-full">{task.applicant_name || 'Unnamed'}</span>
-                        <Badge className="bg-blue-600 text-white text-[10px] font-bold border-transparent px-2">ID: {task.id}</Badge>
+                        <Badge className="bg-custom-blue text-white text-[10px] font-bold border-transparent px-2">ID: {task.id}</Badge>
                      </div>
                   </TableHead>
                 ))}
@@ -177,7 +177,7 @@ export function TransposedReportView({
                       <TableCell colSpan={paginatedColumns.length + 2} className="p-0">
                         <div className="flex items-center justify-between px-6 py-3 sticky left-0 w-max min-w-full border-l-4 border-l-blue-500">
                            <div className="flex items-center gap-3">
-                              <div className="h-8 w-8 rounded-lg bg-blue-600 text-white flex items-center justify-center">
+                              <div className="h-8 w-8 rounded-lg bg-custom-blue text-white flex items-center justify-center">
                                  {row.icon ? <row.icon size={16}/> : <Layers size={16}/>}
                               </div>
                               <span className="text-[13px] font-bold text-slate-900 tracking-tight">{row.label}</span>
