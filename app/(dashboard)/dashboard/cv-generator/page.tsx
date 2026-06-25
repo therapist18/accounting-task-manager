@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Sparkles, FileText, Upload, Plus, Trash2, Download, ZoomIn, ZoomOut, Check, User, Briefcase, GraduationCap, FolderGit2, BookOpen, MessageSquare, AlertCircle, Eye, Search, Users, ImagePlus, X, Loader2, CheckCircle2, Save, Settings2, Palette, ChevronDown, ChevronUp, Globe, ArrowRight } from "lucide-react";
+import { Sparkles, FileText, Upload, Plus, Trash2, Download, ZoomIn, ZoomOut, Check, User, Briefcase, GraduationCap, FolderGit2, BookOpen, MessageSquare, AlertCircle, Eye, Search, Users, ImagePlus, X, Loader2, CheckCircle2, Save, Settings2, Palette, ChevronDown, ChevronRight, Globe, ArrowRight, Award, Target, FileSpreadsheet, Layout, Type, Image, PenLine, BarChart3, Crosshair, FileText as CoverLetterIcon, Copy, RefreshCw, Database } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { exportToDocx } from "@/lib/cvDocxExporter";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase/client";
+import AIWriterModule from "./components/AIWriterModule";
+import ATSOptimizer from "./components/ATSOptimizer";
+import JobMatch from "./components/JobMatch";
+import CoverLetterGenerator from "./components/CoverLetter";
+import ResumeVersions from "./components/ResumeVersions";
+import ResumeAnalytics from "./components/ResumeAnalytics";
+import AdvancedExport from "./components/AdvancedExport";
 
 const PASSPORT_PHOTO_ID = '48f48255-e5db-4944-8864-6f35b3af4696';
 const CLEAR_PHOTO_ID = 'fa74ff82-09ce-418d-8985-174158d73316';
@@ -46,6 +53,9 @@ const EMPTY_CV_DATA = {
   education: [] as any[],
   references: [] as any[],
   languages: [] as { language: string; proficiency: string }[],
+  certifications: [] as { name: string; issuer: string; date: string; url: string }[],
+  achievements: [] as { title: string; description: string; date: string }[],
+  additionalInfo: [] as { label: string; value: string }[],
   declaration: "",
   verifiedBadge: false
 };
@@ -197,6 +207,15 @@ const initialCVData = {
     { language: "English", proficiency: "Professional" },
     { language: "Hindi", proficiency: "Native" }
   ],
+  certifications: [
+    { name: "Certified Python Developer", issuer: "Python Institute", date: "2023", url: "" },
+  ],
+  achievements: [
+    { title: "Employee of the Month", description: "Recognized for outstanding performance and automation contributions", date: "2024" },
+  ],
+  additionalInfo: [
+    { label: "Availability", value: "Immediate" },
+  ],
   declaration: "I hereby declare that the above information is accurate to the best of my knowledge and reflects my professional qualifications, experience, and readiness for international employment opportunities.",
   verifiedBadge: true
 };
@@ -210,10 +229,28 @@ const ENHANCEMENT_OPTIONS: { value: EnhancementLevel; label: string; description
   { value: "executive",    label: "Executive",     description: "Strategic language, leadership framing, impact-focused" },
 ];
 
+const LS_PREFIX = 'cv_generator_';
+
+function loadFromLocalStorage<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const stored = localStorage.getItem(LS_PREFIX + key);
+    if (stored) return JSON.parse(stored);
+  } catch { /* ignore */ }
+  return fallback;
+}
+
+function saveToLocalStorage(key: string, value: any) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(LS_PREFIX + key, JSON.stringify(value));
+  } catch { /* ignore */ }
+}
+
 export default function CVGeneratorPage() {
-  const [cvData, setCvData] = useState<any>(initialCVData);
-  const [selectedLayout, setSelectedLayout] = useState<string>("theme1");
-  const [zoomLevel, setZoomLevel] = useState<number>(0.75);
+  const [cvData, setCvData] = useState<any>(() => loadFromLocalStorage('cvData', initialCVData));
+  const [selectedLayout, setSelectedLayout] = useState<string>(() => loadFromLocalStorage('selectedLayout', "theme1"));
+  const [zoomLevel, setZoomLevel] = useState<number>(() => loadFromLocalStorage('zoomLevel', 0.75));
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
   const [extractionProgress, setExtractionProgress] = useState<string>("");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
@@ -239,34 +276,86 @@ export default function CVGeneratorPage() {
     location: '',
     languages: [{ language: 'English', proficiency: 'Professional' }] as { language: string; proficiency: string }[],
   });
-  const [cvSettings, setCvSettings] = useState({
+  const [cvSettings, setCvSettings] = useState(() => loadFromLocalStorage('cvSettings', {
     photoSize: 150,
     photoFit: 'cover' as 'cover' | 'contain' | 'fill',
     photoShape: 'square' as 'square' | 'circle' | 'rounded',
     primaryColor: '#2c3e50',
     accentColor: '#3498db',
     fontScale: 1 as 0.85 | 1 | 1.15,
+    fontFamily: 'Inter, sans-serif',
+    showPhoto: true,
     showCustomize: false,
-  });
+  }));
 
   const updateCvSetting = <K extends keyof typeof cvSettings>(key: K, value: typeof cvSettings[K]) =>
     setCvSettings(prev => ({ ...prev, [key]: value }));
 
   const [workflowStep, setWorkflowStep] = useState<'import' | 'review-edit' | 'design-finalize'>('import');
   const [activeSection, setActiveSection] = useState('contact');
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(() => loadFromLocalStorage('collapsedGroups', {}));
+  const [showAiWriter, setShowAiWriter] = useState(false);
+  const [showAtsOptimizer, setShowAtsOptimizer] = useState(false);
+  const [showJobMatch, setShowJobMatch] = useState(false);
+  const [showCoverLetter, setShowCoverLetter] = useState(false);
+  const [showResumeVersions, setShowResumeVersions] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showAdvancedExport, setShowAdvancedExport] = useState(false);
+  const [cvVersions, setCvVersions] = useState<{ id: string; name: string; data: any; createdAt: string }[]>(() => loadFromLocalStorage('cvVersions', []));
+  const [activeDesignTab, setActiveDesignTab] = useState('theme');
 
-  const sectionMeta = [
-    { id: 'contact', label: 'Contact Information', icon: User, count: 1 },
-    { id: 'summary', label: 'Professional Summary', icon: BookOpen, count: cvData.summary ? 1 : 0 },
-    { id: 'experience', label: 'Experience', icon: Briefcase, count: cvData.experience.length },
-    { id: 'education', label: 'Education', icon: GraduationCap, count: cvData.education.length },
-    { id: 'skills', label: 'Skills', icon: Sparkles, count: cvData.skills.length },
-    { id: 'internships', label: 'Internships', icon: Briefcase, count: cvData.internships.length },
-    { id: 'projects', label: 'Projects', icon: FolderGit2, count: cvData.projects.length },
-    { id: 'languages', label: 'Languages', icon: Globe, count: cvData.languages.length },
-    { id: 'references', label: 'References', icon: MessageSquare, count: cvData.references.length },
-    { id: 'declaration', label: 'Declaration', icon: Check, count: cvData.declaration ? 1 : 0 },
+  // Auto-save to localStorage on changes
+  const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
+    autoSaveRef.current = setTimeout(() => {
+      saveToLocalStorage('cvData', cvData);
+      saveToLocalStorage('cvSettings', cvSettings);
+      saveToLocalStorage('selectedLayout', selectedLayout);
+      saveToLocalStorage('collapsedGroups', collapsedGroups);
+      saveToLocalStorage('cvVersions', cvVersions);
+      saveToLocalStorage('zoomLevel', zoomLevel);
+    }, 500);
+    return () => { if (autoSaveRef.current) clearTimeout(autoSaveRef.current); };
+  }, [cvData, cvSettings, selectedLayout, collapsedGroups, cvVersions, zoomLevel]);
+
+  const sectionGroups = [
+    {
+      label: 'Core',
+      sections: [
+        { id: 'contact', label: 'Contact Information', icon: User, count: 1 },
+        { id: 'summary', label: 'Professional Summary', icon: BookOpen, count: cvData.summary ? 1 : 0 },
+      ],
+    },
+    {
+      label: 'Experience',
+      sections: [
+        { id: 'experience', label: 'Experience', icon: Briefcase, count: cvData.experience.length },
+        { id: 'internships', label: 'Internships', icon: Briefcase, count: cvData.internships.length },
+        { id: 'education', label: 'Education', icon: GraduationCap, count: cvData.education.length },
+        { id: 'certifications', label: 'Certifications', icon: Award, count: cvData.certifications?.length || 0 },
+      ],
+    },
+    {
+      label: 'Skills & Projects',
+      sections: [
+        { id: 'skills', label: 'Skills', icon: Sparkles, count: cvData.skills.length },
+        { id: 'projects', label: 'Projects', icon: FolderGit2, count: cvData.projects.length },
+        { id: 'achievements', label: 'Achievements', icon: Target, count: cvData.achievements?.length || 0 },
+      ],
+    },
+    {
+      label: 'Additional',
+      sections: [
+        { id: 'languages', label: 'Languages', icon: Globe, count: cvData.languages.length },
+        { id: 'references', label: 'References', icon: MessageSquare, count: cvData.references.length },
+        { id: 'additionalInfo', label: 'Additional Info', icon: FileSpreadsheet, count: cvData.additionalInfo?.length || 0 },
+        { id: 'declaration', label: 'Declaration', icon: Check, count: cvData.declaration ? 1 : 0 },
+      ],
+    },
   ];
+
+  const sectionMeta = sectionGroups.flatMap(g => g.sections);
 
   const previewRef = useRef<HTMLDivElement>(null);
 
@@ -459,6 +548,63 @@ export default function CVGeneratorPage() {
     setCvData((prev: any) => ({ ...prev, languages: updated }));
   };
 
+  // Certifications handlers
+  const addCertification = () => {
+    setCvData((prev: any) => ({
+      ...prev,
+      certifications: [...(prev.certifications || []), { name: "", issuer: "", date: "", url: "" }]
+    }));
+  };
+  const handleCertificationChange = (index: number, field: string, value: any) => {
+    const updated = [...(cvData.certifications || [])];
+    updated[index] = { ...updated[index], [field]: value };
+    setCvData((prev: any) => ({ ...prev, certifications: updated }));
+  };
+  const removeCertification = (index: number) => {
+    setCvData((prev: any) => ({
+      ...prev,
+      certifications: (prev.certifications || []).filter((_: any, i: number) => i !== index)
+    }));
+  };
+
+  // Achievements handlers
+  const addAchievement = () => {
+    setCvData((prev: any) => ({
+      ...prev,
+      achievements: [...(prev.achievements || []), { title: "", description: "", date: "" }]
+    }));
+  };
+  const handleAchievementChange = (index: number, field: string, value: any) => {
+    const updated = [...(cvData.achievements || [])];
+    updated[index] = { ...updated[index], [field]: value };
+    setCvData((prev: any) => ({ ...prev, achievements: updated }));
+  };
+  const removeAchievement = (index: number) => {
+    setCvData((prev: any) => ({
+      ...prev,
+      achievements: (prev.achievements || []).filter((_: any, i: number) => i !== index)
+    }));
+  };
+
+  // Additional Info handlers
+  const addAdditionalInfo = () => {
+    setCvData((prev: any) => ({
+      ...prev,
+      additionalInfo: [...(prev.additionalInfo || []), { label: "", value: "" }]
+    }));
+  };
+  const handleAdditionalInfoChange = (index: number, field: string, value: any) => {
+    const updated = [...(cvData.additionalInfo || [])];
+    updated[index] = { ...updated[index], [field]: value };
+    setCvData((prev: any) => ({ ...prev, additionalInfo: updated }));
+  };
+  const removeAdditionalInfo = (index: number) => {
+    setCvData((prev: any) => ({
+      ...prev,
+      additionalInfo: (prev.additionalInfo || []).filter((_: any, i: number) => i !== index)
+    }));
+  };
+
   const removeLanguage = (index: number) => {
     setCvData((prev: any) => ({
       ...prev,
@@ -625,21 +771,30 @@ export default function CVGeneratorPage() {
   const applyIndividualToCV = () => {
     if (!selectedIndividual) return;
     const photoUrl = pendingPhotoPreview || individualPhoto || '';
+    const contact = Array.isArray(selectedIndividual.contact_details)
+      ? selectedIndividual.contact_details[0] || {}
+      : selectedIndividual.contact_details || {};
     setCvData({
       ...EMPTY_CV_DATA,
       personalInfo: {
         ...EMPTY_CV_DATA.personalInfo,
         fullName: registryFormData.fullName || selectedIndividual.full_name || "",
-        phone: registryFormData.phone || "",
-        email: registryFormData.email || "",
+        phone: registryFormData.phone || contact.phone?.kenyan?.primary || contact.phone?.abroad?.primary || "",
+        email: registryFormData.email || contact.email?.primary || "",
         location: registryFormData.location || "",
         photoUrl,
+      },
+      personalDetails: {
+        ...EMPTY_CV_DATA.personalDetails,
+        nationality: selectedIndividual.nationality || "",
       },
       languages: registryFormData.languages.length > 0
         ? registryFormData.languages
         : EMPTY_CV_DATA.languages,
     });
-    toast.success(`CV reset and pre-filled with ${registryFormData.fullName || selectedIndividual.full_name}'s details`);
+    toast.success(`CV pre-filled with ${registryFormData.fullName || selectedIndividual.full_name}'s details`);
+    setWorkflowStep('review-edit');
+    setActiveSection('contact');
     if (pendingPhotoFile) setShowSavePhotoPrompt(true);
     setShowSaveCvPrompt(true);
   };
@@ -805,6 +960,9 @@ export default function CVGeneratorPage() {
       education = [],
       references = [],
       languages = [],
+      certifications = [],
+      achievements = [],
+      additionalInfo = [],
       declaration = "",
       verifiedBadge = false
     } = cvData;
@@ -812,7 +970,7 @@ export default function CVGeneratorPage() {
     const photoShapeStyle: React.CSSProperties = {
       borderRadius: cvSettings.photoShape === 'circle' ? '50%' : cvSettings.photoShape === 'rounded' ? '12px' : '0',
     };
-    const fontScaleStyle: React.CSSProperties = { fontSize: `${cvSettings.fontScale}em` };
+    const fontScaleStyle: React.CSSProperties = { fontSize: `${cvSettings.fontScale}em`, fontFamily: (cvSettings as any).fontFamily || 'Inter, sans-serif' };
 
     if (selectedLayout === "theme1") {
       const acc = cvSettings.accentColor;
@@ -821,16 +979,18 @@ export default function CVGeneratorPage() {
         <div className="w-[210mm] min-h-[297mm] bg-white text-[#333] grid grid-cols-[280px_1fr] relative shadow-2xl text-left font-sans leading-normal" style={fontScaleStyle}>
           {/* Sidebar */}
           <aside style={{ backgroundColor: pri }} className="text-[#ecf0f1] p-[20px_15px] flex flex-col gap-6">
-            <div
-              style={{ width: cvSettings.photoSize, height: cvSettings.photoSize, borderColor: acc, ...photoShapeStyle }}
-              className="bg-white border-[3px] mx-auto flex items-center justify-center overflow-hidden"
-            >
-              <img
-                src={personalInfo.photoUrl || "https://via.placeholder.com/150x150?text=Photo"}
-                alt="Profile"
-                style={{ objectFit: cvSettings.photoFit, width: '100%', height: '100%' }}
-              />
-            </div>
+            {(cvSettings as any).showPhoto !== false && (
+              <div
+                style={{ width: cvSettings.photoSize, height: cvSettings.photoSize, borderColor: acc, ...photoShapeStyle }}
+                className="bg-white border-[3px] mx-auto flex items-center justify-center overflow-hidden"
+              >
+                <img
+                  src={personalInfo.photoUrl || "https://via.placeholder.com/150x150?text=Photo"}
+                  alt="Profile"
+                  style={{ objectFit: cvSettings.photoFit, width: '100%', height: '100%' }}
+                />
+              </div>
+            )}
 
             <div>
               <div style={{ color: acc, borderColor: `${acc}55` }} className="text-[11px] font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Contact Information</div>
@@ -884,6 +1044,17 @@ export default function CVGeneratorPage() {
                 <p className="text-[10px] italic opacity-60">No languages added yet.</p>
               )}
             </div>
+
+            {additionalInfo.length > 0 && (
+              <div>
+                <div style={{ color: acc, borderColor: `${acc}55` }} className="text-[11px] font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Additional Info</div>
+                <div className="space-y-1.5 text-[11px]">
+                  {additionalInfo.map((info: any, idx: number) => (
+                    <div key={idx}><strong>{info.label}:</strong> {info.value}</div>
+                  ))}
+                </div>
+              </div>
+            )}
           </aside>
 
           {/* Main Area */}
@@ -969,7 +1140,7 @@ export default function CVGeneratorPage() {
             </div>
 
             <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-[13px] font-extrabold uppercase mb-3">Education & Certifications</div>
+              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-[13px] font-extrabold uppercase mb-3">Education</div>
               {education.length > 0 ? (
                 <div className="space-y-2">
                   {education.map((edu: any, idx: number) => (
@@ -983,6 +1154,33 @@ export default function CVGeneratorPage() {
                 <p className="text-[11px] italic text-gray-400">No education added yet.</p>
               )}
             </div>
+
+            {certifications.length > 0 && (
+              <div>
+                <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-[13px] font-extrabold uppercase mb-3">Certifications</div>
+                <div className="space-y-2">
+                  {certifications.map((cert: any, idx: number) => (
+                    <div key={idx} className="text-[11.5px]">
+                      <strong>{cert.name}</strong> – {cert.issuer} {cert.date ? `(${cert.date})` : ""}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {achievements.length > 0 && (
+              <div>
+                <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-[13px] font-extrabold uppercase mb-3">Achievements</div>
+                <div className="space-y-2">
+                  {achievements.map((ach: any, idx: number) => (
+                    <div key={idx} className="text-[11.5px]">
+                      <strong>{ach.title}</strong> {ach.date ? `(${ach.date})` : ""}
+                      {ach.description && <p className="text-[10.5px] text-gray-500 mt-0.5">{ach.description}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div>
               <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-[13px] font-extrabold uppercase mb-3">References</div>
@@ -1167,6 +1365,39 @@ export default function CVGeneratorPage() {
                 )}
               </section>
 
+              {certifications.length > 0 && (
+                <section>
+                  <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3">Certifications</h2>
+                  <div className="space-y-2 text-[10.5px] text-slate-600">
+                    {certifications.map((cert: any, idx: number) => (
+                      <div key={idx}><strong className="text-slate-800">{cert.name}</strong> – {cert.issuer} {cert.date ? `(${cert.date})` : ""}</div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {achievements.length > 0 && (
+                <section>
+                  <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3">Achievements</h2>
+                  <div className="space-y-2 text-[10.5px] text-slate-600">
+                    {achievements.map((ach: any, idx: number) => (
+                      <div key={idx}><strong className="text-slate-800">{ach.title}</strong> {ach.date ? `(${ach.date})` : ""}{ach.description ? `: ${ach.description}` : ""}</div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {additionalInfo.length > 0 && (
+                <section>
+                  <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3">Additional Info</h2>
+                  <div className="space-y-1 text-[10.5px] text-slate-600">
+                    {additionalInfo.map((info: any, idx: number) => (
+                      <div key={idx}><strong className="text-slate-800">{info.label}:</strong> {info.value}</div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               <section>
                 <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-2">Languages</h2>
                 {languages.length > 0 ? (
@@ -1214,7 +1445,7 @@ export default function CVGeneratorPage() {
           )}
         </div>
       );
-    } else {
+    } else if (selectedLayout === "theme3") {
       // THEME 3: Minimalist Single Column Layout
       return (
         <div className="w-[210mm] min-h-[297mm] bg-white text-slate-800 p-12 relative shadow-2xl text-left font-serif leading-relaxed" style={fontScaleStyle}>
@@ -1302,6 +1533,40 @@ export default function CVGeneratorPage() {
               )}
             </section>
 
+            {certifications.length > 0 && (
+              <section>
+                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-2 font-sans">Certifications</h2>
+                <div className="font-sans text-[11.5px] space-y-1 text-slate-600">
+                  {certifications.map((cert: any, idx: number) => (
+                    <div key={idx}><strong>{cert.name}</strong> – {cert.issuer} {cert.date ? `(${cert.date})` : ""}</div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {achievements.length > 0 && (
+              <section>
+                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-2 font-sans">Achievements</h2>
+                {achievements.map((ach: any, idx: number) => (
+                  <div key={idx} className="font-sans text-[11.5px] text-slate-600">
+                    <strong>{ach.title}</strong> {ach.date ? `(${ach.date})` : ""}
+                    {ach.description && <p className="text-[10px] text-slate-400">{ach.description}</p>}
+                  </div>
+                ))}
+              </section>
+            )}
+
+            {additionalInfo.length > 0 && (
+              <section>
+                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-2 font-sans">Additional Info</h2>
+                <div className="font-sans text-[11.5px] space-y-1 text-slate-600">
+                  {additionalInfo.map((info: any, idx: number) => (
+                    <div key={idx}><strong>{info.label}:</strong> {info.value}</div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             <section>
               <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-2 font-sans">References</h2>
               {references.length > 0 ? (
@@ -1324,6 +1589,137 @@ export default function CVGeneratorPage() {
                 <p>{declaration}</p>
               </div>
             )}
+          </div>
+        </div>
+      );
+    } else {
+      // THEME 4: Executive Layout
+      const acc = cvSettings.accentColor;
+      const pri = cvSettings.primaryColor;
+      return (
+        <div className="w-[210mm] min-h-[297mm] bg-white relative shadow-2xl text-left font-sans leading-normal" style={fontScaleStyle}>
+          {/* Bold top banner */}
+          <header style={{ backgroundColor: pri, borderBottomColor: acc }} className="text-white border-b-4">
+            <div className="p-8 pb-4">
+              <h1 className="text-4xl font-extrabold tracking-tight">{personalInfo.fullName || "Your Name"}</h1>
+              <div style={{ color: acc }} className="text-lg font-semibold tracking-wide mt-1 uppercase">{personalInfo.title || "Professional Title"}</div>
+            </div>
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs px-8 pb-4 text-slate-300" style={{ backgroundColor: `${pri}dd` }}>
+              {personalInfo.email && <span>✉ {personalInfo.email}</span>}
+              {personalInfo.phone && <span>📞 {personalInfo.phone}</span>}
+              {personalInfo.location && <span>📍 {personalInfo.location}</span>}
+              {personalInfo.linkedin && <span>🔗 {personalInfo.linkedin}</span>}
+              {personalInfo.github && <span>🐙 {personalInfo.github}</span>}
+            </div>
+          </header>
+
+          <div className="p-8 grid grid-cols-[1fr_280px] gap-8">
+            <div className="space-y-6">
+              <section>
+                <h2 style={{ borderBottomColor: acc, color: pri }} className="text-lg font-extrabold uppercase border-b-2 pb-1 mb-3">Executive Profile</h2>
+                {summary ? <p className="text-[12px] leading-relaxed text-slate-700 text-justify">{summary}</p> : <p className="text-[11px] italic text-slate-400">No profile summary.</p>}
+              </section>
+
+              <section>
+                <h2 style={{ borderBottomColor: acc, color: pri }} className="text-lg font-extrabold uppercase border-b-2 pb-1 mb-4">Leadership Experience</h2>
+                {experience.length > 0 ? (
+                  <div className="space-y-5">
+                    {experience.map((exp: any, idx: number) => (
+                      <div key={idx} className="border-l-2 pl-4" style={{ borderLeftColor: acc }}>
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <div className="font-bold text-[14px] text-slate-900">{exp.role}</div>
+                            <div className="text-[12px] text-slate-500 font-semibold">{exp.company} {exp.location ? `— ${exp.location}` : ""}</div>
+                          </div>
+                          <div style={{ color: acc }} className="text-[11px] font-bold whitespace-nowrap">{exp.startDate} – {exp.endDate}</div>
+                        </div>
+                        {exp.companyDesc && <p className="text-[10.5px] text-slate-400 italic mt-1">{exp.companyDesc}</p>}
+                        <ul className="list-disc pl-5 text-[11.5px] text-slate-600 mt-2 space-y-1">
+                          {Array.isArray(exp.responsibilities) ? exp.responsibilities.map((resp: string, rIdx: number) => (
+                            <li key={rIdx}>{resp}</li>
+                          )) : <li>{exp.responsibilities}</li>}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className="text-[11px] italic text-slate-400">No experience added.</p>}
+              </section>
+
+              <section>
+                <h2 style={{ borderBottomColor: acc, color: pri }} className="text-lg font-extrabold uppercase border-b-2 pb-1 mb-3">Key Projects & Impact</h2>
+                {projects.length > 0 ? (
+                  <div className="space-y-3">
+                    {projects.map((proj: any, idx: number) => (
+                      <div key={idx} className="text-[12px]"><strong className="text-slate-800">{proj.title}</strong> {proj.year ? `(${proj.year})` : ""} — <span className="text-slate-600">{proj.description}</span></div>
+                    ))}
+                  </div>
+                ) : <p className="text-[11px] italic text-slate-400">No projects added.</p>}
+              </section>
+
+              <section>
+                <h2 style={{ borderBottomColor: acc, color: pri }} className="text-lg font-extrabold uppercase border-b-2 pb-1 mb-3">Education</h2>
+                {education.length > 0 ? (
+                  <div className="space-y-2">
+                    {education.map((edu: any, idx: number) => (
+                      <div key={idx} className="text-[12px]"><strong>{edu.degree}</strong> — {edu.institution} ({edu.year}){edu.details ? ` — ${edu.details}` : ""}</div>
+                    ))}
+                  </div>
+                ) : <p className="text-[11px] italic text-slate-400">No education added.</p>}
+              </section>
+            </div>
+
+            <aside className="space-y-5">
+              <div className="text-center">
+                {(cvSettings as any).showPhoto !== false && (
+                  <div style={{ width: 120, height: 120, borderRadius: '50%', borderColor: acc, objectFit: cvSettings.photoFit }} className="mx-auto border-2 overflow-hidden mb-3">
+                    <img src={personalInfo.photoUrl || "https://via.placeholder.com/120"} alt="Profile" className="w-full h-full" style={{ objectFit: cvSettings.photoFit }} />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">Core Competencies</h3>
+                {skills.length > 0 ? skills.map((grp: any, idx: number) => (
+                  <div key={idx} className="mb-2"><div className="text-[11px] font-bold text-slate-700">{grp.category}</div><div className="text-[10px] text-slate-500">{grp.items}</div></div>
+                )) : <p className="text-[10px] italic text-slate-400">No skills.</p>}
+              </div>
+
+              <div>
+                <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">Languages</h3>
+                {languages.length > 0 ? languages.map((l: any, idx: number) => (
+                  <div key={idx} className="text-[11px] text-slate-600">{l.language} — {l.proficiency}</div>
+                )) : <p className="text-[10px] italic text-slate-400">No languages.</p>}
+              </div>
+
+              {certifications.length > 0 && (
+                <div>
+                  <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">Certifications</h3>
+                  {certifications.map((c: any, idx: number) => (
+                    <div key={idx} className="text-[11px] text-slate-600"><strong>{c.name}</strong> — {c.issuer}</div>
+                  ))}
+                </div>
+              )}
+
+              {additionalInfo.length > 0 && (
+                <div>
+                  <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">Details</h3>
+                  {additionalInfo.map((info: any, idx: number) => (
+                    <div key={idx} className="text-[11px] text-slate-600"><strong>{info.label}:</strong> {info.value}</div>
+                  ))}
+                </div>
+              )}
+
+              <div>
+                <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">References</h3>
+                {references.length > 0 ? references.map((ref: any, idx: number) => (
+                  <div key={idx} className="text-[11px] text-slate-600 mb-2"><strong>{ref.name}</strong><br />{ref.title} | {ref.company}<br /><span style={{ color: acc }}>{ref.contact}</span></div>
+                )) : <p className="text-[10px] italic text-slate-400">No references.</p>}
+              </div>
+
+              {declaration && (
+                <div className="text-[9px] italic text-slate-400 border-t border-slate-200 pt-2 mt-4">{declaration}</div>
+              )}
+            </aside>
           </div>
         </div>
       );
@@ -1504,37 +1900,63 @@ export default function CVGeneratorPage() {
         {/* ─── STEP 2: REVIEW & EDIT ──────────────────────────────────────── */}
         {workflowStep === 'review-edit' && (
           <div className="flex-1 flex gap-4">
-            {/* Left — Sections Sidebar */}
+            {/* Left — Sections Sidebar (Collapsible Accordion) */}
             <div className="w-56 shrink-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-              <div className="px-3 py-2.5 border-b border-slate-200">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Resume Sections</span>
+              <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Sections</span>
               </div>
-              <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-                {sectionMeta.map((sec) => {
-                  const Icon = sec.icon
-                  const isActive = activeSection === sec.id
-                  const isComplete = sec.count > 0 || (sec.id === 'contact')
-                  return (
+              <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                {sectionGroups.map((group) => (
+                  <div key={group.label}>
                     <button
-                      key={sec.id}
-                      onClick={() => setActiveSection(sec.id)}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all ${
-                        isActive ? 'bg-custom-blue text-white shadow-sm' : 'hover:bg-slate-50 text-slate-600'
-                      }`}
+                      onClick={() => setCollapsedGroups(prev => ({ ...prev, [group.label]: !prev[group.label] }))}
+                      className="w-full flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold text-slate-400 uppercase tracking-wider hover:text-slate-600"
                     >
-                      <Icon className={`h-3.5 w-3.5 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                      <span className="text-xs font-semibold flex-1 truncate">{sec.label}</span>
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                        isActive ? 'bg-white/20 text-white' : isComplete ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'
-                      }`}>
-                        {sec.count}
-                      </span>
+                      {collapsedGroups[group.label] ? <ChevronRight className="h-2.5 w-2.5" /> : <ChevronDown className="h-2.5 w-2.5" />}
+                      {group.label}
                     </button>
-                  )
-                })}
+                    {!collapsedGroups[group.label] && (
+                      <div className="space-y-0.5 mt-0.5">
+                        {group.sections.map((sec) => {
+                          const Icon = sec.icon
+                          const isActive = activeSection === sec.id
+                          const isComplete = sec.count > 0 || (sec.id === 'contact')
+                          return (
+                            <button
+                              key={sec.id}
+                              onClick={() => setActiveSection(sec.id)}
+                              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-left transition-all ${
+                                isActive ? 'bg-custom-blue text-white shadow-sm' : 'hover:bg-slate-50 text-slate-600'
+                              }`}
+                            >
+                              <Icon className={`h-3 w-3 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                              <span className="text-[11px] font-semibold flex-1 truncate">{sec.label}</span>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center ${
+                                isActive ? 'bg-white/20 text-white' : isComplete ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'
+                              }`}>
+                                {sec.count}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
-              <div className="border-t border-slate-200 p-3">
-                <Button size="sm" onClick={() => setWorkflowStep('design-finalize')} className="w-full text-xs bg-custom-blue hover:bg-[#2d5a94]">
+              {/* AI & Tools Panel */}
+              <div className="border-t border-slate-200 p-2 space-y-1.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1 block">AI &amp; Tools</span>
+                <button onClick={() => setShowAiWriter(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-purple-50 text-slate-600 text-[11px] font-semibold"><PenLine className="h-3 w-3 text-purple-500" /> AI Writer</button>
+                <button onClick={() => setShowAtsOptimizer(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-amber-50 text-slate-600 text-[11px] font-semibold"><BarChart3 className="h-3 w-3 text-amber-600" /> ATS Optimizer</button>
+                <button onClick={() => setShowJobMatch(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-blue-50 text-slate-600 text-[11px] font-semibold"><Crosshair className="h-3 w-3 text-blue-600" /> Job Match</button>
+                <button onClick={() => setShowCoverLetter(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-green-50 text-slate-600 text-[11px] font-semibold"><CoverLetterIcon className="h-3 w-3 text-green-600" /> Cover Letter</button>
+                <button onClick={() => setShowResumeVersions(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-slate-50 text-slate-600 text-[11px] font-semibold"><Copy className="h-3 w-3 text-slate-500" /> Versions</button>
+                <button onClick={() => setShowAnalytics(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-slate-50 text-slate-600 text-[11px] font-semibold"><BarChart3 className="h-3 w-3 text-slate-500" /> Analytics</button>
+              </div>
+              <div className="border-t border-slate-200 p-3 space-y-1.5">
+                <Button size="sm" onClick={() => setShowAdvancedExport(true)} variant="outline" className="w-full text-xs h-7 border-slate-200"><Download className="h-3 w-3 mr-1" /> Advanced Export</Button>
+                <Button size="sm" onClick={() => setWorkflowStep('design-finalize')} className="w-full text-xs bg-custom-blue hover:bg-[#2d5a94] h-7">
                   Design &amp; Finalize <ArrowRight className="h-3 w-3 ml-1" />
                 </Button>
               </div>
@@ -1553,16 +1975,16 @@ export default function CVGeneratorPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5 col-span-2">
                       <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Full Name</Label>
-                      <Input value={cvData.personalInfo.fullName} onChange={(e) => handlePersonalInfoChange("fullName", e.target.value)} />
+                      <Input value={cvData.personalInfo?.fullName ?? ""} onChange={(e) => handlePersonalInfoChange("fullName", e.target.value)} />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Professional Title</Label>
-                      <Input value={cvData.personalInfo.title} onChange={(e) => handlePersonalInfoChange("title", e.target.value)} />
+                      <Input value={cvData.personalInfo?.title ?? ""} onChange={(e) => handlePersonalInfoChange("title", e.target.value)} />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Photo</Label>
                       <div className="flex gap-2 items-center">
-                        {cvData.personalInfo.photoUrl ? (
+                        {cvData.personalInfo?.photoUrl ? (
                           <img src={cvData.personalInfo.photoUrl} className="h-10 w-10 object-cover rounded-lg border border-slate-200" />
                         ) : (
                           <div className="h-10 w-10 rounded-lg bg-slate-100 flex items-center justify-center"><User className="h-4 w-4 text-slate-400" /></div>
@@ -1575,31 +1997,31 @@ export default function CVGeneratorPage() {
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Email</Label>
-                      <Input value={cvData.personalInfo.email} onChange={(e) => handlePersonalInfoChange("email", e.target.value)} />
+                      <Input value={cvData.personalInfo?.email ?? ""} onChange={(e) => handlePersonalInfoChange("email", e.target.value)} />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Phone</Label>
-                      <Input value={cvData.personalInfo.phone} onChange={(e) => handlePersonalInfoChange("phone", e.target.value)} />
+                      <Input value={cvData.personalInfo?.phone ?? ""} onChange={(e) => handlePersonalInfoChange("phone", e.target.value)} />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Location</Label>
-                      <Input value={cvData.personalInfo.location} onChange={(e) => handlePersonalInfoChange("location", e.target.value)} />
+                      <Input value={cvData.personalInfo?.location ?? ""} onChange={(e) => handlePersonalInfoChange("location", e.target.value)} />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">LinkedIn</Label>
-                      <Input value={cvData.personalInfo.linkedin} onChange={(e) => handlePersonalInfoChange("linkedin", e.target.value)} />
+                      <Input value={cvData.personalInfo?.linkedin ?? ""} onChange={(e) => handlePersonalInfoChange("linkedin", e.target.value)} />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">GitHub</Label>
-                      <Input value={cvData.personalInfo.github} onChange={(e) => handlePersonalInfoChange("github", e.target.value)} />
+                      <Input value={cvData.personalInfo?.github ?? ""} onChange={(e) => handlePersonalInfoChange("github", e.target.value)} />
                     </div>
                     <div className="space-y-1.5 col-span-2">
                       <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Personal Details</Label>
                       <div className="grid grid-cols-2 gap-3">
-                        <Input placeholder="Date of Birth" value={cvData.personalDetails.dateOfBirth || ""} onChange={(e) => handlePersonalDetailsChange("dateOfBirth", e.target.value)} />
-                        <Input placeholder="Nationality" value={cvData.personalDetails.nationality || ""} onChange={(e) => handlePersonalDetailsChange("nationality", e.target.value)} />
-                        <Input placeholder="Marital Status" value={cvData.personalDetails.maritalStatus || ""} onChange={(e) => handlePersonalDetailsChange("maritalStatus", e.target.value)} />
-                        <Input placeholder="Residence" value={cvData.personalDetails.residence || ""} onChange={(e) => handlePersonalDetailsChange("residence", e.target.value)} />
+                        <Input placeholder="Date of Birth" value={cvData.personalDetails?.dateOfBirth ?? ""} onChange={(e) => handlePersonalDetailsChange("dateOfBirth", e.target.value)} />
+                        <Input placeholder="Nationality" value={cvData.personalDetails?.nationality ?? ""} onChange={(e) => handlePersonalDetailsChange("nationality", e.target.value)} />
+                        <Input placeholder="Marital Status" value={cvData.personalDetails?.maritalStatus ?? ""} onChange={(e) => handlePersonalDetailsChange("maritalStatus", e.target.value)} />
+                        <Input placeholder="Residence" value={cvData.personalDetails?.residence ?? ""} onChange={(e) => handlePersonalDetailsChange("residence", e.target.value)} />
                       </div>
                     </div>
                   </div>
@@ -1608,8 +2030,11 @@ export default function CVGeneratorPage() {
                 {/* Summary Editor */}
                 {activeSection === 'summary' && (
                   <div className="space-y-2">
-                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Professional Summary</Label>
-                    <Textarea rows={6} value={cvData.summary} onChange={(e) => setCvData({ ...cvData, summary: e.target.value })} placeholder="Write a compelling professional summary..." />
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Professional Summary</Label>
+                      <Button size="sm" variant="ghost" onClick={() => setShowAiWriter(true)} className="h-6 text-[10px] text-purple-600 gap-1"><Sparkles className="h-3 w-3" /> AI Enhance</Button>
+                    </div>
+                    <Textarea rows={6} value={cvData.summary ?? ""} onChange={(e) => setCvData({ ...cvData, summary: e.target.value })} placeholder="Write a compelling professional summary..." />
                     <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
                       <div className="flex items-start gap-2">
                         <Sparkles className="h-4 w-4 text-custom-blue shrink-0 mt-0.5" />
@@ -1627,7 +2052,10 @@ export default function CVGeneratorPage() {
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-500">{cvData.experience.length} entries</span>
-                      <Button size="sm" variant="outline" onClick={addExperience} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                      <div className="flex gap-1.5">
+                        <Button size="sm" variant="ghost" onClick={() => setShowAiWriter(true)} className="h-7 text-[10px] text-purple-600 gap-1"><Sparkles className="h-3 w-3" /> AI Enhance</Button>
+                        <Button size="sm" variant="outline" onClick={addExperience} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                      </div>
                     </div>
                     {cvData.experience.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No experience entries yet. Click "Add" to create one.</p>}
                     <div className="space-y-4">
@@ -1638,14 +2066,14 @@ export default function CVGeneratorPage() {
                             <Button variant="ghost" size="icon" onClick={() => removeExperience(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                           </div>
                           <div className="grid grid-cols-2 gap-3">
-                            <Input placeholder="Company Name" value={exp.company} onChange={(e) => handleExperienceChange(idx, "company", e.target.value)} />
-                            <Input placeholder="Location" value={exp.location} onChange={(e) => handleExperienceChange(idx, "location", e.target.value)} />
-                            <Input placeholder="Role / Job Title" value={exp.role} onChange={(e) => handleExperienceChange(idx, "role", e.target.value)} />
+                            <Input placeholder="Company Name" value={exp.company ?? ""} onChange={(e) => handleExperienceChange(idx, "company", e.target.value)} />
+                            <Input placeholder="Location" value={exp.location ?? ""} onChange={(e) => handleExperienceChange(idx, "location", e.target.value)} />
+                            <Input placeholder="Role / Job Title" value={exp.role ?? ""} onChange={(e) => handleExperienceChange(idx, "role", e.target.value)} />
                             <div className="grid grid-cols-2 gap-2">
-                              <Input placeholder="Start Date" value={exp.startDate} onChange={(e) => handleExperienceChange(idx, "startDate", e.target.value)} />
-                              <Input placeholder="End Date" value={exp.endDate} onChange={(e) => handleExperienceChange(idx, "endDate", e.target.value)} />
+                              <Input placeholder="Start Date" value={exp.startDate ?? ""} onChange={(e) => handleExperienceChange(idx, "startDate", e.target.value)} />
+                              <Input placeholder="End Date" value={exp.endDate ?? ""} onChange={(e) => handleExperienceChange(idx, "endDate", e.target.value)} />
                             </div>
-                            <Input placeholder="Company Description" className="col-span-2" value={exp.companyDesc || ""} onChange={(e) => handleExperienceChange(idx, "companyDesc", e.target.value)} />
+                            <Input placeholder="Company Description" className="col-span-2" value={exp.companyDesc ?? ""} onChange={(e) => handleExperienceChange(idx, "companyDesc", e.target.value)} />
                             <div className="col-span-2 space-y-2">
                               <div className="flex justify-between items-center">
                                 <span className="text-xs text-slate-500">Key Responsibilities</span>
@@ -1653,7 +2081,7 @@ export default function CVGeneratorPage() {
                               </div>
                               {exp.responsibilities?.map((resp: string, rIdx: number) => (
                                 <div key={rIdx} className="flex gap-2 items-center">
-                                  <Input value={resp} placeholder="e.g. Designed backend system" onChange={(e) => handleRespChangeInExperience(idx, rIdx, e.target.value)} className="h-8 text-xs" />
+                                  <Input value={resp ?? ""} placeholder="e.g. Designed backend system" onChange={(e) => handleRespChangeInExperience(idx, rIdx, e.target.value)} className="h-8 text-xs" />
                                   <Button variant="ghost" size="icon" onClick={() => removeRespFromExperience(idx, rIdx)} className="h-8 w-8 text-red-400 hover:text-red-600"><Trash2 className="h-3 w-3" /></Button>
                                 </div>
                               ))}
@@ -1679,10 +2107,10 @@ export default function CVGeneratorPage() {
                           <Button variant="ghost" size="icon" onClick={() => removeEducation(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
-                          <Input placeholder="Degree / Certificate" value={edu.degree} onChange={(e) => handleEducationChange(idx, "degree", e.target.value)} />
-                          <Input placeholder="Year of Completion" value={edu.year} onChange={(e) => handleEducationChange(idx, "year", e.target.value)} />
-                          <Input placeholder="Institution" className="col-span-2" value={edu.institution} onChange={(e) => handleEducationChange(idx, "institution", e.target.value)} />
-                          <Input placeholder="Extra Details / Certifications" className="col-span-2" value={edu.details || ""} onChange={(e) => handleEducationChange(idx, "details", e.target.value)} />
+                          <Input placeholder="Degree / Certificate" value={edu.degree ?? ""} onChange={(e) => handleEducationChange(idx, "degree", e.target.value)} />
+                          <Input placeholder="Year of Completion" value={edu.year ?? ""} onChange={(e) => handleEducationChange(idx, "year", e.target.value)} />
+                          <Input placeholder="Institution" className="col-span-2" value={edu.institution ?? ""} onChange={(e) => handleEducationChange(idx, "institution", e.target.value)} />
+                          <Input placeholder="Extra Details / Certifications" className="col-span-2" value={edu.details ?? ""} onChange={(e) => handleEducationChange(idx, "details", e.target.value)} />
                         </div>
                       </div>
                     ))}
@@ -1700,8 +2128,8 @@ export default function CVGeneratorPage() {
                     {cvData.skills.map((skill: any, idx: number) => (
                       <div key={idx} className="flex gap-3 items-start p-3 border border-slate-200 rounded-lg">
                         <div className="flex-1 space-y-2">
-                          <Input placeholder="Category (e.g. Frameworks & Tools)" value={skill.category} onChange={(e) => handleSkillGroupChange(idx, "category", e.target.value)} />
-                          <Textarea placeholder="Comma-separated items" rows={2} value={skill.items} onChange={(e) => handleSkillGroupChange(idx, "items", e.target.value)} />
+                          <Input placeholder="Category (e.g. Frameworks & Tools)" value={skill.category ?? ""} onChange={(e) => handleSkillGroupChange(idx, "category", e.target.value)} />
+                          <Textarea placeholder="Comma-separated items" rows={2} value={skill.items ?? ""} onChange={(e) => handleSkillGroupChange(idx, "items", e.target.value)} />
                         </div>
                         <Button variant="ghost" size="icon" onClick={() => removeSkillGroup(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                       </div>
@@ -1724,14 +2152,14 @@ export default function CVGeneratorPage() {
                           <Button variant="ghost" size="icon" onClick={() => removeInternship(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
-                          <Input placeholder="Company" value={intern.company} onChange={(e) => handleInternshipChange(idx, "company", e.target.value)} />
-                          <Input placeholder="Location" value={intern.location} onChange={(e) => handleInternshipChange(idx, "location", e.target.value)} />
-                          <Input placeholder="Role / Title" value={intern.role} onChange={(e) => handleInternshipChange(idx, "role", e.target.value)} />
+                          <Input placeholder="Company" value={intern.company ?? ""} onChange={(e) => handleInternshipChange(idx, "company", e.target.value)} />
+                          <Input placeholder="Location" value={intern.location ?? ""} onChange={(e) => handleInternshipChange(idx, "location", e.target.value)} />
+                          <Input placeholder="Role / Title" value={intern.role ?? ""} onChange={(e) => handleInternshipChange(idx, "role", e.target.value)} />
                           <div className="grid grid-cols-2 gap-2">
-                            <Input placeholder="Start Date" value={intern.startDate} onChange={(e) => handleInternshipChange(idx, "startDate", e.target.value)} />
-                            <Input placeholder="End Date" value={intern.endDate} onChange={(e) => handleInternshipChange(idx, "endDate", e.target.value)} />
+                            <Input placeholder="Start Date" value={intern.startDate ?? ""} onChange={(e) => handleInternshipChange(idx, "startDate", e.target.value)} />
+                            <Input placeholder="End Date" value={intern.endDate ?? ""} onChange={(e) => handleInternshipChange(idx, "endDate", e.target.value)} />
                           </div>
-                          <Input placeholder="Company Description" className="col-span-2" value={intern.companyDesc || ""} onChange={(e) => handleInternshipChange(idx, "companyDesc", e.target.value)} />
+                          <Input placeholder="Company Description" className="col-span-2" value={intern.companyDesc ?? ""} onChange={(e) => handleInternshipChange(idx, "companyDesc", e.target.value)} />
                           <div className="col-span-2 space-y-2">
                             <div className="flex justify-between items-center">
                               <span className="text-xs text-slate-500">Key Responsibilities</span>
@@ -1739,7 +2167,7 @@ export default function CVGeneratorPage() {
                             </div>
                             {intern.responsibilities?.map((resp: string, rIdx: number) => (
                               <div key={rIdx} className="flex gap-2 items-center">
-                                <Input value={resp} onChange={(e) => handleRespChangeInInternship(idx, rIdx, e.target.value)} className="h-8 text-xs" />
+                                <Input value={resp ?? ""} onChange={(e) => handleRespChangeInInternship(idx, rIdx, e.target.value)} className="h-8 text-xs" />
                                 <Button variant="ghost" size="icon" onClick={() => removeRespFromInternship(idx, rIdx)} className="h-8 w-8 text-red-400 hover:text-red-600"><Trash2 className="h-3 w-3" /></Button>
                               </div>
                             ))}
@@ -1765,10 +2193,10 @@ export default function CVGeneratorPage() {
                           <Button variant="ghost" size="icon" onClick={() => removeProject(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                         </div>
                         <div className="grid grid-cols-[1fr_100px] gap-3">
-                          <Input placeholder="Project Title" value={proj.title} onChange={(e) => handleProjectChange(idx, "title", e.target.value)} />
-                          <Input placeholder="Year" value={proj.year || ""} onChange={(e) => handleProjectChange(idx, "year", e.target.value)} />
+                          <Input placeholder="Project Title" value={proj.title ?? ""} onChange={(e) => handleProjectChange(idx, "title", e.target.value)} />
+                          <Input placeholder="Year" value={proj.year ?? ""} onChange={(e) => handleProjectChange(idx, "year", e.target.value)} />
                         </div>
-                        <Textarea placeholder="Project Description" rows={2} value={proj.description} onChange={(e) => handleProjectChange(idx, "description", e.target.value)} />
+                        <Textarea placeholder="Project Description" rows={2} value={proj.description ?? ""} onChange={(e) => handleProjectChange(idx, "description", e.target.value)} />
                       </div>
                     ))}
                   </div>
@@ -1784,8 +2212,8 @@ export default function CVGeneratorPage() {
                     {cvData.languages.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No languages added yet.</p>}
                     {cvData.languages.map((lang: any, idx: number) => (
                       <div key={idx} className="flex gap-3 items-center">
-                        <Input placeholder="Language" value={lang.language} onChange={(e) => handleLanguageChange(idx, "language", e.target.value)} className="flex-1" />
-                        <Input placeholder="Proficiency" value={lang.proficiency} onChange={(e) => handleLanguageChange(idx, "proficiency", e.target.value)} className="flex-1" />
+                        <Input placeholder="Language" value={lang.language ?? ""} onChange={(e) => handleLanguageChange(idx, "language", e.target.value)} className="flex-1" />
+                        <Input placeholder="Proficiency" value={lang.proficiency ?? ""} onChange={(e) => handleLanguageChange(idx, "proficiency", e.target.value)} className="flex-1" />
                         <Button variant="ghost" size="icon" onClick={() => removeLanguage(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                       </div>
                     ))}
@@ -1807,12 +2235,81 @@ export default function CVGeneratorPage() {
                           <Button variant="ghost" size="icon" onClick={() => removeReference(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
-                          <Input placeholder="Reference Name" value={ref.name} onChange={(e) => handleReferenceChange(idx, "name", e.target.value)} />
-                          <Input placeholder="Title / Role" value={ref.title} onChange={(e) => handleReferenceChange(idx, "title", e.target.value)} />
-                          <Input placeholder="Company" value={ref.company} onChange={(e) => handleReferenceChange(idx, "company", e.target.value)} />
-                          <Input placeholder="Contact (Phone / Email)" value={ref.contact} onChange={(e) => handleReferenceChange(idx, "contact", e.target.value)} />
-                          <Input placeholder="Address / Office" className="col-span-2" value={ref.address || ""} onChange={(e) => handleReferenceChange(idx, "address", e.target.value)} />
+                          <Input placeholder="Reference Name" value={ref.name ?? ""} onChange={(e) => handleReferenceChange(idx, "name", e.target.value)} />
+                          <Input placeholder="Title / Role" value={ref.title ?? ""} onChange={(e) => handleReferenceChange(idx, "title", e.target.value)} />
+                          <Input placeholder="Company" value={ref.company ?? ""} onChange={(e) => handleReferenceChange(idx, "company", e.target.value)} />
+                          <Input placeholder="Contact (Phone / Email)" value={ref.contact ?? ""} onChange={(e) => handleReferenceChange(idx, "contact", e.target.value)} />
+                          <Input placeholder="Address / Office" className="col-span-2" value={ref.address ?? ""} onChange={(e) => handleReferenceChange(idx, "address", e.target.value)} />
                         </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Certifications Editor */}
+                {activeSection === 'certifications' && (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-slate-500">{(cvData.certifications || []).length} entries</span>
+                      <Button size="sm" variant="outline" onClick={addCertification} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                    </div>
+                    {(cvData.certifications || []).length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No certifications added yet.</p>}
+                    {(cvData.certifications || []).map((cert: any, idx: number) => (
+                      <div key={idx} className="p-4 border border-slate-200 rounded-xl space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-500">Certification #{idx + 1}</span>
+                          <Button variant="ghost" size="icon" onClick={() => removeCertification(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Input placeholder="Certification Name" value={cert.name ?? ""} onChange={(e) => handleCertificationChange(idx, "name", e.target.value)} />
+                          <Input placeholder="Issuer" value={cert.issuer ?? ""} onChange={(e) => handleCertificationChange(idx, "issuer", e.target.value)} />
+                          <Input placeholder="Date" value={cert.date ?? ""} onChange={(e) => handleCertificationChange(idx, "date", e.target.value)} />
+                          <Input placeholder="URL (optional)" value={cert.url ?? ""} onChange={(e) => handleCertificationChange(idx, "url", e.target.value)} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Achievements Editor */}
+                {activeSection === 'achievements' && (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-slate-500">{(cvData.achievements || []).length} entries</span>
+                      <Button size="sm" variant="outline" onClick={addAchievement} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                    </div>
+                    {(cvData.achievements || []).length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No achievements added yet.</p>}
+                    {(cvData.achievements || []).map((ach: any, idx: number) => (
+                      <div key={idx} className="p-4 border border-slate-200 rounded-xl space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-500">Achievement #{idx + 1}</span>
+                          <Button variant="ghost" size="icon" onClick={() => removeAchievement(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Input placeholder="Achievement Title" value={ach.title ?? ""} onChange={(e) => handleAchievementChange(idx, "title", e.target.value)} />
+                          <Input placeholder="Date" value={ach.date ?? ""} onChange={(e) => handleAchievementChange(idx, "date", e.target.value)} />
+                          <Textarea placeholder="Description" rows={2} className="col-span-2" value={ach.description ?? ""} onChange={(e) => handleAchievementChange(idx, "description", e.target.value)} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Additional Info Editor */}
+                {activeSection === 'additionalInfo' && (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-slate-500">{(cvData.additionalInfo || []).length} entries</span>
+                      <Button size="sm" variant="outline" onClick={addAdditionalInfo} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                    </div>
+                    {(cvData.additionalInfo || []).length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No additional info added yet.</p>}
+                    {(cvData.additionalInfo || []).map((info: any, idx: number) => (
+                      <div key={idx} className="flex gap-3 items-start p-3 border border-slate-200 rounded-lg">
+                        <div className="flex-1 grid grid-cols-2 gap-3">
+                          <Input placeholder="Label (e.g. Availability)" value={info.label ?? ""} onChange={(e) => handleAdditionalInfoChange(idx, "label", e.target.value)} />
+                          <Input placeholder="Value (e.g. Immediate)" value={info.value ?? ""} onChange={(e) => handleAdditionalInfoChange(idx, "value", e.target.value)} />
+                        </div>
+                        <Button variant="ghost" size="icon" onClick={() => removeAdditionalInfo(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                       </div>
                     ))}
                   </div>
@@ -1844,10 +2341,10 @@ export default function CVGeneratorPage() {
                   <span className="text-[11px] font-bold text-slate-600 min-w-[36px] text-center">{Math.round(zoomLevel * 100)}%</span>
                   <button onClick={() => setZoomLevel(Math.min(1.2, zoomLevel + 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomIn className="h-3.5 w-3.5 text-slate-500" /></button>
                 </div>
-                <div className="flex gap-1.5 bg-slate-100 rounded-lg p-0.5">
-                  {[{ key: "theme1", label: "Classic" }, { key: "theme2", label: "Modern" }, { key: "theme3", label: "Minimal" }].map(t => (
+                <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5">
+                  {[{ key: "theme1", label: "Classic" }, { key: "theme2", label: "Modern" }, { key: "theme3", label: "Minimal" }, { key: "theme4", label: "Executive" }].map(t => (
                     <button key={t.key} onClick={() => setSelectedLayout(t.key)}
-                      className={`text-[10px] font-semibold px-2.5 py-1 rounded-md transition-all ${selectedLayout === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                      className={`text-[10px] font-semibold px-2 py-1 rounded-md transition-all ${selectedLayout === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     >{t.label}</button>
                   ))}
                 </div>
@@ -1864,94 +2361,181 @@ export default function CVGeneratorPage() {
         {/* ─── STEP 3: DESIGN & FINALIZE ──────────────────────────────────── */}
         {workflowStep === 'design-finalize' && (
           <div className="flex-1 flex gap-4">
-            {/* Left — Design Controls */}
+            {/* Left — Design Studio (Tabbed) */}
             <div className="w-80 shrink-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
               <div className="px-4 py-2.5 border-b border-slate-200">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Design Studio</span>
+                <div className="flex gap-0.5 bg-slate-100 rounded-lg p-0.5">
+                  {[{ key: 'theme', label: 'Layout' }, { key: 'colors', label: 'Color' }, { key: 'font', label: 'Font' }, { key: 'photo', label: 'Photo' }].map(tab => (
+                    <button key={tab.key} onClick={() => setActiveDesignTab(tab.key)}
+                      className={`flex-1 text-[10px] font-semibold py-1.5 rounded-md transition-all ${activeDesignTab === tab.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >{tab.label}</button>
+                  ))}
+                </div>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                {/* Themes */}
-                <div className="space-y-2">
-                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Theme</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[{ key: "theme1", label: "Classic", desc: "Two-column sidebar" },
-                      { key: "theme2", label: "Modern", desc: "Top header layout" },
-                      { key: "theme3", label: "Minimal", desc: "Single column" }].map(t => (
-                      <button key={t.key} onClick={() => setSelectedLayout(t.key)}
-                        className={`p-3 rounded-lg border-2 text-left transition-all ${selectedLayout === t.key ? 'border-custom-blue bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}
-                      >
-                        <div className="text-xs font-bold text-slate-700">{t.label}</div>
-                        <div className="text-[10px] text-slate-400 mt-0.5">{t.desc}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Colors */}
-                <div className="space-y-2">
-                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Color Scheme</span>
-                  <div className="flex flex-wrap gap-2">
-                    {COLOR_PRESETS.map(preset => (
-                      <button key={preset.name} title={preset.name}
-                        onClick={() => { updateCvSetting('primaryColor', preset.primary); updateCvSetting('accentColor', preset.accent); }}
-                        className="relative w-8 h-8 rounded-full border-2 transition-all hover:scale-110"
-                        style={{
-                          background: `linear-gradient(135deg, ${preset.primary} 50%, ${preset.accent} 50%)`,
-                          borderColor: (cvSettings.primaryColor === preset.primary && cvSettings.accentColor === preset.accent) ? '#376bae' : 'transparent',
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                {/* Font */}
-                <div className="space-y-2">
-                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Font Size</span>
-                  <div className="flex items-center border border-slate-200 rounded-md overflow-hidden h-8 bg-white">
-                    {([0.85, 1, 1.15] as const).map((s, i) => (
-                      <button key={s} onClick={() => updateCvSetting('fontScale', s)}
-                        className={`px-4 text-xs font-bold h-full transition-colors ${cvSettings.fontScale === s ? 'bg-custom-blue text-white' : 'text-slate-500 hover:bg-slate-50'} ${i > 0 ? 'border-l border-slate-200' : ''}`}
-                      >{['Small', 'Medium', 'Large'][i]}</button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Photo */}
-                <div className="space-y-2">
-                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Photo Settings</span>
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {/* Layout Tab */}
+                {activeDesignTab === 'theme' && (
                   <div className="space-y-3">
-                    <div>
-                      <span className="text-[10px] text-slate-500">Size</span>
-                      <div className="flex items-center border border-slate-200 rounded-md overflow-hidden h-7 bg-white mt-1">
-                        {([100, 150, 200] as const).map((s, i) => (
-                          <button key={s} onClick={() => updateCvSetting('photoSize', s)}
-                            className={`px-3 text-[10px] font-bold h-full transition-colors ${cvSettings.photoSize === s ? 'bg-custom-blue text-white' : 'text-slate-500 hover:bg-slate-50'} ${i > 0 ? 'border-l border-slate-200' : ''}`}
-                          >{['S','M','L'][i]}</button>
+                    <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Theme Layout</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { key: "theme1", label: "Classic", desc: "Two-column sidebar", icon: Layout },
+                        { key: "theme2", label: "Modern", desc: "Top header layout", icon: Layout },
+                        { key: "theme3", label: "Minimal", desc: "Single column", icon: Layout },
+                        { key: "theme4", label: "Executive", desc: "Bold leadership focus", icon: Layout },
+                      ].map(t => (
+                        <button key={t.key} onClick={() => setSelectedLayout(t.key)}
+                          className={`p-3 rounded-lg border-2 text-left transition-all ${selectedLayout === t.key ? 'border-custom-blue bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}
+                        >
+                          <Layout className={`h-4 w-4 mb-1 ${selectedLayout === t.key ? 'text-custom-blue' : 'text-slate-400'}`} />
+                          <div className="text-xs font-bold text-slate-700">{t.label}</div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">{t.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="space-y-1.5">
+                      <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Column Style</span>
+                      <div className="flex gap-2">
+                        {['single-column', 'two-column', 'sidebar', 'executive'].map(col => (
+                          <button key={col} onClick={() => {}}
+                            className={`flex-1 text-[10px] font-semibold py-2 rounded-lg border transition-all ${selectedLayout.includes(col) ? 'border-custom-blue bg-blue-50 text-custom-blue' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}
+                          >{col.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}</button>
                         ))}
                       </div>
                     </div>
-                    <div>
-                      <span className="text-[10px] text-slate-500">Shape</span>
-                      <div className="flex items-center border border-slate-200 rounded-md overflow-hidden h-7 bg-white mt-1">
-                        {(['square','circle','rounded'] as const).map((s, i) => (
-                          <button key={s} onClick={() => updateCvSetting('photoShape', s)}
-                            className={`px-3 text-[10px] font-bold h-full transition-colors ${cvSettings.photoShape === s ? 'bg-custom-blue text-white' : 'text-slate-500 hover:bg-slate-50'} ${i > 0 ? 'border-l border-slate-200' : ''}`}
-                          >{s.charAt(0).toUpperCase() + s.slice(1)}</button>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-500">Fit</span>
-                      <select value={cvSettings.photoFit} onChange={e => updateCvSetting('photoFit', e.target.value as any)}
-                        className="w-full h-7 text-xs border border-slate-200 rounded-md px-2 bg-white text-slate-600 mt-1"
-                      >
-                        <option value="cover">Cover</option>
-                        <option value="contain">Fit</option>
-                        <option value="fill">Stretch</option>
-                      </select>
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <p className="text-[10px] text-amber-700">Choose a layout that matches your industry. Classic is best for conservative fields like finance. Modern works for tech. Minimal for creative roles.</p>
                     </div>
                   </div>
-                </div>
+                )}
+
+                {/* Color Tab */}
+                {activeDesignTab === 'colors' && (
+                  <div className="space-y-3">
+                    <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Color Scheme</span>
+                    <div className="grid grid-cols-4 gap-2">
+                      {COLOR_PRESETS.map(preset => (
+                        <button key={preset.name} title={preset.name}
+                          onClick={() => { updateCvSetting('primaryColor', preset.primary); updateCvSetting('accentColor', preset.accent); }}
+                          className="relative w-full aspect-square rounded-xl border-2 transition-all hover:scale-105"
+                          style={{
+                            background: `linear-gradient(135deg, ${preset.primary} 50%, ${preset.accent} 50%)`,
+                            borderColor: (cvSettings.primaryColor === preset.primary && cvSettings.accentColor === preset.accent) ? '#376bae' : 'transparent',
+                          }}
+                        >
+                          {(cvSettings.primaryColor === preset.primary && cvSettings.accentColor === preset.accent) && (
+                            <Check className="absolute inset-0 m-auto h-4 w-4 text-white drop-shadow" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] text-slate-500">Primary Color</span>
+                      <input type="color" value={cvSettings.primaryColor} onChange={e => updateCvSetting('primaryColor', e.target.value)}
+                        className="w-full h-8 rounded border border-slate-200 p-0.5 cursor-pointer" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] text-slate-500">Accent Color</span>
+                      <input type="color" value={cvSettings.accentColor} onChange={e => updateCvSetting('accentColor', e.target.value)}
+                        className="w-full h-8 rounded border border-slate-200 p-0.5 cursor-pointer" />
+                    </div>
+                  </div>
+                )}
+
+                {/* Font Tab */}
+                {activeDesignTab === 'font' && (
+                  <div className="space-y-3">
+                    <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Font Family</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { name: 'Inter', family: 'Inter, sans-serif', desc: 'Clean modern' },
+                        { name: 'Roboto', family: 'Roboto, sans-serif', desc: 'Versatile' },
+                        { name: 'Poppins', family: 'Poppins, sans-serif', desc: 'Friendly' },
+                        { name: 'Lato', family: 'Lato, sans-serif', desc: 'Professional' },
+                        { name: 'Merriweather', family: 'Merriweather, serif', desc: 'Elegant serif' },
+                        { name: 'System', family: '-apple-system, sans-serif', desc: 'Default' },
+                      ].map(f => (
+                        <button key={f.name} onClick={() => updateCvSetting('fontFamily', f.family)}
+                          className={`p-2.5 rounded-lg border-2 text-left transition-all ${(cvSettings as any).fontFamily === f.family ? 'border-custom-blue bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}
+                        >
+                          <div className="text-xs font-bold text-slate-700" style={{ fontFamily: f.family }}>{f.name}</div>
+                          <div className="text-[9px] text-slate-400">{f.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                    <span className="text-xs font-bold text-slate-600 uppercase tracking-wider mt-3 block">Font Size</span>
+                    <div className="flex items-center border border-slate-200 rounded-md overflow-hidden h-8 bg-white">
+                      {([0.85, 1, 1.15] as const).map((s, i) => (
+                        <button key={s} onClick={() => updateCvSetting('fontScale', s)}
+                          className={`flex-1 text-xs font-bold h-full transition-colors ${cvSettings.fontScale === s ? 'bg-custom-blue text-white' : 'text-slate-500 hover:bg-slate-50'} ${i > 0 ? 'border-l border-slate-200' : ''}`}
+                        >{['Small', 'Medium', 'Large'][i]}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Photo Tab */}
+                {activeDesignTab === 'photo' && (
+                  <div className="space-y-3">
+                    <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Photo Settings</span>
+                    <div className="flex justify-center">
+                      <div className="relative">
+                        <div
+                          style={{
+                            width: cvSettings.photoSize,
+                            height: cvSettings.photoSize,
+                            borderRadius: cvSettings.photoShape === 'circle' ? '50%' : cvSettings.photoShape === 'rounded' ? '12px' : '0',
+                            objectFit: cvSettings.photoFit,
+                          }}
+                          className="bg-slate-100 border-2 border-slate-200 flex items-center justify-center overflow-hidden"
+                        >
+                          {cvData.personalInfo?.photoUrl ? (
+                            <img src={cvData.personalInfo.photoUrl} alt="Preview" style={{ width: '100%', height: '100%', objectFit: cvSettings.photoFit }} />
+                          ) : (
+                            <User className="h-8 w-8 text-slate-400" />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      <div>
+                        <span className="text-[10px] text-slate-500">Size</span>
+                        <input type="range" min={80} max={250} value={cvSettings.photoSize} onChange={e => updateCvSetting('photoSize', Number(e.target.value))}
+                          className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-custom-blue mt-1" />
+                        <div className="flex justify-between text-[9px] text-slate-400"><span>Small</span><span>{cvSettings.photoSize}px</span><span>Large</span></div>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500">Shape</span>
+                        <div className="flex items-center border border-slate-200 rounded-md overflow-hidden h-7 bg-white mt-1">
+                          {(['square','circle','rounded'] as const).map((s, i) => (
+                            <button key={s} onClick={() => updateCvSetting('photoShape', s)}
+                              className={`flex-1 text-[10px] font-bold h-full transition-colors ${cvSettings.photoShape === s ? 'bg-custom-blue text-white' : 'text-slate-500 hover:bg-slate-50'} ${i > 0 ? 'border-l border-slate-200' : ''}`}
+                            >{s.charAt(0).toUpperCase() + s.slice(1)}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500">Fit</span>
+                        <select value={cvSettings.photoFit} onChange={e => updateCvSetting('photoFit', e.target.value as any)}
+                          className="w-full h-7 text-xs border border-slate-200 rounded-md px-2 bg-white text-slate-600 mt-1"
+                        >
+                          <option value="cover">Cover (crop to fill)</option>
+                          <option value="contain">Fit (show all)</option>
+                          <option value="fill">Stretch (fill)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500">Show/Hide</span>
+                        <label className="flex items-center gap-2 mt-1 cursor-pointer">
+                          <input type="checkbox" checked={cvSettings.showPhoto !== false}
+                            onChange={e => updateCvSetting('showPhoto', e.target.checked)}
+                            className="rounded border-slate-300 text-custom-blue focus:ring-custom-blue h-4 w-4" />
+                          <span className="text-xs text-slate-600">Show photo in CV</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Export */}
                 <div className="space-y-2 pt-4 border-t border-slate-200">
@@ -1962,6 +2546,15 @@ export default function CVGeneratorPage() {
                     </Button>
                     <Button size="sm" variant="outline" onClick={handleDownloadDocx} className="text-xs h-9">Download Word</Button>
                   </div>
+                </div>
+
+                {/* Save to Database */}
+                <div className="space-y-2 pt-4 border-t border-slate-200">
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Save to Database</span>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">Your CV is auto-saved locally. Save to database for permanent access.</p>
+                  <Button size="sm" onClick={() => setShowSaveCvPrompt(true)} className="bg-green-600 hover:bg-green-700 text-xs w-full h-9">
+                    <Database className="h-3.5 w-3.5 mr-1.5" /> Save to Database
+                  </Button>
                 </div>
 
                 {/* AI Enhancement */}
@@ -1998,6 +2591,47 @@ export default function CVGeneratorPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* AI Writer Modal */}
+        {showAiWriter && (
+          <AIWriterModule cvData={cvData} setCvData={setCvData} onClose={() => setShowAiWriter(false)} />
+        )}
+
+        {/* ATS Optimizer Modal */}
+        {showAtsOptimizer && (
+          <ATSOptimizer cvData={cvData} onClose={() => setShowAtsOptimizer(false)} />
+        )}
+
+        {/* Job Match Modal */}
+        {showJobMatch && (
+          <JobMatch cvData={cvData} onClose={() => setShowJobMatch(false)} />
+        )}
+
+        {/* Cover Letter Modal */}
+        {showCoverLetter && (
+          <CoverLetterGenerator cvData={cvData} onClose={() => setShowCoverLetter(false)} />
+        )}
+
+        {/* Resume Versions Modal */}
+        {showResumeVersions && (
+          <ResumeVersions
+            cvData={cvData}
+            setCvData={setCvData}
+            cvVersions={cvVersions}
+            setCvVersions={setCvVersions}
+            onClose={() => setShowResumeVersions(false)}
+          />
+        )}
+
+        {/* Analytics Modal */}
+        {showAnalytics && (
+          <ResumeAnalytics cvData={cvData} onClose={() => setShowAnalytics(false)} />
+        )}
+
+        {/* Advanced Export Modal */}
+        {showAdvancedExport && (
+          <AdvancedExport cvData={cvData} previewRef={previewRef as React.RefObject<HTMLDivElement>} onClose={() => setShowAdvancedExport(false)} />
         )}
 
       </div>
