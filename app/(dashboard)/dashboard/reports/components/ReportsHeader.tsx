@@ -44,7 +44,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
   return (
     <div className={cn(
       "border-r border-slate-200 bg-[#FAFAFC] flex flex-col max-h-screen shrink-0 transition-all duration-300 ease-in-out z-20",
-      isCollapsed ? "w-[72px]" : "w-[280px]"
+      isCollapsed ? "w-[72px]" : "w-[260px]"
     )}>
       <div className="shadow-md flex flex-col h-full overflow-hidden">
         {/* Header */}
@@ -53,8 +53,8 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
           isCollapsed ? "justify-center" : "justify-between"
         )}>
           {!isCollapsed && (
-            <div className="flex gap-2">
-              <span className="bg-blue-600 text-white p-2 rounded-sm"><Building2 className="h-6 w-6 text-white" /></span>
+              <div className="flex gap-2">
+              <span className="text-white p-2 rounded-sm" style={{ backgroundColor: '#376bae' }}><Building2 className="h-6 w-6 text-white" /></span>
               <div className="flex flex-col">
                 <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-widest leading-tight">Workspace</h2>
                 <span className="text-[14px] text-slate-900 font-bold">Departments</span>
@@ -105,7 +105,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
                   className={cn(
                     "w-11 h-11 mx-auto flex items-center justify-center rounded-full text-sm font-bold transition-all mt-3 border",
                     isActive
-                      ? "bg-blue-600 text-white border-blue-600"
+                      ? "bg-custom-blue text-white border-custom-blue"
                       : "bg-white text-slate-400 border-slate-200 hover:border-blue-300"
                   )}
                   title={dept.name}
@@ -121,13 +121,13 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
                   onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
                   className={cn(
                     "w-full flex items-center justify-between px-6 py-4 transition-all text-left",
-                    isActive ? "bg-slate-50 border-l-4 border-blue-600" : "hover:bg-slate-50 border-l-4 border-transparent"
+                    isActive ? "bg-slate-50 border-l-4 border-custom-blue" : "hover:bg-slate-50 border-l-4 border-transparent"
                   )}
                 >
                   <div className="flex items-center gap-3">
                     <div className={cn(
                       "h-7 w-7 rounded flex items-center justify-center text-sm font-bold",
-                      isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-500"
+                      isActive ? "bg-custom-blue text-white" : "bg-slate-200 text-slate-500"
                     )}>
                       {getInitials(dept.name)}
                     </div>
@@ -142,13 +142,13 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
                 </button>
 
                 {isActive && activeSubDepartments.length > 0 && (
-                  <div className="bg-blue-50 border-y border-slate-100 py-2 px-4 flex flex-col">
+                  <div className="border-y border-slate-100 py-2 px-4 flex flex-col">
                     <button
                       onClick={() => setActiveSubDeptIds([])}
                       className={cn(
                         "w-full text-left px-8 py-2.5 text-sm font-medium transition-all flex justify-between items-center",
                         activeSubDeptIds.length === 0
-                          ? "bg-blue-500 text-white border mx-2 rounded-xl"
+                          ? "bg-custom-blue text-white border mx-2 rounded-xl"
                           : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                       )}
                     >
@@ -166,7 +166,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
                           className={cn(
                             "text-left px-8 py-2.5 text-sm font-medium transition-all truncate flex justify-between items-center",
                             isSelected
-                              ? "h-10 text-sm rounded-sm border border-slate-300 transition-all bg-blue-600 text-white"
+                              ? "h-10 text-sm rounded-sm border border-slate-300 transition-all bg-custom-blue text-white"
                               : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                           )}
                         >
@@ -250,7 +250,7 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button className="h-10 px-6 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold gap-2 shadow-md transition-all">
+              <Button className="h-10 px-6 rounded-full hover:bg-[#2d5a94] text-white text-sm font-bold gap-2 shadow-md transition-all" style={{ backgroundColor: '#376bae' }}>
                 <Send className="h-4 w-4" />
                 Send Report
                 <ChevronDown className="h-3 w-3 opacity-60" />
@@ -369,7 +369,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                 variant="outline"
                 className={cn(
                   "h-10 px-5 rounded-full border-blue-500 text-sm font-semibold text-blue-600 bg-white hover:bg-blue-50 shrink-0",
-                  (activeClassId !== 'all') && "bg-blue-600 text-white hover:bg-blue-700 hover:text-white"
+                  (activeClassId !== 'all') && "bg-custom-blue text-white hover:bg-[#2d5a94] hover:text-white"
                 )}
               >
                 <Filter className="h-4 w-4 mr-2" /> Filter
@@ -476,14 +476,14 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                 className={cn(
                   "h-10 px-6 py-2 rounded-full text-sm font-bold transition-all border flex items-center gap-1.5",
                   isActive
-                    ? (isOfficer ? "bg-blue-600 border-blue-600 text-white shadow-sm" : "bg-violet-600 border-violet-600 text-white shadow-sm")
+                    ? (isOfficer ? "bg-custom-blue border-custom-blue text-white shadow-sm" : "bg-violet-600 border-violet-600 text-white shadow-sm")
                     : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
                 )}
               >
                 {displayName}
                 {count > 0 && (
                   <span className={cn(
-                    "text-sm font-black tabular-nums font-medium bg-blue-500 text-white px-1.5 py-0.5 rounded-full"
+                    "text-sm font-black tabular-nums font-medium bg-custom-blue text-white px-1.5 py-0.5 rounded-full"
                   )}>
                     {count}
                   </span>
@@ -520,7 +520,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
 
 export function KpiSummaryCards({ allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount }: any) {
   const cards = [
-    { label: 'ALL TASKS', value: allTasksCount || 0, icon: Layers, iconBg: 'bg-blue-500', cardBg: 'bg-blue-50/60 border-blue-100', valueColor: 'text-blue-700', accentBorder: 'border-l-blue-500' },
+    { label: 'ALL TASKS', value: allTasksCount || 0, icon: Layers, iconBg: 'bg-custom-blue', cardBg: 'bg-blue-50/60 border-blue-100', valueColor: 'text-blue-700', accentBorder: 'border-l-blue-500' },
     { label: 'WIP', value: wipTasksCount || 0, icon: Clock, iconBg: 'bg-amber-500', cardBg: 'bg-amber-50/60 border-amber-100', valueColor: 'text-amber-700', accentBorder: 'border-l-amber-500' },
     { label: 'WRITE-UP COMPLETED', value: writeUpCompletedCount || 0, icon: Check, iconBg: 'bg-emerald-500', cardBg: 'bg-emerald-50/60 border-emerald-100', valueColor: 'text-emerald-700', accentBorder: 'border-l-emerald-500' },
     { label: 'ENDORSED', value: endorsedCount || 0, icon: Sparkles, iconBg: 'bg-teal-500', cardBg: 'bg-teal-50/60 border-teal-100', valueColor: 'text-teal-700', accentBorder: 'border-l-teal-500' },
@@ -558,7 +558,7 @@ export function KpiSummaryCards({ allTasksCount, wipTasksCount, writeUpCompleted
 export function StatusFilterBar({ activeStatus, setActiveStatus, allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount }: any) {
   const counts = { all: allTasksCount || 0, wip: wipTasksCount || 0, write_up_completed: writeUpCompletedCount || 0, endorsed: endorsedCount || 0, cancelled: cancelledCount || 0 };
   const tabs = [
-    { id: 'all', label: 'All Tasks', color: 'bg-blue-600', lightBg: 'bg-blue-50', lightText: 'text-blue-700', ringColor: 'ring-blue-200' },
+    { id: 'all', label: 'All Tasks', color: 'bg-custom-blue', lightBg: 'bg-blue-50', lightText: 'text-blue-700', ringColor: 'ring-blue-200' },
     { id: 'wip', label: 'WIP', color: 'bg-amber-500', lightBg: 'bg-amber-50', lightText: 'text-amber-700', ringColor: 'ring-amber-200' },
     { id: 'write_up_completed', label: 'Write-up Completed', color: 'bg-emerald-600', lightBg: 'bg-emerald-50', lightText: 'text-emerald-700', ringColor: 'ring-emerald-200' },
     { id: 'endorsed', label: 'Endorsed', color: 'bg-violet-600', lightBg: 'bg-violet-50', lightText: 'text-violet-700', ringColor: 'ring-violet-200' },

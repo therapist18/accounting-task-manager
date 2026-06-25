@@ -2461,7 +2461,7 @@ export default function ReportsPage() {
       />
 
       {/* 2. Main Content Area — LAYER 3: "The Workspace" */}
-      <div className="flex flex-col flex-1 overflow-hidden bg-white">
+      <div className="flex flex-col flex-1 overflow-hidden">
         {/* Header Bar */}
         <ReportsHeader
           activeReport={activeReport}
@@ -2537,13 +2537,13 @@ export default function ReportsPage() {
         />
 
         {/* Table Area */}
-        <div className="flex-1 overflow-hidden pt-6">
+        <div className="flex-1 overflow-hidden">
           {!activeReport ? (
             <div className="h-full flex flex-col items-center justify-center bg-white rounded-lg mx-4 shadow-sm border border-slate-200">
               <FileText className="h-10 w-10 mb-3 text-slate-300" />
               <p className="text-sm font-semibold text-slate-700">No Report Selected</p>
               <p className="text-xs text-slate-400 mt-1">Select a report template to view data</p>
-              <Button size="sm" className="mt-4 bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setIsReportDialogOpen(true)}>
+              <Button size="sm" className="mt-4 hover:bg-blue-700 text-white" onClick={() => setIsReportDialogOpen(true)} style={{ backgroundColor: '#376bae' }}>
                 <Filter className="h-3.5 w-3.5 mr-1.5" />Select Report
               </Button>
             </div>

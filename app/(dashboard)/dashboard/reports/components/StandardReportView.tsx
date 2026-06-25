@@ -27,17 +27,17 @@ const DataCell = ({ val, isMissing, isPrimary }: { val: React.ReactNode, isMissi
       <TooltipTrigger asChild>
         <div className={cn(
           "block w-full truncate text-sm cursor-default leading-snug",
-          isMissing 
-            ? "text-rose-600 font-semibold bg-rose-50 px-1.5 py-0.5 rounded-full text-xs" 
-            : isPrimary 
-              ? "text-slate-900 font-semibold" 
+          isMissing
+            ? "text-rose-600 font-semibold bg-rose-50 px-1.5 py-0.5 rounded-full text-xs"
+            : isPrimary
+              ? "text-slate-900 font-semibold"
               : "text-slate-500 font-medium"
         )}>
           {val}
         </div>
       </TooltipTrigger>
       {val && val !== 'Missing' && (
-         <TooltipContent side="top" className="max-w-sm bg-slate-800 text-white border-none shadow-xl text-sm rounded-lg px-3 py-2 z-[100] break-words">
+        <TooltipContent side="top" className="max-w-sm bg-slate-800 text-white border-none shadow-xl text-sm rounded-lg px-3 py-2 z-[100] break-words">
           {val}
         </TooltipContent>
       )}
@@ -45,16 +45,16 @@ const DataCell = ({ val, isMissing, isPrimary }: { val: React.ReactNode, isMissi
   </TooltipProvider>
 );
 
-export function StandardReportView({ 
-  allTasks, filteredColumns, sortConfig, expandedStageColumns, 
-  renderCellValue, safeRender, handleSort, toggleStageColumns, 
-  isStageApplicableToCurrentFilter, initialRowsPerPage = 25, 
-  stages = [] 
+export function StandardReportView({
+  allTasks, filteredColumns, sortConfig, expandedStageColumns,
+  renderCellValue, safeRender, handleSort, toggleStageColumns,
+  isStageApplicableToCurrentFilter, initialRowsPerPage = 25,
+  stages = []
 }: any) {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(initialRowsPerPage);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
-  
+
   const stickyColumnIds = new Set(['task_id', 'task_passport_number', 'task_applicant_name']);
 
   const columnDefs = useMemo<ColumnDef<any>[]>(() => [
@@ -98,8 +98,8 @@ export function StandardReportView({
   return (
     <div className="flex flex-col h-full antialiased pt-0 bg-white">
       {/* Table Wrapper: white card with subtle border */}
-      <div className="relative overflow-hidden border border-slate-200 shadow-sm bg-white">
-        <div className="overflow-auto max-h-[calc(100vh-280px)] custom-scrollbar">
+      <div className="relative overflow-hidden border border-slate-200 shadow-sm">
+        <div className="overflow-auto max-h-[calc(100vh-360px)] custom-scrollbar">
           <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
             <colgroup>
               <col style={{ width: INDEX_COL_WIDTH }} />
@@ -112,8 +112,8 @@ export function StandardReportView({
               {/* Main Header Row — Dark Navy */}
               <TableRow className="hover:bg-transparent border-0">
                 {/* Index Header */}
-                <TableHead className="sticky left-0 z-50 border-r border-b border-slate-600 text-center py-3 px-2" style={{background: "#1E3A5F"}}>
-                  <span className="text-[10px] font-semibold text-slate-300 uppercase tracking-wider">#</span>
+                <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-3 px-2" style={{ background: "#376bae" }}>
+                  <span className="text-[10px] font-semibold text-white uppercase tracking-wider">#</span>
                 </TableHead>
 
                 {filteredColumns.map((col: any) => {
@@ -127,37 +127,34 @@ export function StandardReportView({
                       key={col.id}
                       onClick={() => handleSort(col.id)}
                       className={cn(
-                          "group relative border-r border-b border-slate-600 transition-colors cursor-pointer select-none px-4 py-3",
-                          isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.15)]",
-                          isActive && "bg-slate-700",
-                          isCentered && "text-center",
-                        )}
+                        "group relative border-r border-b border-white/30 transition-colors cursor-pointer select-none px-4 py-3",
+                        isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.15)]",
+                        isActive && "bg-slate-700",
+                        isCentered && "text-center",
+                      )}
                       style={{
-                        background: "#1E3A5F",
+                        background: "#376bae",
                         ...(isSticky ? { left: `${left}px` } : undefined),
                       }}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className={cn(
-                          "text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap",
-                          isActive ? "text-white" : "text-slate-300"
-                        )}>
+                        <span className={cn("text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap text-white")}>
                           {col.label}
                         </span>
 
                         <div className="flex items-center gap-1.5">
-                            {col.hasSubColumns && (
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); toggleStageColumns(col.stageId); }}
-                                    className="h-4 w-4 shrink-0 flex items-center justify-center rounded bg-slate-600 hover:bg-slate-500 text-slate-300 transition-all"
-                                >
-                                    {expandedStageColumns.has(col.stageId) ? <Minus size={10} strokeWidth={2.5} /> : <Plus size={10} strokeWidth={2.5} />}
-                                </button>
-                            )}
-                            <ArrowUpDown className={cn(
-                                "h-3 w-3 shrink-0",
-                                isActive ? "text-white" : "text-slate-500 opacity-0 group-hover:opacity-100"
-                            )} />
+                          {col.hasSubColumns && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); toggleStageColumns(col.stageId); }}
+                              className="h-4 w-4 shrink-0 flex items-center justify-center rounded bg-slate-600 hover:bg-slate-500 text-white transition-all"
+                            >
+                              {expandedStageColumns.has(col.stageId) ? <Minus size={10} strokeWidth={2.5} /> : <Plus size={10} strokeWidth={2.5} />}
+                            </button>
+                          )}
+                          <ArrowUpDown className={cn(
+                            "h-3 w-3 shrink-0",
+                            isActive ? "text-white" : "text-slate-500 opacity-0 group-hover:opacity-100"
+                          )} />
                         </div>
                       </div>
 
@@ -176,7 +173,7 @@ export function StandardReportView({
                   const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
 
                   let content: React.ReactNode = null;
-                  
+
                   if (col.type === 'stage_date' && col.stageId) {
                     const stage = stages?.find((s: any) => s.id === col.stageId);
                     if (stage?.estimated_time) {
@@ -236,7 +233,7 @@ export function StandardReportView({
 
                         const val = safeRender(renderCellValue(task, col));
                         const isMissing = typeof val === 'string' && val.toLowerCase() === 'missing';
-                        
+
                         // Primary columns: applicant name, company name
                         // Secondary columns: passport, R number, duration, class
                         const isPrimary = col.field === 'applicant_name' || col.field === 'company_name';
@@ -282,16 +279,16 @@ export function StandardReportView({
       {/* Pagination Footer */}
       <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
         {/* Left Stats Info */}
-        <div className="text-[11px] text-slate-400">
-            Showing <span className="font-medium text-slate-600">{((currentPage - 1) * rowsPerPage) + 1}</span> to <span className="font-medium text-slate-600">{Math.min(currentPage * rowsPerPage, allTasks.length)}</span> of <span className="font-medium text-slate-600">{allTasks.length}</span>
+        <div className="text-[11px] text-slate-600 font-semibold">
+          Showing <span className="text-slate-600">{((currentPage - 1) * rowsPerPage) + 1}</span> to <span className="font-medium text-slate-600">{Math.min(currentPage * rowsPerPage, allTasks.length)}</span> of <span className="font-medium text-slate-600">{allTasks.length}</span>
         </div>
-        
+
         {/* Right Controls */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-slate-400">Rows:</span>
+            <span className="text-[11px] text-slate-600 font-semibold">Rows:</span>
             <Select value={String(rowsPerPage)} onValueChange={(v) => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
-              <SelectTrigger className="w-[52px] h-7 rounded border-slate-200 text-[11px] font-medium text-slate-600">
+              <SelectTrigger className="w-[52px] h-8 rounded border-slate-200 text-[11px] font-medium text-slate-600">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="rounded">
@@ -307,8 +304,8 @@ export function StandardReportView({
             <PaginationButton onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}>
               <ChevronLeft size={12} />
             </PaginationButton>
-            
-            <div className="px-2 py-0.5 text-[11px] font-medium text-slate-600 min-w-[24px] text-center">
+
+            <div className="px-2 py-1.5 text-[11px] font-medium text-slate-600 min-w-[24px] text-center">
               {currentPage}
             </div>
 
@@ -327,16 +324,16 @@ export function StandardReportView({
 
 // Cleaned up pagination button to match SaaS standard
 const PaginationButton = ({ children, onClick, disabled }: any) => (
-    <Button 
-        variant="ghost" 
-        size="icon" 
-        className={cn(
-          "h-6 w-6 rounded text-slate-400 transition-all",
-          disabled ? "opacity-30 cursor-not-allowed" : "hover:text-slate-700 hover:bg-slate-100"
-        )} 
-        onClick={onClick} 
-        disabled={disabled}
-    >
-        {children}
-    </Button>
+  <Button
+    variant="ghost"
+    size="icon"
+    className={cn(
+      "h-6 w-6 rounded text-slate-600 transition-all",
+      disabled ? "opacity-30 cursor-not-allowed" : "hover:text-slate-700 hover:bg-slate-100"
+    )}
+    onClick={onClick}
+    disabled={disabled}
+  >
+    {children}
+  </Button>
 );
