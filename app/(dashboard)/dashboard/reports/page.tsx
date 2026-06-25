@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
 import { ReportColumnVisibilityDialog } from "./components/ReportColumnVisibilityDialog";
-import { ReportsSidebar, ReportsHeader, PersonFilterStrip, StatusFilterBar, KpiSummaryCards } from "./components/ReportsHeader";
+import { ReportsSidebar, ReportsHeader, PersonFilterStrip, StatusFilterBar } from "./components/ReportsHeader";
 
 const SPECIAL_STAGE_IDS = [
   '072b9710-45df-4a05-ba65-01b4ef29d61d',
@@ -2476,25 +2476,11 @@ export default function ReportsPage() {
           view={view}
           setView={setView}
           handleSendReport={handleSendReport}
-          refreshData={() => refreshData(true)}
-          loading={loading}
           activeDepartment={activeDepartment}
           activeSubDepartments={activeSubDepartments}
           activeSubDeptIds={activeSubDeptIds}
-          allTasksCount={allTasksCount}
-          wipTasksCount={wipTasksCount}
-          writeUpCompletedCount={writeUpCompletedCount}
-          endorsedCount={endorsedCount}
-          cancelledCount={cancelledCount}
         />
 
-        {/* KPI Summary Cards */}
-        <KpiSummaryCards
-          allTasksCount={allTasksCount}
-          wipTasksCount={wipTasksCount}
-          writeUpCompletedCount={writeUpCompletedCount}
-          endorsedCount={endorsedCount}
-        />
         {/* Person Filter Strip */}
         <PersonFilterStrip
           activePerspective={activePerspective}
@@ -2515,7 +2501,7 @@ export default function ReportsPage() {
           setTaskManagerFilterMode={setTaskManagerFilterMode}
         />
 
-        {/* Status + Search Bar */}
+        {/* Status Tabs */}
         <StatusFilterBar
           activeStatus={activeStatus}
           setActiveStatus={setActiveStatus}
@@ -2524,16 +2510,6 @@ export default function ReportsPage() {
           writeUpCompletedCount={writeUpCompletedCount}
           endorsedCount={endorsedCount}
           cancelledCount={cancelledCount}
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-          activeClassId={activeClassId}
-          setActiveClassId={setActiveClassId}
-          activeSubClassId={activeSubClassId}
-          setActiveSubClassId={setActiveSubClassId}
-          activeSubDeptIds={activeSubDeptIds}
-          activeSubDepartments={activeSubDepartments}
-          isFiltersDropdownOpen={isFiltersDropdownOpen}
-          setIsFiltersDropdownOpen={setIsFiltersDropdownOpen}
         />
 
         {/* Table Area */}

@@ -126,7 +126,7 @@ export function TransposedReportView({
 
       {/* Main Transposed Table */}
       <div className="mx-8 border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm ring-1 ring-slate-200/50">
-        <div className="overflow-auto max-h-[calc(100vh-320px)] custom-scrollbar">
+        <div className="overflow-auto max-h-[calc(100vh-240px)] custom-scrollbar">
           <Table className="border-separate border-spacing-0">
             <TableHeader className="sticky top-0 z-30">
               {/* Context Row */}

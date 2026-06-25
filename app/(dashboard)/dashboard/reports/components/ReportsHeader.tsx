@@ -24,12 +24,24 @@ interface ReportsSidebarProps {
 
 export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, activeSubDepartments, activeSubDeptIds, setActiveSubDeptIds, isCollapsed = false, onToggleCollapse }: ReportsSidebarProps) {
   const [sidebarSearch, setSidebarSearch] = React.useState("");
+  const [expandedDeptId, setExpandedDeptId] = React.useState<string | null>(activeDeptId);
+
+  React.useEffect(() => {
+    if (activeDeptId) setExpandedDeptId(activeDeptId);
+  }, [activeDeptId]);
+
   const toggleSubDept = (id: string) => {
     setActiveSubDeptIds(
       activeSubDeptIds.includes(id)
         ? activeSubDeptIds.filter(x => x !== id)
         : [...activeSubDeptIds, id]
     );
+  };
+
+  const handleDeptClick = (deptId: string) => {
+    setActiveDeptId(deptId);
+    setActiveSubDeptIds([]);
+    setExpandedDeptId(prev => prev === deptId ? null : deptId);
   };
 
   const getInitials = (name: string) => {
@@ -44,7 +56,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
   return (
     <div className={cn(
       "border-r border-slate-200 bg-[#FAFAFC] flex flex-col max-h-screen shrink-0 transition-all duration-300 ease-in-out z-20",
-      isCollapsed ? "w-[72px]" : "w-[260px]"
+      isCollapsed ? "w-[52px]" : "w-[260px]"
     )}>
       <div className="shadow-md flex flex-col h-full overflow-hidden">
         {/* Header */}
@@ -53,7 +65,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
           isCollapsed ? "justify-center" : "justify-between"
         )}>
           {!isCollapsed && (
-              <div className="flex gap-2">
+            <div className="flex gap-2">
               <span className="text-white p-2 rounded-sm" style={{ backgroundColor: '#376bae' }}><Building2 className="h-6 w-6 text-white" /></span>
               <div className="flex flex-col">
                 <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-widest leading-tight">Workspace</h2>
@@ -64,126 +76,120 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
           {onToggleCollapse && (
             <button
               onClick={onToggleCollapse}
-              className="p-1.5 rounded-full border border-slate-200 text-slate-400 hover:text-slate-800 hover:bg-slate-50 transition-all"
+              className={cn(
+                "p-1.5 rounded-full border border-slate-200 text-slate-400 hover:text-slate-800 hover:bg-slate-50 transition-all",
+                isCollapsed && "mx-auto"
+              )}
             >
               {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
           )}
         </div>
 
-        {/* Search Input */}
-        {!isCollapsed && (
-          <div className="p-4 bg-white border-b border-slate-200 shrink-0">
-            <div className="relative group">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search department..."
-                value={sidebarSearch}
-                onChange={e => setSidebarSearch(e.target.value)}
-                className="w-full pl-10 pr-8 h-10 text-sm rounded-full border border-slate-300 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-400"
-              />
-              {sidebarSearch && (
-                <button onClick={() => setSidebarSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
+        {/* Collapsed: thin rail with expand icon */}
+        {isCollapsed ? (
+          <div className="flex-1 flex flex-col items-center py-4 gap-1">
+            <div className="w-6 h-px bg-slate-200" />
+            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-2 rotate-180" style={{ writingMode: 'vertical-rl' }}>Depts</span>
           </div>
-        )}
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto bg-white custom-scrollbar pb-6">
-          {filteredDepartments.map((dept) => {
-            const isActive = activeDeptId === dept.id.toString();
-
-            if (isCollapsed) {
-              return (
-                <button
-                  key={dept.id}
-                  onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
-                  className={cn(
-                    "w-11 h-11 mx-auto flex items-center justify-center rounded-full text-sm font-bold transition-all mt-3 border",
-                    isActive
-                      ? "bg-custom-blue text-white border-custom-blue"
-                      : "bg-white text-slate-400 border-slate-200 hover:border-blue-300"
-                  )}
-                  title={dept.name}
-                >
-                  {getInitials(dept.name)}
-                </button>
-              );
-            }
-
-            return (
-              <div key={dept.id} className="border-b border-slate-100 last:border-none">
-                <button
-                  onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptIds([]); }}
-                  className={cn(
-                    "w-full flex items-center justify-between px-6 py-4 transition-all text-left",
-                    isActive ? "bg-slate-50 border-l-4 border-custom-blue" : "hover:bg-slate-50 border-l-4 border-transparent"
-                  )}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={cn(
-                      "h-7 w-7 rounded flex items-center justify-center text-sm font-bold",
-                      isActive ? "bg-custom-blue text-white" : "bg-slate-200 text-slate-500"
-                    )}>
-                      {getInitials(dept.name)}
-                    </div>
-                    <span className={cn(
-                      "text-sm font-semibold uppercase tracking-wider truncate",
-                      isActive ? "text-slate-900" : "text-slate-600"
-                    )}>
-                      {dept.name}
-                    </span>
-                  </div>
-                  {isActive && <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
-                </button>
-
-                {isActive && activeSubDepartments.length > 0 && (
-                  <div className="border-y border-slate-100 py-2 px-4 flex flex-col">
-                    <button
-                      onClick={() => setActiveSubDeptIds([])}
-                      className={cn(
-                        "w-full text-left px-8 py-2.5 text-sm font-medium transition-all flex justify-between items-center",
-                        activeSubDeptIds.length === 0
-                          ? "bg-custom-blue text-white border mx-2 rounded-xl"
-                          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                      )}
-                    >
-                      <span>All Sub-units</span>
-                      {activeSubDeptIds.length === 0 && <Check className="h-3 w-3" />}
-                    </button>
-
-                    {activeSubDepartments.map((sub) => {
-                      const id = sub.id.toString();
-                      const isSelected = activeSubDeptIds.includes(id);
-                      return (
-                        <button
-                          key={sub.id}
-                          onClick={() => toggleSubDept(id)}
-                          className={cn(
-                            "text-left px-8 py-2.5 text-sm font-medium transition-all truncate flex justify-between items-center",
-                            isSelected
-                              ? "h-10 text-sm rounded-sm border border-slate-300 transition-all bg-custom-blue text-white"
-                              : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                          )}
-                        >
-                          <div className="flex gap-2">
-                            {isSelected && <span className="h-4 w-1 bg-white"></span>}
-                            <span className="truncate">{sub.name}</span>
-                          </div>
-                          {isSelected && <Check className="h-3 w-3" />}
-                        </button>
-                      );
-                    })}
-                  </div>
+        ) : (
+          <>
+            {/* Search Input */}
+            <div className="p-4 bg-white border-b border-slate-200 shrink-0">
+              <div className="relative group">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search department..."
+                  value={sidebarSearch}
+                  onChange={e => setSidebarSearch(e.target.value)}
+                  className="w-full pl-10 pr-8 h-10 text-sm rounded-full border border-slate-300 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-400"
+                />
+                {sidebarSearch && (
+                  <button onClick={() => setSidebarSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                    <X className="h-4 w-4" />
+                  </button>
                 )}
               </div>
-            );
-          })}
-        </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto bg-white custom-scrollbar pb-6">
+              {filteredDepartments.map((dept) => {
+                const isActive = activeDeptId === dept.id.toString();
+                const isExpanded = expandedDeptId === dept.id.toString();
+
+                return (
+                  <div key={dept.id} className="border-b border-slate-100 last:border-none">
+                    <button
+                      onClick={() => handleDeptClick(dept.id.toString())}
+                      className={cn(
+                        "w-full flex items-center justify-between px-5 py-3.5 transition-all text-left",
+                        isActive ? "bg-slate-50/80" : "hover:bg-slate-50/50"
+                      )}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={cn(
+                          "h-7 w-7 rounded-md flex items-center justify-center text-xs font-bold shrink-0 transition-all",
+                          isActive ? "bg-custom-blue text-white" : "bg-slate-100 text-slate-500"
+                        )}>
+                          {getInitials(dept.name)}
+                        </div>
+                        <span className={cn(
+                          "text-xs font-semibold uppercase tracking-wider truncate",
+                          isActive ? "text-slate-900" : "text-slate-500"
+                        )}>
+                          {dept.name}
+                        </span>
+                      </div>
+                      <ChevronDown className={cn(
+                        "h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform duration-200",
+                        isExpanded && "rotate-180"
+                      )} />
+                    </button>
+
+                    {isExpanded && activeSubDepartments.length > 0 && (
+                      <div className="pb-3 px-3 flex flex-col gap-0.5">
+                        <button
+                          onClick={() => setActiveSubDeptIds([])}
+                          className={cn(
+                            "w-full text-left px-4 py-2 text-xs font-medium transition-all rounded-md flex justify-between items-center",
+                            activeSubDeptIds.length === 0
+                              ? "bg-custom-blue text-white"
+                              : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                          )}
+                        >
+                          <span>All Sub-units</span>
+                          {activeSubDeptIds.length === 0 && <Check className="h-3 w-3" />}
+                        </button>
+
+                        {activeSubDepartments.map((sub) => {
+                          const id = sub.id.toString();
+                          const isSelected = activeSubDeptIds.includes(id);
+                          return (
+                            <button
+                              key={sub.id}
+                              onClick={() => toggleSubDept(id)}
+                              className={cn(
+                                "w-full text-left px-4 py-2 text-xs font-medium transition-all truncate rounded-md flex justify-between items-center",
+                                isSelected
+                                  ? "bg-custom-blue text-white"
+                                  : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                              )}
+                            >
+                              <span className="truncate">{sub.name}</span>
+                              {isSelected && <Check className="h-3 w-3 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -518,74 +524,39 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
   );
 }
 
-export function KpiSummaryCards({ allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount }: any) {
-  const cards = [
-    { label: 'ALL TASKS', value: allTasksCount || 0, icon: Layers, iconBg: 'bg-custom-blue', cardBg: 'bg-blue-50/60 border-blue-100', valueColor: 'text-blue-700', accentBorder: 'border-l-blue-500' },
-    { label: 'WIP', value: wipTasksCount || 0, icon: Clock, iconBg: 'bg-amber-500', cardBg: 'bg-amber-50/60 border-amber-100', valueColor: 'text-amber-700', accentBorder: 'border-l-amber-500' },
-    { label: 'WRITE-UP COMPLETED', value: writeUpCompletedCount || 0, icon: Check, iconBg: 'bg-emerald-500', cardBg: 'bg-emerald-50/60 border-emerald-100', valueColor: 'text-emerald-700', accentBorder: 'border-l-emerald-500' },
-    { label: 'ENDORSED', value: endorsedCount || 0, icon: Sparkles, iconBg: 'bg-teal-500', cardBg: 'bg-teal-50/60 border-teal-100', valueColor: 'text-teal-700', accentBorder: 'border-l-teal-500' },
-  ];
 
-  return (
-    <div className="px-8 pt-4 pb-2 flex items-center gap-4">
-      {cards.map((card) => {
-        const Icon = card.icon;
-        return (
-          <div
-            key={card.label}
-            className={cn(
-              "flex-1 flex items-center gap-4 px-5 py-4 rounded-xl border border-l-4 transition-all hover:shadow-sm",
-              card.cardBg,
-              card.accentBorder
-            )}
-          >
-            <div className={cn("h-10 w-10 rounded-lg flex items-center justify-center shrink-0", card.iconBg)}>
-              <Icon className="h-5 w-5 text-white" />
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{card.label}</span>
-              <span className={cn("text-2xl font-black tabular-nums leading-none mt-0.5", card.valueColor)}>
-                {card.value.toLocaleString()}
-              </span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 export function StatusFilterBar({ activeStatus, setActiveStatus, allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount }: any) {
   const counts = { all: allTasksCount || 0, wip: wipTasksCount || 0, write_up_completed: writeUpCompletedCount || 0, endorsed: endorsedCount || 0, cancelled: cancelledCount || 0 };
   const tabs = [
-    { id: 'all', label: 'All Tasks', color: 'bg-custom-blue', lightBg: 'bg-blue-50', lightText: 'text-blue-700', ringColor: 'ring-blue-200' },
-    { id: 'wip', label: 'WIP', color: 'bg-amber-500', lightBg: 'bg-amber-50', lightText: 'text-amber-700', ringColor: 'ring-amber-200' },
-    { id: 'write_up_completed', label: 'Write-up Completed', color: 'bg-emerald-600', lightBg: 'bg-emerald-50', lightText: 'text-emerald-700', ringColor: 'ring-emerald-200' },
-    { id: 'endorsed', label: 'Endorsed', color: 'bg-violet-600', lightBg: 'bg-violet-50', lightText: 'text-violet-700', ringColor: 'ring-violet-200' },
+    { id: 'all', label: 'All Applications' },
+    { id: 'wip', label: 'WIP' },
+    { id: 'write_up_completed', label: 'Write-up Completed' },
+    { id: 'endorsed', label: 'Endorsed' },
   ];
 
   return (
-    <div className="px-8 py-4 pb-0 flex items-center border-b border-slate-200 antialiased">
-      <div className="flex gap-1">
-        {tabs.map(s => {
-          const isActive = activeStatus === s.id;
+    <div className="px-8 py-2.5 flex items-center border-b border-slate-200 bg-white antialiased">
+      <div className="flex gap-1.5">
+        {tabs.map(tab => {
+          const isActive = activeStatus === tab.id;
           return (
             <button
-              key={s.id}
-              onClick={() => setActiveStatus(s.id)}
+              key={tab.id}
+              onClick={() => setActiveStatus(tab.id)}
               className={cn(
-                "h-10 px-5 text-sm font-semibold rounded-t-xl transition-all flex items-center gap-2.5 border-x border-t",
+                "h-8 px-4 text-sm font-semibold rounded-lg transition-all flex items-center gap-2",
                 isActive
-                  ? `${s.color} text-white border-transparent shadow-[0_-4px_12px_rgba(0,0,0,0.08)]`
-                  : "bg-transparent text-slate-500 border-transparent hover:text-slate-800 hover:bg-slate-200/50"
+                  ? "bg-custom-blue text-white shadow-sm"
+                  : "bg-white text-slate-500 border border-slate-200 hover:border-slate-300 hover:text-slate-700"
               )}
             >
-              {s.label}
+              {tab.label}
               <span className={cn(
-                "px-2 py-0.5 rounded-full text-sm font-black tabular-nums font-medium",
-                isActive ? "bg-white/25 text-white" : "bg-slate-200 text-slate-500"
+                "px-1.5 py-0.5 rounded-md text-xs font-bold tabular-nums",
+                isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
               )}>
-                {counts[s.id]}
+                {counts[tab.id]}
               </span>
             </button>
           );

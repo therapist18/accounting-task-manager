@@ -1,159 +1,182 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { CheckCircle, Clock, FileText, Users, Sparkles } from "lucide-react"
+import { CheckCircle, Clock, FileText, Users, Sparkles, LayoutDashboard, ArrowRight, UserPlus, FileUp, ClipboardList, Building2 } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 
+const quickLinks = [
+  { label: "CV Generator", href: "/dashboard/cv-generator", icon: FileText, desc: "Generate professional CVs" },
+  { label: "New Individual", href: "/dashboard/individuals", icon: UserPlus, desc: "Add a new registry entry" },
+  { label: "Create Task", href: "/dashboard/tasks", icon: ClipboardList, desc: "Assign a new task" },
+  { label: "Upload File", href: "/dashboard/letters", icon: FileUp, desc: "Import documents" },
+  { label: "Departments", href: "/dashboard/departments", icon: Building2, desc: "Manage departments" },
+]
+
 export default function DashboardPage() {
   return (
-    <div className="flex-1 space-y-4">
-      <div className="flex items-center justify-between space-y-2">
-        <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
-        <div className="flex items-center space-x-2">
-          <Link href="/dashboard/cv-generator">
-            <Button className="bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-sm">
-              <Sparkles className="mr-2 h-4 w-4 text-yellow-300 fill-yellow-300" />
-              CV Generator
-            </Button>
-          </Link>
+    <div className="p-6 h-full overflow-y-auto bg-[#FAFAFC]">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-lg bg-custom-blue flex items-center justify-center">
+            <LayoutDashboard className="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-slate-900">Dashboard</h1>
+            <p className="text-xs text-slate-500">Overview of your workspace</p>
+          </div>
         </div>
+        <Link href="/dashboard/cv-generator">
+          <Button className="bg-custom-blue hover:bg-[#2d5a94] text-white font-semibold shadow-sm">
+            <Sparkles className="mr-2 h-4 w-4 text-yellow-300 fill-yellow-300" />
+            CV Generator
+          </Button>
+        </Link>
       </div>
+
+      {/* Quick Links */}
+      <div className="grid grid-cols-5 gap-3 mb-6">
+        {quickLinks.map((link) => {
+          const Icon = link.icon
+          return (
+            <Link key={link.href} href={link.href}>
+              <Card className="border border-slate-200 shadow-sm rounded-lg hover:border-custom-blue/30 hover:shadow-md transition-all cursor-pointer group bg-white">
+                <CardContent className="p-4 flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0 group-hover:bg-custom-blue transition-colors">
+                    <Icon className="h-4 w-4 text-custom-blue group-hover:text-white transition-colors" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-800 truncate">{link.label}</p>
+                    <p className="text-[10px] text-slate-400 truncate">{link.desc}</p>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-slate-300 group-hover:text-custom-blue transition-colors shrink-0" />
+                </CardContent>
+              </Card>
+            </Link>
+          )
+        })}
+      </div>
+
       <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="analytics">Analytics</TabsTrigger>
+        <TabsList className="bg-slate-100 h-9 p-0.5 rounded-lg">
+          <TabsTrigger value="overview" className="text-xs font-semibold py-1.5 px-4 rounded-md data-[state=active]:bg-white data-[state=active]:shadow-sm">Overview</TabsTrigger>
+          <TabsTrigger value="analytics" className="text-xs font-semibold py-1.5 px-4 rounded-md data-[state=active]:bg-white data-[state=active]:shadow-sm">Analytics</TabsTrigger>
         </TabsList>
-        <TabsContent value="overview" className="space-y-4">
+
+        <TabsContent value="overview" className="space-y-4 m-0">
+          {/* Stats Cards */}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Tasks</CardTitle>
-                <FileText className="h-4 w-4 text-muted-foreground" />
+            <Card className="border border-slate-200 shadow-sm rounded-lg bg-white">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">
+                <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Tasks</CardTitle>
+                <FileText className="h-4 w-4 text-slate-400" />
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">127</div>
-                <p className="text-xs text-muted-foreground">+5 from yesterday</p>
+              <CardContent className="px-4 pb-4">
+                <div className="text-3xl font-black text-slate-900">127</div>
+                <p className="text-[11px] text-emerald-600 font-medium mt-0.5">+5 from yesterday</p>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Completed Tasks</CardTitle>
-                <CheckCircle className="h-4 w-4 text-muted-foreground" />
+            <Card className="border border-slate-200 shadow-sm rounded-lg bg-white">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">
+                <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Completed</CardTitle>
+                <CheckCircle className="h-4 w-4 text-slate-400" />
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">89</div>
-                <p className="text-xs text-muted-foreground">+2 from yesterday</p>
+              <CardContent className="px-4 pb-4">
+                <div className="text-3xl font-black text-slate-900">89</div>
+                <p className="text-[11px] text-emerald-600 font-medium mt-0.5">+2 from yesterday</p>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Pending Tasks</CardTitle>
-                <Clock className="h-4 w-4 text-muted-foreground" />
+            <Card className="border border-slate-200 shadow-sm rounded-lg bg-white">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">
+                <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Pending</CardTitle>
+                <Clock className="h-4 w-4 text-slate-400" />
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">34</div>
-                <p className="text-xs text-muted-foreground">-2 from yesterday</p>
+              <CardContent className="px-4 pb-4">
+                <div className="text-3xl font-black text-slate-900">34</div>
+                <p className="text-[11px] text-amber-600 font-medium mt-0.5">-2 from yesterday</p>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Active Users</CardTitle>
-                <Users className="h-4 w-4 text-muted-foreground" />
+            <Card className="border border-slate-200 shadow-sm rounded-lg bg-white">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">
+                <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Active Users</CardTitle>
+                <Users className="h-4 w-4 text-slate-400" />
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">12</div>
-                <p className="text-xs text-muted-foreground">+1 from last week</p>
+              <CardContent className="px-4 pb-4">
+                <div className="text-3xl font-black text-slate-900">12</div>
+                <p className="text-[11px] text-emerald-600 font-medium mt-0.5">+1 from last week</p>
               </CardContent>
             </Card>
           </div>
+
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-            <Card className="col-span-4">
-              <CardHeader>
-                <CardTitle>Recent Tasks</CardTitle>
+            <Card className="col-span-4 border border-slate-200 shadow-sm rounded-lg bg-white">
+              <CardHeader className="px-4 pt-4 pb-0">
+                <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Recent Tasks</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
+              <CardContent className="px-4 pb-4 pt-3">
+                <div className="space-y-1">
                   {[1, 2, 3, 4, 5].map((i) => (
-                    <div key={i} className="flex items-center justify-between border-b pb-2">
+                    <div key={i} className="flex items-center justify-between py-2.5 border-b border-slate-100 last:border-0">
                       <div>
-                        <p className="font-medium">Tax Filing for ABC Corp</p>
-                        <p className="text-sm text-muted-foreground">KRA • Tax Returns</p>
+                        <p className="text-sm font-semibold text-slate-800">Tax Filing for ABC Corp</p>
+                        <p className="text-xs text-slate-400">KRA &bull; Tax Returns</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="flex h-2 w-2 rounded-full bg-green-500"></span>
-                        <span className="text-sm">In Progress</span>
+                        <span className="flex h-2 w-2 rounded-full bg-emerald-500"></span>
+                        <span className="text-xs font-medium text-slate-500">In Progress</span>
                       </div>
                     </div>
                   ))}
                 </div>
               </CardContent>
             </Card>
-            <Card className="col-span-3">
-              <CardHeader>
-                <CardTitle>Department Overview</CardTitle>
+            <Card className="col-span-3 border border-slate-200 shadow-sm rounded-lg bg-white">
+              <CardHeader className="px-4 pt-4 pb-0">
+                <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Department Overview</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium">KRA</p>
-                      <p className="text-sm text-muted-foreground">45 tasks</p>
+              <CardContent className="px-4 pb-4 pt-3">
+                <div className="space-y-3">
+                  {[
+                    { name: "KRA", tasks: 45, pct: "45%" },
+                    { name: "Immigration", tasks: 32, pct: "32%" },
+                    { name: "NTSA", tasks: 18, pct: "18%" },
+                    { name: "eCitizen", tasks: 24, pct: "24%" },
+                  ].map((dept) => (
+                    <div key={dept.name} className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-slate-700">{dept.name}</p>
+                        <p className="text-xs text-slate-400">{dept.tasks} tasks</p>
+                      </div>
+                      <div className="h-2 w-full rounded-full bg-slate-100">
+                        <div className="h-2 rounded-full bg-custom-blue" style={{ width: dept.pct }}></div>
+                      </div>
                     </div>
-                    <div className="h-2 w-full rounded-full bg-muted">
-                      <div className="h-2 rounded-full bg-primary" style={{ width: "45%" }}></div>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium">Immigration</p>
-                      <p className="text-sm text-muted-foreground">32 tasks</p>
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-muted">
-                      <div className="h-2 rounded-full bg-primary" style={{ width: "32%" }}></div>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium">NTSA</p>
-                      <p className="text-sm text-muted-foreground">18 tasks</p>
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-muted">
-                      <div className="h-2 rounded-full bg-primary" style={{ width: "18%" }}></div>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium">eCitizen</p>
-                      <p className="text-sm text-muted-foreground">24 tasks</p>
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-muted">
-                      <div className="h-2 rounded-full bg-primary" style={{ width: "24%" }}></div>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
           </div>
         </TabsContent>
-        <TabsContent value="analytics" className="space-y-4">
+
+        <TabsContent value="analytics" className="space-y-4 m-0">
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-            <Card className="col-span-4">
-              <CardHeader>
-                <CardTitle>Task Completion Rate</CardTitle>
+            <Card className="col-span-4 border border-slate-200 shadow-sm rounded-lg bg-white">
+              <CardHeader className="px-4 pt-4 pb-0">
+                <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Task Completion Rate</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="px-4 pb-4 pt-3">
                 <div className="h-[300px] flex items-center justify-center">
-                  <p className="text-muted-foreground">Analytics charts will be displayed here</p>
+                  <p className="text-sm text-slate-400">Analytics charts will be displayed here</p>
                 </div>
               </CardContent>
             </Card>
-            <Card className="col-span-3">
-              <CardHeader>
-                <CardTitle>Task Distribution</CardTitle>
+            <Card className="col-span-3 border border-slate-200 shadow-sm rounded-lg bg-white">
+              <CardHeader className="px-4 pt-4 pb-0">
+                <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Task Distribution</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="px-4 pb-4 pt-3">
                 <div className="h-[300px] flex items-center justify-center">
-                  <p className="text-muted-foreground">Distribution charts will be displayed here</p>
+                  <p className="text-sm text-slate-400">Distribution charts will be displayed here</p>
                 </div>
               </CardContent>
             </Card>

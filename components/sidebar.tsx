@@ -227,7 +227,7 @@ const NavItem = ({ item, isCollapsed, pathname }) => {
                 isCollapsed && "justify-center px-0"
             )}
         >
-            <item.icon className={cn("h-5 w-5 shrink-0", active ? "text-[#376bae]" : "text-white/90")} />
+            <item.icon className={cn("h-5 w-5 shrink-0 transition-colors duration-200", active ? "text-[#376bae]" : "text-white/90 hover:text-[#376bae]")} />
             {!isCollapsed && (
                 <span className="flex-1 truncate">{item.title}</span>
             )}

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Sparkles, FileText, Upload, Plus, Trash2, Download, ZoomIn, ZoomOut, Check, User, Briefcase, GraduationCap, FolderGit2, BookOpen, MessageSquare, AlertCircle, Eye, Search, Users, ImagePlus, X, Loader2, CheckCircle2, Save, Settings2, Palette, ChevronDown, ChevronUp, Globe } from "lucide-react";
+import { Sparkles, FileText, Upload, Plus, Trash2, Download, ZoomIn, ZoomOut, Check, User, Briefcase, GraduationCap, FolderGit2, BookOpen, MessageSquare, AlertCircle, Eye, Search, Users, ImagePlus, X, Loader2, CheckCircle2, Save, Settings2, Palette, ChevronDown, ChevronUp, Globe, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -251,6 +251,22 @@ export default function CVGeneratorPage() {
 
   const updateCvSetting = <K extends keyof typeof cvSettings>(key: K, value: typeof cvSettings[K]) =>
     setCvSettings(prev => ({ ...prev, [key]: value }));
+
+  const [workflowStep, setWorkflowStep] = useState<'import' | 'review-edit' | 'design-finalize'>('import');
+  const [activeSection, setActiveSection] = useState('contact');
+
+  const sectionMeta = [
+    { id: 'contact', label: 'Contact Information', icon: User, count: 1 },
+    { id: 'summary', label: 'Professional Summary', icon: BookOpen, count: cvData.summary ? 1 : 0 },
+    { id: 'experience', label: 'Experience', icon: Briefcase, count: cvData.experience.length },
+    { id: 'education', label: 'Education', icon: GraduationCap, count: cvData.education.length },
+    { id: 'skills', label: 'Skills', icon: Sparkles, count: cvData.skills.length },
+    { id: 'internships', label: 'Internships', icon: Briefcase, count: cvData.internships.length },
+    { id: 'projects', label: 'Projects', icon: FolderGit2, count: cvData.projects.length },
+    { id: 'languages', label: 'Languages', icon: Globe, count: cvData.languages.length },
+    { id: 'references', label: 'References', icon: MessageSquare, count: cvData.references.length },
+    { id: 'declaration', label: 'Declaration', icon: Check, count: cvData.declaration ? 1 : 0 },
+  ];
 
   const previewRef = useRef<HTMLDivElement>(null);
 
@@ -1315,1204 +1331,675 @@ export default function CVGeneratorPage() {
   };
 
   return (
-    <div className="flex flex-col xl:flex-row h-screen overflow-hidden gap-4 p-4 bg-gray-100 dark:bg-zinc-900">
-      {/* LEFT PANEL - Form Input & AI Parsing (Scrollable) */}
-      <div className="flex-1 xl:max-w-[45%] h-full flex flex-col bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-        <Tabs defaultValue="registry" className="flex-1 flex flex-col overflow-hidden">
-          <CardHeader className="py-3 px-4 border-b border-slate-100 dark:border-slate-800 flex flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="h-8 w-8 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
-                <FileText className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-              </div>
-              <div className="min-w-0">
-                <CardTitle className="text-sm font-bold truncate">CV Builder</CardTitle>
-                <CardDescription className="text-[10px] text-slate-400 truncate">
-                  Load from registry or fill manually
-                </CardDescription>
-              </div>
-            </div>
-            <TabsList className="bg-slate-100 dark:bg-slate-800 h-8 p-0.5 shrink-0 rounded-lg">
-              <TabsTrigger value="registry" className="text-[10px] font-semibold py-1 px-2.5 rounded-md data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:shadow-sm">
-                <Users className="h-3 w-3 mr-1" /> Registry
-              </TabsTrigger>
-              <TabsTrigger value="form" className="text-[10px] font-semibold py-1 px-2.5 rounded-md data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:shadow-sm">
-                <FileText className="h-3 w-3 mr-1" /> Form
-              </TabsTrigger>
-              <TabsTrigger value="upload" className="text-[10px] font-semibold py-1 px-2.5 rounded-md data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:shadow-sm">
-                <Upload className="h-3 w-3 mr-1" /> AI Upload
-              </TabsTrigger>
-              <TabsTrigger value="raw" className="text-[10px] font-semibold py-1 px-2.5 rounded-md data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:shadow-sm">
-                <span className="font-mono">{'{}'}</span>
-              </TabsTrigger>
-            </TabsList>
-          </CardHeader>
+    <div className="flex flex-col h-screen overflow-hidden bg-[#FAFAFC]">
+      {/* HEADER with workflow steps */}
+      <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-lg bg-custom-blue flex items-center justify-center">
+            <FileText className="h-4 w-4 text-white" />
+          </div>
+          <div>
+            <h1 className="text-sm font-bold text-slate-900">CV Builder</h1>
+            <p className="text-[10px] text-slate-500">Import → Review & Edit → Design & Finalize</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 bg-slate-100 rounded-full p-1">
+          {([
+            { key: 'import', label: 'Import' },
+            { key: 'review-edit', label: 'Review & Edit' },
+            { key: 'design-finalize', label: 'Design & Finalize' },
+          ] as const).map((step, i) => (
+            <button
+              key={step.key}
+              onClick={() => setWorkflowStep(step.key)}
+              className={`relative text-[11px] font-semibold px-4 py-1.5 rounded-full transition-all ${
+                workflowStep === step.key
+                  ? 'bg-custom-blue text-white shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {i + 1}. {step.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleDownloadDocx}
+            className="text-xs h-8 gap-1.5 border-slate-200"
+          >
+            <Download className="h-3.5 w-3.5" /> Word
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleDownloadPdf}
+            disabled={isDownloadingPdf}
+            className="text-xs h-8 gap-1.5 bg-custom-blue hover:bg-[#2d5a94] text-white"
+          >
+            {isDownloadingPdf ? (
+              <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Generating...</>
+            ) : (
+              <><Download className="h-3.5 w-3.5" /> PDF</>
+            )}
+          </Button>
+        </div>
+      </div>
 
-          {/* Form Tabs Content */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-6">
-            {/* ── Registry Tab ─────────────────────────────────────────────── */}
-            <TabsContent value="registry" className="m-0 outline-none space-y-4">
-              <div className="space-y-1">
-                <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <Users className="h-3.5 w-3.5 text-blue-500" />
-                  Load from Individual Registry
-                </h3>
-                <p className="text-[11px] text-slate-400">Search by name to pre-fill the CV with their contact details and photo.</p>
-              </div>
+      {/* MAIN CONTENT */}
+      <div className="flex-1 flex gap-4 p-4 overflow-hidden">
 
-              {/* Search Box */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input
-                  className="pl-9 pr-4 h-9 text-sm bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 focus:bg-white dark:focus:bg-slate-900"
-                  placeholder="Search by name..."
-                  value={individualSearch}
-                  onChange={(e) => handleIndividualSearchChange(e.target.value)}
-                />
-                {isSearching && (
-                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-slate-400" />
+        {/* ─── STEP 1: IMPORT ─────────────────────────────────────────────── */}
+        {workflowStep === 'import' && (
+          <div className="flex-1 flex gap-4">
+            <div className="flex-1 grid grid-cols-3 gap-4 content-start">
+              {/* Upload CV */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col items-center text-center gap-4">
+                <div className="h-14 w-14 rounded-2xl bg-blue-50 flex items-center justify-center">
+                  <Upload className="h-6 w-6 text-custom-blue" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">Upload CV</h3>
+                  <p className="text-xs text-slate-400 mt-1">Parse an existing CV file</p>
+                </div>
+                <div className="flex flex-wrap gap-1.5 justify-center">
+                  <span className="text-[10px] font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">PDF</span>
+                  <span className="text-[10px] font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">DOCX</span>
+                  <span className="text-[10px] font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">TXT</span>
+                </div>
+                <Input type="file" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg" onChange={handleFileUpload} className="hidden" id="import-file-upload" disabled={isExtracting} />
+                <Button asChild variant="outline" className="w-full" disabled={isExtracting}>
+                  <label htmlFor="import-file-upload" className="cursor-pointer">Choose File</label>
+                </Button>
+                {isExtracting && (
+                  <div className="flex items-center gap-2 text-xs text-custom-blue">
+                    <div className="w-3 h-3 border-2 border-custom-blue border-t-transparent rounded-full animate-spin" />
+                    {extractionProgress}
+                  </div>
                 )}
               </div>
 
-              {/* Search Results */}
-              {searchResults.length > 0 && (
-                <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm bg-white dark:bg-slate-800/50">
-                  {searchResults.map((ind: any) => (
-                    <button
-                      key={ind.id}
-                      onClick={() => handleSelectIndividual(ind)}
-                      className="w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-blue-900/20 border-b border-slate-100 dark:border-slate-700 last:border-0 transition-colors group"
-                    >
-                      <div className="font-semibold text-sm text-slate-800 dark:text-slate-200 group-hover:text-blue-700 dark:group-hover:text-blue-300">{ind.full_name}</div>
-                      <div className="text-[11px] text-slate-400 mt-0.5 flex gap-3 items-center">
-                        {ind.gender && <span className="capitalize">{ind.gender}</span>}
-                        {ind.contact_details?.email?.primary && (
-                          <span>{ind.contact_details.email.primary}</span>
-                        )}
-                      </div>
-                    </button>
-                  ))}
+              {/* Import From Registry */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col gap-4">
+                <div className="flex flex-col items-center text-center gap-4">
+                  <div className="h-14 w-14 rounded-2xl bg-blue-50 flex items-center justify-center">
+                    <Users className="h-6 w-6 text-custom-blue" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-800">Import From Registry</h3>
+                    <p className="text-xs text-slate-400 mt-1">Search the individual registry</p>
+                  </div>
                 </div>
-              )}
 
-              {/* Selected Individual — Editable Form */}
-              {selectedIndividual && (
-                <div className="border border-blue-200 dark:border-blue-800/50 rounded-xl bg-blue-50/30 dark:bg-blue-900/10 p-4 space-y-4">
-                  {/* Header row */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="h-6 w-6 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                      </div>
-                      <span className="text-sm font-bold text-slate-800 dark:text-slate-200">{selectedIndividual.full_name}</span>
-                      {selectedIndividual.gender && <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded-full text-slate-500 capitalize">{selectedIndividual.gender}</span>}
-                    </div>
-                    <button onClick={() => { setSelectedIndividual(null); setIndividualPhoto(null); setPendingPhotoPreview(null); setPendingPhotoFile(null); setShowSavePhotoPrompt(false); setShowSaveCvPrompt(false); }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+                {/* Search */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <Input
+                    className="pl-9 pr-4 h-9 text-sm bg-slate-50 border-slate-200 focus:bg-white"
+                    placeholder="Search by name..."
+                    value={individualSearch}
+                    onChange={(e) => handleIndividualSearchChange(e.target.value)}
+                  />
+                  {isSearching && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-slate-400" />}
+                </div>
 
-                  {/* Editable fields */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="col-span-2 space-y-1">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Full Name</Label>
-                      <Input
-                        value={registryFormData.fullName}
-                        onChange={e => setRegistryFormData(p => ({ ...p, fullName: e.target.value }))}
-                        className="h-8 text-sm"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Phone</Label>
-                      <Input
-                        value={registryFormData.phone}
-                        onChange={e => setRegistryFormData(p => ({ ...p, phone: e.target.value }))}
-                        className="h-8 text-sm"
-                        placeholder="+254..."
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Email</Label>
-                      <Input
-                        value={registryFormData.email}
-                        onChange={e => setRegistryFormData(p => ({ ...p, email: e.target.value }))}
-                        className="h-8 text-sm"
-                        placeholder="email@..."
-                      />
-                    </div>
-                    <div className="col-span-2 space-y-1">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Location</Label>
-                      <Input
-                        value={registryFormData.location}
-                        onChange={e => setRegistryFormData(p => ({ ...p, location: e.target.value }))}
-                        className="h-8 text-sm"
-                        placeholder="City, Country"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Languages */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                        <Globe className="h-3.5 w-3.5" /> Languages
-                      </Label>
-                      <button onClick={addRegistryLanguage} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-                        <Plus className="h-3 w-3" /> Add
+                {searchResults.length > 0 && (
+                  <div className="border border-slate-200 rounded-lg overflow-hidden max-h-[220px] overflow-y-auto">
+                    {searchResults.map((ind: any) => (
+                      <button key={ind.id} onClick={() => handleSelectIndividual(ind)} className="w-full text-left px-3 py-2.5 hover:bg-blue-50 border-b border-slate-100 last:border-0 transition-colors">
+                        <div className="text-sm font-semibold text-slate-800">{ind.full_name}</div>
+                        <div className="text-[11px] text-slate-400">{ind.gender} {ind.contact_details?.email?.primary ? `• ${ind.contact_details.email.primary}` : ''}</div>
                       </button>
+                    ))}
+                  </div>
+                )}
+
+                {selectedIndividual && (
+                  <div className="border border-blue-200 rounded-lg bg-blue-50/30 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-slate-800">{selectedIndividual.full_name}</span>
+                      <button onClick={() => { setSelectedIndividual(null); setIndividualPhoto(null); setPendingPhotoPreview(null); setPendingPhotoFile(null); setShowSavePhotoPrompt(false); setShowSaveCvPrompt(false); }} className="text-slate-400 hover:text-slate-600 p-1"><X className="h-3 w-3" /></button>
                     </div>
-                    <div className="space-y-2">
-                      {registryFormData.languages.map((lang, idx) => (
-                        <div key={idx} className="flex gap-2 items-center">
-                          <Select value={lang.language} onValueChange={v => updateRegistryLanguage(idx, 'language', v)}>
-                            <SelectTrigger className="h-8 flex-1 text-xs">
-                              <SelectValue placeholder="Select language" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {COMMON_LANGUAGES.map(l => (
-                                <SelectItem key={l} value={l} className="text-xs">{l}</SelectItem>
+                    <Button onClick={applyIndividualToCV} className="w-full" size="sm"><CheckCircle2 className="h-4 w-4 mr-2" /> Apply to CV</Button>
+                  </div>
+                )}
+
+                {!selectedIndividual && !searchResults.length && !isSearching && individualSearch.length < 2 && (
+                  <p className="text-[11px] text-slate-400 text-center py-2">Type a name to search the registry</p>
+                )}
+              </div>
+
+              {/* Start From Scratch */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col items-center text-center gap-4">
+                <div className="h-14 w-14 rounded-2xl bg-blue-50 flex items-center justify-center">
+                  <FileText className="h-6 w-6 text-custom-blue" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">Start From Scratch</h3>
+                  <p className="text-xs text-slate-400 mt-1">Build your CV manually</p>
+                </div>
+                <Button onClick={() => { setCvData(EMPTY_CV_DATA); setWorkflowStep('review-edit'); setActiveSection('contact'); }} className="w-full bg-custom-blue hover:bg-[#2d5a94]">Start Building</Button>
+              </div>
+            </div>
+
+            {/* Right preview during import */}
+            <div className="w-[45%] bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+              <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Preview</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setZoomLevel(Math.max(0.4, zoomLevel - 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomOut className="h-3.5 w-3.5 text-slate-500" /></button>
+                  <span className="text-[11px] font-bold text-slate-600 min-w-[36px] text-center">{Math.round(zoomLevel * 100)}%</span>
+                  <button onClick={() => setZoomLevel(Math.min(1.2, zoomLevel + 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomIn className="h-3.5 w-3.5 text-slate-500" /></button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto p-6 flex items-start justify-center bg-slate-50">
+                <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center', transition: 'transform 0.15s ease-out' }} className="shrink-0">
+                  <div ref={previewRef} id="cv-preview-container">{renderLayout()}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── STEP 2: REVIEW & EDIT ──────────────────────────────────────── */}
+        {workflowStep === 'review-edit' && (
+          <div className="flex-1 flex gap-4">
+            {/* Left — Sections Sidebar */}
+            <div className="w-56 shrink-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+              <div className="px-3 py-2.5 border-b border-slate-200">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Resume Sections</span>
+              </div>
+              <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+                {sectionMeta.map((sec) => {
+                  const Icon = sec.icon
+                  const isActive = activeSection === sec.id
+                  const isComplete = sec.count > 0 || (sec.id === 'contact')
+                  return (
+                    <button
+                      key={sec.id}
+                      onClick={() => setActiveSection(sec.id)}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all ${
+                        isActive ? 'bg-custom-blue text-white shadow-sm' : 'hover:bg-slate-50 text-slate-600'
+                      }`}
+                    >
+                      <Icon className={`h-3.5 w-3.5 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                      <span className="text-xs font-semibold flex-1 truncate">{sec.label}</span>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                        isActive ? 'bg-white/20 text-white' : isComplete ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'
+                      }`}>
+                        {sec.count}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="border-t border-slate-200 p-3">
+                <Button size="sm" onClick={() => setWorkflowStep('design-finalize')} className="w-full text-xs bg-custom-blue hover:bg-[#2d5a94]">
+                  Design &amp; Finalize <ArrowRight className="h-3 w-3 ml-1" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Center — Editor Panel */}
+            <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+              <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider">{sectionMeta.find(s => s.id === activeSection)?.label || 'Section'}</h2>
+                <span className="text-[10px] text-slate-400">Confidence Score <span className="text-emerald-600 font-bold">92%</span></span>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-6">
+
+                {/* Contact Information Editor */}
+                {activeSection === 'contact' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5 col-span-2">
+                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Full Name</Label>
+                      <Input value={cvData.personalInfo.fullName} onChange={(e) => handlePersonalInfoChange("fullName", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Professional Title</Label>
+                      <Input value={cvData.personalInfo.title} onChange={(e) => handlePersonalInfoChange("title", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Photo</Label>
+                      <div className="flex gap-2 items-center">
+                        {cvData.personalInfo.photoUrl ? (
+                          <img src={cvData.personalInfo.photoUrl} className="h-10 w-10 object-cover rounded-lg border border-slate-200" />
+                        ) : (
+                          <div className="h-10 w-10 rounded-lg bg-slate-100 flex items-center justify-center"><User className="h-4 w-4 text-slate-400" /></div>
+                        )}
+                        <Input type="file" accept="image/*" className="text-xs h-8" onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) { const url = URL.createObjectURL(file); handlePersonalInfoChange("photoUrl", url); }
+                        }} />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Email</Label>
+                      <Input value={cvData.personalInfo.email} onChange={(e) => handlePersonalInfoChange("email", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Phone</Label>
+                      <Input value={cvData.personalInfo.phone} onChange={(e) => handlePersonalInfoChange("phone", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Location</Label>
+                      <Input value={cvData.personalInfo.location} onChange={(e) => handlePersonalInfoChange("location", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">LinkedIn</Label>
+                      <Input value={cvData.personalInfo.linkedin} onChange={(e) => handlePersonalInfoChange("linkedin", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">GitHub</Label>
+                      <Input value={cvData.personalInfo.github} onChange={(e) => handlePersonalInfoChange("github", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5 col-span-2">
+                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Personal Details</Label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Input placeholder="Date of Birth" value={cvData.personalDetails.dateOfBirth || ""} onChange={(e) => handlePersonalDetailsChange("dateOfBirth", e.target.value)} />
+                        <Input placeholder="Nationality" value={cvData.personalDetails.nationality || ""} onChange={(e) => handlePersonalDetailsChange("nationality", e.target.value)} />
+                        <Input placeholder="Marital Status" value={cvData.personalDetails.maritalStatus || ""} onChange={(e) => handlePersonalDetailsChange("maritalStatus", e.target.value)} />
+                        <Input placeholder="Residence" value={cvData.personalDetails.residence || ""} onChange={(e) => handlePersonalDetailsChange("residence", e.target.value)} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Summary Editor */}
+                {activeSection === 'summary' && (
+                  <div className="space-y-2">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Professional Summary</Label>
+                    <Textarea rows={6} value={cvData.summary} onChange={(e) => setCvData({ ...cvData, summary: e.target.value })} placeholder="Write a compelling professional summary..." />
+                    <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                      <div className="flex items-start gap-2">
+                        <Sparkles className="h-4 w-4 text-custom-blue shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-semibold text-slate-700">AI Suggestion</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">Results-driven professional with expertise in... Consider adding measurable achievements and industry-specific keywords.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Experience Editor */}
+                {activeSection === 'experience' && (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-slate-500">{cvData.experience.length} entries</span>
+                      <Button size="sm" variant="outline" onClick={addExperience} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                    </div>
+                    {cvData.experience.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No experience entries yet. Click "Add" to create one.</p>}
+                    <div className="space-y-4">
+                      {cvData.experience.map((exp: any, idx: number) => (
+                        <div key={idx} className="p-4 border border-slate-200 rounded-xl space-y-3">
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs font-bold text-slate-500">Position #{idx + 1}</span>
+                            <Button variant="ghost" size="icon" onClick={() => removeExperience(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <Input placeholder="Company Name" value={exp.company} onChange={(e) => handleExperienceChange(idx, "company", e.target.value)} />
+                            <Input placeholder="Location" value={exp.location} onChange={(e) => handleExperienceChange(idx, "location", e.target.value)} />
+                            <Input placeholder="Role / Job Title" value={exp.role} onChange={(e) => handleExperienceChange(idx, "role", e.target.value)} />
+                            <div className="grid grid-cols-2 gap-2">
+                              <Input placeholder="Start Date" value={exp.startDate} onChange={(e) => handleExperienceChange(idx, "startDate", e.target.value)} />
+                              <Input placeholder="End Date" value={exp.endDate} onChange={(e) => handleExperienceChange(idx, "endDate", e.target.value)} />
+                            </div>
+                            <Input placeholder="Company Description" className="col-span-2" value={exp.companyDesc || ""} onChange={(e) => handleExperienceChange(idx, "companyDesc", e.target.value)} />
+                            <div className="col-span-2 space-y-2">
+                              <div className="flex justify-between items-center">
+                                <span className="text-xs text-slate-500">Key Responsibilities</span>
+                                <Button type="button" variant="ghost" size="sm" onClick={() => addRespToExperience(idx)} className="h-6 text-[10px] text-blue-600"><Plus className="h-2.5 w-2.5" /> Add</Button>
+                              </div>
+                              {exp.responsibilities?.map((resp: string, rIdx: number) => (
+                                <div key={rIdx} className="flex gap-2 items-center">
+                                  <Input value={resp} placeholder="e.g. Designed backend system" onChange={(e) => handleRespChangeInExperience(idx, rIdx, e.target.value)} className="h-8 text-xs" />
+                                  <Button variant="ghost" size="icon" onClick={() => removeRespFromExperience(idx, rIdx)} className="h-8 w-8 text-red-400 hover:text-red-600"><Trash2 className="h-3 w-3" /></Button>
+                                </div>
                               ))}
-                            </SelectContent>
-                          </Select>
-                          <Select value={lang.proficiency} onValueChange={v => updateRegistryLanguage(idx, 'proficiency', v)}>
-                            <SelectTrigger className="h-8 w-32 text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {PROFICIENCY_LEVELS.map(p => (
-                                <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {registryFormData.languages.length > 1 && (
-                            <button onClick={() => removeRegistryLanguage(idx)} className="text-slate-400 hover:text-red-500 flex-shrink-0">
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          )}
+                            </div>
+                          </div>
                         </div>
                       ))}
                     </div>
                   </div>
-
-                  {/* Photo Section */}
-                  <div className="space-y-2">
-                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Photo</Label>
-                    {isFetchingPhoto ? (
-                      <div className="flex items-center gap-2 text-xs text-slate-500">
-                        <Loader2 className="h-4 w-4 animate-spin" /> Fetching from registry...
-                      </div>
-                    ) : (pendingPhotoPreview || individualPhoto) ? (
-                      <div className="flex items-start gap-3">
-                        <img
-                          src={pendingPhotoPreview || individualPhoto!}
-                          alt="Individual"
-                          className="w-20 h-20 object-cover rounded-lg border border-slate-200 shadow-sm"
-                        />
-                        <div className="flex flex-col gap-1.5">
-                          {pendingPhotoPreview ? (
-                            <span className="text-xs text-amber-600 font-medium bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">Pending upload</span>
-                          ) : (
-                            <span className="text-xs text-green-700 font-medium bg-green-50 border border-green-200 px-2 py-0.5 rounded flex items-center gap-1">
-                              <CheckCircle2 className="h-3 w-3" /> From registry
-                            </span>
-                          )}
-                          <button onClick={() => photoInputRef.current?.click()} className="text-xs text-blue-600 hover:underline text-left">
-                            Replace photo
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div
-                        onClick={() => photoInputRef.current?.click()}
-                        className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-lg p-4 cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition-colors"
-                      >
-                        <ImagePlus className="h-6 w-6 text-slate-400" />
-                        <p className="text-xs text-slate-500">No photo in registry — click to upload</p>
-                      </div>
-                    )}
-                    <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handleRegistryPhotoUpload} />
-                  </div>
-
-                  {/* Save photo to registry prompt */}
-                  {showSavePhotoPrompt && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
-                      <p className="text-xs text-amber-800 font-medium">Save this photo to the individual's registry record?</p>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="outline" className="h-7 text-xs border-amber-300 text-amber-800 hover:bg-amber-100" onClick={savePhotoToRegistry} disabled={isSavingPhoto}>
-                          {isSavingPhoto ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
-                          {isSavingPhoto ? 'Saving...' : 'Yes, save to registry'}
-                        </Button>
-                        <Button size="sm" variant="ghost" className="h-7 text-xs text-slate-600" onClick={() => setShowSavePhotoPrompt(false)}>
-                          Skip
-                        </Button>
-                      </div>
+                )}
+                {/* Education Editor */}
+                {activeSection === 'education' && (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-slate-500">{cvData.education.length} entries</span>
+                      <Button size="sm" variant="outline" onClick={addEducation} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
                     </div>
-                  )}
-
-                  {/* Save CV to DB prompt */}
-                  {showSaveCvPrompt && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
-                      <p className="text-xs text-blue-800 font-medium">Save this CV to the individual's database record?</p>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="outline" className="h-7 text-xs border-blue-300 text-blue-800 hover:bg-blue-100" onClick={saveCVToDb} disabled={isSavingCv}>
-                          {isSavingCv ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
-                          {isSavingCv ? 'Saving...' : 'Yes, save CV'}
-                        </Button>
-                        <Button size="sm" variant="ghost" className="h-7 text-xs text-slate-600" onClick={() => setShowSaveCvPrompt(false)}>
-                          Skip
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  <Button onClick={applyIndividualToCV} className="w-full" size="sm">
-                    <CheckCircle2 className="h-4 w-4 mr-2" />
-                    Apply to CV
-                  </Button>
-                </div>
-              )}
-
-              {!selectedIndividual && !searchResults.length && !isSearching && individualSearch.length < 2 && (
-                <div className="text-center py-12 text-slate-300 dark:text-slate-600">
-                  <div className="h-14 w-14 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto mb-3">
-                    <Users className="h-6 w-6 opacity-40" />
-                  </div>
-                  <p className="text-xs font-medium">Type a name to search the registry</p>
-                  <p className="text-[10px] text-slate-300 dark:text-slate-600 mt-1">Minimum 2 characters</p>
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="form" className="space-y-6 m-0 outline-none">
-
-              {/* Personal Info Section */}
-              <section className="space-y-4">
-                <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <div className="h-5 w-5 rounded bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center">
-                    <User className="h-3 w-3 text-blue-600 dark:text-blue-400" />
-                  </div>
-                  1. Contact Information
-                </h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="fullName">Full Name</Label>
-                    <Input
-                      id="fullName"
-                      value={cvData.personalInfo.fullName}
-                      onChange={(e) => handlePersonalInfoChange("fullName", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="title">Professional Title</Label>
-                    <Input
-                      id="title"
-                      value={cvData.personalInfo.title}
-                      onChange={(e) => handlePersonalInfoChange("title", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Email</Label>
-                    <Input
-                      id="email"
-                      value={cvData.personalInfo.email}
-                      onChange={(e) => handlePersonalInfoChange("email", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="phone">Phone</Label>
-                    <Input
-                      id="phone"
-                      value={cvData.personalInfo.phone}
-                      onChange={(e) => handlePersonalInfoChange("phone", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2 col-span-2">
-                    <Label htmlFor="location">Location / Address</Label>
-                    <Input
-                      id="location"
-                      value={cvData.personalInfo.location}
-                      onChange={(e) => handlePersonalInfoChange("location", e.target.value)}
-                      placeholder="e.g. Nairobi, Kenya"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="github">GitHub Link</Label>
-                    <Input
-                      id="github"
-                      value={cvData.personalInfo.github}
-                      onChange={(e) => handlePersonalInfoChange("github", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="linkedin">LinkedIn Link</Label>
-                    <Input
-                      id="linkedin"
-                      value={cvData.personalInfo.linkedin}
-                      onChange={(e) => handlePersonalInfoChange("linkedin", e.target.value)}
-                    />
-                  </div>
-                </div>
-              </section>
-
-              {/* Personal Details Section */}
-              <section className="space-y-4">
-                <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <div className="h-5 w-5 rounded bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center">
-                    <User className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                  </div>
-                  2. Personal Details
-                </h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="dob">Date of Birth</Label>
-                    <Input
-                      id="dob"
-                      value={cvData.personalDetails.dateOfBirth || ""}
-                      onChange={(e) => handlePersonalDetailsChange("dateOfBirth", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="nationality">Nationality</Label>
-                    <Input
-                      id="nationality"
-                      value={cvData.personalDetails.nationality || ""}
-                      onChange={(e) => handlePersonalDetailsChange("nationality", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="maritalStatus">Marital Status</Label>
-                    <Input
-                      id="maritalStatus"
-                      value={cvData.personalDetails.maritalStatus || ""}
-                      onChange={(e) => handlePersonalDetailsChange("maritalStatus", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="residence">Current Residence</Label>
-                    <Input
-                      id="residence"
-                      value={cvData.personalDetails.residence || ""}
-                      onChange={(e) => handlePersonalDetailsChange("residence", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2 col-span-2">
-                    <Label htmlFor="kenyaStatus">Kenya Status (Visa / Permit Info)</Label>
-                    <Input
-                      id="kenyaStatus"
-                      value={cvData.personalDetails.kenyaStatus || ""}
-                      onChange={(e) => handlePersonalDetailsChange("kenyaStatus", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="nairobiRes">Nairobi Residence</Label>
-                    <Input
-                      id="nairobiRes"
-                      value={cvData.personalDetails.nairobiRes || ""}
-                      onChange={(e) => handlePersonalDetailsChange("nairobiRes", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="driving">Driving Experience</Label>
-                    <Input
-                      id="driving"
-                      value={cvData.personalDetails.drivingExperience || ""}
-                      onChange={(e) => handlePersonalDetailsChange("drivingExperience", e.target.value)}
-                    />
-                  </div>
-                </div>
-              </section>
-
-              {/* Profile Summary Section */}
-              <section className="space-y-4">
-                <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <div className="h-5 w-5 rounded bg-violet-50 dark:bg-violet-900/30 flex items-center justify-center">
-                    <BookOpen className="h-3 w-3 text-violet-600 dark:text-violet-400" />
-                  </div>
-                  3. Professional Profile
-                </h3>
-                <div className="space-y-2">
-                  <Label htmlFor="summary">Summary Paragraph</Label>
-                  <Textarea
-                    id="summary"
-                    rows={4}
-                    value={cvData.summary}
-                    onChange={(e) => setCvData({ ...cvData, summary: e.target.value })}
-                  />
-                </div>
-              </section>
-
-              {/* Skills Group Section */}
-              <section className="space-y-4">
-                <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                    <div className="h-5 w-5 rounded bg-amber-50 dark:bg-amber-900/30 flex items-center justify-center">
-                      <Sparkles className="h-3 w-3 text-amber-500" />
-                    </div>
-                    4. Core Competencies (Skills)
-                  </h3>
-                  <Button type="button" variant="outline" size="sm" onClick={addSkillGroup} className="h-7 text-[10px] gap-1 border-dashed">
-                    <Plus className="h-3 w-3" /> Add
-                  </Button>
-                </div>
-                <div className="space-y-4">
-                  {cvData.skills.length === 0 && (
-                    <p className="text-[11px] text-slate-400 italic py-2">No skills added yet. Click "Add" to create a skill category.</p>
-                  )}
-                  {cvData.skills.map((skill: any, idx: number) => (
-                    <div key={idx} className="flex gap-4 items-start p-3 border border-slate-100 rounded-lg dark:border-slate-800">
-                      <div className="flex-1 space-y-2">
-                        <Input
-                          placeholder="Category (e.g. Frameworks & Tools)"
-                          value={skill.category}
-                          onChange={(e) => handleSkillGroupChange(idx, "category", e.target.value)}
-                        />
-                        <Textarea
-                          placeholder="Comma-separated items (e.g. Next.js, React, Node.js)"
-                          rows={2}
-                          value={skill.items}
-                          onChange={(e) => handleSkillGroupChange(idx, "items", e.target.value)}
-                        />
-                      </div>
-                      <Button variant="ghost" size="icon" onClick={() => removeSkillGroup(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              {/* Work Experience Section */}
-              <section className="space-y-4">
-                <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                    <div className="h-5 w-5 rounded bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center">
-                      <Briefcase className="h-3 w-3 text-blue-600 dark:text-blue-400" />
-                    </div>
-                    5. Work Experience
-                  </h3>
-                  <Button type="button" variant="outline" size="sm" onClick={addExperience} className="h-7 text-[10px] gap-1 border-dashed">
-                    <Plus className="h-3 w-3" /> Add
-                  </Button>
-                </div>
-                <div className="space-y-6">
-                  {cvData.experience.length === 0 && (
-                    <p className="text-[11px] text-slate-400 italic py-2">No work experience added yet. Click "Add" to create one.</p>
-                  )}
-                  {cvData.experience.map((exp: any, idx: number) => (
-                    <div key={idx} className="p-4 border border-slate-100 dark:border-slate-800 rounded-xl space-y-4 bg-slate-50/50 dark:bg-slate-900/50">
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-slate-500">Position #{idx + 1}</span>
-                        <Button variant="ghost" size="icon" onClick={() => removeExperience(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Company Name</Label>
-                          <Input
-                            value={exp.company}
-                            onChange={(e) => handleExperienceChange(idx, "company", e.target.value)}
-                          />
+                    {cvData.education.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No education entries yet.</p>}
+                    {cvData.education.map((edu: any, idx: number) => (
+                      <div key={idx} className="p-4 border border-slate-200 rounded-xl space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-500">Education #{idx + 1}</span>
+                          <Button variant="ghost" size="icon" onClick={() => removeEducation(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                         </div>
-                        <div className="space-y-2">
-                          <Label>Location</Label>
-                          <Input
-                            value={exp.location}
-                            placeholder="e.g. Kenya or Remote"
-                            onChange={(e) => handleExperienceChange(idx, "location", e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Role / Job Title</Label>
-                          <Input
-                            value={exp.role}
-                            onChange={(e) => handleExperienceChange(idx, "role", e.target.value)}
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="space-y-2">
-                            <Label>Start Date</Label>
-                            <Input
-                              value={exp.startDate}
-                              placeholder="e.g. Jan 2021"
-                              onChange={(e) => handleExperienceChange(idx, "startDate", e.target.value)}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>End Date</Label>
-                            <Input
-                              value={exp.endDate}
-                              placeholder="e.g. Present"
-                              onChange={(e) => handleExperienceChange(idx, "endDate", e.target.value)}
-                            />
-                          </div>
-                        </div>
-                        <div className="space-y-2 col-span-2">
-                          <Label>Company Short Description</Label>
-                          <Input
-                            value={exp.companyDesc || ""}
-                            onChange={(e) => handleExperienceChange(idx, "companyDesc", e.target.value)}
-                          />
-                        </div>
-
-                        {/* Responsibilities list */}
-                        <div className="col-span-2 space-y-2">
-                          <div className="flex justify-between items-center">
-                            <Label className="text-xs">Key Responsibilities / Accomplishments</Label>
-                            <Button type="button" variant="ghost" size="sm" onClick={() => addRespToExperience(idx)} className="h-6 text-[10px] text-blue-600 gap-0.5">
-                              <Plus className="h-2.5 w-2.5" /> Add bullet
-                            </Button>
-                          </div>
-                          <div className="space-y-2">
-                            {exp.responsibilities?.map((resp: string, rIdx: number) => (
-                              <div key={rIdx} className="flex gap-2 items-center">
-                                <Input
-                                  value={resp}
-                                  placeholder="e.g. Designed backend system for scaling ETL pipelines"
-                                  onChange={(e) => handleRespChangeInExperience(idx, rIdx, e.target.value)}
-                                  className="h-8 text-xs"
-                                />
-                                <Button variant="ghost" size="icon" onClick={() => removeRespFromExperience(idx, rIdx)} className="h-8 w-8 text-red-400 hover:text-red-600">
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Input placeholder="Degree / Certificate" value={edu.degree} onChange={(e) => handleEducationChange(idx, "degree", e.target.value)} />
+                          <Input placeholder="Year of Completion" value={edu.year} onChange={(e) => handleEducationChange(idx, "year", e.target.value)} />
+                          <Input placeholder="Institution" className="col-span-2" value={edu.institution} onChange={(e) => handleEducationChange(idx, "institution", e.target.value)} />
+                          <Input placeholder="Extra Details / Certifications" className="col-span-2" value={edu.details || ""} onChange={(e) => handleEducationChange(idx, "details", e.target.value)} />
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
+                    ))}
+                  </div>
+                )}
 
-              {/* Internships Section */}
-              <section className="space-y-4">
-                <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                    <div className="h-5 w-5 rounded bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center">
-                      <Briefcase className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                {/* Skills Editor */}
+                {activeSection === 'skills' && (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-slate-500">{cvData.skills.length} categories</span>
+                      <Button size="sm" variant="outline" onClick={addSkillGroup} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
                     </div>
-                    6. Internships
-                  </h3>
-                  <Button type="button" variant="outline" size="sm" onClick={addInternship} className="h-7 text-[10px] gap-1 border-dashed">
-                    <Plus className="h-3 w-3" /> Add
-                  </Button>
-                </div>
-                <div className="space-y-6">
-                  {(!cvData.internships || cvData.internships.length === 0) && (
-                    <p className="text-[11px] text-slate-400 italic py-2">No internships added yet. Click "Add" to create one.</p>
-                  )}
-                  {cvData.internships?.map((intern: any, idx: number) => (
-                    <div key={idx} className="p-4 border border-slate-100 dark:border-slate-800 rounded-xl space-y-4 bg-slate-50/50 dark:bg-slate-900/50">
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-slate-500">Internship #{idx + 1}</span>
-                        <Button variant="ghost" size="icon" onClick={() => removeInternship(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                    {cvData.skills.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No skills added yet.</p>}
+                    {cvData.skills.map((skill: any, idx: number) => (
+                      <div key={idx} className="flex gap-3 items-start p-3 border border-slate-200 rounded-lg">
+                        <div className="flex-1 space-y-2">
+                          <Input placeholder="Category (e.g. Frameworks & Tools)" value={skill.category} onChange={(e) => handleSkillGroupChange(idx, "category", e.target.value)} />
+                          <Textarea placeholder="Comma-separated items" rows={2} value={skill.items} onChange={(e) => handleSkillGroupChange(idx, "items", e.target.value)} />
+                        </div>
+                        <Button variant="ghost" size="icon" onClick={() => removeSkillGroup(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Company Name</Label>
-                          <Input
-                            value={intern.company}
-                            onChange={(e) => handleInternshipChange(idx, "company", e.target.value)}
-                          />
+                    ))}
+                  </div>
+                )}
+
+                {/* Internships Editor */}
+                {activeSection === 'internships' && (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-slate-500">{cvData.internships.length} entries</span>
+                      <Button size="sm" variant="outline" onClick={addInternship} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                    </div>
+                    {cvData.internships.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No internships added yet.</p>}
+                    {cvData.internships.map((intern: any, idx: number) => (
+                      <div key={idx} className="p-4 border border-slate-200 rounded-xl space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-500">Internship #{idx + 1}</span>
+                          <Button variant="ghost" size="icon" onClick={() => removeInternship(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                         </div>
-                        <div className="space-y-2">
-                          <Label>Location</Label>
-                          <Input
-                            value={intern.location}
-                            onChange={(e) => handleInternshipChange(idx, "location", e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Role / Title</Label>
-                          <Input
-                            value={intern.role}
-                            onChange={(e) => handleInternshipChange(idx, "role", e.target.value)}
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="space-y-2">
-                            <Label>Start Date</Label>
-                            <Input
-                              value={intern.startDate}
-                              onChange={(e) => handleInternshipChange(idx, "startDate", e.target.value)}
-                            />
+                        <div className="grid grid-cols-2 gap-3">
+                          <Input placeholder="Company" value={intern.company} onChange={(e) => handleInternshipChange(idx, "company", e.target.value)} />
+                          <Input placeholder="Location" value={intern.location} onChange={(e) => handleInternshipChange(idx, "location", e.target.value)} />
+                          <Input placeholder="Role / Title" value={intern.role} onChange={(e) => handleInternshipChange(idx, "role", e.target.value)} />
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input placeholder="Start Date" value={intern.startDate} onChange={(e) => handleInternshipChange(idx, "startDate", e.target.value)} />
+                            <Input placeholder="End Date" value={intern.endDate} onChange={(e) => handleInternshipChange(idx, "endDate", e.target.value)} />
                           </div>
-                          <div className="space-y-2">
-                            <Label>End Date</Label>
-                            <Input
-                              value={intern.endDate}
-                              onChange={(e) => handleInternshipChange(idx, "endDate", e.target.value)}
-                            />
-                          </div>
-                        </div>
-                        <div className="space-y-2 col-span-2">
-                          <Label>Company Short Description</Label>
-                          <Input
-                            value={intern.companyDesc || ""}
-                            onChange={(e) => handleInternshipChange(idx, "companyDesc", e.target.value)}
-                          />
-                        </div>
-                        <div className="col-span-2 space-y-2">
-                          <div className="flex justify-between items-center">
-                            <Label className="text-xs">Key Responsibilities</Label>
-                            <Button type="button" variant="ghost" size="sm" onClick={() => addRespToInternship(idx)} className="h-6 text-[10px] text-blue-600 gap-0.5">
-                              <Plus className="h-2.5 w-2.5" /> Add bullet
-                            </Button>
-                          </div>
-                          <div className="space-y-2">
+                          <Input placeholder="Company Description" className="col-span-2" value={intern.companyDesc || ""} onChange={(e) => handleInternshipChange(idx, "companyDesc", e.target.value)} />
+                          <div className="col-span-2 space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-slate-500">Key Responsibilities</span>
+                              <Button type="button" variant="ghost" size="sm" onClick={() => addRespToInternship(idx)} className="h-6 text-[10px] text-blue-600"><Plus className="h-2.5 w-2.5" /> Add</Button>
+                            </div>
                             {intern.responsibilities?.map((resp: string, rIdx: number) => (
                               <div key={rIdx} className="flex gap-2 items-center">
-                                <Input
-                                  value={resp}
-                                  onChange={(e) => handleRespChangeInInternship(idx, rIdx, e.target.value)}
-                                  className="h-8 text-xs"
-                                />
-                                <Button variant="ghost" size="icon" onClick={() => removeRespFromInternship(idx, rIdx)} className="h-8 w-8 text-red-400 hover:text-red-600">
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
+                                <Input value={resp} onChange={(e) => handleRespChangeInInternship(idx, rIdx, e.target.value)} className="h-8 text-xs" />
+                                <Button variant="ghost" size="icon" onClick={() => removeRespFromInternship(idx, rIdx)} className="h-8 w-8 text-red-400 hover:text-red-600"><Trash2 className="h-3 w-3" /></Button>
                               </div>
                             ))}
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              {/* Projects Section */}
-              <section className="space-y-4">
-                <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                    <div className="h-5 w-5 rounded bg-amber-50 dark:bg-amber-900/30 flex items-center justify-center">
-                      <FolderGit2 className="h-3 w-3 text-amber-600 dark:text-amber-400" />
-                    </div>
-                    7. Key Projects
-                  </h3>
-                  <Button type="button" variant="outline" size="sm" onClick={addProject} className="h-7 text-[10px] gap-1 border-dashed">
-                    <Plus className="h-3 w-3" /> Add
-                  </Button>
-                </div>
-                <div className="space-y-4">
-                  {cvData.projects.length === 0 && (
-                    <p className="text-[11px] text-slate-400 italic py-2">No projects added yet. Click "Add" to create one.</p>
-                  )}
-                  {cvData.projects.map((proj: any, idx: number) => (
-                    <div key={idx} className="p-4 border border-slate-100 dark:border-slate-800 rounded-xl space-y-3">
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-slate-500">Project #{idx + 1}</span>
-                        <Button variant="ghost" size="icon" onClick={() => removeProject(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      <div className="grid grid-cols-[1fr_120px] gap-4">
-                        <div className="space-y-2">
-                          <Label>Project Title</Label>
-                          <Input
-                            value={proj.title}
-                            onChange={(e) => handleProjectChange(idx, "title", e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Year</Label>
-                          <Input
-                            value={proj.year || ""}
-                            placeholder="e.g. 2025"
-                            onChange={(e) => handleProjectChange(idx, "year", e.target.value)}
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Project Description</Label>
-                        <Textarea
-                          value={proj.description}
-                          rows={2}
-                          onChange={(e) => handleProjectChange(idx, "description", e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              {/* Education Section */}
-              <section className="space-y-4">
-                <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                    <div className="h-5 w-5 rounded bg-violet-50 dark:bg-violet-900/30 flex items-center justify-center">
-                      <GraduationCap className="h-3 w-3 text-violet-600 dark:text-violet-400" />
-                    </div>
-                    8. Education & Certifications
-                  </h3>
-                  <Button type="button" variant="outline" size="sm" onClick={addEducation} className="h-7 text-[10px] gap-1 border-dashed">
-                    <Plus className="h-3 w-3" /> Add
-                  </Button>
-                </div>
-                <div className="space-y-4">
-                  {cvData.education.length === 0 && (
-                    <p className="text-[11px] text-slate-400 italic py-2">No education added yet. Click "Add" to create one.</p>
-                  )}
-                  {cvData.education.map((edu: any, idx: number) => (
-                    <div key={idx} className="p-4 border border-slate-100 dark:border-slate-800 rounded-xl space-y-3">
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-slate-500">Education #{idx + 1}</span>
-                        <Button variant="ghost" size="icon" onClick={() => removeEducation(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      <div className="grid grid-cols-[1fr_120px] gap-4">
-                        <div className="space-y-2">
-                          <Label>Degree / Certificate</Label>
-                          <Input
-                            value={edu.degree}
-                            onChange={(e) => handleEducationChange(idx, "degree", e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Year of Completion</Label>
-                          <Input
-                            value={edu.year}
-                            placeholder="e.g. 2019"
-                            onChange={(e) => handleEducationChange(idx, "year", e.target.value)}
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Institution</Label>
-                        <Input
-                          value={edu.institution}
-                          onChange={(e) => handleEducationChange(idx, "institution", e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Extra Details / Certifications</Label>
-                        <Input
-                          value={edu.details || ""}
-                          placeholder="e.g. Red Hat Certification (2019)"
-                          onChange={(e) => handleEducationChange(idx, "details", e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              {/* References Section */}
-              <section className="space-y-4">
-                <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                    <div className="h-5 w-5 rounded bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center">
-                      <MessageSquare className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                    </div>
-                    9. References
-                  </h3>
-                  <Button type="button" variant="outline" size="sm" onClick={addReference} className="h-7 text-[10px] gap-1 border-dashed">
-                    <Plus className="h-3 w-3" /> Add
-                  </Button>
-                </div>
-                <div className="space-y-4">
-                  {cvData.references.length === 0 && (
-                    <p className="text-[11px] text-slate-400 italic py-2">No references added yet. Click "Add" to create one.</p>
-                  )}
-                  {cvData.references.map((ref: any, idx: number) => (
-                    <div key={idx} className="p-4 border border-slate-100 dark:border-slate-800 rounded-xl space-y-3">
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-slate-500">Reference #{idx + 1}</span>
-                        <Button variant="ghost" size="icon" onClick={() => removeReference(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Reference Name</Label>
-                          <Input
-                            value={ref.name}
-                            onChange={(e) => handleReferenceChange(idx, "name", e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Title / Role</Label>
-                          <Input
-                            value={ref.title}
-                            onChange={(e) => handleReferenceChange(idx, "title", e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Company</Label>
-                          <Input
-                            value={ref.company}
-                            onChange={(e) => handleReferenceChange(idx, "company", e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Contact (Phone / Email)</Label>
-                          <Input
-                            value={ref.contact}
-                            onChange={(e) => handleReferenceChange(idx, "contact", e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-2 col-span-2">
-                          <Label>Address / Office Details</Label>
-                          <Input
-                            value={ref.address || ""}
-                            onChange={(e) => handleReferenceChange(idx, "address", e.target.value)}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              {/* Languages Section */}
-              <section className="space-y-4">
-                <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                    <div className="h-5 w-5 rounded bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center">
-                      <Globe className="h-3 w-3 text-blue-600 dark:text-blue-400" />
-                    </div>
-                    10. Languages
-                  </h3>
-                  <Button type="button" variant="outline" size="sm" onClick={addLanguage} className="h-7 text-[10px] gap-1 border-dashed">
-                    <Plus className="h-3 w-3" /> Add
-                  </Button>
-                </div>
-                <div className="space-y-3">
-                  {(!cvData.languages || cvData.languages.length === 0) && (
-                    <p className="text-[11px] text-slate-400 italic py-2">No languages added yet. Click "Add" to create one.</p>
-                  )}
-                  {cvData.languages?.map((lang: any, idx: number) => (
-                    <div key={idx} className="flex gap-4 items-center">
-                      <Input
-                        placeholder="Language (e.g. English)"
-                        value={lang.language}
-                        onChange={(e) => handleLanguageChange(idx, "language", e.target.value)}
-                        className="flex-1"
-                      />
-                      <Input
-                        placeholder="Proficiency (e.g. Professional)"
-                        value={lang.proficiency}
-                        onChange={(e) => handleLanguageChange(idx, "proficiency", e.target.value)}
-                        className="flex-1"
-                      />
-                      <Button variant="ghost" size="icon" onClick={() => removeLanguage(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              {/* Declaration & Extra Section */}
-              <section className="space-y-4 border-t border-slate-100 dark:border-slate-800 pt-6">
-                <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                  <div className="h-5 w-5 rounded bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center">
-                    <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                    ))}
                   </div>
-                  11. Declaration & Badge
-                </h3>
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="declaration">Declaration Statement</Label>
-                    <Textarea
-                      id="declaration"
-                      rows={2}
-                      value={cvData.declaration || ""}
-                      onChange={(e) => setCvData({ ...cvData, declaration: e.target.value })}
-                    />
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="verifiedBadge"
-                      checked={cvData.verifiedBadge}
-                      onCheckedChange={(checked) => setCvData({ ...cvData, verifiedBadge: !!checked })}
-                    />
-                    <Label htmlFor="verifiedBadge" className="text-xs text-slate-600 cursor-pointer">
-                      Include a "Verified & Up-to-date" badge at the bottom of the CV
-                    </Label>
-                  </div>
-                </div>
-              </section>
-            </TabsContent>
-
-            {/* AI UPLOAD / EXTRACTION TAB */}
-            <TabsContent value="upload" className="space-y-6 m-0 outline-none">
-
-              {/* Enhancement Level Selector */}
-              <div className="space-y-2">
-                <Label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-                  Enhancement Level
-                </Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {ENHANCEMENT_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setEnhancementLevel(opt.value)}
-                      className={`text-left p-3 rounded-xl border-2 transition-all ${
-                        enhancementLevel === opt.value
-                          ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-                          : "border-slate-200 dark:border-slate-700 hover:border-slate-300"
-                      }`}
-                    >
-                      <div className={`text-xs font-bold mb-0.5 ${enhancementLevel === opt.value ? "text-blue-700 dark:text-blue-300" : "text-slate-700 dark:text-slate-300"}`}>
-                        {opt.label}
-                      </div>
-                      <div className="text-[10px] text-slate-500 leading-relaxed">{opt.description}</div>
-                    </button>
-                  ))}
-                </div>
-                {enhancementLevel !== "none" && (
-                  <p className="text-[10px] text-slate-400 italic">
-                    Company names, dates, job titles, and all factual details are never changed — only the language is improved.
-                  </p>
                 )}
-              </div>
 
-              {/* Upload Drop Zone */}
-              <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-900/30 text-center gap-4">
-                <div className="h-12 w-12 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600">
-                  <Upload className="h-6 w-6" />
-                </div>
-                <div>
-                  <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">Parse CV with Gemini AI</h4>
-                  <p className="text-xs text-slate-500 mt-1 max-w-[320px] mx-auto">
-                    Upload your current CV (PDF or Image). Gemini will extract all data{enhancementLevel !== "none" ? ` then apply ${enhancementLevel} enhancement` : ""}.
-                  </p>
-                </div>
-                <div className="w-full max-w-[240px]">
-                  <Input
-                    type="file"
-                    accept=".pdf,.png,.jpg,.jpeg"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                    id="cv-file-upload"
-                    disabled={isExtracting}
-                  />
-                  <Button asChild variant="outline" className="w-full cursor-pointer h-10" disabled={isExtracting}>
-                    <label htmlFor="cv-file-upload">
-                      Choose PDF / Image File
-                    </label>
-                  </Button>
-                </div>
-                <span className="text-[10px] text-slate-400">Supported formats: PDF, PNG, JPG (Max 5MB)</span>
-              </div>
-
-              {isExtracting && (
-                <div className="flex flex-col items-center justify-center p-6 border border-blue-100 bg-blue-50/20 rounded-xl text-center gap-3">
-                  <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                  <span className="text-xs font-bold text-blue-700">AI Processing...</span>
-                  <p className="text-[11px] text-blue-500 max-w-[280px]">{extractionProgress}</p>
-                </div>
-              )}
-
-              <div className="flex items-start gap-3 p-4 border border-amber-100 bg-amber-50/20 rounded-xl text-amber-800 dark:text-amber-300 dark:border-amber-950/40 text-left">
-                <AlertCircle className="h-5 w-5 shrink-0 text-amber-600" />
-                <div className="text-xs leading-relaxed">
-                  <strong className="block font-bold mb-0.5">Note:</strong>
-                  Extracted content replaces all current form fields. You can always review and edit anything after parsing.
-                </div>
-              </div>
-            </TabsContent>
-
-            {/* RAW DATA JSON TAB */}
-            <TabsContent value="raw" className="space-y-4 m-0 outline-none flex-1 flex flex-col h-full">
-              <Label className="text-xs font-bold">Copy/Paste CV JSON directly</Label>
-              <Textarea
-                className="flex-1 min-h-[360px] font-mono text-[10.5px] leading-relaxed bg-slate-900 text-slate-100 p-4 rounded-xl border-none focus:ring-1 focus:ring-blue-600"
-                value={JSON.stringify(cvData, null, 2)}
-                onChange={(e) => {
-                  try {
-                    const parsed = JSON.parse(e.target.value);
-                    setCvData(parsed);
-                  } catch (err) {}
-                }}
-              />
-              <span className="text-[10px] text-slate-400">You can paste compatible CV JSON configurations here to load files instantly.</span>
-            </TabsContent>
-          </div>
-        </Tabs>
-      </div>
-
-      {/* RIGHT PANEL - Live Render A4 Preview (Zoomable / Floating Layout) */}
-      <div className="flex-1 h-full flex flex-col bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-        {/* Preview Control Toolbar */}
-        <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0">
-          {/* Row 1: Theme selector + Zoom + Downloads */}
-          <div className="px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
-              <span className="text-[10px] font-bold text-slate-500 px-2 flex items-center gap-1">
-                <Palette className="h-3 w-3" /> Theme
-              </span>
-              {[
-                { key: "theme1", label: "Classic" },
-                { key: "theme2", label: "Modern" },
-                { key: "theme3", label: "Minimal" }
-              ].map(t => (
-                <button
-                  key={t.key}
-                  onClick={() => setSelectedLayout(t.key)}
-                  className={`text-[11px] font-semibold px-3 py-1.5 rounded-md transition-all ${
-                    selectedLayout === t.key
-                      ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
-                      : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <div className="flex items-center border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden h-8 bg-white dark:bg-slate-800">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setZoomLevel(Math.max(0.4, zoomLevel - 0.05))}
-                  className="h-full w-8 rounded-none hover:bg-slate-50 dark:hover:bg-slate-700"
-                >
-                  <ZoomOut className="h-3.5 w-3.5" />
-                </Button>
-                <span className="text-[11px] font-bold px-2 shrink-0 min-w-[40px] text-center border-x border-slate-100 dark:border-slate-700">{Math.round(zoomLevel * 100)}%</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setZoomLevel(Math.min(1.2, zoomLevel + 0.05))}
-                  className="h-full w-8 rounded-none hover:bg-slate-50 dark:hover:bg-slate-700"
-                >
-                  <ZoomIn className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-
-              <div className="w-px h-6 bg-slate-200 dark:bg-slate-700" />
-
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleDownloadDocx}
-                className="text-xs h-8 gap-1.5 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
-              >
-                <Download className="h-3.5 w-3.5" /> Word
-              </Button>
-
-              <Button
-                size="sm"
-                onClick={handleDownloadPdf}
-                disabled={isDownloadingPdf}
-                className="text-xs h-8 gap-1.5 bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-slate-100 dark:text-slate-900"
-              >
-                {isDownloadingPdf ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent dark:border-slate-900 dark:border-t-transparent rounded-full animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Download className="h-3.5 w-3.5" /> PDF
-                  </>
+                {/* Projects Editor */}
+                {activeSection === 'projects' && (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-slate-500">{cvData.projects.length} entries</span>
+                      <Button size="sm" variant="outline" onClick={addProject} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                    </div>
+                    {cvData.projects.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No projects added yet.</p>}
+                    {cvData.projects.map((proj: any, idx: number) => (
+                      <div key={idx} className="p-4 border border-slate-200 rounded-xl space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-500">Project #{idx + 1}</span>
+                          <Button variant="ghost" size="icon" onClick={() => removeProject(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                        </div>
+                        <div className="grid grid-cols-[1fr_100px] gap-3">
+                          <Input placeholder="Project Title" value={proj.title} onChange={(e) => handleProjectChange(idx, "title", e.target.value)} />
+                          <Input placeholder="Year" value={proj.year || ""} onChange={(e) => handleProjectChange(idx, "year", e.target.value)} />
+                        </div>
+                        <Textarea placeholder="Project Description" rows={2} value={proj.description} onChange={(e) => handleProjectChange(idx, "description", e.target.value)} />
+                      </div>
+                    ))}
+                  </div>
                 )}
-              </Button>
+
+                {/* Languages Editor */}
+                {activeSection === 'languages' && (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-slate-500">{cvData.languages.length} languages</span>
+                      <Button size="sm" variant="outline" onClick={addLanguage} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                    </div>
+                    {cvData.languages.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No languages added yet.</p>}
+                    {cvData.languages.map((lang: any, idx: number) => (
+                      <div key={idx} className="flex gap-3 items-center">
+                        <Input placeholder="Language" value={lang.language} onChange={(e) => handleLanguageChange(idx, "language", e.target.value)} className="flex-1" />
+                        <Input placeholder="Proficiency" value={lang.proficiency} onChange={(e) => handleLanguageChange(idx, "proficiency", e.target.value)} className="flex-1" />
+                        <Button variant="ghost" size="icon" onClick={() => removeLanguage(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* References Editor */}
+                {activeSection === 'references' && (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-slate-500">{cvData.references.length} entries</span>
+                      <Button size="sm" variant="outline" onClick={addReference} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                    </div>
+                    {cvData.references.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No references added yet.</p>}
+                    {cvData.references.map((ref: any, idx: number) => (
+                      <div key={idx} className="p-4 border border-slate-200 rounded-xl space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-500">Reference #{idx + 1}</span>
+                          <Button variant="ghost" size="icon" onClick={() => removeReference(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Input placeholder="Reference Name" value={ref.name} onChange={(e) => handleReferenceChange(idx, "name", e.target.value)} />
+                          <Input placeholder="Title / Role" value={ref.title} onChange={(e) => handleReferenceChange(idx, "title", e.target.value)} />
+                          <Input placeholder="Company" value={ref.company} onChange={(e) => handleReferenceChange(idx, "company", e.target.value)} />
+                          <Input placeholder="Contact (Phone / Email)" value={ref.contact} onChange={(e) => handleReferenceChange(idx, "contact", e.target.value)} />
+                          <Input placeholder="Address / Office" className="col-span-2" value={ref.address || ""} onChange={(e) => handleReferenceChange(idx, "address", e.target.value)} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Declaration Editor */}
+                {activeSection === 'declaration' && (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Declaration Statement</Label>
+                      <Textarea rows={3} value={cvData.declaration || ""} onChange={(e) => setCvData({ ...cvData, declaration: e.target.value })} />
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Checkbox id="verifiedBadge" checked={cvData.verifiedBadge} onCheckedChange={(checked) => setCvData({ ...cvData, verifiedBadge: !!checked })} />
+                      <Label htmlFor="verifiedBadge" className="text-xs text-slate-600 cursor-pointer">Include "Verified & Up-to-date" badge</Label>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </div>
+
+            {/* Right — Preview Panel (Review & Edit step) */}
+            <div className="w-[45%] bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+              <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Live Preview</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setZoomLevel(Math.max(0.4, zoomLevel - 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomOut className="h-3.5 w-3.5 text-slate-500" /></button>
+                  <span className="text-[11px] font-bold text-slate-600 min-w-[36px] text-center">{Math.round(zoomLevel * 100)}%</span>
+                  <button onClick={() => setZoomLevel(Math.min(1.2, zoomLevel + 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomIn className="h-3.5 w-3.5 text-slate-500" /></button>
+                </div>
+                <div className="flex gap-1.5 bg-slate-100 rounded-lg p-0.5">
+                  {[{ key: "theme1", label: "Classic" }, { key: "theme2", label: "Modern" }, { key: "theme3", label: "Minimal" }].map(t => (
+                    <button key={t.key} onClick={() => setSelectedLayout(t.key)}
+                      className={`text-[10px] font-semibold px-2.5 py-1 rounded-md transition-all ${selectedLayout === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >{t.label}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto p-6 flex items-start justify-center bg-slate-50">
+                <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center', transition: 'transform 0.15s ease-out' }} className="shrink-0">
+                  <div ref={previewRef} id="cv-preview-container">{renderLayout()}</div>
+                </div>
+              </div>
             </div>
           </div>
+        )}
 
-          {/* Row 2: Customization toolbar */}
-          <div className="px-4 pb-3 border-t border-slate-100 dark:border-slate-800 pt-2.5 flex flex-wrap items-center gap-5">
-            {/* Photo controls */}
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Photo</span>
-              <div className="flex items-center border border-slate-200 dark:border-slate-700 rounded-md overflow-hidden h-7 bg-white dark:bg-slate-800">
-                {([100, 150, 200] as const).map((s, i) => (
-                  <button
-                    key={s}
-                    onClick={() => updateCvSetting('photoSize', s)}
-                    className={`px-2.5 text-[10px] font-bold h-full transition-colors ${cvSettings.photoSize === s ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700'} ${i > 0 ? 'border-l border-slate-200 dark:border-slate-700' : ''}`}
-                  >
-                    {['S','M','L'][i]}
-                  </button>
-                ))}
+        {/* ─── STEP 3: DESIGN & FINALIZE ──────────────────────────────────── */}
+        {workflowStep === 'design-finalize' && (
+          <div className="flex-1 flex gap-4">
+            {/* Left — Design Controls */}
+            <div className="w-80 shrink-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+              <div className="px-4 py-2.5 border-b border-slate-200">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Design Studio</span>
               </div>
-              <select
-                value={cvSettings.photoFit}
-                onChange={e => updateCvSetting('photoFit', e.target.value as any)}
-                className="h-7 text-[10px] border border-slate-200 dark:border-slate-700 rounded-md px-2 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-medium"
-              >
-                <option value="cover">Cover</option>
-                <option value="contain">Fit</option>
-                <option value="fill">Stretch</option>
-              </select>
-              <div className="flex items-center border border-slate-200 dark:border-slate-700 rounded-md overflow-hidden h-7 bg-white dark:bg-slate-800">
-                {(['square','circle','rounded'] as const).map((s, i) => (
-                  <button
-                    key={s}
-                    onClick={() => updateCvSetting('photoShape', s)}
-                    title={s.charAt(0).toUpperCase() + s.slice(1)}
-                    className={`px-2 text-[10px] font-bold h-full transition-colors ${cvSettings.photoShape === s ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700'} ${i > 0 ? 'border-l border-slate-200 dark:border-slate-700' : ''}`}
-                  >
-                    {s === 'square' ? '⬜' : s === 'circle' ? '⭕' : '▢'}
-                  </button>
-                ))}
+              <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                {/* Themes */}
+                <div className="space-y-2">
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Theme</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[{ key: "theme1", label: "Classic", desc: "Two-column sidebar" },
+                      { key: "theme2", label: "Modern", desc: "Top header layout" },
+                      { key: "theme3", label: "Minimal", desc: "Single column" }].map(t => (
+                      <button key={t.key} onClick={() => setSelectedLayout(t.key)}
+                        className={`p-3 rounded-lg border-2 text-left transition-all ${selectedLayout === t.key ? 'border-custom-blue bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}
+                      >
+                        <div className="text-xs font-bold text-slate-700">{t.label}</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">{t.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Colors */}
+                <div className="space-y-2">
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Color Scheme</span>
+                  <div className="flex flex-wrap gap-2">
+                    {COLOR_PRESETS.map(preset => (
+                      <button key={preset.name} title={preset.name}
+                        onClick={() => { updateCvSetting('primaryColor', preset.primary); updateCvSetting('accentColor', preset.accent); }}
+                        className="relative w-8 h-8 rounded-full border-2 transition-all hover:scale-110"
+                        style={{
+                          background: `linear-gradient(135deg, ${preset.primary} 50%, ${preset.accent} 50%)`,
+                          borderColor: (cvSettings.primaryColor === preset.primary && cvSettings.accentColor === preset.accent) ? '#376bae' : 'transparent',
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Font */}
+                <div className="space-y-2">
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Font Size</span>
+                  <div className="flex items-center border border-slate-200 rounded-md overflow-hidden h-8 bg-white">
+                    {([0.85, 1, 1.15] as const).map((s, i) => (
+                      <button key={s} onClick={() => updateCvSetting('fontScale', s)}
+                        className={`px-4 text-xs font-bold h-full transition-colors ${cvSettings.fontScale === s ? 'bg-custom-blue text-white' : 'text-slate-500 hover:bg-slate-50'} ${i > 0 ? 'border-l border-slate-200' : ''}`}
+                      >{['Small', 'Medium', 'Large'][i]}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Photo */}
+                <div className="space-y-2">
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Photo Settings</span>
+                  <div className="space-y-3">
+                    <div>
+                      <span className="text-[10px] text-slate-500">Size</span>
+                      <div className="flex items-center border border-slate-200 rounded-md overflow-hidden h-7 bg-white mt-1">
+                        {([100, 150, 200] as const).map((s, i) => (
+                          <button key={s} onClick={() => updateCvSetting('photoSize', s)}
+                            className={`px-3 text-[10px] font-bold h-full transition-colors ${cvSettings.photoSize === s ? 'bg-custom-blue text-white' : 'text-slate-500 hover:bg-slate-50'} ${i > 0 ? 'border-l border-slate-200' : ''}`}
+                          >{['S','M','L'][i]}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500">Shape</span>
+                      <div className="flex items-center border border-slate-200 rounded-md overflow-hidden h-7 bg-white mt-1">
+                        {(['square','circle','rounded'] as const).map((s, i) => (
+                          <button key={s} onClick={() => updateCvSetting('photoShape', s)}
+                            className={`px-3 text-[10px] font-bold h-full transition-colors ${cvSettings.photoShape === s ? 'bg-custom-blue text-white' : 'text-slate-500 hover:bg-slate-50'} ${i > 0 ? 'border-l border-slate-200' : ''}`}
+                          >{s.charAt(0).toUpperCase() + s.slice(1)}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500">Fit</span>
+                      <select value={cvSettings.photoFit} onChange={e => updateCvSetting('photoFit', e.target.value as any)}
+                        className="w-full h-7 text-xs border border-slate-200 rounded-md px-2 bg-white text-slate-600 mt-1"
+                      >
+                        <option value="cover">Cover</option>
+                        <option value="contain">Fit</option>
+                        <option value="fill">Stretch</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Export */}
+                <div className="space-y-2 pt-4 border-t border-slate-200">
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Export</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button size="sm" onClick={handleDownloadPdf} disabled={isDownloadingPdf} className="bg-custom-blue hover:bg-[#2d5a94] text-xs h-9">
+                      {isDownloadingPdf ? 'Generating...' : 'Download PDF'}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={handleDownloadDocx} className="text-xs h-9">Download Word</Button>
+                  </div>
+                </div>
+
+                {/* AI Enhancement */}
+                <div className="space-y-2 pt-4 border-t border-slate-200">
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">AI Enhancement</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {ENHANCEMENT_OPTIONS.map((opt) => (
+                      <button key={opt.value} type="button" onClick={() => setEnhancementLevel(opt.value)}
+                        className={`text-left p-2.5 rounded-lg border-2 transition-all ${enhancementLevel === opt.value ? 'border-custom-blue bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}
+                      >
+                        <div className="text-[10px] font-bold text-slate-700">{opt.label}</div>
+                        <div className="text-[9px] text-slate-400 leading-tight mt-0.5">{opt.description}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
-
-            {/* Color presets */}
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Color</span>
-              <div className="flex items-center gap-1.5">
-                {COLOR_PRESETS.map(preset => (
-                  <button
-                    key={preset.name}
-                    title={preset.name}
-                    onClick={() => { updateCvSetting('primaryColor', preset.primary); updateCvSetting('accentColor', preset.accent); }}
-                    className="relative w-5 h-5 rounded-full border-2 transition-all hover:scale-110"
-                    style={{
-                      background: `linear-gradient(135deg, ${preset.primary} 50%, ${preset.accent} 50%)`,
-                      borderColor: (cvSettings.primaryColor === preset.primary && cvSettings.accentColor === preset.accent) ? '#000' : 'transparent',
-                    }}
-                  />
-                ))}
+            {/* Right — Preview + Viewport */}
+            <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+              <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Final Preview</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setZoomLevel(Math.max(0.4, zoomLevel - 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomOut className="h-3.5 w-3.5 text-slate-500" /></button>
+                  <span className="text-[11px] font-bold text-slate-600 min-w-[36px] text-center">{Math.round(zoomLevel * 100)}%</span>
+                  <button onClick={() => setZoomLevel(Math.min(1.2, zoomLevel + 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomIn className="h-3.5 w-3.5 text-slate-500" /></button>
+                </div>
               </div>
-            </div>
-
-            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
-
-            {/* Font scale */}
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Font</span>
-              <div className="flex items-center border border-slate-200 dark:border-slate-700 rounded-md overflow-hidden h-7 bg-white dark:bg-slate-800">
-                {([0.85, 1, 1.15] as const).map((s, i) => (
-                  <button
-                    key={s}
-                    onClick={() => updateCvSetting('fontScale', s)}
-                    className={`px-2.5 text-[10px] font-bold h-full transition-colors ${cvSettings.fontScale === s ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700'} ${i > 0 ? 'border-l border-slate-200 dark:border-slate-700' : ''}`}
-                  >
-                    {['S','M','L'][i]}
-                  </button>
-                ))}
+              <div className="flex-1 overflow-auto p-8 flex items-start justify-center bg-slate-50">
+                <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center', transition: 'transform 0.15s ease-out' }} className="shrink-0">
+                  <div ref={previewRef} id="cv-preview-container">{renderLayout()}</div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
 
-        {/* Zoom Canvas viewport */}
-        <div className="flex-1 overflow-auto p-8 flex items-start justify-center relative bg-slate-200 dark:bg-slate-900/30">
-          <div
-            style={{
-              transform: `scale(${zoomLevel})`,
-              transformOrigin: "top center",
-              transition: "transform 0.15s ease-out"
-            }}
-            className="shrink-0"
-          >
-            <div ref={previewRef} id="cv-preview-container">
-              {renderLayout()}
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );

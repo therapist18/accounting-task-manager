@@ -99,7 +99,7 @@ export function StandardReportView({
     <div className="flex flex-col h-full antialiased pt-0 bg-white">
       {/* Table Wrapper: white card with subtle border */}
       <div className="relative overflow-hidden border border-slate-200 shadow-sm">
-        <div className="overflow-auto max-h-[calc(100vh-360px)] custom-scrollbar">
+        <div className="overflow-auto max-h-[calc(100vh-280px)] custom-scrollbar">
           <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
             <colgroup>
               <col style={{ width: INDEX_COL_WIDTH }} />
