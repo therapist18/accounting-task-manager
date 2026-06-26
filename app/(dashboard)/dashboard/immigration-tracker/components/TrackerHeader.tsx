@@ -10,6 +10,7 @@ export function TrackerHeader({
   activeDepartment,
   activeSubDepartments,
   activeSubDeptIds,
+  setActiveSubDeptIds,
   allTasksCount,
   wipTasksCount,
   writeUpCompletedCount,
@@ -39,8 +40,8 @@ export function TrackerHeader({
             Immigration Document Tracker
           </h1>
           <div className="flex items-center text-sm text-slate-500 font-semibold gap-1">
-            <Building2 className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-            <span className="text-blue-600 font-bold">
+            <Building2 className="h-3.5 w-3.5 shrink-0" style={{ color: '#376bae' }} />
+            <span className="font-bold" style={{ color: '#376bae' }}>
               {activeDepartment?.name || "Department"}
             </span>
             <span className="text-slate-300 mx-0.5">/</span>
@@ -57,7 +58,7 @@ export function TrackerHeader({
             placeholder="Search employee, ID, department..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full h-10 pl-11 pr-10 bg-white border-slate-300 rounded-full text-[13px] font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
+            className="w-full h-10 pl-11 pr-10 bg-white border-slate-300 rounded-full text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
           />
           {searchQuery && (
             <button
@@ -71,9 +72,9 @@ export function TrackerHeader({
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-4 gap-4 mb-4">
         {[
-          { label: "ALL TASKS", value: allTasksCount || 0, icon: Layers, iconBg: "bg-blue-500", cardBg: "bg-blue-50/60 border-blue-100", valueColor: "text-blue-700", accentBorder: "border-l-blue-500" },
+          { label: "ALL TASKS", value: allTasksCount || 0, icon: Layers, iconBg: "bg-custom-blue", cardBg: "bg-blue-50/60 border-blue-100", valueColor: "text-slate-800", accentBorder: "border-l-custom-blue" },
           { label: "WIP", value: wipTasksCount || 0, icon: Clock, iconBg: "bg-amber-500", cardBg: "bg-amber-50/60 border-amber-100", valueColor: "text-amber-700", accentBorder: "border-l-amber-500" },
           { label: "WRITE-UP COMPLETED", value: writeUpCompletedCount || 0, icon: Check, iconBg: "bg-emerald-500", cardBg: "bg-emerald-50/60 border-emerald-100", valueColor: "text-emerald-700", accentBorder: "border-l-emerald-500" },
           { label: "ENDORSED", value: endorsedCount || 0, icon: Sparkles, iconBg: "bg-teal-500", cardBg: "bg-teal-50/60 border-teal-100", valueColor: "text-teal-700", accentBorder: "border-l-teal-500" },
@@ -113,6 +114,41 @@ export function TrackerHeader({
           );
         })}
       </div>
+
+      {/* Sub-Department Tabs */}
+      <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-full border border-slate-200 w-fit">
+        <button
+          onClick={() => setActiveSubDeptIds([])}
+          className={cn(
+            "h-8 px-4 text-sm font-bold rounded-full transition-all flex items-center gap-2",
+            activeSubDeptIds.length === 0
+              ? "bg-white text-slate-800 shadow-sm"
+              : "text-slate-500 hover:text-slate-800"
+          )}
+        >
+          All
+        </button>
+        {activeSubDepartments.map((sub) => {
+          const id = sub.id.toString();
+          const isActive = activeSubDeptIds.includes(id);
+          return (
+            <button
+              key={sub.id}
+              onClick={() =>
+                setActiveSubDeptIds(isActive ? [] : [id])
+              }
+              className={cn(
+                "h-8 px-4 text-sm font-bold rounded-full transition-all flex items-center gap-2",
+                isActive
+                  ? "bg-white text-slate-800 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800"
+              )}
+            >
+              {sub.name}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -133,15 +169,15 @@ export function TrackerStatusFilter({
   };
 
   const tabs = [
-    { id: "all", label: "All Tasks", color: "bg-blue-600" },
-    { id: "wip", label: "WIP", color: "bg-amber-500" },
-    { id: "write_up_completed", label: "Write-up Completed", color: "bg-emerald-600" },
-    { id: "endorsed", label: "Endorsed", color: "bg-violet-600" },
+    { id: "all", label: "All Applications" },
+    { id: "wip", label: "WIP" },
+    { id: "write_up_completed", label: "Write-up Completed" },
+    { id: "endorsed", label: "Endorsed" },
   ];
 
   return (
-    <div className="px-8 pt-2 pb-0 flex items-center border-b border-slate-200 bg-slate-50/50 antialiased">
-      <div className="flex gap-1">
+    <div className="px-8 py-2.5 flex items-center border-b border-slate-200 bg-white antialiased">
+      <div className="flex gap-1.5">
         {tabs.map((s) => {
           const isActive = activeStatus === s.id;
           return (
@@ -149,17 +185,17 @@ export function TrackerStatusFilter({
               key={s.id}
               onClick={() => setActiveStatus(s.id)}
               className={cn(
-                "h-10 px-5 text-sm font-semibold rounded-t-xl transition-all flex items-center gap-2.5 border-x border-t",
+                "h-8 px-4 text-sm font-semibold rounded-lg transition-all flex items-center gap-2",
                 isActive
-                  ? `${s.color} text-white border-transparent shadow-[0_-4px_12px_rgba(0,0,0,0.08)]`
-                  : "bg-transparent text-slate-500 border-transparent hover:text-slate-800 hover:bg-slate-200/50"
+                  ? "bg-custom-blue text-white shadow-sm"
+                  : "bg-white text-slate-500 border border-slate-200 hover:border-slate-300 hover:text-slate-700"
               )}
             >
               {s.label}
               <span
                 className={cn(
-                  "px-2 py-0.5 rounded-full text-sm font-black tabular-nums font-medium",
-                  isActive ? "bg-white/25 text-white" : "bg-slate-200 text-slate-500"
+                  "px-1.5 py-0.5 rounded-md text-xs font-bold tabular-nums",
+                  isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
                 )}
               >
                 {counts[s.id]}

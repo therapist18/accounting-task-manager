@@ -5,7 +5,6 @@ import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "@/lib/hooks/use-toast";
 import { supabase } from "@/lib/supabase/client";
-import { formatDuration } from "../tasks/overall-view/tableUtils";
 import { parseDate } from "@/app/generic-functions/dateUtils";
 import {
   fetchTasks,
@@ -22,7 +21,6 @@ import {
   enhanceTasksWithIndividualData,
 } from "../tasks/overall-view/tableUtils";
 import { cn } from "@/lib/utils";
-import { TrackerSidebar } from "./components/TrackerSidebar";
 import {
   TrackerHeader,
   TrackerStatusFilter,
@@ -30,6 +28,21 @@ import {
 import { ImmigrationTrackerView } from "./components/ImmigrationTrackerView";
 
 const TARGET_DEPT_ID = "1";
+
+// Stage definitions with UUIDs (from the database)
+const STAGE_COLUMNS = [
+  { id: "1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa", label: "Enquiry", hasDateInput: false },
+  { id: "d59923c0-45ad-48be-aa26-211dea362372", label: "Application Form", hasDateInput: false },
+  { id: "0381a733-a6de-46fe-8d29-5f9f407f17a2", label: "Pro.Payment Receipt", hasDateInput: false },
+  { id: "aa6c99e0-914c-45ea-af31-1bb3fc1d7e81", label: "Application in Progress", hasDateInput: false },
+  { id: "04c280a2-da2c-48b2-91a8-d3b1830ce3e9", label: "Approval", hasDateInput: false },
+  { id: "13706cc1-2a10-407b-8e69-2e0835f2b506", label: "Issuance Receipt", hasDateInput: false },
+  { id: "072b9710-45df-4a05-ba65-01b4ef29d61d", label: "Write Up", hasDateInput: false },
+  { id: "nyayo_to_bcl", label: "Nyayo to Bcl", hasDateInput: true },
+  { id: "bcl_to_client", label: "Bcl to client", hasDateInput: true },
+  { id: "client_to_bcl", label: "Client to Bcl", hasDateInput: true },
+  { id: "caefd742-5de5-4341-a3bb-81d7b9dd2b73", label: "PP. Endorsement", hasDateInput: false },
+];
 
 export default function ImmigrationTrackerPage() {
   const [loading, setLoading] = useState(true);
@@ -61,7 +74,6 @@ export default function ImmigrationTrackerPage() {
   } | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const activeDepartment = useMemo(
     () => departments.find((d) => d.id.toString() === activeDeptId),
@@ -85,7 +97,6 @@ export default function ImmigrationTrackerPage() {
           fetchAllKycFields(),
         ]);
 
-        // Filter to target department
         const targetDept = depts.find(
           (d) => d.id.toString() === TARGET_DEPT_ID
         );
@@ -98,10 +109,11 @@ export default function ImmigrationTrackerPage() {
 
         const safeTasks = Array.isArray(tasksData) ? tasksData : [];
 
-        const { enhancedTasksData: enhancedMap, taskDependants: dependantsMap } =
-          await enhanceTasksWithIndividualData(safeTasks);
+        const {
+          enhancedTasksData: enhancedMap,
+          taskDependants: dependantsMap,
+        } = await enhanceTasksWithIndividualData(safeTasks);
 
-        // Load unified user data
         const unifiedUserData = await userService.getAllUserData(
           { payrollAccess: true },
           depts
@@ -132,6 +144,23 @@ export default function ImmigrationTrackerPage() {
     init();
   }, []);
 
+  // Refresh data helper
+  const refreshData = useCallback(async () => {
+    try {
+      const comps = await fetchCompanies();
+      const tasksData = await fetchTasks(activeDeptId, undefined, comps);
+      const safeTasks = Array.isArray(tasksData) ? tasksData : [];
+      const { enhancedTasksData: enhancedMap, taskDependants: dependantsMap } =
+        await enhanceTasksWithIndividualData(safeTasks);
+      setCompanies(comps);
+      setTasks(safeTasks);
+      setTaskDependants(dependantsMap);
+      setEnhancedTasksData(enhancedMap);
+    } catch (error) {
+      console.error("Error refreshing data", error);
+    }
+  }, [activeDeptId]);
+
   const getStaffName = useCallback(
     (userId: any) => {
       if (!userId) return "";
@@ -149,128 +178,104 @@ export default function ImmigrationTrackerPage() {
     [unifiedOfficers]
   );
 
-  // Determine current stage status for a task
-  const getTaskCurrentStage = useCallback(
-    (task: any) => {
-      if (!stages.length || !departments.length) {
-        return { stageName: "No Stage", stageFollowUp: null };
+  // Get stage date from task
+  const getStageDate = useCallback(
+    (task: any, stageId: string): string | null => {
+      const stageData = task.stages?.[stageId];
+      if (!stageData) return null;
+      return stageData.date || stageData.completedAt || null;
+    },
+    []
+  );
+
+  // Get stage status for display
+  const getStageStatus = useCallback(
+    (task: any, stageId: string): "completed" | "pending" | "missing" => {
+      const stageData = task.stages?.[stageId];
+      if (!stageData) return "pending";
+      if (
+        stageData.status === "completed" ||
+        stageData.completedAt ||
+        stageData.date
+      ) {
+        return "completed";
       }
-      const result = getCurrentStageStatus(task, stages, departments, allDocuments);
-      return {
-        stageName: result.stageName || "Unknown",
-        stageFollowUp: result.stageFollowUp || null,
-      };
+      return "pending";
     },
-    [stages, departments, allDocuments]
+    []
   );
 
-  // Get current officer stage and assigned officer names
-  const getTaskCurrentOfficers = useCallback(
-    (task: any): string[] => {
-      if (!stages.length || !departments.length) return [];
+  // Save stage date to database
+  const handleSaveStageDate = useCallback(
+    async (taskId: string, stageId: string, date: string) => {
+      try {
+        // Fetch current task stages
+        const { data: currentTask, error: fetchError } = await supabase
+          .from("tm_tasks")
+          .select("stages, status")
+          .eq("id", taskId)
+          .single();
 
-      const sortedStages = [...stages]
-        .filter((stage) => {
-          // Basic applicability check
-          const dept = departments.find(
-            (d) => d.id === (task.department?.id || task.department_id)
-          );
-          if (!dept) return true;
-          return true;
-        })
-        .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+        if (fetchError) throw fetchError;
 
-      // Find first officer stage that is not completed
-      const currentOfficerStage = sortedStages.find((stage) => {
-        const stageData = task?.stages?.[stage?.id];
-        const status = stageData?.status?.toString().toLowerCase();
-        return (
-          stageData &&
-          stage.follow_up?.toLowerCase() === "officer" &&
-          status !== "completed" &&
-          status !== "skipped"
-        );
-      });
-
-      if (!currentOfficerStage) return [];
-
-      const officerIds =
-        task?.stages?.[currentOfficerStage.id]?.officer_ids || [];
-      const ids = Array.isArray(officerIds)
-        ? officerIds.map((id) => id?.toString()).filter(Boolean)
-        : [];
-
-      return ids.map((id) => getStaffName(id)).filter(Boolean);
-    },
-    [stages, departments, getStaffName]
-  );
-
-  // Get stage age in days
-  const getTaskAgeDays = useCallback(
-    (task: any): number | null => {
-      if (!stages.length || !departments.length) return null;
-
-      const sortedStages = [...stages]
-        .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-
-      let latestHandledAt: Date | null = null;
-
-      sortedStages.forEach((stage) => {
-        const stageData = task?.stages?.[stage?.id];
-        if (!stageData) return;
-
-        const directDate = parseDate(
-          stageData.completedAt ||
-            stageData.skippedAt ||
-            stageData.date_completed ||
-            stageData.date ||
-            stageData.lastUpdated ||
-            null
-        );
-
-        if (directDate) {
-          if (!latestHandledAt || directDate.getTime() > latestHandledAt.getTime()) {
-            latestHandledAt = directDate;
-          }
+        // Determine new status based on stage ID
+        let taskStatusUpdate = {};
+        if (stageId === "caefd742-5de5-4341-a3bb-81d7b9dd2b73") {
+          taskStatusUpdate = { status: "endorsed" };
+        } else if (stageId === "072b9710-45df-4a05-ba65-01b4ef29d61d") {
+          taskStatusUpdate = { status: "write_up_completed" };
         }
-      });
 
-      if (!latestHandledAt) return null;
+        // Prepare updated stages
+        const existingStages = currentTask?.stages || {};
+        const timestamp = new Date().toISOString();
 
-      const elapsedMs = Date.now() - latestHandledAt.getTime();
-      const elapsedDays = Math.floor(elapsedMs / (1000 * 60 * 60 * 24));
-      return elapsedDays;
-    },
-    [stages, departments]
-  );
+        const updatedStages = {
+          ...existingStages,
+          [stageId]: {
+            ...existingStages[stageId],
+            date: date,
+            status: "completed",
+            completedAt: timestamp,
+            updatedAt: timestamp,
+          },
+        };
 
-  // Get sub department name
-  const getSubDeptName = useCallback(
-    (task: any): string => {
-      const subdeptId = task.subdepartment_id?.toString();
-      if (!subdeptId || !activeDepartment) return "—";
-      const subdept = activeDepartment.tm_subdepartments?.find(
-        (s) => s.id.toString() === subdeptId
-      );
-      return subdept?.name || "—";
-    },
-    [activeDepartment]
-  );
+        // Execute update
+        const { error: updateError } = await supabase
+          .from("tm_tasks")
+          .update({
+            ...taskStatusUpdate,
+            stages: updatedStages,
+            updated_at: timestamp,
+          })
+          .eq("id", taskId);
 
-  // Get class name
-  const getClassName = useCallback(
-    (task: any): string => {
-      const classId = task.class_id?.toString();
-      if (!classId || !activeDepartment) return "—";
-      for (const sub of activeDepartment.tm_subdepartments || []) {
-        const cls = sub.classes?.find(
-          (c) => c.id.toString() === classId
+        if (updateError) throw updateError;
+
+        // Update local state
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === taskId
+              ? { ...t, stages: updatedStages, ...taskStatusUpdate }
+              : t
+          )
         );
-        if (cls) return cls.name;
+
+        toast({
+          title: "Success",
+          description: "Stage date updated successfully.",
+        });
+      } catch (error) {
+        console.error("Error updating stage date:", error);
+        toast({
+          title: "Error",
+          description: "Failed to update stage date.",
+          variant: "destructive",
+        });
       }
-      return "—";
     },
-    [activeDepartment]
+    []
   );
 
   // Filtered tasks
@@ -340,40 +345,15 @@ export default function ImmigrationTrackerPage() {
           av = companies.get(a.company_id)?.prefix || "";
           bv = companies.get(b.company_id)?.prefix || "";
           break;
-        case "sub_department":
-          av = getSubDeptName(a);
-          bv = getSubDeptName(b);
-          break;
-        case "class":
-          av = getClassName(a);
-          bv = getClassName(b);
-          break;
-        case "duration":
-          av = a.applicant_data?.duration || "";
-          bv = b.applicant_data?.duration || "";
-          break;
-        case "renewal_status":
-          av = a.renewal_status || "";
-          bv = b.renewal_status || "";
-          break;
-        case "current_stage_name":
-          av = getTaskCurrentStage(a).stageName;
-          bv = getTaskCurrentStage(b).stageName;
-          break;
-        case "current_stage_follow_up":
-          av = getTaskCurrentStage(a).stageFollowUp || "";
-          bv = getTaskCurrentStage(b).stageFollowUp || "";
-          break;
-        case "current_stage_officer":
-          av = getTaskCurrentOfficers(a).join(", ");
-          bv = getTaskCurrentOfficers(b).join(", ");
-          break;
-        case "age_days":
-          av = getTaskAgeDays(a) ?? -1;
-          bv = getTaskAgeDays(b) ?? -1;
-          break;
         default:
-          return 0;
+          // For stage columns, sort by date completion
+          const stageCol = STAGE_COLUMNS.find((c) => c.id === sortConfig.key);
+          if (stageCol) {
+            av = getStageDate(a, stageCol.id) || "";
+            bv = getStageDate(b, stageCol.id) || "";
+          } else {
+            return 0;
+          }
       }
 
       if (typeof av === "string") av = av.toLowerCase();
@@ -384,19 +364,10 @@ export default function ImmigrationTrackerPage() {
       return 0;
     });
     return sorted;
-  }, [
-    searchedTasks,
-    sortConfig,
-    companies,
-    getSubDeptName,
-    getClassName,
-    getTaskCurrentStage,
-    getTaskCurrentOfficers,
-    getTaskAgeDays,
-  ]);
+  }, [searchedTasks, sortConfig, companies, getStageDate]);
 
-  // KPI counts
-  const allTasksCount = useMemo(() => {
+  // KPI counts (based on filtered tasks before status filter)
+  const baseFilteredTasks = useMemo(() => {
     return tasks.filter((task) => {
       if (activeSubDeptIds.length > 0) {
         const taskSubDeptId = task.subdepartment_id?.toString();
@@ -406,8 +377,10 @@ export default function ImmigrationTrackerPage() {
     });
   }, [tasks, activeSubDeptIds]);
 
+  const allTasksCount = baseFilteredTasks.length;
+
   const wipTasksCount = useMemo(() => {
-    return allTasksCount.filter((task) => {
+    return baseFilteredTasks.filter((task) => {
       const isWriteUp = task.status === "write_up_completed";
       const isEndorsed = task.status === "endorsed";
       const isCancelled = task.status === "cancel";
@@ -417,16 +390,16 @@ export default function ImmigrationTrackerPage() {
         ["completed", "archived"].includes(task.status);
       return !isCompleted && !isCancelled;
     }).length;
-  }, [allTasksCount]);
+  }, [baseFilteredTasks]);
 
   const writeUpCompletedCount = useMemo(
-    () => allTasksCount.filter((t) => t.status === "write_up_completed").length,
-    [allTasksCount]
+    () => baseFilteredTasks.filter((t) => t.status === "write_up_completed").length,
+    [baseFilteredTasks]
   );
 
   const endorsedCount = useMemo(
-    () => allTasksCount.filter((t) => t.status === "endorsed").length,
-    [allTasksCount]
+    () => baseFilteredTasks.filter((t) => t.status === "endorsed").length,
+    [baseFilteredTasks]
   );
 
   const handleSort = (columnId: string) => {
@@ -439,48 +412,6 @@ export default function ImmigrationTrackerPage() {
       return { key: columnId, direction: "asc" };
     });
   };
-
-  // Cell value getter
-  const getCellValue = useCallback(
-    (task: any, colId: string) => {
-      switch (colId) {
-        case "r_number":
-          return task.applicant_data?.r_number || task.r_number || "—";
-        case "passport_number":
-          return task.passport_number || "—";
-        case "applicant_name":
-          return task.applicant_name || "—";
-        case "company_prefix":
-          return companies.get(task.company_id)?.prefix || "—";
-        case "sub_department":
-          return getSubDeptName(task);
-        case "class":
-          return getClassName(task);
-        case "duration":
-          return task.applicant_data?.duration || task.duration || "—";
-        case "renewal_status":
-          return task.renewal_status || "—";
-        case "current_stage_name":
-          return getTaskCurrentStage(task).stageName;
-        case "current_stage_follow_up":
-          return getTaskCurrentStage(task).stageFollowUp;
-        case "current_stage_officer":
-          return getTaskCurrentOfficers(task);
-        case "age_days":
-          return getTaskAgeDays(task);
-        default:
-          return "—";
-      }
-    },
-    [
-      companies,
-      getSubDeptName,
-      getClassName,
-      getTaskCurrentStage,
-      getTaskCurrentOfficers,
-      getTaskAgeDays,
-    ]
-  );
 
   if (loading) {
     return (
@@ -496,57 +427,47 @@ export default function ImmigrationTrackerPage() {
   }
 
   return (
-    <div className="flex flex-1 overflow-hidden">
-      {/* Sidebar */}
-      <TrackerSidebar
-        departments={departments}
-        activeDeptId={activeDeptId}
-        setActiveDeptId={setActiveDeptId}
+    <div className="flex flex-1 overflow-hidden flex-col bg-slate-100">
+      {/* Header */}
+      <TrackerHeader
+        activeDepartment={activeDepartment}
         activeSubDepartments={activeSubDepartments}
         activeSubDeptIds={activeSubDeptIds}
         setActiveSubDeptIds={setActiveSubDeptIds}
-        isCollapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed((p) => !p)}
+        allTasksCount={allTasksCount}
+        wipTasksCount={wipTasksCount}
+        writeUpCompletedCount={writeUpCompletedCount}
+        endorsedCount={endorsedCount}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
       />
 
-      {/* Main Content */}
-      <div className="flex flex-col flex-1 overflow-hidden bg-slate-100">
-        {/* Header */}
-        <TrackerHeader
-          activeDepartment={activeDepartment}
-          activeSubDepartments={activeSubDepartments}
-          activeSubDeptIds={activeSubDeptIds}
-          allTasksCount={allTasksCount.length}
-          wipTasksCount={wipTasksCount}
-          writeUpCompletedCount={writeUpCompletedCount}
-          endorsedCount={endorsedCount}
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-        />
+      {/* Status Filter Tabs */}
+      <TrackerStatusFilter
+        activeStatus={activeStatus}
+        setActiveStatus={setActiveStatus}
+        allTasksCount={allTasksCount}
+        wipTasksCount={wipTasksCount}
+        writeUpCompletedCount={writeUpCompletedCount}
+        endorsedCount={endorsedCount}
+      />
 
-        {/* Status Filter Tabs */}
-        <TrackerStatusFilter
-          activeStatus={activeStatus}
-          setActiveStatus={setActiveStatus}
-          allTasksCount={allTasksCount.length}
-          wipTasksCount={wipTasksCount}
-          writeUpCompletedCount={writeUpCompletedCount}
-          endorsedCount={endorsedCount}
+      {/* Table */}
+      <div className="flex-1 overflow-hidden pt-4 px-4 pb-4">
+        <ImmigrationTrackerView
+          tasks={sortedTasks}
+          stageColumns={STAGE_COLUMNS}
+          sortConfig={sortConfig}
+          handleSort={handleSort}
+          currentPage={currentPage}
+          setCurrentPage={setCurrentPage}
+          rowsPerPage={rowsPerPage}
+          setRowsPerPage={setRowsPerPage}
+          getStageDate={getStageDate}
+          getStageStatus={getStageStatus}
+          onSaveStageDate={handleSaveStageDate}
+          companies={companies}
         />
-
-        {/* Table */}
-        <div className="flex-1 overflow-hidden pt-4 px-4 pb-4">
-          <ImmigrationTrackerView
-            tasks={sortedTasks}
-            sortConfig={sortConfig}
-            handleSort={handleSort}
-            currentPage={currentPage}
-            setCurrentPage={setCurrentPage}
-            rowsPerPage={rowsPerPage}
-            setRowsPerPage={setRowsPerPage}
-            getCellValue={getCellValue}
-          />
-        </div>
       </div>
     </div>
   );

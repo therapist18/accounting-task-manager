@@ -13,13 +13,32 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const session = await getServerAppSession()
-  if (!session) redirect("/login")
-
   const headerStore = await headers()
   const pathname = headerStore.get("x-pathname") ?? "/dashboard"
-  const allowed = await canAccessPath(session.user, pathname)
-  if (!allowed) redirect(pathname === "/dashboard" ? "/login" : "/dashboard")
+  const search = headerStore.get("x-search") ?? ""
+
+  const isPublicCvGenerator = pathname.startsWith("/dashboard/cv-generator")
+  const session = await getServerAppSession()
+
+  // Bypasses auth checks if it's the client portal (portal=true is in query parameters or there is no session at all)
+  const isClientPortal = isPublicCvGenerator && (search.includes("portal=true") || !session)
+
+  if (!isClientPortal) {
+    if (!session) redirect("/login")
+    const allowed = await canAccessPath(session.user, pathname)
+    if (!allowed) redirect(pathname === "/dashboard" ? "/login" : "/dashboard")
+  }
+
+  if (isClientPortal) {
+    return (
+      <div className="flex h-screen w-screen overflow-hidden bg-slate-50 dark:bg-zinc-950">
+        <main className="flex-1 relative dark:bg-zinc-900 bg-slate-50 overflow-hidden">
+          {children}
+        </main>
+        <Toaster />
+      </div>
+    )
+  }
 
   return (
     <SidebarProvider>

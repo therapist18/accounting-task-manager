@@ -10,6 +10,7 @@ const PUBLIC_PATHS = [
   "/api/auth/logout",
   "/api/auth/session",
   "/cv-generator",
+  "/dashboard/cv-generator",
   "/api/cv/extract",
 ];
 
@@ -18,10 +19,18 @@ function isPublicPath(pathname: string): boolean {
 }
 
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
+
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-pathname", pathname);
+  requestHeaders.set("x-search", search);
 
   if (isPublicPath(pathname)) {
-    return NextResponse.next();
+    return NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    });
   }
 
   const sessionCookie = request.cookies.get(AUTH_SESSION_COOKIE_NAME)?.value;
@@ -29,9 +38,6 @@ export async function middleware(request: NextRequest) {
     const loginUrl = new URL("/login", request.url);
     return NextResponse.redirect(loginUrl);
   }
-
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-pathname", pathname);
 
   return NextResponse.next({
     request: {
