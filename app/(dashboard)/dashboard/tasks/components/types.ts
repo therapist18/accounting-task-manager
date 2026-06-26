@@ -81,7 +81,7 @@ export interface Task {
 }
 
 export interface DepartmentTasksManagerProps {
-  error: string | null
+  error?: string | null
   onTaskAction?: (action: string, task: Task) => void
   onStageDocumentUpload?: (task: Task, stage: Stage) => void
   onViewStageDocument?: (task: Task, stage: Stage, stageDoc: any, document: any) => void
@@ -91,5 +91,8 @@ export interface DepartmentTasksManagerProps {
   handleStageStatusSave?: (stageId: string, taskId: string, date: string) => Promise<any>
   onTaskUpdate?: (updatedTask: Task) => void
   getCurrentRequirements?: () => any[]
-  allDocuments: any[];
+  allDocuments?: any[];
+  initialSearchTerm?: string;
+  initialDeptId?: string;
+  initialSubDeptId?: string;
 }

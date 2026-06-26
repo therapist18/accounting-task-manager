@@ -181,6 +181,9 @@ export default function ReportsPage() {
   const [isAssistantDropdownOpen, setIsAssistantDropdownOpen] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [view, setView] = useState<'standard' | 'transposed'>('standard');
+  const [showTime, setShowTime] = useState(false);
+  const [showDelta, setShowDelta] = useState(false);
+  const [showDurationRow, setShowDurationRow] = useState(false);
   const [expandedSections, setExpandedSections] = useState(() => new Set(['task_details', 'time_tracking']));
   const [showTimeStatuses, setShowTimeStatuses] = useState(false);
   const [showNARows, setShowNARows] = useState(true);
@@ -2479,6 +2482,12 @@ export default function ReportsPage() {
           activeDepartment={activeDepartment}
           activeSubDepartments={activeSubDepartments}
           activeSubDeptIds={activeSubDeptIds}
+          showTime={showTime}
+          setShowTime={setShowTime}
+          showDelta={showDelta}
+          setShowDelta={setShowDelta}
+          showDurationRow={showDurationRow}
+          setShowDurationRow={setShowDurationRow}
         />
 
         {/* Person Filter Strip */}
@@ -2543,6 +2552,9 @@ export default function ReportsPage() {
               userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
               departments={departments}
               stages={stages}
+              showTime={showTime}
+              showDelta={showDelta}
+              showDurationRow={showDurationRow}
             />
           ) : (
             <TransposedReportView

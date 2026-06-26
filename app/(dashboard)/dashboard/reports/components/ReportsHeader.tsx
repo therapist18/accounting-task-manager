@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { ChevronDown, Filter, RotateCcw, X, Download, Search, Send, ChevronRight, ChevronLeft, Plus, Minus, ArrowUpDown, SearchX, ChevronsLeft, ChevronsRight, Shield, User, Clock, Sparkles, AlertCircle, ListChecks, Check, Layers, Settings2, TableProperties, LayoutGrid, Building2, Eye } from "lucide-react";
+import { ChevronDown, Filter, RotateCcw, X, Download, Search, Send, ChevronRight, ChevronLeft, Plus, Minus, ArrowUpDown, SearchX, ChevronsLeft, ChevronsRight, Shield, User, Clock, Sparkles, AlertCircle, ListChecks, Check, Layers, Settings2, TableProperties, LayoutGrid, Building2, Eye, GitCompare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -130,13 +130,13 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <div className={cn(
-                          "h-7 w-7 rounded-md flex items-center justify-center text-xs font-bold shrink-0 transition-all",
+                          "h-7 w-7 rounded-md flex items-center justify-center text-sm font-bold shrink-0 transition-all",
                           isActive ? "bg-custom-blue text-white" : "bg-slate-100 text-slate-500"
                         )}>
                           {getInitials(dept.name)}
                         </div>
                         <span className={cn(
-                          "text-xs font-semibold uppercase tracking-wider truncate",
+                          "text-sm font-semibold uppercase tracking-wider truncate",
                           isActive ? "text-slate-900" : "text-slate-500"
                         )}>
                           {dept.name}
@@ -149,11 +149,11 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
                     </button>
 
                     {isExpanded && activeSubDepartments.length > 0 && (
-                      <div className="pb-3 px-3 flex flex-col gap-0.5">
+                      <div className="pb-3 px-3 flex flex-col gap-0.5 bg-gray-100">
                         <button
                           onClick={() => setActiveSubDeptIds([])}
                           className={cn(
-                            "w-full text-left px-4 py-2 text-xs font-medium transition-all rounded-md flex justify-between items-center",
+                            "w-full text-left px-4 py-2 text-sm font-medium transition-all rounded-md flex justify-between items-center",
                             activeSubDeptIds.length === 0
                               ? "bg-custom-blue text-white"
                               : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
@@ -171,7 +171,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
                               key={sub.id}
                               onClick={() => toggleSubDept(id)}
                               className={cn(
-                                "w-full text-left px-4 py-2 text-xs font-medium transition-all truncate rounded-md flex justify-between items-center",
+                                "w-full text-left px-4 py-2 text-sm font-medium transition-all truncate rounded-md flex justify-between items-center",
                                 isSelected
                                   ? "bg-custom-blue text-white"
                                   : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
@@ -195,7 +195,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
   );
 }
 
-export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setView, handleSendReport, activeDepartment, activeSubDepartments, activeSubDeptIds, allTasksCount, wipTasksCount, writeUpCompletedCount, columns, visibleColumnIds, setVisibleColumnIds, showTimeTrackingColumns, setShowTimeTrackingColumns, showDocRequirementsColumns, setShowDocRequirementsColumns }: any) {
+export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setView, handleSendReport, activeDepartment, activeSubDepartments, activeSubDeptIds, allTasksCount, wipTasksCount, writeUpCompletedCount, columns, visibleColumnIds, setVisibleColumnIds, showTimeTrackingColumns, setShowTimeTrackingColumns, showDocRequirementsColumns, setShowDocRequirementsColumns, showTime, setShowTime, showDelta, setShowDelta, showDurationRow, setShowDurationRow }: any) {
 
   const selectedSubDeptText = React.useMemo(() => {
     if (activeSubDeptIds.length === 0) return "All Sub-units";
@@ -252,6 +252,56 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
             showDocRequirementsColumns={showDocRequirementsColumns}
             setShowDocRequirementsColumns={setShowDocRequirementsColumns}
           />
+          <div className="h-6 w-px bg-slate-200 mx-1" />
+
+          {/* Show Time */}
+          {setShowTime && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowTime((v: boolean) => !v)}
+              className={cn(
+                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+                showTime ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              <Clock className="h-3.5 w-3.5" />
+              {showTime ? "Hide Time" : "Show Time"}
+            </Button>
+          )}
+
+          {/* Duration Row */}
+          {setShowDurationRow && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowDurationRow((v: boolean) => !v)}
+              className={cn(
+                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+                showDurationRow ? "bg-amber-50 border-amber-300 text-amber-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              <Layers className="h-3.5 w-3.5" />
+              {showDurationRow ? "Hide Est." : "Show Est."}
+            </Button>
+          )}
+
+          {/* Delta Toggle */}
+          {setShowDelta && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowDelta((v: boolean) => !v)}
+              className={cn(
+                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+                showDelta ? "bg-violet-50 border-violet-300 text-violet-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              <GitCompare className="h-3.5 w-3.5" />
+              {showDelta ? "Hide Δ" : "Show Δ"}
+            </Button>
+          )}
+
           <div className="h-6 w-px bg-slate-200 mx-1" />
 
           <DropdownMenu>

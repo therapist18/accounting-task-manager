@@ -161,13 +161,13 @@ const NavGroup = ({ item, isCollapsed, setIsCollapsed, pathname }) => {
         <button
             onClick={handleToggle}
             className={cn(
-                "flex w-full items-center gap-3.5 rounded-lg px-4 py-2.5 text-[12px] font-medium transition-colors duration-200 mb-1",
+                "group flex w-full items-center gap-3.5 rounded-lg px-4 py-2.5 text-[12px] font-medium transition-colors duration-200 mb-1",
                 "text-white/90 hover:bg-white hover:text-[#376bae] hover:font-bold",
                 isActive ? "bg-white text-[#376bae] shadow-md opacity-100" : "opacity-90",
                 isCollapsed && "justify-center px-0"
             )}
         >
-            <item.icon className={cn("h-5 w-5 shrink-0", isActive ? "text-[#376bae]" : "text-white/90")} />
+            <item.icon className={cn("h-5 w-5 shrink-0 transition-colors duration-200", isActive ? "text-[#376bae]" : "text-white/90 group-hover:text-[#376bae]")} />
             {!isCollapsed && (
                 <>
                     <span className="flex-1 text-left truncate">{item.title}</span>
@@ -221,13 +221,13 @@ const NavItem = ({ item, isCollapsed, pathname }) => {
         <Link
             href={item.href}
             className={cn(
-                "relative flex items-center gap-3.5 rounded-lg px-4 py-2.5 text-[12px] font-medium transition-colors duration-200 mb-1",
+                "group relative flex items-center gap-3.5 rounded-lg px-4 py-2.5 text-[12px] font-medium transition-colors duration-200 mb-1",
                 "text-white/90 hover:bg-white hover:text-[#376bae] hover:font-bold",
                 active ? "bg-white text-[#376bae] rounded-md font-bold shadow-md opacity-100" : "opacity-90",
                 isCollapsed && "justify-center px-0"
             )}
         >
-            <item.icon className={cn("h-5 w-5 shrink-0 transition-colors duration-200", active ? "text-[#376bae]" : "text-white/90 hover:text-[#376bae]")} />
+            <item.icon className={cn("h-5 w-5 shrink-0 transition-colors duration-200", active ? "text-[#376bae]" : "text-white/90 group-hover:text-[#376bae]")} />
             {!isCollapsed && (
                 <span className="flex-1 truncate">{item.title}</span>
             )}

@@ -613,7 +613,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
         )}
       </div>
 
-      <div className="border-2 border-slate-300 rounded-b-lg rounded-tl-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 180px)' }}>
+      <div className="border-2 border-slate-300 rounded-b-lg rounded-tl-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 300px)' }}>
         <Table className="min-w-full border-separate border-spacing-0">
           <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
             {expandedSections.has('case_details') && visibleCaseDetailHeaders.map((header, index) => (

@@ -44,12 +44,13 @@ import { determineCurrentStage, getStageProgress } from './utils/stageUtils'
 import { calculateStageDate } from './utils/dateUtils'
 import { fetchUserAssignmentData, hasJobLevelAccess, getOfficerDisplayName, userService } from "@/lib/shared-user-assignment-service"
 
-export default function DepartmentTasksManager({ error, onTaskAction, handleStageStatusSave, onTaskUpdate, getCurrentRequirements }: DepartmentTasksManagerProps) {
+export default function DepartmentTasksManager({ error, onTaskAction, handleStageStatusSave, onTaskUpdate, getCurrentRequirements, initialSearchTerm, initialDeptId, initialSubDeptId }: DepartmentTasksManagerProps) {
   const [departments, setDepartments] = useState<Department[]>([])
   const [companies, setCompanies] = useState<Map<number, { name: string; prefix: string }>>(new Map())
   const [activeDepartmentTab, setActiveDepartmentTab] = useState<string>("")
   const [activeSubTab, setActiveSubTab] = useState<string>("wip-stages")
   const [activeSubdepartmentTab, setActiveSubdepartmentTab] = useState<string>("")
+  const initialSubDeptApplied = useRef(false)
   const [activeFollowUpFilter, setActiveFollowUpFilter] = useState<string>("all")
   const [isTransposedView, setIsTransposedView] = useState<boolean>(true)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
@@ -65,7 +66,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [isPushingCase, setIsPushingCase] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
   const [isLoadingTasks, setIsLoadingTasks] = useState(false)
-  const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('')
+  const [globalSearchTerm, setGlobalSearchTerm] = useState<string>(initialSearchTerm || '')
   const [currentTableHeaders, setCurrentTableHeaders] = useState(ENHANCED_TABLE_HEADERS)
   const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(new Set(ENHANCED_TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
   const [visibleStats, setVisibleStats] = useState<Set<string>>(new Set(STATS_HEADERS.filter(h => h.default).map(h => h.id)))
@@ -86,6 +87,11 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [isDeleting, setIsDeleting] = useState(false);
   const [stageDialogKey, setStageDialogKey] = useState(0);
   const realtimeSubscriptionRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (initialSearchTerm) setGlobalSearchTerm(initialSearchTerm);
+  }, [initialSearchTerm]);
+
   useEffect(() => {
     const headers = activeDepartmentTab === '1'
       ? ENHANCED_TABLE_HEADERS_IMMIGRATION
@@ -3228,12 +3234,12 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         setDepartments(departmentsData);
 
         if (departmentsData.length > 0) {
-          const firstDept = departmentsData[0];
-          setActiveDepartmentTab(firstDept.id.toString());
-          const defaultSubs = firstDept.tm_subdepartments?.filter(sub => sub.default_display) || [];
-          if (defaultSubs.length > 0) {
-            setActiveSubdepartmentTab(defaultSubs[0].id.toString());
-          }
+          const targetDept = initialDeptId
+            ? (departmentsData.find((d: any) => d.id.toString() === initialDeptId) || departmentsData[0])
+            : departmentsData[0];
+          setActiveDepartmentTab(targetDept.id.toString());
+          // activeSubdepartmentTab is set by the useEffect that watches activeDepartmentTab/departments
+          // (it will honour initialSubDeptId on the first run via initialSubDeptApplied ref)
         }
       } catch (error) {
         console.error('Error loading initial data:', error);
@@ -3362,11 +3368,17 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     if (activeDepartmentTab && departments.length > 0) {
       const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab)
       if (currentDept) {
-        const defaultSubs = currentDept.tm_subdepartments?.filter(sub => sub.default_display) || []
-        if (defaultSubs.length > 0) {
-          setActiveSubdepartmentTab(defaultSubs[0].id.toString())
+        // On first load, honour the subdept from the URL before falling back to default
+        if (initialSubDeptId && !initialSubDeptApplied.current) {
+          setActiveSubdepartmentTab(initialSubDeptId)
+          initialSubDeptApplied.current = true
         } else {
-          setActiveSubdepartmentTab("")
+          const defaultSubs = currentDept.tm_subdepartments?.filter(sub => sub.default_display) || []
+          if (defaultSubs.length > 0) {
+            setActiveSubdepartmentTab(defaultSubs[0].id.toString())
+          } else {
+            setActiveSubdepartmentTab("")
+          }
         }
       }
     }
@@ -4058,4 +4070,3 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     </div>
   )
 }
-

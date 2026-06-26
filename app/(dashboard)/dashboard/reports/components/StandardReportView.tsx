@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Plus, Minus, ArrowUpDown, SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { differenceInDays, isValid } from "date-fns";
 import { cn } from "@/lib/utils";
 
 const colBucket = (type: string) => {
@@ -45,11 +46,22 @@ const DataCell = ({ val, isMissing, isPrimary }: { val: React.ReactNode, isMissi
   </TooltipProvider>
 );
 
+const parseDateSafeReport = (s: string | null | undefined): Date | null => {
+  if (!s) return null;
+  if (typeof s !== 'string') return null;
+  if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) {
+    const [dd, mm, yyyy] = s.split('/');
+    const d = new Date(`${yyyy}-${mm}-${dd}`);
+    return isValid(d) ? d : null;
+  }
+  try { const d = new Date(s); return isValid(d) ? d : null; } catch { return null; }
+};
+
 export function StandardReportView({
   allTasks, filteredColumns, sortConfig, expandedStageColumns,
   renderCellValue, safeRender, handleSort, toggleStageColumns,
   isStageApplicableToCurrentFilter, initialRowsPerPage = 25,
-  stages = []
+  stages = [], showTime = false, showDelta = false, showDurationRow = false,
 }: any) {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(initialRowsPerPage);
@@ -88,6 +100,20 @@ export function StandardReportView({
     return offsets;
   }, [filteredColumns, columnSizing]);
 
+  // Interleave delta columns between consecutive stage date columns
+  const interleavedColumns = useMemo(() => {
+    if (!showDelta) return filteredColumns;
+    const result: any[] = [];
+    filteredColumns.forEach((col: any, i: number) => {
+      result.push(col);
+      const next = filteredColumns[i + 1];
+      if (col.type === 'stage_date' && next?.type === 'stage_date') {
+        result.push({ id: `__delta__${i}`, isDelta: true, prevCol: col, nextCol: next, label: 'Δ', width: 60 });
+      }
+    });
+    return result;
+  }, [filteredColumns, showDelta]);
+
   const paginatedTasks = useMemo(() => {
     const start = (currentPage - 1) * rowsPerPage;
     return allTasks.slice(start, start + rowsPerPage);
@@ -103,8 +129,8 @@ export function StandardReportView({
           <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
             <colgroup>
               <col style={{ width: INDEX_COL_WIDTH }} />
-              {filteredColumns.map((col: any) => (
-                <col key={col.id} style={{ width: getColWidth(col.id) }} />
+              {interleavedColumns.map((col: any) => (
+                <col key={col.id} style={{ width: col.isDelta ? 60 : getColWidth(col.id) }} />
               ))}
             </colgroup>
 
@@ -116,7 +142,14 @@ export function StandardReportView({
                   <span className="text-[10px] font-semibold text-white uppercase tracking-wider">#</span>
                 </TableHead>
 
-                {filteredColumns.map((col: any) => {
+                {interleavedColumns.map((col: any) => {
+                  if (col.isDelta) {
+                    return (
+                      <TableHead key={col.id} className="border-r border-b border-white/30 text-center px-1 py-3" style={{ background: "#376bae", width: 60 }}>
+                        <span className="text-[9px] font-bold text-blue-300/60 uppercase">Δ</span>
+                      </TableHead>
+                    );
+                  }
                   const isSticky = stickyColumnIds.has(col.id);
                   const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
                   const isActive = sortConfig?.key === col.id;
@@ -165,42 +198,43 @@ export function StandardReportView({
                 })}
               </TableRow>
 
-              {/* Sub-Header Row: Estimates / Duration / Types */}
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="sticky left-0 z-50 bg-slate-700 border-r border-b border-slate-600 h-6" />
-                {filteredColumns.map((col: any) => {
-                  const isSticky = stickyColumnIds.has(col.id);
-                  const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
-
-                  let content: React.ReactNode = null;
-
-                  if (col.type === 'stage_date' && col.stageId) {
-                    const stage = stages?.find((s: any) => s.id === col.stageId);
-                    if (stage?.estimated_time) {
-                      const hours = Math.floor(stage.estimated_time / 60);
-                      const mins = stage.estimated_time % 60;
-                      content = `${hours}h ${mins}m`;
-                    } else {
-                      content = 'No TAT';
+              {/* Sub-Header Row: Estimates / Duration / Types — conditionally shown */}
+              {showDurationRow && (
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="sticky left-0 z-50 bg-blue-50 border-r border-b border-slate-200 h-6" />
+                  {interleavedColumns.map((col: any) => {
+                    if (col.isDelta) {
+                      return <TableHead key={col.id} className="border-r border-b border-slate-200 h-6 bg-blue-50" />;
                     }
-                  } else if (col.type === 'stage_gap') {
-                    content = "Wait Gap";
-                  }
+                    const isSticky = stickyColumnIds.has(col.id);
+                    const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
 
-                  return (
-                    <TableHead
-                      key={`sub-${col.id}`}
-                      className={cn(
-                        "text-[9px] font-medium uppercase tracking-wider text-center border-r border-b border-slate-600 px-2 h-6 bg-slate-700 text-slate-400",
-                        isSticky && "sticky z-40 shadow-[2px_0_4px_rgba(0,0,0,0.1)]"
-                      )}
-                      style={isSticky ? { left: `${left}px` } : undefined}
-                    >
-                      {content}
-                    </TableHead>
-                  );
-                })}
-              </TableRow>
+                    let content: React.ReactNode = null;
+
+                    if (col.type === 'stage_date' && col.stageId) {
+                      const stage = stages?.find((s: any) => s.id === col.stageId);
+                      if (stage?.estimated_time) {
+                        const hours = Math.floor(stage.estimated_time / 60);
+                        const mins = stage.estimated_time % 60;
+                        content = <span className="text-blue-600 font-bold italic">{hours > 0 ? `~${hours}h${mins > 0 ? ` ${mins}m` : ''}` : `${mins}m`}</span>;
+                      }
+                    }
+
+                    return (
+                      <TableHead
+                        key={`sub-${col.id}`}
+                        className={cn(
+                          "text-[9px] font-medium uppercase tracking-wider text-center border-r border-b border-slate-200 px-2 h-6 bg-blue-50 text-slate-500",
+                          isSticky && "sticky z-40 shadow-[2px_0_4px_rgba(0,0,0,0.02)]"
+                        )}
+                        style={isSticky ? { left: `${left}px` } : undefined}
+                      >
+                        {content}
+                      </TableHead>
+                    );
+                  })}
+                </TableRow>
+              )}
             </TableHeader>
 
             <TableBody>
@@ -227,15 +261,38 @@ export function StandardReportView({
                       </TableCell>
 
                       {/* Data Cells */}
-                      {filteredColumns.map((col: any) => {
+                      {interleavedColumns.map((col: any) => {
+                        if (col.isDelta) {
+                          // Delta cell: days between prevCol and nextCol stage dates
+                          const prevDate = parseDateSafeReport(task.stages?.[col.prevCol?.stageId]?.date || task.stages?.[col.prevCol?.stageId]?.completedAt);
+                          const nextDate = parseDateSafeReport(task.stages?.[col.nextCol?.stageId]?.date || task.stages?.[col.nextCol?.stageId]?.completedAt);
+                          const days = prevDate && nextDate ? differenceInDays(nextDate, prevDate) : null;
+                          return (
+                            <TableCell
+                              key={col.id}
+                              className={cn(
+                                "px-1 py-3 border-r border-b border-slate-100 text-center",
+                                idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
+                                "group-hover:bg-blue-50/50"
+                              )}
+                            >
+                              {days !== null ? (
+                                <span className={cn("text-xs font-bold tabular-nums", days > 30 ? "text-rose-600" : days > 14 ? "text-amber-600" : "text-slate-500")}>
+                                  +{days}d
+                                </span>
+                              ) : (
+                                <span className="text-[9px] text-slate-300">—</span>
+                              )}
+                            </TableCell>
+                          );
+                        }
+
                         const isSticky = stickyColumnIds.has(col.id);
                         const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
 
                         const val = safeRender(renderCellValue(task, col));
                         const isMissing = typeof val === 'string' && val.toLowerCase() === 'missing';
 
-                        // Primary columns: applicant name, company name
-                        // Secondary columns: passport, R number, duration, class
                         const isPrimary = col.field === 'applicant_name' || col.field === 'company_name';
                         const isCentered = col.field === 'class' || col.field === 'duration' || col.type === 'current_stage_age' || col.type === 'total_process_age';
 
@@ -260,7 +317,7 @@ export function StandardReportView({
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={filteredColumns.length + 1} className="h-64 bg-slate-50">
+                  <TableCell colSpan={interleavedColumns.length + 1} className="h-64 bg-slate-50">
                     <div className="flex flex-col items-center justify-center ">
                       <div className="h-12 w-12 rounded-full bg-slate-200 flex items-center justify-center mb-3">
                         <SearchX size={24} className="text-slate-500" />

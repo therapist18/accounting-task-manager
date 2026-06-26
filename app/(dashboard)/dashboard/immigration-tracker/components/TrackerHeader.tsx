@@ -1,30 +1,142 @@
 // @ts-nocheck
 "use client";
 
-import React from "react";
-import { Layers, Clock, Check, Sparkles, Building2, Search, X } from "lucide-react";
+import React, { useState } from "react";
+import {
+  Building2, Search, X, RotateCcw, Eye, Send, Download,
+  ChevronDown, LayoutGrid, TableProperties, Clock, GitCompare, Users,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuTrigger, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+
+function ColumnVisibilityDialog({
+  stageColumns, visibleStageColumnIds, setVisibleStageColumnIds,
+  infoColumns, visibleInfoColumnIds, setVisibleInfoColumnIds,
+}: any) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const filteredStage = search.trim()
+    ? stageColumns.filter((c: any) => c.label.toLowerCase().includes(search.toLowerCase()))
+    : stageColumns;
+  const filteredInfo = search.trim()
+    ? (infoColumns || []).filter((c: any) => c.label.toLowerCase().includes(search.toLowerCase()))
+    : (infoColumns || []);
+
+  const allStageVisible = stageColumns.every((c: any) => visibleStageColumnIds.includes(c.id));
+
+  const toggleStage = (id: string, checked: boolean) =>
+    setVisibleStageColumnIds((prev: string[]) => checked ? [...prev, id] : prev.filter((x: string) => x !== id));
+  const toggleAllStage = (checked: boolean) =>
+    setVisibleStageColumnIds(checked ? stageColumns.map((c: any) => c.id) : []);
+  const toggleInfo = (id: string, checked: boolean) =>
+    setVisibleInfoColumnIds((prev: string[]) => checked ? [...prev, id] : prev.filter((x: string) => x !== id));
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" className="h-9 px-4 rounded-full border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 gap-2">
+          <Eye className="h-4 w-4" /> Columns
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-md max-h-[80vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-sm font-black text-slate-800 uppercase tracking-wider">
+            Column Visibility
+          </DialogTitle>
+          <div className="relative mt-2">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Input
+              placeholder="Search columns..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 h-9 text-sm"
+            />
+          </div>
+        </DialogHeader>
+        <div className="flex-1 overflow-y-auto space-y-1 mt-3">
+          {/* Stage Columns Section */}
+          <p className="text-xs font-black text-slate-400 uppercase tracking-widest px-1 mb-1">Stage Columns</p>
+          <div className="flex items-center gap-2 px-1 py-2 border-b border-slate-100 mb-2">
+            <Checkbox id="toggle-all-stage" checked={allStageVisible} onCheckedChange={(v) => toggleAllStage(v === true)} />
+            <label htmlFor="toggle-all-stage" className="text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer">Toggle All Stages</label>
+          </div>
+          {filteredStage.map((col: any) => (
+            <div key={col.id} className="flex items-center gap-2.5 px-1 py-1.5 rounded hover:bg-slate-50">
+              <Checkbox
+                id={`stage-${col.id}`}
+                checked={visibleStageColumnIds.includes(col.id)}
+                onCheckedChange={(v) => toggleStage(col.id, v === true)}
+              />
+              <label htmlFor={`stage-${col.id}`} className="text-sm text-slate-700 cursor-pointer flex-1 flex items-center gap-2">
+                {col.label}
+                {col.hasDateInput && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full uppercase">Manual</span>}
+              </label>
+            </div>
+          ))}
+
+          {/* Info Columns Section */}
+          {filteredInfo.length > 0 && (
+            <>
+              <p className="text-xs font-black text-slate-400 uppercase tracking-widest px-1 mt-4 mb-1">Info Columns</p>
+              {filteredInfo.map((col: any) => (
+                <div key={col.id} className="flex items-center gap-2.5 px-1 py-1.5 rounded hover:bg-slate-50">
+                  <Checkbox
+                    id={`info-${col.id}`}
+                    checked={(visibleInfoColumnIds || []).includes(col.id)}
+                    onCheckedChange={(v) => toggleInfo(col.id, v === true)}
+                  />
+                  <label htmlFor={`info-${col.id}`} className="text-sm text-slate-700 cursor-pointer flex-1">
+                    {col.label}
+                  </label>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export function TrackerHeader({
   activeDepartment,
   activeSubDepartments,
   activeSubDeptIds,
   setActiveSubDeptIds,
-  allTasksCount,
-  wipTasksCount,
-  writeUpCompletedCount,
-  endorsedCount,
   searchQuery,
   setSearchQuery,
+  view,
+  setView,
+  showTime,
+  setShowTime,
+  showDelta,
+  setShowDelta,
+  showBclUsers,
+  setShowBclUsers,
+  stageColumns,
+  visibleStageColumnIds,
+  setVisibleStageColumnIds,
+  infoColumns,
+  visibleInfoColumnIds,
+  setVisibleInfoColumnIds,
+  onRefresh,
+  onExportExcel,
+  loading,
 }: any) {
   const selectedSubDeptText = React.useMemo(() => {
     if (activeSubDeptIds.length === 0) return "All Sub-units";
     const names = activeSubDeptIds
-      .map(
-        (id) =>
-          activeSubDepartments.find((s) => s.id.toString() === id)?.name
-      )
+      .map((id: string) => activeSubDepartments.find((s: any) => s.id.toString() === id)?.name)
       .filter(Boolean);
     if (names.length === 1) return names[0];
     if (names.length <= 2) return names.join(", ");
@@ -32,10 +144,11 @@ export function TrackerHeader({
   }, [activeSubDeptIds, activeSubDepartments]);
 
   return (
-    <div className="border-b border-slate-200 bg-white px-8 py-5 antialiased flex flex-col justify-center">
-      {/* Title Row */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex flex-col gap-1.5">
+    <div className="border-b border-slate-200 bg-white antialiased flex flex-col justify-center">
+      {/* Title + Actions Row */}
+      <div className="px-8 py-4 flex items-center justify-between gap-4">
+        {/* Title */}
+        <div className="flex flex-col gap-1 min-w-0">
           <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight leading-none">
             Immigration Document Tracker
           </h1>
@@ -45,109 +158,207 @@ export function TrackerHeader({
               {activeDepartment?.name || "Department"}
             </span>
             <span className="text-slate-300 mx-0.5">/</span>
-            <span className="truncate text-slate-500">
-              {selectedSubDeptText}
-            </span>
+            <span className="truncate text-slate-500">{selectedSubDeptText}</span>
           </div>
         </div>
 
-        {/* Search */}
-        <div className="relative group w-[320px]">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input
-            placeholder="Search employee, ID, department..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full h-10 pl-11 pr-10 bg-white border-slate-300 rounded-full text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
-          />
-          {searchQuery && (
+        {/* Right: Search + Actions */}
+        <div className="flex items-center gap-3 shrink-0">
+          {/* Search */}
+          <div className="relative w-[280px]">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Input
+              placeholder="Search name, passport, ID..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full h-9 pl-10 pr-9 bg-white border-slate-200 rounded-full text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="h-6 w-px bg-slate-200" />
+
+          {/* View Toggle */}
+          <div className="flex items-center gap-0.5 bg-slate-100 p-1 rounded-full border border-slate-200">
             <button
-              onClick={() => setSearchQuery("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"
+              onClick={() => setView("standard")}
+              className={cn(
+                "px-3 py-1.5 text-sm font-bold rounded-full transition-all flex items-center gap-1.5",
+                view === "standard" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-900"
+              )}
             >
-              <X className="h-4 w-4" />
+              <LayoutGrid className="h-3 w-3" /> Standard
             </button>
+            <button
+              onClick={() => setView("transposed")}
+              className={cn(
+                "px-3 py-1.5 text-sm font-bold rounded-full transition-all flex items-center gap-1.5",
+                view === "transposed" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-900"
+              )}
+            >
+              <TableProperties className="h-3 w-3" /> Transposed
+            </button>
+          </div>
+
+          <div className="h-6 w-px bg-slate-200" />
+
+          {/* Show/Hide Time */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowTime((v: boolean) => !v)}
+            className={cn(
+              "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+              showTime
+                ? "bg-blue-50 border-blue-300 text-blue-700"
+                : "border-slate-200 text-slate-600 hover:bg-slate-50"
+            )}
+          >
+            <Clock className="h-3.5 w-3.5" />
+            {showTime ? "Hide Time" : "Show Time"}
+          </Button>
+
+          {/* Delta Toggle */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowDelta((v: boolean) => !v)}
+            className={cn(
+              "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+              showDelta
+                ? "bg-violet-50 border-violet-300 text-violet-700"
+                : "border-slate-200 text-slate-600 hover:bg-slate-50"
+            )}
+          >
+            <GitCompare className="h-3.5 w-3.5" />
+            {showDelta ? "Hide Δ" : "Show Δ"}
+          </Button>
+
+          {/* BCL Users Toggle */}
+          {setShowBclUsers && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowBclUsers((v: boolean) => !v)}
+              className={cn(
+                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+                showBclUsers
+                  ? "bg-violet-50 border-violet-300 text-violet-700"
+                  : "border-slate-200 text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              <Users className="h-3.5 w-3.5" />
+              {showBclUsers ? "Hide Officers" : "Show Officers"}
+            </Button>
           )}
+
+          {/* Column Visibility */}
+          <ColumnVisibilityDialog
+            stageColumns={stageColumns}
+            visibleStageColumnIds={visibleStageColumnIds}
+            setVisibleStageColumnIds={setVisibleStageColumnIds}
+            infoColumns={infoColumns}
+            visibleInfoColumnIds={visibleInfoColumnIds}
+            setVisibleInfoColumnIds={setVisibleInfoColumnIds}
+          />
+
+          {/* Refresh */}
+          <Button
+            variant="outline"
+            onClick={onRefresh}
+            disabled={loading}
+            className="h-9 px-4 rounded-full border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 gap-2"
+          >
+            <RotateCcw className={cn("h-4 w-4 text-slate-400", loading && "animate-spin")} />
+            Refresh
+          </Button>
+
+          <div className="h-6 w-px bg-slate-200" />
+
+          {/* Send Report */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                className="h-9 px-5 rounded-full hover:bg-[#2d5a94] text-white text-sm font-bold gap-2 shadow-sm"
+                style={{ backgroundColor: '#376bae' }}
+              >
+                <Send className="h-3.5 w-3.5" />
+                Send Report
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52 p-2 rounded-2xl shadow-xl border-slate-200">
+              <div className="px-3 py-2">
+                <p className="text-sm font-black text-slate-400 uppercase tracking-widest mb-2">Export Format</p>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="flex-1 text-sm h-8 rounded-lg" onClick={onExportExcel}>Excel</Button>
+                  <Button variant="outline" size="sm" className="flex-1 text-sm h-8 rounded-lg" disabled>PDF</Button>
+                </div>
+              </div>
+              <DropdownMenuSeparator />
+              <div className="px-3 py-2">
+                <p className="text-sm font-black text-slate-400 uppercase tracking-widest mb-2">Email Report</p>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="flex-1 text-sm h-8 rounded-lg border-violet-200 text-violet-700 hover:bg-violet-50">Officer</Button>
+                  <Button variant="outline" size="sm" className="flex-1 text-sm h-8 rounded-lg border-violet-200 text-violet-700 hover:bg-violet-50">Manager</Button>
+                </div>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Bulk Export */}
+          <Button
+            variant="outline"
+            onClick={onExportExcel}
+            className="h-9 px-4 rounded-full border-emerald-600 text-sm font-bold text-emerald-700 bg-emerald-50/30 hover:bg-emerald-50 gap-2"
+          >
+            <Download className="h-3.5 w-3.5" /> Bulk Export
+          </Button>
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-4 mb-4">
-        {[
-          { label: "ALL TASKS", value: allTasksCount || 0, icon: Layers, iconBg: "bg-custom-blue", cardBg: "bg-blue-50/60 border-blue-100", valueColor: "text-slate-800", accentBorder: "border-l-custom-blue" },
-          { label: "WIP", value: wipTasksCount || 0, icon: Clock, iconBg: "bg-amber-500", cardBg: "bg-amber-50/60 border-amber-100", valueColor: "text-amber-700", accentBorder: "border-l-amber-500" },
-          { label: "WRITE-UP COMPLETED", value: writeUpCompletedCount || 0, icon: Check, iconBg: "bg-emerald-500", cardBg: "bg-emerald-50/60 border-emerald-100", valueColor: "text-emerald-700", accentBorder: "border-l-emerald-500" },
-          { label: "ENDORSED", value: endorsedCount || 0, icon: Sparkles, iconBg: "bg-teal-500", cardBg: "bg-teal-50/60 border-teal-100", valueColor: "text-teal-700", accentBorder: "border-l-teal-500" },
-        ].map((card) => {
-          const Icon = card.icon;
-          return (
-            <div
-              key={card.label}
-              className={cn(
-                "flex items-center gap-4 px-5 py-4 rounded-xl border border-l-4 transition-all hover:shadow-sm",
-                card.cardBg,
-                card.accentBorder
-              )}
-            >
-              <div
+      {/* Sub-Department Tabs */}
+      <div className="px-8 pb-3 flex items-center gap-1 bg-slate-50/50 border-t border-slate-100">
+        <div className="flex items-center gap-1 bg-white p-1 rounded-full border border-slate-200 w-fit mt-2">
+          <button
+            onClick={() => setActiveSubDeptIds([])}
+            className={cn(
+              "h-9 px-5 text-sm font-bold rounded-full transition-all",
+              activeSubDeptIds.length === 0
+                ? "bg-slate-800 text-white shadow-sm"
+                : "text-slate-500 hover:text-slate-800"
+            )}
+          >
+            All
+          </button>
+          {activeSubDepartments.map((sub: any) => {
+            const id = sub.id.toString();
+            const isActive = activeSubDeptIds.includes(id);
+            return (
+              <button
+                key={sub.id}
+                onClick={() => setActiveSubDeptIds(
+                  isActive
+                    ? activeSubDeptIds.filter((x: string) => x !== id)
+                    : [...activeSubDeptIds, id]
+                )}
                 className={cn(
-                  "h-10 w-10 rounded-lg flex items-center justify-center shrink-0",
-                  card.iconBg
+                  "h-9 px-5 text-sm font-bold rounded-full transition-all",
+                  isActive ? "bg-slate-800 text-white shadow-sm" : "text-slate-500 hover:text-slate-800"
                 )}
               >
-                <Icon className="h-5 w-5 text-white" />
-              </div>
-              <div className="flex flex-col">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                  {card.label}
-                </span>
-                <span
-                  className={cn(
-                    "text-2xl font-black tabular-nums leading-none mt-0.5",
-                    card.valueColor
-                  )}
-                >
-                  {card.value.toLocaleString()}
-                </span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Sub-Department Tabs */}
-      <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-full border border-slate-200 w-fit">
-        <button
-          onClick={() => setActiveSubDeptIds([])}
-          className={cn(
-            "h-8 px-4 text-sm font-bold rounded-full transition-all flex items-center gap-2",
-            activeSubDeptIds.length === 0
-              ? "bg-white text-slate-800 shadow-sm"
-              : "text-slate-500 hover:text-slate-800"
-          )}
-        >
-          All
-        </button>
-        {activeSubDepartments.map((sub) => {
-          const id = sub.id.toString();
-          const isActive = activeSubDeptIds.includes(id);
-          return (
-            <button
-              key={sub.id}
-              onClick={() =>
-                setActiveSubDeptIds(isActive ? [] : [id])
-              }
-              className={cn(
-                "h-8 px-4 text-sm font-bold rounded-full transition-all flex items-center gap-2",
-                isActive
-                  ? "bg-white text-slate-800 shadow-sm"
-                  : "text-slate-500 hover:text-slate-800"
-              )}
-            >
-              {sub.name}
-            </button>
-          );
-        })}
+                {sub.name}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -185,19 +396,17 @@ export function TrackerStatusFilter({
               key={s.id}
               onClick={() => setActiveStatus(s.id)}
               className={cn(
-                "h-8 px-4 text-sm font-semibold rounded-lg transition-all flex items-center gap-2",
+                "h-8 px-4 text-sm font-bold rounded-lg transition-all flex items-center gap-2",
                 isActive
                   ? "bg-custom-blue text-white shadow-sm"
-                  : "bg-white text-slate-500 border border-slate-200 hover:border-slate-300 hover:text-slate-700"
+                  : "bg-white text-slate-600 border border-slate-200 hover:border-slate-300 hover:text-slate-800"
               )}
             >
               {s.label}
-              <span
-                className={cn(
-                  "px-1.5 py-0.5 rounded-md text-xs font-bold tabular-nums",
-                  isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
-                )}
-              >
+              <span className={cn(
+                "px-1.5 py-0.5 rounded-md text-sm font-bold tabular-nums",
+                isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
+              )}>
                 {counts[s.id]}
               </span>
             </button>

@@ -5,12 +5,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import DepartmentTasksManager from "./DepartmentTasksManager"
 import TasksPage from "./TasksPage"
 import { useCallback, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Department } from "../departments/departments/database";
 import { Task } from "@/lib/types";
 import supabase from "@/lib/supabase/client";
 import { toast } from "@/lib/hooks/use-toast";
 
 export default function Page() {
+  const searchParams = useSearchParams();
+  const initialTaskId = searchParams.get("taskId") || "";
+  const initialDeptId = searchParams.get("deptId") || "";
+  const initialSubDeptId = searchParams.get("subDeptId") || "";
+
   const [tasks, setTasks] = useState<Task[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,6 +102,9 @@ export default function Page() {
     <>
       <DepartmentTasksManager
         handleStageStatusSave={handleStageStatusSave}
+        initialSearchTerm={initialTaskId}
+        initialDeptId={initialDeptId}
+        initialSubDeptId={initialSubDeptId}
       />
       {/* <Tabs defaultValue="overall">
         <div className="flex justify-between">

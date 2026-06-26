@@ -5,6 +5,7 @@ import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "@/lib/hooks/use-toast";
 import { supabase } from "@/lib/supabase/client";
+import * as XLSX from "xlsx";
 import { parseDate } from "@/app/generic-functions/dateUtils";
 import {
   fetchTasks,
@@ -25,7 +26,7 @@ import {
   TrackerHeader,
   TrackerStatusFilter,
 } from "./components/TrackerHeader";
-import { ImmigrationTrackerView } from "./components/ImmigrationTrackerView";
+import { ImmigrationTrackerView, INFO_COLUMNS, BCL_USER_COLUMNS } from "./components/ImmigrationTrackerView";
 
 const TARGET_DEPT_ID = "1";
 
@@ -73,7 +74,19 @@ export default function ImmigrationTrackerPage() {
     direction: "asc" | "desc";
   } | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [rowsPerPage, setRowsPerPage] = useState(30);
+  const [view, setView] = useState<"standard" | "transposed">("standard");
+  const [showTime, setShowTime] = useState(false);
+  const [showDelta, setShowDelta] = useState(false);
+  const [visibleStageColumnIds, setVisibleStageColumnIds] = useState<string[]>(
+    STAGE_COLUMNS.map((c) => c.id)
+  );
+  const [visibleInfoColumnIds, setVisibleInfoColumnIds] = useState<string[]>(
+    ["sub_dept", "class_name", "company_prefix"]
+  );
+  const [bclUsers, setBclUsers] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string>("");
+  const [showBclUsers, setShowBclUsers] = useState(false);
 
   const activeDepartment = useMemo(
     () => departments.find((d) => d.id.toString() === activeDeptId),
@@ -114,6 +127,12 @@ export default function ImmigrationTrackerPage() {
           taskDependants: dependantsMap,
         } = await enhanceTasksWithIndividualData(safeTasks);
 
+        // Merge enhanced data (r_number, applicant_data, etc.) back into each task
+        const mergedTasks = safeTasks.map((t) => ({
+          ...t,
+          ...(enhancedMap.get(t.id.toString()) || {}),
+        }));
+
         const unifiedUserData = await userService.getAllUserData(
           { payrollAccess: true },
           depts
@@ -123,7 +142,7 @@ export default function ImmigrationTrackerPage() {
         setCompanies(comps);
         setAllDocuments(docs);
         setKycDocuments(kycFields?.kycDocsMap || new Map());
-        setTasks(safeTasks);
+        setTasks(mergedTasks);
         setStages(stagesData);
         setTaskDependants(dependantsMap);
         setEnhancedTasksData(enhancedMap);
@@ -144,6 +163,40 @@ export default function ImmigrationTrackerPage() {
     init();
   }, []);
 
+  // Fetch BCL users (company_id = 10) and current session user
+  useEffect(() => {
+    const fetchBclData = async () => {
+      try {
+        const [{ data: bclData }, sessionRes] = await Promise.all([
+          supabase
+            .from("scanner_users")
+            .select("id, first_name, last_name, email")
+            .eq("company_id", 10)
+            .eq("is_active", true),
+          fetch("/api/auth/session"),
+        ]);
+
+        if (bclData) {
+          setBclUsers(
+            bclData.map((u: any) => ({
+              id: u.id,
+              name: `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.email || u.id,
+              email: u.email || "",
+            }))
+          );
+        }
+
+        const sessionJson = await sessionRes.json().catch(() => ({}));
+        if (sessionJson?.authenticated && sessionJson?.user?.id) {
+          setCurrentUserId(sessionJson.user.id);
+        }
+      } catch (e) {
+        console.error("Error fetching BCL users:", e);
+      }
+    };
+    fetchBclData();
+  }, []);
+
   // Refresh data helper
   const refreshData = useCallback(async () => {
     try {
@@ -152,8 +205,12 @@ export default function ImmigrationTrackerPage() {
       const safeTasks = Array.isArray(tasksData) ? tasksData : [];
       const { enhancedTasksData: enhancedMap, taskDependants: dependantsMap } =
         await enhanceTasksWithIndividualData(safeTasks);
+      const mergedTasks = safeTasks.map((t) => ({
+        ...t,
+        ...(enhancedMap.get(t.id.toString()) || {}),
+      }));
       setCompanies(comps);
-      setTasks(safeTasks);
+      setTasks(mergedTasks);
       setTaskDependants(dependantsMap);
       setEnhancedTasksData(enhancedMap);
     } catch (error) {
@@ -207,9 +264,8 @@ export default function ImmigrationTrackerPage() {
 
   // Save stage date to database
   const handleSaveStageDate = useCallback(
-    async (taskId: string, stageId: string, date: string) => {
+    async (taskId: string, stageId: string, date: string, bclUserId?: string | null, bclUserName?: string) => {
       try {
-        // Fetch current task stages
         const { data: currentTask, error: fetchError } = await supabase
           .from("tm_tasks")
           .select("stages, status")
@@ -218,7 +274,6 @@ export default function ImmigrationTrackerPage() {
 
         if (fetchError) throw fetchError;
 
-        // Determine new status based on stage ID
         let taskStatusUpdate = {};
         if (stageId === "caefd742-5de5-4341-a3bb-81d7b9dd2b73") {
           taskStatusUpdate = { status: "endorsed" };
@@ -226,7 +281,6 @@ export default function ImmigrationTrackerPage() {
           taskStatusUpdate = { status: "write_up_completed" };
         }
 
-        // Prepare updated stages
         const existingStages = currentTask?.stages || {};
         const timestamp = new Date().toISOString();
 
@@ -238,41 +292,27 @@ export default function ImmigrationTrackerPage() {
             status: "completed",
             completedAt: timestamp,
             updatedAt: timestamp,
+            ...(bclUserId ? { entered_by: bclUserId, entered_by_name: bclUserName || "" } : {}),
           },
         };
 
-        // Execute update
         const { error: updateError } = await supabase
           .from("tm_tasks")
-          .update({
-            ...taskStatusUpdate,
-            stages: updatedStages,
-            updated_at: timestamp,
-          })
+          .update({ ...taskStatusUpdate, stages: updatedStages, updated_at: timestamp })
           .eq("id", taskId);
 
         if (updateError) throw updateError;
 
-        // Update local state
         setTasks((prev) =>
           prev.map((t) =>
-            t.id === taskId
-              ? { ...t, stages: updatedStages, ...taskStatusUpdate }
-              : t
+            t.id === taskId ? { ...t, stages: updatedStages, ...taskStatusUpdate } : t
           )
         );
 
-        toast({
-          title: "Success",
-          description: "Stage date updated successfully.",
-        });
+        toast({ title: "Success", description: "Stage date updated successfully." });
       } catch (error) {
         console.error("Error updating stage date:", error);
-        toast({
-          title: "Error",
-          description: "Failed to update stage date.",
-          variant: "destructive",
-        });
+        toast({ title: "Error", description: "Failed to update stage date.", variant: "destructive" });
       }
     },
     []
@@ -366,6 +406,43 @@ export default function ImmigrationTrackerPage() {
     return sorted;
   }, [searchedTasks, sortConfig, companies, getStageDate]);
 
+  // Excel export — must be after sortedTasks
+  const handleExcelExport = useCallback(() => {
+    if (!sortedTasks.length) {
+      toast({ title: "No Data", description: "No tasks to export.", variant: "destructive" });
+      return;
+    }
+    try {
+      const rows = sortedTasks.map((task: any) => {
+        const row: Record<string, any> = {
+          "Task ID": task.id,
+          "R Number": task.r_number || task.applicant_data?.r_number || "",
+          "Passport No.": task.passport_number || "",
+          "Applicant Name": task.applicant_name || "",
+          "Company": companies.get(task.company_id)?.name || "",
+          "Sub Department": task.subdepartment_name || "",
+          "Status": task.status || "",
+        };
+        STAGE_COLUMNS.forEach((sc) => {
+          const date = getStageDate(task, sc.id);
+          row[sc.label] = date || "";
+          if (sc.hasDateInput) {
+            row[`${sc.label} (By)`] = task.stages?.[sc.id]?.entered_by_name || "";
+          }
+        });
+        return row;
+      });
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Immigration Tracker");
+      XLSX.writeFile(wb, `immigration_tracker_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      toast({ title: "Export Successful", description: `Exported ${rows.length} rows.` });
+    } catch (e) {
+      console.error("Export error:", e);
+      toast({ title: "Export Failed", description: "Could not export data.", variant: "destructive" });
+    }
+  }, [sortedTasks, companies, getStageDate]);
+
   // KPI counts (based on filtered tasks before status filter)
   const baseFilteredTasks = useMemo(() => {
     return tasks.filter((task) => {
@@ -434,12 +511,25 @@ export default function ImmigrationTrackerPage() {
         activeSubDepartments={activeSubDepartments}
         activeSubDeptIds={activeSubDeptIds}
         setActiveSubDeptIds={setActiveSubDeptIds}
-        allTasksCount={allTasksCount}
-        wipTasksCount={wipTasksCount}
-        writeUpCompletedCount={writeUpCompletedCount}
-        endorsedCount={endorsedCount}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
+        view={view}
+        setView={setView}
+        showTime={showTime}
+        setShowTime={setShowTime}
+        showDelta={showDelta}
+        setShowDelta={setShowDelta}
+        stageColumns={STAGE_COLUMNS}
+        visibleStageColumnIds={visibleStageColumnIds}
+        setVisibleStageColumnIds={setVisibleStageColumnIds}
+        infoColumns={INFO_COLUMNS}
+        visibleInfoColumnIds={visibleInfoColumnIds}
+        setVisibleInfoColumnIds={setVisibleInfoColumnIds}
+        showBclUsers={showBclUsers}
+        setShowBclUsers={setShowBclUsers}
+        onRefresh={refreshData}
+        onExportExcel={handleExcelExport}
+        loading={loading}
       />
 
       {/* Status Filter Tabs */}
@@ -457,6 +547,7 @@ export default function ImmigrationTrackerPage() {
         <ImmigrationTrackerView
           tasks={sortedTasks}
           stageColumns={STAGE_COLUMNS}
+          stages={stages}
           sortConfig={sortConfig}
           handleSort={handleSort}
           currentPage={currentPage}
@@ -467,6 +558,16 @@ export default function ImmigrationTrackerPage() {
           getStageStatus={getStageStatus}
           onSaveStageDate={handleSaveStageDate}
           companies={companies}
+          view={view}
+          showTime={showTime}
+          showDelta={showDelta}
+          visibleStageColumnIds={visibleStageColumnIds}
+          visibleInfoColumnIds={visibleInfoColumnIds}
+          departments={departments}
+          getStaffName={getStaffName}
+          bclUsers={bclUsers}
+          currentUserId={currentUserId}
+          showBclUsers={showBclUsers}
         />
       </div>
     </div>

@@ -715,7 +715,6 @@ export default function CVGeneratorPage() {
     toast.success(`Successfully merged ${mergeCount} updates into the registry!`);
   };
 
-
   const sectionGroups = [
     {
       label: 'Core',
@@ -758,6 +757,13 @@ export default function CVGeneratorPage() {
 
   const handlePersonalInfoChange = (field: string, value: any) => {
     setCvData((prev: any) => ({
+      ...prev,
+      personalInfo: { ...prev.personalInfo, [field]: value }
+    }));
+  };
+
+  const handleClientPersonalInfoChange = (field: string, value: any) => {
+    setClientEdits((prev: any) => ({
       ...prev,
       personalInfo: { ...prev.personalInfo, [field]: value }
     }));
@@ -1390,8 +1396,8 @@ export default function CVGeneratorPage() {
             )}
 
             <div>
-              <div style={{ color: acc, borderColor: `${acc}55` }} className="text-[11px] font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Contact Information</div>
-              <div className="space-y-2 text-[11px]">
+              <div style={{ color: acc, borderColor: `${acc}55` }} className="text-sm font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Contact Information</div>
+              <div className="space-y-2 text-sm">
                 <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold">📍</span> <span className={!personalInfo.location ? "italic opacity-50" : ""}>{personalInfo.location || "Location"}</span></div>
                 <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold">📞</span> <span className={!personalInfo.phone ? "italic opacity-50" : ""}>{personalInfo.phone || "Phone"}</span></div>
                 <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold">✉️</span> <span className={!personalInfo.email ? "italic opacity-50" : ""}>{personalInfo.email || "Email"}</span></div>
@@ -1401,8 +1407,8 @@ export default function CVGeneratorPage() {
             </div>
 
             <div>
-              <div style={{ color: acc, borderColor: `${acc}55` }} className="text-[11px] font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Personal Details</div>
-              <div className="space-y-2 text-[11px]">
+              <div style={{ color: acc, borderColor: `${acc}55` }} className="text-sm font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Personal Details</div>
+              <div className="space-y-2 text-sm">
                 <div><strong style={{ color: acc }}>Date of Birth:</strong> <span className={!personalDetails.dateOfBirth ? "italic opacity-50" : ""}>{personalDetails.dateOfBirth || "—"}</span></div>
                 <div><strong style={{ color: acc }}>Nationality:</strong> <span className={!personalDetails.nationality ? "italic opacity-50" : ""}>{personalDetails.nationality || "—"}</span></div>
                 <div><strong style={{ color: acc }}>Marital Status:</strong> <span className={!personalDetails.maritalStatus ? "italic opacity-50" : ""}>{personalDetails.maritalStatus || "—"}</span></div>
@@ -1414,38 +1420,38 @@ export default function CVGeneratorPage() {
             </div>
 
             <div>
-              <div style={{ color: acc, borderColor: `${acc}55` }} className="text-[11px] font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Core Competencies</div>
+              <div style={{ color: acc, borderColor: `${acc}55` }} className="text-sm font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Core Competencies</div>
               {skills.length > 0 ? (
                 <div className="space-y-4">
                   {skills.map((grp: any, idx: number) => (
                     <div key={idx}>
-                      <div className="text-white font-bold text-[10px] underline underline-offset-4 mb-1.5">{grp.category}</div>
-                      <div className="text-[10px] leading-relaxed opacity-90">{grp.items}</div>
+                      <div className="text-white font-bold text-sm underline underline-offset-4 mb-1.5">{grp.category}</div>
+                      <div className="text-sm leading-relaxed opacity-90">{grp.items}</div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-[10px] italic opacity-60">No skills added yet.</p>
+                <p className="text-sm italic opacity-60">No skills added yet.</p>
               )}
             </div>
 
             <div>
-              <div style={{ color: acc, borderColor: `${acc}55` }} className="text-[11px] font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Languages</div>
+              <div style={{ color: acc, borderColor: `${acc}55` }} className="text-sm font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Languages</div>
               {languages.length > 0 ? (
-                <div className="space-y-1.5 text-[11px]">
+                <div className="space-y-1.5 text-sm">
                   {languages.map((l: any, idx: number) => (
                     <div key={idx}>{l.language} {l.proficiency ? `(${l.proficiency})` : ""}</div>
                   ))}
                 </div>
               ) : (
-                <p className="text-[10px] italic opacity-60">No languages added yet.</p>
+                <p className="text-sm italic opacity-60">No languages added yet.</p>
               )}
             </div>
 
             {additionalInfo.length > 0 && (
               <div>
-                <div style={{ color: acc, borderColor: `${acc}55` }} className="text-[11px] font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Additional Info</div>
-                <div className="space-y-1.5 text-[11px]">
+                <div style={{ color: acc, borderColor: `${acc}55` }} className="text-sm font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Additional Info</div>
+                <div className="space-y-1.5 text-sm">
                   {additionalInfo.map((info: any, idx: number) => (
                     <div key={idx}><strong>{info.label}:</strong> {info.value}</div>
                   ))}
@@ -1462,25 +1468,25 @@ export default function CVGeneratorPage() {
             </div>
 
             <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-[13px] font-extrabold uppercase mb-3">Professional Profile</div>
+              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Professional Profile</div>
               {summary ? (
-                <p className="text-[12px] leading-relaxed text-justify">{summary}</p>
+                <p className="text-sm leading-relaxed text-justify">{summary}</p>
               ) : (
-                <p className="text-[11px] italic text-gray-400">No profile summary added yet.</p>
+                <p className="text-sm italic text-gray-400">No profile summary added yet.</p>
               )}
             </div>
 
             <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-[13px] font-extrabold uppercase mb-4">Professional Experience</div>
+              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-4">Professional Experience</div>
               {experience.length > 0 ? (
                 <div className="space-y-5">
                   {experience.map((exp: any, idx: number) => (
                     <div key={idx}>
-                      <div className="flex justify-between font-extrabold text-[13px] text-black">
+                      <div className="flex justify-between font-extrabold text-sm text-black">
                         <span>{exp.company}</span>
                         <span>{exp.startDate} – {exp.endDate}</span>
                       </div>
-                      <div style={{ color: acc }} className="text-[12px] font-semibold mt-0.5">{exp.role} {exp.location ? `| ${exp.location}` : ""}</div>
+                      <div style={{ color: acc }} className="text-sm font-semibold mt-0.5">{exp.role} {exp.location ? `| ${exp.location}` : ""}</div>
                       {exp.companyDesc && <span className="text-[10.5px] text-gray-500 italic block mt-1 mb-2">{exp.companyDesc}</span>}
                       <ul className="list-disc pl-5 text-[11.5px] leading-relaxed text-gray-700 mt-2 space-y-1">
                         {Array.isArray(exp.responsibilities) ? exp.responsibilities.map((resp: string, rIdx: number) => (
@@ -1491,21 +1497,21 @@ export default function CVGeneratorPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-[11px] italic text-gray-400">No work experience added yet.</p>
+                <p className="text-sm italic text-gray-400">No work experience added yet.</p>
               )}
             </div>
 
             <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-[13px] font-extrabold uppercase mb-4">Internships</div>
+              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-4">Internships</div>
               {internships.length > 0 ? (
                 <div className="space-y-4">
                   {internships.map((intern: any, idx: number) => (
                     <div key={idx}>
-                      <div className="flex justify-between font-extrabold text-[13px] text-black">
+                      <div className="flex justify-between font-extrabold text-sm text-black">
                         <span>{intern.company}</span>
                         <span>{intern.startDate} – {intern.endDate}</span>
                       </div>
-                      <div style={{ color: acc }} className="text-[12px] font-semibold mt-0.5">{intern.role} {intern.location ? `| ${intern.location}` : ""}</div>
+                      <div style={{ color: acc }} className="text-sm font-semibold mt-0.5">{intern.role} {intern.location ? `| ${intern.location}` : ""}</div>
                       {intern.companyDesc && <span className="text-[10.5px] text-gray-500 italic block mt-1 mb-1">{intern.companyDesc}</span>}
                       <ul className="list-disc pl-5 text-[11.5px] leading-relaxed text-gray-700 mt-1 space-y-1">
                         {Array.isArray(intern.responsibilities) ? intern.responsibilities.map((resp: string, rIdx: number) => (
@@ -1516,28 +1522,28 @@ export default function CVGeneratorPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-[11px] italic text-gray-400">No internships added yet.</p>
+                <p className="text-sm italic text-gray-400">No internships added yet.</p>
               )}
             </div>
 
             <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-[13px] font-extrabold uppercase mb-3">Key Projects</div>
+              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Key Projects</div>
               {projects.length > 0 ? (
                 <div className="grid grid-cols-2 gap-3.5">
                   {projects.map((proj: any, idx: number) => (
                     <div key={idx} className="border border-gray-100 p-3 rounded shadow-sm bg-white">
-                      <strong style={{ color: pri }} className="text-[12px] block mb-1">{proj.title} {proj.year ? `(${proj.year})` : ""}</strong>
+                      <strong style={{ color: pri }} className="text-sm block mb-1">{proj.title} {proj.year ? `(${proj.year})` : ""}</strong>
                       <p className="text-[10.5px] text-gray-600 leading-normal">{proj.description}</p>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-[11px] italic text-gray-400">No projects added yet.</p>
+                <p className="text-sm italic text-gray-400">No projects added yet.</p>
               )}
             </div>
 
             <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-[13px] font-extrabold uppercase mb-3">Education</div>
+              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Education</div>
               {education.length > 0 ? (
                 <div className="space-y-2">
                   {education.map((edu: any, idx: number) => (
@@ -1548,13 +1554,13 @@ export default function CVGeneratorPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-[11px] italic text-gray-400">No education added yet.</p>
+                <p className="text-sm italic text-gray-400">No education added yet.</p>
               )}
             </div>
 
             {certifications.length > 0 && (
               <div>
-                <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-[13px] font-extrabold uppercase mb-3">Certifications</div>
+                <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Certifications</div>
                 <div className="space-y-2">
                   {certifications.map((cert: any, idx: number) => (
                     <div key={idx} className="text-[11.5px]">
@@ -1567,7 +1573,7 @@ export default function CVGeneratorPage() {
 
             {achievements.length > 0 && (
               <div>
-                <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-[13px] font-extrabold uppercase mb-3">Achievements</div>
+                <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Achievements</div>
                 <div className="space-y-2">
                   {achievements.map((ach: any, idx: number) => (
                     <div key={idx} className="text-[11.5px]">
@@ -1580,12 +1586,12 @@ export default function CVGeneratorPage() {
             )}
 
             <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-[13px] font-extrabold uppercase mb-3">References</div>
+              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">References</div>
               {references.length > 0 ? (
                 <div className="grid grid-cols-2 gap-4">
                   {references.map((ref: any, idx: number) => (
-                    <div key={idx} className="text-[11px] text-gray-700 leading-relaxed">
-                      <strong className="text-black text-[12px] block">{ref.name}</strong>
+                    <div key={idx} className="text-sm text-gray-700 leading-relaxed">
+                      <strong className="text-black text-sm block">{ref.name}</strong>
                       {ref.title} | {ref.company}<br />
                       {ref.address && <span>{ref.address}<br /></span>}
                       <span style={{ color: acc }}>{ref.contact}</span>
@@ -1593,15 +1599,15 @@ export default function CVGeneratorPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-[11px] italic text-gray-400">No references added yet.</p>
+                <p className="text-sm italic text-gray-400">No references added yet.</p>
               )}
             </div>
 
             {declaration && (
               <div className="border-t border-gray-100 pt-4 mt-4">
-                <p className="text-[10px] italic text-gray-500 leading-relaxed">{declaration}</p>
+                <p className="text-sm italic text-gray-500 leading-relaxed">{declaration}</p>
                 {verifiedBadge && (
-                  <div style={{ backgroundColor: acc }} className="inline-flex items-center gap-1.5 text-white p-1 px-3 rounded text-[10px] font-extrabold uppercase mt-3">
+                  <div style={{ backgroundColor: acc }} className="inline-flex items-center gap-1.5 text-white p-1 px-3 rounded text-sm font-extrabold uppercase mt-3">
                     ✓ CV Verified & Up-to-date 2026
                   </div>
                 )}
@@ -1639,9 +1645,9 @@ export default function CVGeneratorPage() {
               <section>
                 <h2 className="text-base font-bold text-slate-900 uppercase border-b-2 border-slate-200 pb-1.5 mb-3">Professional Profile</h2>
                 {summary ? (
-                  <p className="text-[12px] leading-relaxed text-slate-600 text-justify">{summary}</p>
+                  <p className="text-sm leading-relaxed text-slate-600 text-justify">{summary}</p>
                 ) : (
-                  <p className="text-[11px] italic text-slate-400">No profile summary added yet.</p>
+                  <p className="text-sm italic text-slate-400">No profile summary added yet.</p>
                 )}
               </section>
 
@@ -1652,11 +1658,11 @@ export default function CVGeneratorPage() {
                     {experience.map((exp: any, idx: number) => (
                       <div key={idx} className="relative pl-4 border-l border-slate-200">
                         <div style={{ backgroundColor: acc2 }} className="absolute -left-1.5 top-1.5 w-3 h-3 rounded-full" />
-                        <div className="flex justify-between font-bold text-[13px] text-slate-900">
+                        <div className="flex justify-between font-bold text-sm text-slate-900">
                           <span>{exp.company}</span>
                           <span className="text-slate-500 font-semibold">{exp.startDate} – {exp.endDate}</span>
                         </div>
-                        <div style={{ color: acc2 }} className="text-[12px] font-semibold mt-0.5">{exp.role} {exp.location ? `| ${exp.location}` : ""}</div>
+                        <div style={{ color: acc2 }} className="text-sm font-semibold mt-0.5">{exp.role} {exp.location ? `| ${exp.location}` : ""}</div>
                         {exp.companyDesc && <p className="text-[10.5px] text-slate-400 italic mt-0.5">{exp.companyDesc}</p>}
                         <ul className="list-disc pl-4 text-[11.5px] text-slate-600 mt-2 space-y-1">
                           {Array.isArray(exp.responsibilities) ? exp.responsibilities.map((resp: string, rIdx: number) => (
@@ -1667,7 +1673,7 @@ export default function CVGeneratorPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-[11px] italic text-slate-400">No work experience added yet.</p>
+                  <p className="text-sm italic text-slate-400">No work experience added yet.</p>
                 )}
               </section>
 
@@ -1678,11 +1684,11 @@ export default function CVGeneratorPage() {
                     {internships.map((intern: any, idx: number) => (
                       <div key={idx} className="relative pl-4 border-l border-slate-200">
                         <div className="absolute -left-1.5 top-1.5 w-3 h-3 rounded-full bg-slate-400" />
-                        <div className="flex justify-between font-bold text-[13px] text-slate-900">
+                        <div className="flex justify-between font-bold text-sm text-slate-900">
                           <span>{intern.company}</span>
                           <span className="text-slate-500 font-semibold">{intern.startDate} – {intern.endDate}</span>
                         </div>
-                        <div className="text-slate-600 text-[12px] font-semibold mt-0.5">{intern.role} {intern.location ? `| ${intern.location}` : ""}</div>
+                        <div className="text-slate-600 text-sm font-semibold mt-0.5">{intern.role} {intern.location ? `| ${intern.location}` : ""}</div>
                         {intern.companyDesc && <p className="text-[10.5px] text-slate-400 italic mt-0.5">{intern.companyDesc}</p>}
                         <ul className="list-disc pl-4 text-[11.5px] text-slate-600 mt-1 space-y-1">
                           {Array.isArray(intern.responsibilities) ? intern.responsibilities.map((resp: string, rIdx: number) => (
@@ -1693,7 +1699,7 @@ export default function CVGeneratorPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-[11px] italic text-slate-400">No internships added yet.</p>
+                  <p className="text-sm italic text-slate-400">No internships added yet.</p>
                 )}
               </section>
 
@@ -1703,13 +1709,13 @@ export default function CVGeneratorPage() {
                   <div className="space-y-3">
                     {projects.map((proj: any, idx: number) => (
                       <div key={idx} className="text-[11.5px]">
-                        <strong className="text-slate-800 text-[12px]">{proj.title} {proj.year ? `(${proj.year})` : ""}</strong>
+                        <strong className="text-slate-800 text-sm">{proj.title} {proj.year ? `(${proj.year})` : ""}</strong>
                         <p className="text-slate-500 mt-0.5">{proj.description}</p>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-[11px] italic text-slate-400">No projects added yet.</p>
+                  <p className="text-sm italic text-slate-400">No projects added yet.</p>
                 )}
               </section>
             </div>
@@ -1722,13 +1728,13 @@ export default function CVGeneratorPage() {
                   <div className="space-y-4">
                     {skills.map((grp: any, idx: number) => (
                       <div key={idx}>
-                        <div className="font-bold text-[11px] text-slate-800 mb-1">{grp.category}</div>
+                        <div className="font-bold text-sm text-slate-800 mb-1">{grp.category}</div>
                         <div className="text-[10.5px] leading-relaxed text-slate-500">{grp.items}</div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-[10px] italic text-slate-400">No skills added yet.</p>
+                  <p className="text-sm italic text-slate-400">No skills added yet.</p>
                 )}
               </section>
 
@@ -1750,7 +1756,7 @@ export default function CVGeneratorPage() {
                 {education.length > 0 ? (
                   <div className="space-y-3">
                     {education.map((edu: any, idx: number) => (
-                      <div key={idx} className="text-[11px] text-slate-600">
+                      <div key={idx} className="text-sm text-slate-600">
                         <strong className="text-slate-800 block">{edu.degree}</strong>
                         {edu.institution} ({edu.year})
                         {edu.details && <p className="text-[9.5px] text-slate-400 mt-0.5">{edu.details}</p>}
@@ -1758,7 +1764,7 @@ export default function CVGeneratorPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-[10px] italic text-slate-400">No education added yet.</p>
+                  <p className="text-sm italic text-slate-400">No education added yet.</p>
                 )}
               </section>
 
@@ -1807,7 +1813,7 @@ export default function CVGeneratorPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-[10px] italic text-slate-400">No languages added yet.</p>
+                  <p className="text-sm italic text-slate-400">No languages added yet.</p>
                 )}
               </section>
 
@@ -1824,17 +1830,17 @@ export default function CVGeneratorPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-[10px] italic text-slate-400">No references added yet.</p>
+                  <p className="text-sm italic text-slate-400">No references added yet.</p>
                 )}
               </section>
             </div>
           </div>
 
           {declaration && (
-            <div className="p-8 pt-0 border-t border-slate-100 mt-4 text-[10px] italic text-slate-400">
+            <div className="p-8 pt-0 border-t border-slate-100 mt-4 text-sm italic text-slate-400">
               <p>{declaration}</p>
               {verifiedBadge && (
-                <div style={{ backgroundColor: acc2 }} className="inline-flex items-center gap-1.5 text-white p-0.5 px-2.5 rounded text-[9px] font-extrabold uppercase mt-2">
+                <div style={{ backgroundColor: acc2 }} className="inline-flex items-center gap-1.5 text-white p-0.5 px-2.5 rounded text-xs font-extrabold uppercase mt-2">
                   Verified CV
                 </div>
               )}
@@ -1864,9 +1870,9 @@ export default function CVGeneratorPage() {
             <section>
               <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-2 font-sans">Profile</h2>
               {summary ? (
-                <p className="text-[12px] leading-relaxed text-slate-700 text-justify font-sans">{summary}</p>
+                <p className="text-sm leading-relaxed text-slate-700 text-justify font-sans">{summary}</p>
               ) : (
-                <p className="text-[11px] italic text-slate-400 font-sans">No profile summary added yet.</p>
+                <p className="text-sm italic text-slate-400 font-sans">No profile summary added yet.</p>
               )}
             </section>
 
@@ -1876,13 +1882,13 @@ export default function CVGeneratorPage() {
                 <div className="space-y-4">
                   {experience.map((exp: any, idx: number) => (
                     <div key={idx} className="font-sans">
-                      <div className="flex justify-between font-bold text-[12px] text-slate-900">
+                      <div className="flex justify-between font-bold text-sm text-slate-900">
                         <span>{exp.company} {exp.location ? `(${exp.location})` : ""}</span>
                         <span className="font-normal text-slate-500">{exp.startDate} – {exp.endDate}</span>
                       </div>
                       <div className="text-[11.5px] italic text-slate-600 mt-0.5">{exp.role}</div>
-                      {exp.companyDesc && <p className="text-[10px] text-slate-400 italic mt-0.5">{exp.companyDesc}</p>}
-                      <ul className="list-disc pl-5 text-[11px] text-slate-600 mt-1.5 space-y-1">
+                      {exp.companyDesc && <p className="text-sm text-slate-400 italic mt-0.5">{exp.companyDesc}</p>}
+                      <ul className="list-disc pl-5 text-sm text-slate-600 mt-1.5 space-y-1">
                         {Array.isArray(exp.responsibilities) ? exp.responsibilities.map((resp: string, rIdx: number) => (
                           <li key={rIdx}>{resp}</li>
                         )) : <li>{exp.responsibilities}</li>}
@@ -1891,14 +1897,14 @@ export default function CVGeneratorPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-[11px] italic text-slate-400 font-sans">No work experience added yet.</p>
+                <p className="text-sm italic text-slate-400 font-sans">No work experience added yet.</p>
               )}
             </section>
 
             <section>
               <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-3 font-sans">Skills</h2>
               {skills.length > 0 ? (
-                <div className="space-y-2 font-sans text-[11px]">
+                <div className="space-y-2 font-sans text-sm">
                   {skills.map((grp: any, idx: number) => (
                     <div key={idx} className="grid grid-cols-[180px_1fr] gap-4">
                       <strong className="text-slate-800">{grp.category}</strong>
@@ -1907,7 +1913,7 @@ export default function CVGeneratorPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-[11px] italic text-slate-400 font-sans">No skills added yet.</p>
+                <p className="text-sm italic text-slate-400 font-sans">No skills added yet.</p>
               )}
             </section>
 
@@ -1919,14 +1925,14 @@ export default function CVGeneratorPage() {
                     <div key={idx} className="text-[11.5px] flex justify-between">
                       <div>
                         <strong>{edu.degree}</strong> – <span className="text-slate-600">{edu.institution}</span>
-                        {edu.details && <p className="text-[10px] text-slate-400 mt-0.5">{edu.details}</p>}
+                        {edu.details && <p className="text-sm text-slate-400 mt-0.5">{edu.details}</p>}
                       </div>
                       <span className="text-slate-500">{edu.year}</span>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-[11px] italic text-slate-400 font-sans">No education added yet.</p>
+                <p className="text-sm italic text-slate-400 font-sans">No education added yet.</p>
               )}
             </section>
 
@@ -1947,7 +1953,7 @@ export default function CVGeneratorPage() {
                 {achievements.map((ach: any, idx: number) => (
                   <div key={idx} className="font-sans text-[11.5px] text-slate-600">
                     <strong>{ach.title}</strong> {ach.date ? `(${ach.date})` : ""}
-                    {ach.description && <p className="text-[10px] text-slate-400">{ach.description}</p>}
+                    {ach.description && <p className="text-sm text-slate-400">{ach.description}</p>}
                   </div>
                 ))}
               </section>
@@ -1967,7 +1973,7 @@ export default function CVGeneratorPage() {
             <section>
               <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-2 font-sans">References</h2>
               {references.length > 0 ? (
-                <div className="grid grid-cols-2 gap-4 font-sans text-[11px] text-slate-600">
+                <div className="grid grid-cols-2 gap-4 font-sans text-sm text-slate-600">
                   {references.map((ref: any, idx: number) => (
                     <div key={idx}>
                       <strong className="text-slate-900 block">{ref.name}</strong>
@@ -1977,12 +1983,12 @@ export default function CVGeneratorPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-[11px] italic text-slate-400 font-sans">No references added yet.</p>
+                <p className="text-sm italic text-slate-400 font-sans">No references added yet.</p>
               )}
             </section>
 
             {declaration && (
-              <div className="pt-4 border-t border-slate-100 mt-6 font-sans text-[10px] text-slate-400 text-center italic">
+              <div className="pt-4 border-t border-slate-100 mt-6 font-sans text-sm text-slate-400 text-center italic">
                 <p>{declaration}</p>
               </div>
             )}
@@ -2014,7 +2020,7 @@ export default function CVGeneratorPage() {
             <div className="space-y-6">
               <section>
                 <h2 style={{ borderBottomColor: acc, color: pri }} className="text-lg font-extrabold uppercase border-b-2 pb-1 mb-3">Executive Profile</h2>
-                {summary ? <p className="text-[12px] leading-relaxed text-slate-700 text-justify">{summary}</p> : <p className="text-[11px] italic text-slate-400">No profile summary.</p>}
+                {summary ? <p className="text-sm leading-relaxed text-slate-700 text-justify">{summary}</p> : <p className="text-sm italic text-slate-400">No profile summary.</p>}
               </section>
 
               <section>
@@ -2026,9 +2032,9 @@ export default function CVGeneratorPage() {
                         <div className="flex justify-between items-start">
                           <div>
                             <div className="font-bold text-[14px] text-slate-900">{exp.role}</div>
-                            <div className="text-[12px] text-slate-500 font-semibold">{exp.company} {exp.location ? `— ${exp.location}` : ""}</div>
+                            <div className="text-sm text-slate-500 font-semibold">{exp.company} {exp.location ? `— ${exp.location}` : ""}</div>
                           </div>
-                          <div style={{ color: acc }} className="text-[11px] font-bold whitespace-nowrap">{exp.startDate} – {exp.endDate}</div>
+                          <div style={{ color: acc }} className="text-sm font-bold whitespace-nowrap">{exp.startDate} – {exp.endDate}</div>
                         </div>
                         {exp.companyDesc && <p className="text-[10.5px] text-slate-400 italic mt-1">{exp.companyDesc}</p>}
                         <ul className="list-disc pl-5 text-[11.5px] text-slate-600 mt-2 space-y-1">
@@ -2039,7 +2045,7 @@ export default function CVGeneratorPage() {
                       </div>
                     ))}
                   </div>
-                ) : <p className="text-[11px] italic text-slate-400">No experience added.</p>}
+                ) : <p className="text-sm italic text-slate-400">No experience added.</p>}
               </section>
 
               <section>
@@ -2047,10 +2053,10 @@ export default function CVGeneratorPage() {
                 {projects.length > 0 ? (
                   <div className="space-y-3">
                     {projects.map((proj: any, idx: number) => (
-                      <div key={idx} className="text-[12px]"><strong className="text-slate-800">{proj.title}</strong> {proj.year ? `(${proj.year})` : ""} — <span className="text-slate-600">{proj.description}</span></div>
+                      <div key={idx} className="text-sm"><strong className="text-slate-800">{proj.title}</strong> {proj.year ? `(${proj.year})` : ""} — <span className="text-slate-600">{proj.description}</span></div>
                     ))}
                   </div>
-                ) : <p className="text-[11px] italic text-slate-400">No projects added.</p>}
+                ) : <p className="text-sm italic text-slate-400">No projects added.</p>}
               </section>
 
               <section>
@@ -2058,10 +2064,10 @@ export default function CVGeneratorPage() {
                 {education.length > 0 ? (
                   <div className="space-y-2">
                     {education.map((edu: any, idx: number) => (
-                      <div key={idx} className="text-[12px]"><strong>{edu.degree}</strong> — {edu.institution} ({edu.year}){edu.details ? ` — ${edu.details}` : ""}</div>
+                      <div key={idx} className="text-sm"><strong>{edu.degree}</strong> — {edu.institution} ({edu.year}){edu.details ? ` — ${edu.details}` : ""}</div>
                     ))}
                   </div>
-                ) : <p className="text-[11px] italic text-slate-400">No education added.</p>}
+                ) : <p className="text-sm italic text-slate-400">No education added.</p>}
               </section>
             </div>
 
@@ -2077,22 +2083,22 @@ export default function CVGeneratorPage() {
               <div>
                 <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">Core Competencies</h3>
                 {skills.length > 0 ? skills.map((grp: any, idx: number) => (
-                  <div key={idx} className="mb-2"><div className="text-[11px] font-bold text-slate-700">{grp.category}</div><div className="text-[10px] text-slate-500">{grp.items}</div></div>
-                )) : <p className="text-[10px] italic text-slate-400">No skills.</p>}
+                  <div key={idx} className="mb-2"><div className="text-sm font-bold text-slate-700">{grp.category}</div><div className="text-sm text-slate-500">{grp.items}</div></div>
+                )) : <p className="text-sm italic text-slate-400">No skills.</p>}
               </div>
 
               <div>
                 <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">Languages</h3>
                 {languages.length > 0 ? languages.map((l: any, idx: number) => (
-                  <div key={idx} className="text-[11px] text-slate-600">{l.language} — {l.proficiency}</div>
-                )) : <p className="text-[10px] italic text-slate-400">No languages.</p>}
+                  <div key={idx} className="text-sm text-slate-600">{l.language} — {l.proficiency}</div>
+                )) : <p className="text-sm italic text-slate-400">No languages.</p>}
               </div>
 
               {certifications.length > 0 && (
                 <div>
                   <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">Certifications</h3>
                   {certifications.map((c: any, idx: number) => (
-                    <div key={idx} className="text-[11px] text-slate-600"><strong>{c.name}</strong> — {c.issuer}</div>
+                    <div key={idx} className="text-sm text-slate-600"><strong>{c.name}</strong> — {c.issuer}</div>
                   ))}
                 </div>
               )}
@@ -2101,7 +2107,7 @@ export default function CVGeneratorPage() {
                 <div>
                   <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">Details</h3>
                   {additionalInfo.map((info: any, idx: number) => (
-                    <div key={idx} className="text-[11px] text-slate-600"><strong>{info.label}:</strong> {info.value}</div>
+                    <div key={idx} className="text-sm text-slate-600"><strong>{info.label}:</strong> {info.value}</div>
                   ))}
                 </div>
               )}
@@ -2109,12 +2115,12 @@ export default function CVGeneratorPage() {
               <div>
                 <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">References</h3>
                 {references.length > 0 ? references.map((ref: any, idx: number) => (
-                  <div key={idx} className="text-[11px] text-slate-600 mb-2"><strong>{ref.name}</strong><br />{ref.title} | {ref.company}<br /><span style={{ color: acc }}>{ref.contact}</span></div>
-                )) : <p className="text-[10px] italic text-slate-400">No references.</p>}
+                  <div key={idx} className="text-sm text-slate-600 mb-2"><strong>{ref.name}</strong><br />{ref.title} | {ref.company}<br /><span style={{ color: acc }}>{ref.contact}</span></div>
+                )) : <p className="text-sm italic text-slate-400">No references.</p>}
               </div>
 
               {declaration && (
-                <div className="text-[9px] italic text-slate-400 border-t border-slate-200 pt-2 mt-4">{declaration}</div>
+                <div className="text-xs italic text-slate-400 border-t border-slate-200 pt-2 mt-4">{declaration}</div>
               )}
             </aside>
           </div>
@@ -2159,11 +2165,11 @@ export default function CVGeneratorPage() {
             </div>
             <div className="text-left">
               <h1 className="text-sm font-bold text-slate-900">AI Client Review Portal</h1>
-              <p className="text-[10px] text-slate-500">Collaboration &amp; Verification</p>
+              <p className="text-sm text-slate-500">Collaboration &amp; Verification</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-[10px] bg-blue-50 text-custom-blue border border-blue-100 px-2 py-0.5 rounded-full font-semibold">Verification Active</span>
+            <span className="text-sm bg-blue-50 text-custom-blue border border-blue-100 px-2 py-0.5 rounded-full font-semibold">Verification Active</span>
             <Button size="sm" variant="outline" onClick={() => { setWorkflowStep('collaboration'); setClientEdits(null); }} className="text-xs border-slate-200 text-slate-650 h-8">
               Exit to Recruiter View
             </Button>
@@ -2176,7 +2182,7 @@ export default function CVGeneratorPage() {
             {steps.map((st, i) => (
               <React.Fragment key={st.id}>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-extrabold transition-all ${
+                  <div className={`h-6 w-6 rounded-full flex items-center justify-center text-sm font-extrabold transition-all ${
                     portalStep === st.id 
                       ? 'bg-custom-blue text-white shadow-sm' 
                       : portalStep > st.id 
@@ -2185,7 +2191,7 @@ export default function CVGeneratorPage() {
                   }`}>
                     {portalStep > st.id ? "✓" : st.id}
                   </div>
-                  <span className={`text-[11px] font-semibold hidden sm:inline ${
+                  <span className={`text-sm font-semibold hidden sm:inline ${
                     portalStep === st.id ? 'text-custom-blue font-bold' : 'text-slate-500'
                   }`}>
                     {st.name}
@@ -2202,13 +2208,13 @@ export default function CVGeneratorPage() {
         </div>
 
         {/* Main Work Area */}
-        <div className="flex-1 overflow-auto p-3 sm:p-6 flex flex-col items-center">
+        <div className="flex-1 overflow-auto p-3 sm:p-6 flex flex-col items-center custom-scrollbar">
           <div className="w-full max-w-3xl bg-white rounded-2xl border border-slate-200/80 shadow-lg p-4 sm:p-8 flex flex-col transition-all">
             
             {/* Step Header */}
             {portalStep < 7 && (
               <div className="mb-6 border-b border-slate-100 pb-4 text-left">
-                <span className="text-[10px] bg-slate-100 text-slate-500 font-extrabold uppercase px-2 py-0.5 rounded-full tracking-wider">Step {portalStep} of 6</span>
+                <span className="text-sm bg-slate-100 text-slate-500 font-extrabold uppercase px-2 py-0.5 rounded-full tracking-wider">Step {portalStep} of 6</span>
                 <h2 className="text-xl font-extrabold text-slate-800 mt-1">{getStepTitle(portalStep)}</h2>
               </div>
             )}
@@ -2232,16 +2238,16 @@ export default function CVGeneratorPage() {
                 {/* Progress Indicators */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="border border-slate-200 rounded-xl p-4 flex flex-col items-center justify-center text-center bg-slate-50/50">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Profile Completeness</span>
+                    <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Profile Completeness</span>
                     <span className="text-3xl font-extrabold text-custom-blue mt-1.5">{completionPercent}%</span>
                     <div className="w-full bg-slate-200 h-2 rounded-full mt-3 overflow-hidden">
                       <div className="bg-custom-blue h-full rounded-full transition-all duration-500" style={{ width: `${completionPercent}%` }} />
                     </div>
                   </div>
                   <div className="border border-slate-200 rounded-xl p-4 flex flex-col items-center justify-center text-center bg-slate-50/50">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Estimated Review Time</span>
+                    <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Estimated Review Time</span>
                     <span className="text-3xl font-extrabold text-slate-800 mt-1.5">5 mins</span>
-                    <span className="text-[10px] text-slate-400 mt-3">We just need a few missing details!</span>
+                    <span className="text-sm text-slate-400 mt-3">We just need a few missing details!</span>
                   </div>
                 </div>
 
@@ -2253,13 +2259,13 @@ export default function CVGeneratorPage() {
                       <div key={item.id} className="border border-slate-100 rounded-lg p-3 flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           {item.status === 'success' ? (
-                            <span className="h-4 w-4 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-[10px] font-bold">✓</span>
+                            <span className="h-4 w-4 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-sm font-bold">✓</span>
                           ) : (
-                            <span className="h-4 w-4 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center text-[10px] font-bold">!</span>
+                            <span className="h-4 w-4 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center text-sm font-bold">!</span>
                           )}
                           <span className="text-xs font-semibold text-slate-700">{item.label}</span>
                         </div>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${
                           item.status === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
                         }`}>
                           {item.status === 'success' ? 'Complete' : 'Needs Review'}
@@ -2292,7 +2298,7 @@ export default function CVGeneratorPage() {
                         <span className="h-2 w-2 rounded-full bg-emerald-500" />
                         <span className="text-xs font-bold text-slate-700">Contact &amp; Personal Details</span>
                       </div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">Confidence: 98%</span>
+                      <span className="text-sm font-bold text-slate-400 uppercase">Confidence: 98%</span>
                     </div>
                     <div className="p-4 space-y-3 text-xs">
                       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center pb-2 border-b border-slate-100">
@@ -2305,9 +2311,9 @@ export default function CVGeneratorPage() {
                         )}
                         <div className="text-left">
                           <div className="font-bold text-slate-900 text-sm">{clientEdits.personalInfo?.fullName || "—"}</div>
-                          <div className="text-slate-500 text-[11px]">{clientEdits.personalInfo?.title || "—"}</div>
+                          <div className="text-slate-500 text-sm">{clientEdits.personalInfo?.title || "—"}</div>
                           {!clientEdits.personalInfo?.photoUrl && (
-                            <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 mt-1 inline-block font-semibold">⚠️ Photo Missing</span>
+                            <span className="text-sm text-amber-600 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 mt-1 inline-block font-semibold">⚠️ Photo Missing</span>
                           )}
                         </div>
                       </div>
@@ -2327,7 +2333,7 @@ export default function CVGeneratorPage() {
                         <span className="h-2 w-2 rounded-full bg-emerald-500" />
                         <span className="text-xs font-bold text-slate-700">Professional Profile</span>
                       </div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">Confidence: 92%</span>
+                      <span className="text-sm font-bold text-slate-400 uppercase">Confidence: 92%</span>
                     </div>
                     <div className="p-4 text-xs leading-relaxed text-left text-slate-600">
                       {clientEdits.summary || <span className="italic text-slate-400">No profile summary extracted.</span>}
@@ -2341,7 +2347,7 @@ export default function CVGeneratorPage() {
                         <span className="h-2 w-2 rounded-full bg-emerald-500" />
                         <span className="text-xs font-bold text-slate-700">Work Experience</span>
                       </div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">Confidence: 95%</span>
+                      <span className="text-sm font-bold text-slate-400 uppercase">Confidence: 95%</span>
                     </div>
                     <div className="p-4 space-y-4">
                       {clientEdits.experience?.map((exp: any, idx: number) => (
@@ -2351,11 +2357,11 @@ export default function CVGeneratorPage() {
                             <span className="text-slate-500 font-semibold">{exp.startDate} - {exp.endDate}</span>
                           </div>
                           {exp.companyDesc ? (
-                            <p className="text-[11px] text-slate-500 italic mt-1 font-medium bg-slate-50 p-1.5 rounded border border-slate-100">
+                            <p className="text-sm text-slate-500 italic mt-1 font-medium bg-slate-50 p-1.5 rounded border border-slate-100">
                               Company Profile / Specialization: {exp.companyDesc}
                             </p>
                           ) : (
-                            <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 inline-block mt-1 font-semibold">
+                            <p className="text-sm text-amber-600 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 inline-block mt-1 font-semibold">
                               ⚠️ Missing company description &amp; specialization details
                             </p>
                           )}
@@ -2379,7 +2385,7 @@ export default function CVGeneratorPage() {
                         <span className="h-2 w-2 rounded-full bg-emerald-500" />
                         <span className="text-xs font-bold text-slate-700">Education</span>
                       </div>
-                      <span className="text-[10px] font-bold text-emerald-600 uppercase">Confirmed</span>
+                      <span className="text-sm font-bold text-emerald-600 uppercase">Confirmed</span>
                     </div>
                     <div className="p-4 space-y-2 text-xs">
                       {clientEdits.education?.map((edu: any, idx: number) => (
@@ -2396,7 +2402,7 @@ export default function CVGeneratorPage() {
                   <Check className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
                   <div>
                     <h5 className="text-xs font-bold text-slate-800">All parsed details look accurate?</h5>
-                    <p className="text-[11px] text-slate-500 mt-0.5">You can skip manual edits. We'll proceed to add any missing profile URLs, language declarations, or requirements in the next steps.</p>
+                    <p className="text-sm text-slate-500 mt-0.5">You can skip manual edits. We'll proceed to add any missing profile URLs, language declarations, or requirements in the next steps.</p>
                   </div>
                 </div>
 
@@ -2423,7 +2429,7 @@ export default function CVGeneratorPage() {
                       <User className="h-4 w-4 text-slate-400" />
                       Professional Photo Missing (Required White Background)
                     </h4>
-                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                    <p className="text-sm text-slate-500 leading-relaxed">
                       Please upload a professional passport-sized photo with a <strong>plain white background</strong>. An appropriate professional photo is highly recommended for employment verification:
                     </p>
                     <div className="flex items-center gap-3">
@@ -2447,7 +2453,7 @@ export default function CVGeneratorPage() {
                         }}
                       />
                     </div>
-                    <p className="text-[9px] text-slate-400 italic">Please make sure the background is solid white. Snapshots with busy backdrops or informal attire are often rejected.</p>
+                    <p className="text-xs text-slate-400 italic">Please make sure the background is solid white. Snapshots with busy backdrops or informal attire are often rejected.</p>
                   </div>
                 )}
 
@@ -2462,13 +2468,13 @@ export default function CVGeneratorPage() {
                           <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
                           Specify Month &amp; Year: {exp.company || 'Employer'}
                         </h4>
-                        <p className="text-[11px] text-slate-500">
+                        <p className="text-sm text-slate-500">
                           AI detected that you only provided the year for your role as <strong>{exp.role || 'Employee'}</strong>. Please edit the date(s) to include both the month and year (e.g. 'Jan 2021' or '05/2021'):
                         </p>
                         <div className="grid grid-cols-2 gap-3 text-left">
                           {startNeedsMonth && (
                             <div className="space-y-1">
-                              <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Start Date</Label>
+                              <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Start Date</Label>
                               <Input 
                                 placeholder="e.g. Jan 2021 or 01/2021"
                                 value={exp.startDate || ''}
@@ -2483,7 +2489,7 @@ export default function CVGeneratorPage() {
                           )}
                           {endNeedsMonth && (
                             <div className="space-y-1">
-                              <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">End Date</Label>
+                              <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">End Date</Label>
                               <Input 
                                 placeholder="e.g. Dec 2023 or Present"
                                 value={exp.endDate || ''}
@@ -2512,7 +2518,7 @@ export default function CVGeneratorPage() {
                           <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
                           Company Specialization Missing: {exp.company || 'Employer'}
                         </h4>
-                        <p className="text-[11px] text-slate-500">
+                        <p className="text-sm text-slate-500">
                           Please describe what <strong>{exp.company || 'this company'}</strong> specializes in or what its primary business field is:
                         </p>
                         <Input 
@@ -2537,11 +2543,11 @@ export default function CVGeneratorPage() {
                     <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
                     Missing Professional Links
                   </h4>
-                  <p className="text-[11px] text-slate-400">We couldn't find these in your CV. Add them to showcase your network &amp; work:</p>
+                  <p className="text-sm text-slate-400">We couldn't find these in your CV. Add them to showcase your network &amp; work:</p>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">LinkedIn URL</Label>
+                      <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">LinkedIn URL</Label>
                       <Input 
                         placeholder="linkedin.com/in/username" 
                         value={clientEdits.personalInfo?.linkedin || ''} 
@@ -2550,7 +2556,7 @@ export default function CVGeneratorPage() {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">GitHub / Portfolio URL</Label>
+                      <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">GitHub / Portfolio URL</Label>
                       <Input 
                         placeholder="github.com/username" 
                         value={clientEdits.personalInfo?.github || ''} 
@@ -2609,7 +2615,7 @@ export default function CVGeneratorPage() {
                 {/* Languages */}
                 <div className="border border-slate-200 rounded-xl p-4 space-y-3">
                   <h4 className="text-xs font-extrabold text-slate-700">Languages Spoken</h4>
-                  <p className="text-[11px] text-slate-400">Which languages do you speak? Check all that apply:</p>
+                  <p className="text-sm text-slate-400">Which languages do you speak? Check all that apply:</p>
                   <div className="grid grid-cols-3 gap-3 pt-1">
                     {["English", "Swahili", "French", "German", "Hindi", "Arabic"].map(lang => {
                       const isChecked = clientEdits.languages?.some((l: any) => l.language === lang);
@@ -2642,7 +2648,7 @@ export default function CVGeneratorPage() {
                 {/* Missing Achievements */}
                 <div className="border border-slate-200 rounded-xl p-4 space-y-3">
                   <h4 className="text-xs font-extrabold text-slate-700">Measurable Achievements</h4>
-                  <p className="text-[11px] text-slate-405 text-slate-400">Add an achievement to stand out (e.g. reduced processing time, led a team, won an award):</p>
+                  <p className="text-sm text-slate-405 text-slate-400">Add an achievement to stand out (e.g. reduced processing time, led a team, won an award):</p>
                   <Textarea 
                     placeholder="Tell us one major project delivery or optimization you spearheaded..."
                     rows={3}
@@ -2685,7 +2691,7 @@ export default function CVGeneratorPage() {
                     
                     <div className="grid grid-cols-2 gap-4 text-left">
                       <div className="space-y-1.5 text-left">
-                        <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Driving Licence status</Label>
+                        <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Driving Licence status</Label>
                         <Select 
                           value={clientEdits.personalDetails?.drivingExperience || 'No Licence'} 
                           onValueChange={(val) => handleClientPersonalDetailsChange('drivingExperience', val)}
@@ -2703,7 +2709,7 @@ export default function CVGeneratorPage() {
                       </div>
 
                       <div className="space-y-1.5">
-                        <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Residence (Nairobi Neighborhood)</Label>
+                        <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Residence (Nairobi Neighborhood)</Label>
                         <Input 
                           placeholder="e.g. Westlands, Kileleshwa, Kilimani" 
                           value={clientEdits.personalDetails?.nairobiRes || ''}
@@ -2713,7 +2719,7 @@ export default function CVGeneratorPage() {
                       </div>
 
                       <div className="space-y-1.5 text-left">
-                        <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Work Permit status</Label>
+                        <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Work Permit status</Label>
                         <Select 
                           value={clientEdits.personalDetails?.kenyaStatus || 'Citizen'} 
                           onValueChange={(val) => handleClientPersonalDetailsChange('kenyaStatus', val)}
@@ -2730,7 +2736,7 @@ export default function CVGeneratorPage() {
                       </div>
 
                       <div className="space-y-1.5 text-left">
-                        <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Notice Period</Label>
+                        <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Notice Period</Label>
                         <Select 
                           onValueChange={(val) => {
                             const add = clientEdits.additionalInfo || [];
@@ -2770,7 +2776,7 @@ export default function CVGeneratorPage() {
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1.5">
-                          <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Portfolio Website URL</Label>
+                          <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Portfolio Website URL</Label>
                           <Input 
                             placeholder="e.g. portfolio.dev" 
                             className="h-9 text-xs bg-white"
@@ -2782,7 +2788,7 @@ export default function CVGeneratorPage() {
                           />
                         </div>
                         <div className="space-y-1.5 text-left">
-                          <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">AI Experience &amp; Prompt Eng.</Label>
+                          <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">AI Experience &amp; Prompt Eng.</Label>
                           <Select 
                             onValueChange={(val) => {
                               const add = clientEdits.additionalInfo || [];
@@ -2802,7 +2808,7 @@ export default function CVGeneratorPage() {
                         </div>
                       </div>
                       <div className="space-y-1.5">
-                        <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Primary Cloud Platform</Label>
+                        <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Primary Cloud Platform</Label>
                         <div className="flex gap-2">
                           {["AWS", "Azure", "Google Cloud", "Heroku/Vercel"].map(cloud => (
                             <button
@@ -2813,7 +2819,7 @@ export default function CVGeneratorPage() {
                                 const updated = [...add, { label: 'Cloud Focus', value: cloud }];
                                 setClientEdits((prev: any) => ({ ...prev, additionalInfo: updated }));
                               }}
-                              className="flex-1 text-[11px] py-1.5 border rounded border-slate-200 hover:bg-slate-50 font-semibold"
+                              className="flex-1 text-sm py-1.5 border rounded border-slate-200 hover:bg-slate-50 font-semibold"
                             >
                               {cloud}
                             </button>
@@ -2826,7 +2832,7 @@ export default function CVGeneratorPage() {
                   {collabTargetRole === 'accountant' && (
                     <div className="space-y-4 text-left">
                       <div className="space-y-1.5">
-                        <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Accounting Softwares Experienced</Label>
+                        <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Accounting Softwares Experienced</Label>
                         <div className="grid grid-cols-3 gap-2">
                           {["QuickBooks", "Sage ERP", "Xero", "SAP", "Tally"].map(tool => (
                             <label key={tool} className="flex items-center gap-2 text-xs cursor-pointer text-slate-705 text-slate-700 font-semibold">
@@ -2845,7 +2851,7 @@ export default function CVGeneratorPage() {
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1.5 text-left">
-                          <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Professional Certification</Label>
+                          <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Professional Certification</Label>
                           <Select 
                             onValueChange={(val) => {
                               const certs = clientEdits.certifications || [];
@@ -2868,7 +2874,7 @@ export default function CVGeneratorPage() {
 
                   {collabTargetRole !== 'software-engineer' && collabTargetRole !== 'accountant' && (
                     <div className="space-y-1.5">
-                      <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Briefly detail your core specializations:</Label>
+                      <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Briefly detail your core specializations:</Label>
                       <Input placeholder="e.g. Pediatric Nursing, IB Curriculum, Project Management" onChange={(e) => {
                         const add = clientEdits.additionalInfo || [];
                         setClientEdits((prev: any) => ({ ...prev, additionalInfo: [...add, { label: 'Specialization', value: e.target.value }] }));
@@ -2896,7 +2902,7 @@ export default function CVGeneratorPage() {
                 <div className="grid grid-cols-2 gap-4">
                   {/* Theme buttons */}
                   <div className="space-y-3">
-                    <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Choose Theme Style</Label>
+                    <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider block">Choose Theme Style</Label>
                     <div className="grid grid-cols-2 gap-2">
                       {[
                         { key: "theme1", name: "Classic Blue", desc: "Clean sidebar" },
@@ -2913,7 +2919,7 @@ export default function CVGeneratorPage() {
                           }`}
                         >
                           <div className="text-xs font-bold text-slate-700">{t.name}</div>
-                          <div className="text-[10px] text-slate-450 mt-0.5">{t.desc}</div>
+                          <div className="text-sm text-slate-450 mt-0.5">{t.desc}</div>
                         </button>
                       ))}
                     </div>
@@ -2921,9 +2927,9 @@ export default function CVGeneratorPage() {
 
                   {/* AI polish */}
                   <div className="space-y-3">
-                    <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">AI Enhancements</Label>
+                    <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider block">AI Enhancements</Label>
                     <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2">
-                      <p className="text-[11px] text-slate-550 text-slate-500">Enable AI to automatically polish descriptions to professional framing during finalize:</p>
+                      <p className="text-sm text-slate-550 text-slate-500">Enable AI to automatically polish descriptions to professional framing during finalize:</p>
                       
                       <div className="space-y-2 pt-1.5">
                         <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer text-slate-700">
@@ -2970,7 +2976,7 @@ export default function CVGeneratorPage() {
                     <Upload className="h-4 w-4 text-slate-400" />
                     Missing Document Proof
                   </h4>
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-sm text-slate-400">
                     If you listed certifications (e.g., Red Hat, Python Developer), upload a file to attach to your permanent registry portfolio:
                   </p>
                   
@@ -2978,7 +2984,7 @@ export default function CVGeneratorPage() {
                     <FileText className="h-6 w-6 text-slate-400" />
                     <div>
                       <span className="text-xs font-bold text-slate-700">Drag cert file here, or browse</span>
-                      <span className="text-[10px] text-slate-400 block mt-0.5">Supports PDF, JPG, PNG up to 5MB</span>
+                      <span className="text-sm text-slate-400 block mt-0.5">Supports PDF, JPG, PNG up to 5MB</span>
                     </div>
                     <Input type="file" className="hidden" id="portal-cert-upload" />
                     <Button asChild variant="outline" size="sm" className="h-8 text-xs mt-1">
@@ -3056,8 +3062,8 @@ export default function CVGeneratorPage() {
             <FileText className="h-4 w-4 text-white" />
           </div>
           <div>
-            <h1 className="text-sm font-bold text-slate-900">CV Builder</h1>
-            <p className="text-[10px] text-slate-500">Import → Review &amp; Edit → Client Collaboration → Design &amp; Finalize</p>
+            <h1 className="text-xl font-bold text-slate-900">CV Builder</h1>
+            <p className="text-sm text-slate-500">Import → Review &amp; Edit → Client Collaboration → Design &amp; Finalize</p>
           </div>
         </div>
         <div className="flex items-center gap-1.5 bg-slate-100 rounded-full p-1">
@@ -3070,7 +3076,7 @@ export default function CVGeneratorPage() {
             <button
               key={step.key}
               onClick={() => setWorkflowStep(step.key)}
-              className={`relative text-[11px] font-semibold px-4 py-1.5 rounded-full transition-all ${
+              className={`relative text-sm font-semibold px-4 py-1.5 rounded-full transition-all ${
                 workflowStep === step.key
                   ? 'bg-custom-blue text-white shadow-sm'
                   : 'text-slate-500 hover:text-slate-700'
@@ -3105,14 +3111,14 @@ export default function CVGeneratorPage() {
       </div>
 
       {/* MAIN CONTENT */}
-      <div className="flex-1 flex gap-4 px-4 overflow-hidden">
+      <div className="flex-1 flex gap-4 overflow-auto max-h-[calc(100vh-98px)] custom-scrollbar">
 
         {/* ─── STEP 1: IMPORT ─────────────────────────────────────────────── */}
         {workflowStep === 'import' && (
-          <div className="flex-1 flex gap-4">
+          <div className="flex-1 flex">
             <div className="flex-1 grid grid-cols-3 gap-4 content-start">
               {/* Upload CV */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col items-center text-center gap-4">
+              <div className="bg-white border border-slate-200 shadow-sm p-6 flex flex-col items-center text-center gap-4">
                 <div className="h-14 w-14 rounded-2xl bg-blue-50 flex items-center justify-center">
                   <Upload className="h-6 w-6 text-custom-blue" />
                 </div>
@@ -3121,9 +3127,9 @@ export default function CVGeneratorPage() {
                   <p className="text-xs text-slate-400 mt-1">Parse an existing CV file</p>
                 </div>
                 <div className="flex flex-wrap gap-1.5 justify-center">
-                  <span className="text-[10px] font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">PDF</span>
-                  <span className="text-[10px] font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">DOCX</span>
-                  <span className="text-[10px] font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">TXT</span>
+                  <span className="text-sm font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">PDF</span>
+                  <span className="text-sm font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">DOCX</span>
+                  <span className="text-sm font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">TXT</span>
                 </div>
                 <Input type="file" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg" onChange={handleFileUpload} className="hidden" id="import-file-upload" disabled={isExtracting} />
                 <Button asChild variant="outline" className="w-full" disabled={isExtracting}>
@@ -3138,7 +3144,7 @@ export default function CVGeneratorPage() {
               </div>
 
               {/* Import From Registry */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col gap-4">
+              <div className="bg-white border border-slate-200 shadow-sm p-6 flex flex-col gap-4">
                 <div className="flex flex-col items-center text-center gap-4">
                   <div className="h-14 w-14 rounded-2xl bg-blue-50 flex items-center justify-center">
                     <Users className="h-6 w-6 text-custom-blue" />
@@ -3166,7 +3172,7 @@ export default function CVGeneratorPage() {
                     {searchResults.map((ind: any) => (
                       <button key={ind.id} onClick={() => handleSelectIndividual(ind)} className="w-full text-left px-3 py-2.5 hover:bg-blue-50 border-b border-slate-100 last:border-0 transition-colors">
                         <div className="text-sm font-semibold text-slate-800">{ind.full_name}</div>
-                        <div className="text-[11px] text-slate-400">{ind.gender} {ind.contact_details?.email?.primary ? `• ${ind.contact_details.email.primary}` : ''}</div>
+                        <div className="text-sm text-slate-400">{ind.gender} {ind.contact_details?.email?.primary ? `• ${ind.contact_details.email.primary}` : ''}</div>
                       </button>
                     ))}
                   </div>
@@ -3183,12 +3189,12 @@ export default function CVGeneratorPage() {
                 )}
 
                 {!selectedIndividual && !searchResults.length && !isSearching && individualSearch.length < 2 && (
-                  <p className="text-[11px] text-slate-400 text-center py-2">Type a name to search the registry</p>
+                  <p className="text-sm text-slate-400 text-center py-2">Type a name to search the registry</p>
                 )}
               </div>
 
               {/* Start From Scratch */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col items-center text-center gap-4">
+              <div className="bg-white border border-slate-200 shadow-sm p-6 flex flex-col items-center text-center gap-4">
                 <div className="h-14 w-14 rounded-2xl bg-blue-50 flex items-center justify-center">
                   <FileText className="h-6 w-6 text-custom-blue" />
                 </div>
@@ -3201,16 +3207,16 @@ export default function CVGeneratorPage() {
             </div>
 
             {/* Right preview during import */}
-            <div className="w-[45%] bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+            <div className="w-[45%] bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
               <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
                 <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Preview</span>
                 <div className="flex items-center gap-2">
                   <button onClick={() => setZoomLevel(Math.max(0.4, zoomLevel - 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomOut className="h-3.5 w-3.5 text-slate-500" /></button>
-                  <span className="text-[11px] font-bold text-slate-600 min-w-[36px] text-center">{Math.round(zoomLevel * 100)}%</span>
+                  <span className="text-sm font-bold text-slate-600 min-w-[36px] text-center">{Math.round(zoomLevel * 100)}%</span>
                   <button onClick={() => setZoomLevel(Math.min(1.2, zoomLevel + 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomIn className="h-3.5 w-3.5 text-slate-500" /></button>
                 </div>
               </div>
-              <div className="flex-1 overflow-auto p-6 flex items-start justify-center bg-slate-50">
+              <div className="flex-1 overflow-auto p-6 flex items-start justify-center bg-slate-50 custom-scrollbar">
                 <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center', transition: 'transform 0.15s ease-out' }} className="shrink-0">
                   <div ref={previewRef} id="cv-preview-container">{renderLayout()}</div>
                 </div>
@@ -3221,18 +3227,18 @@ export default function CVGeneratorPage() {
 
         {/* ─── STEP 2: REVIEW & EDIT ──────────────────────────────────────── */}
         {workflowStep === 'review-edit' && (
-          <div className="flex-1 flex gap-4">
+          <div className="flex-1 flex">
             {/* Left — Sections Sidebar (Collapsible Accordion) */}
-            <div className="w-56 shrink-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+            <div className="w-56 shrink-0 bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
               <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Sections</span>
+                <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Sections</span>
               </div>
               <div className="flex-1 overflow-y-auto p-2 space-y-1">
                 {sectionGroups.map((group) => (
                   <div key={group.label}>
                     <button
                       onClick={() => setCollapsedGroups(prev => ({ ...prev, [group.label]: !prev[group.label] }))}
-                      className="w-full flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold text-slate-400 uppercase tracking-wider hover:text-slate-600"
+                      className="w-full flex items-center gap-1.5 px-2 py-1 rounded text-sm font-bold text-slate-400 uppercase tracking-wider hover:text-slate-600"
                     >
                       {collapsedGroups[group.label] ? <ChevronRight className="h-2.5 w-2.5" /> : <ChevronDown className="h-2.5 w-2.5" />}
                       {group.label}
@@ -3252,8 +3258,8 @@ export default function CVGeneratorPage() {
                               }`}
                             >
                               <Icon className={`h-3 w-3 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                              <span className="text-[11px] font-semibold flex-1 truncate">{sec.label}</span>
-                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center ${
+                              <span className="text-sm font-semibold flex-1 truncate">{sec.label}</span>
+                              <span className={`text-sm font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center ${
                                 isActive ? 'bg-white/20 text-white' : isComplete ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'
                               }`}>
                                 {sec.count}
@@ -3268,13 +3274,13 @@ export default function CVGeneratorPage() {
               </div>
               {/* AI & Tools Panel */}
               <div className="border-t border-slate-200 p-2 space-y-1.5">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1 block">AI &amp; Tools</span>
-                <button onClick={() => setShowAiWriter(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-purple-50 text-slate-600 text-[11px] font-semibold"><PenLine className="h-3 w-3 text-purple-500" /> AI Writer</button>
-                <button onClick={() => setShowAtsOptimizer(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-amber-50 text-slate-600 text-[11px] font-semibold"><BarChart3 className="h-3 w-3 text-amber-600" /> ATS Optimizer</button>
-                <button onClick={() => setShowJobMatch(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-blue-50 text-slate-600 text-[11px] font-semibold"><Crosshair className="h-3 w-3 text-blue-600" /> Job Match</button>
-                <button onClick={() => setShowCoverLetter(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-green-50 text-slate-600 text-[11px] font-semibold"><CoverLetterIcon className="h-3 w-3 text-green-600" /> Cover Letter</button>
-                <button onClick={() => setShowResumeVersions(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-slate-50 text-slate-600 text-[11px] font-semibold"><Copy className="h-3 w-3 text-slate-500" /> Versions</button>
-                <button onClick={() => setShowAnalytics(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-slate-50 text-slate-600 text-[11px] font-semibold"><BarChart3 className="h-3 w-3 text-slate-500" /> Analytics</button>
+                <span className="text-sm font-bold text-slate-400 uppercase tracking-wider px-1 block">AI &amp; Tools</span>
+                <button onClick={() => setShowAiWriter(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-purple-50 text-slate-600 text-sm font-semibold"><PenLine className="h-3 w-3 text-purple-500" /> AI Writer</button>
+                <button onClick={() => setShowAtsOptimizer(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-amber-50 text-slate-600 text-sm font-semibold"><BarChart3 className="h-3 w-3 text-amber-600" /> ATS Optimizer</button>
+                <button onClick={() => setShowJobMatch(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-blue-50 text-slate-600 text-sm font-semibold"><Crosshair className="h-3 w-3 text-blue-600" /> Job Match</button>
+                <button onClick={() => setShowCoverLetter(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-green-50 text-slate-600 text-sm font-semibold"><CoverLetterIcon className="h-3 w-3 text-green-600" /> Cover Letter</button>
+                <button onClick={() => setShowResumeVersions(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-slate-50 text-slate-600 text-sm font-semibold"><Copy className="h-3 w-3 text-slate-500" /> Versions</button>
+                <button onClick={() => setShowAnalytics(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-slate-50 text-slate-600 text-sm font-semibold"><BarChart3 className="h-3 w-3 text-slate-500" /> Analytics</button>
               </div>
               <div className="border-t border-slate-200 p-3 space-y-1.5">
                 <Button size="sm" onClick={() => setShowAdvancedExport(true)} variant="outline" className="w-full text-xs h-7 border-slate-200"><Download className="h-3 w-3 mr-1" /> Advanced Export</Button>
@@ -3285,10 +3291,10 @@ export default function CVGeneratorPage() {
             </div>
 
             {/* Center — Editor Panel */}
-            <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+            <div className="flex-1 bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
               <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
-                <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider">{sectionMeta.find(s => s.id === activeSection)?.label || 'Section'}</h2>
-                <span className="text-[10px] text-slate-400">Confidence Score <span className="text-emerald-600 font-bold">92%</span></span>
+                <h2 className="text-lg font-bold text-slate-700 uppercase tracking-wider">{sectionMeta.find(s => s.id === activeSection)?.label || 'Section'}</h2>
+                <span className="text-sm text-slate-400">Confidence Score <span className="text-emerald-600 font-bold">92%</span></span>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-6">
 
@@ -3296,15 +3302,15 @@ export default function CVGeneratorPage() {
                 {activeSection === 'contact' && (
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5 col-span-2">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Full Name</Label>
+                      <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Full Name</Label>
                       <Input value={cvData.personalInfo?.fullName ?? ""} onChange={(e) => handlePersonalInfoChange("fullName", e.target.value)} />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Professional Title</Label>
+                      <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Professional Title</Label>
                       <Input value={cvData.personalInfo?.title ?? ""} onChange={(e) => handlePersonalInfoChange("title", e.target.value)} />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Photo</Label>
+                      <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Photo</Label>
                       <div className="flex gap-2 items-center">
                         {cvData.personalInfo?.photoUrl ? (
                           <img src={cvData.personalInfo.photoUrl} className="h-10 w-10 object-cover rounded-lg border border-slate-200" />
@@ -3318,27 +3324,27 @@ export default function CVGeneratorPage() {
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Email</Label>
+                      <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Email</Label>
                       <Input value={cvData.personalInfo?.email ?? ""} onChange={(e) => handlePersonalInfoChange("email", e.target.value)} />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Phone</Label>
+                      <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Phone</Label>
                       <Input value={cvData.personalInfo?.phone ?? ""} onChange={(e) => handlePersonalInfoChange("phone", e.target.value)} />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Location</Label>
+                      <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Location</Label>
                       <Input value={cvData.personalInfo?.location ?? ""} onChange={(e) => handlePersonalInfoChange("location", e.target.value)} />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">LinkedIn</Label>
+                      <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">LinkedIn</Label>
                       <Input value={cvData.personalInfo?.linkedin ?? ""} onChange={(e) => handlePersonalInfoChange("linkedin", e.target.value)} />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">GitHub</Label>
+                      <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">GitHub</Label>
                       <Input value={cvData.personalInfo?.github ?? ""} onChange={(e) => handlePersonalInfoChange("github", e.target.value)} />
                     </div>
                     <div className="space-y-1.5 col-span-2">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Personal Details</Label>
+                      <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Personal Details</Label>
                       <div className="grid grid-cols-2 gap-3">
                         <Input placeholder="Date of Birth" value={cvData.personalDetails?.dateOfBirth ?? ""} onChange={(e) => handlePersonalDetailsChange("dateOfBirth", e.target.value)} />
                         <Input placeholder="Nationality" value={cvData.personalDetails?.nationality ?? ""} onChange={(e) => handlePersonalDetailsChange("nationality", e.target.value)} />
@@ -3353,8 +3359,8 @@ export default function CVGeneratorPage() {
                 {activeSection === 'summary' && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Professional Summary</Label>
-                      <Button size="sm" variant="ghost" onClick={() => setShowAiWriter(true)} className="h-6 text-[10px] text-purple-600 gap-1"><Sparkles className="h-3 w-3" /> AI Enhance</Button>
+                      <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Professional Summary</Label>
+                      <Button size="sm" variant="ghost" onClick={() => setShowAiWriter(true)} className="h-6 text-sm text-purple-600 gap-1"><Sparkles className="h-3 w-3" /> AI Enhance</Button>
                     </div>
                     <Textarea rows={6} value={cvData.summary ?? ""} onChange={(e) => setCvData({ ...cvData, summary: e.target.value })} placeholder="Write a compelling professional summary..." />
                     <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
@@ -3362,7 +3368,7 @@ export default function CVGeneratorPage() {
                         <Sparkles className="h-4 w-4 text-custom-blue shrink-0 mt-0.5" />
                         <div>
                           <p className="text-xs font-semibold text-slate-700">AI Suggestion</p>
-                          <p className="text-[11px] text-slate-500 mt-0.5">Results-driven professional with expertise in... Consider adding measurable achievements and industry-specific keywords.</p>
+                          <p className="text-sm text-slate-500 mt-0.5">Results-driven professional with expertise in... Consider adding measurable achievements and industry-specific keywords.</p>
                         </div>
                       </div>
                     </div>
@@ -3375,8 +3381,8 @@ export default function CVGeneratorPage() {
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-500">{cvData.experience.length} entries</span>
                       <div className="flex gap-1.5">
-                        <Button size="sm" variant="ghost" onClick={() => setShowAiWriter(true)} className="h-7 text-[10px] text-purple-600 gap-1"><Sparkles className="h-3 w-3" /> AI Enhance</Button>
-                        <Button size="sm" variant="outline" onClick={addExperience} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setShowAiWriter(true)} className="h-7 text-sm text-purple-600 gap-1"><Sparkles className="h-3 w-3" /> AI Enhance</Button>
+                        <Button size="sm" variant="outline" onClick={addExperience} className="h-7 text-sm gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
                       </div>
                     </div>
                     {cvData.experience.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No experience entries yet. Click "Add" to create one.</p>}
@@ -3399,7 +3405,7 @@ export default function CVGeneratorPage() {
                             <div className="col-span-2 space-y-2">
                               <div className="flex justify-between items-center">
                                 <span className="text-xs text-slate-500">Key Responsibilities</span>
-                                <Button type="button" variant="ghost" size="sm" onClick={() => addRespToExperience(idx)} className="h-6 text-[10px] text-blue-600"><Plus className="h-2.5 w-2.5" /> Add</Button>
+                                <Button type="button" variant="ghost" size="sm" onClick={() => addRespToExperience(idx)} className="h-6 text-sm text-blue-600"><Plus className="h-2.5 w-2.5" /> Add</Button>
                               </div>
                               {exp.responsibilities?.map((resp: string, rIdx: number) => (
                                 <div key={rIdx} className="flex gap-2 items-center">
@@ -3419,7 +3425,7 @@ export default function CVGeneratorPage() {
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-500">{cvData.education.length} entries</span>
-                      <Button size="sm" variant="outline" onClick={addEducation} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                      <Button size="sm" variant="outline" onClick={addEducation} className="h-7 text-sm gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
                     </div>
                     {cvData.education.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No education entries yet.</p>}
                     {cvData.education.map((edu: any, idx: number) => (
@@ -3444,7 +3450,7 @@ export default function CVGeneratorPage() {
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-500">{cvData.skills.length} categories</span>
-                      <Button size="sm" variant="outline" onClick={addSkillGroup} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                      <Button size="sm" variant="outline" onClick={addSkillGroup} className="h-7 text-sm gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
                     </div>
                     {cvData.skills.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No skills added yet.</p>}
                     {cvData.skills.map((skill: any, idx: number) => (
@@ -3464,7 +3470,7 @@ export default function CVGeneratorPage() {
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-500">{cvData.internships.length} entries</span>
-                      <Button size="sm" variant="outline" onClick={addInternship} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                      <Button size="sm" variant="outline" onClick={addInternship} className="h-7 text-sm gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
                     </div>
                     {cvData.internships.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No internships added yet.</p>}
                     {cvData.internships.map((intern: any, idx: number) => (
@@ -3485,7 +3491,7 @@ export default function CVGeneratorPage() {
                           <div className="col-span-2 space-y-2">
                             <div className="flex justify-between items-center">
                               <span className="text-xs text-slate-500">Key Responsibilities</span>
-                              <Button type="button" variant="ghost" size="sm" onClick={() => addRespToInternship(idx)} className="h-6 text-[10px] text-blue-600"><Plus className="h-2.5 w-2.5" /> Add</Button>
+                              <Button type="button" variant="ghost" size="sm" onClick={() => addRespToInternship(idx)} className="h-6 text-sm text-blue-600"><Plus className="h-2.5 w-2.5" /> Add</Button>
                             </div>
                             {intern.responsibilities?.map((resp: string, rIdx: number) => (
                               <div key={rIdx} className="flex gap-2 items-center">
@@ -3505,7 +3511,7 @@ export default function CVGeneratorPage() {
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-500">{cvData.projects.length} entries</span>
-                      <Button size="sm" variant="outline" onClick={addProject} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                      <Button size="sm" variant="outline" onClick={addProject} className="h-7 text-sm gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
                     </div>
                     {cvData.projects.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No projects added yet.</p>}
                     {cvData.projects.map((proj: any, idx: number) => (
@@ -3529,7 +3535,7 @@ export default function CVGeneratorPage() {
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-500">{cvData.languages.length} languages</span>
-                      <Button size="sm" variant="outline" onClick={addLanguage} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                      <Button size="sm" variant="outline" onClick={addLanguage} className="h-7 text-sm gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
                     </div>
                     {cvData.languages.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No languages added yet.</p>}
                     {cvData.languages.map((lang: any, idx: number) => (
@@ -3547,7 +3553,7 @@ export default function CVGeneratorPage() {
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-500">{cvData.references.length} entries</span>
-                      <Button size="sm" variant="outline" onClick={addReference} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                      <Button size="sm" variant="outline" onClick={addReference} className="h-7 text-sm gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
                     </div>
                     {cvData.references.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No references added yet.</p>}
                     {cvData.references.map((ref: any, idx: number) => (
@@ -3573,7 +3579,7 @@ export default function CVGeneratorPage() {
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-500">{(cvData.certifications || []).length} entries</span>
-                      <Button size="sm" variant="outline" onClick={addCertification} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                      <Button size="sm" variant="outline" onClick={addCertification} className="h-7 text-sm gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
                     </div>
                     {(cvData.certifications || []).length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No certifications added yet.</p>}
                     {(cvData.certifications || []).map((cert: any, idx: number) => (
@@ -3598,7 +3604,7 @@ export default function CVGeneratorPage() {
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-500">{(cvData.achievements || []).length} entries</span>
-                      <Button size="sm" variant="outline" onClick={addAchievement} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                      <Button size="sm" variant="outline" onClick={addAchievement} className="h-7 text-sm gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
                     </div>
                     {(cvData.achievements || []).length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No achievements added yet.</p>}
                     {(cvData.achievements || []).map((ach: any, idx: number) => (
@@ -3622,7 +3628,7 @@ export default function CVGeneratorPage() {
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-500">{(cvData.additionalInfo || []).length} entries</span>
-                      <Button size="sm" variant="outline" onClick={addAdditionalInfo} className="h-7 text-[10px] gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
+                      <Button size="sm" variant="outline" onClick={addAdditionalInfo} className="h-7 text-sm gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
                     </div>
                     {(cvData.additionalInfo || []).length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No additional info added yet.</p>}
                     {(cvData.additionalInfo || []).map((info: any, idx: number) => (
@@ -3641,7 +3647,7 @@ export default function CVGeneratorPage() {
                 {activeSection === 'declaration' && (
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Declaration Statement</Label>
+                      <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Declaration Statement</Label>
                       <Textarea rows={3} value={cvData.declaration || ""} onChange={(e) => setCvData({ ...cvData, declaration: e.target.value })} />
                     </div>
                     <div className="flex items-center space-x-2">
@@ -3655,23 +3661,23 @@ export default function CVGeneratorPage() {
             </div>
 
             {/* Right — Preview Panel (Review & Edit step) */}
-            <div className="w-[45%] bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+            <div className="w-[45%] bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
               <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
                 <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Live Preview</span>
                 <div className="flex items-center gap-2">
                   <button onClick={() => setZoomLevel(Math.max(0.4, zoomLevel - 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomOut className="h-3.5 w-3.5 text-slate-500" /></button>
-                  <span className="text-[11px] font-bold text-slate-600 min-w-[36px] text-center">{Math.round(zoomLevel * 100)}%</span>
+                  <span className="text-sm font-bold text-slate-600 min-w-[36px] text-center">{Math.round(zoomLevel * 100)}%</span>
                   <button onClick={() => setZoomLevel(Math.min(1.2, zoomLevel + 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomIn className="h-3.5 w-3.5 text-slate-500" /></button>
                 </div>
                 <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5">
                   {[{ key: "theme1", label: "Classic" }, { key: "theme2", label: "Modern" }, { key: "theme3", label: "Minimal" }, { key: "theme4", label: "Executive" }].map(t => (
                     <button key={t.key} onClick={() => setSelectedLayout(t.key)}
-                      className={`text-[10px] font-semibold px-2 py-1 rounded-md transition-all ${selectedLayout === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                      className={`text-sm font-semibold px-2 py-1 rounded-md transition-all ${selectedLayout === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     >{t.label}</button>
                   ))}
                 </div>
               </div>
-              <div className="flex-1 overflow-auto p-6 flex items-start justify-center bg-slate-50">
+              <div className="flex-1 overflow-auto p-6 flex items-start justify-center bg-slate-50 custom-scrollbar">
                 <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center', transition: 'transform 0.15s ease-out' }} className="shrink-0">
                   <div ref={previewRef} id="cv-preview-container">{renderLayout()}</div>
                 </div>
@@ -3684,7 +3690,7 @@ export default function CVGeneratorPage() {
         {workflowStep === 'collaboration' && (
           <div className="flex-1 flex gap-4 overflow-hidden">
             {/* Left Column: Configuration & Audit */}
-            <div className="w-[45%] bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col gap-6 overflow-y-auto text-left">
+            <div className="w-[45%] bg-white border border-slate-200 shadow-sm p-6 flex flex-col gap-6 overflow-y-auto text-left">
               
               {/* Header section */}
               <div>
@@ -3702,7 +3708,7 @@ export default function CVGeneratorPage() {
                 <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Configure Dynamic Questions</h4>
                 <div className="grid grid-cols-2 gap-4 text-left">
                   <div className="space-y-1.5 text-left">
-                    <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Job Region / Context</Label>
+                    <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Job Region / Context</Label>
                     <Select 
                       value={collabTargetCountry} 
                       onValueChange={(val: 'kenya' | 'other') => setCollabTargetCountry(val)}
@@ -3717,7 +3723,7 @@ export default function CVGeneratorPage() {
                     </Select>
                   </div>
                   <div className="space-y-1.5 text-left">
-                    <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Target Job Category</Label>
+                    <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Target Job Category</Label>
                     <Select 
                       value={collabTargetRole} 
                       onValueChange={(val: string) => setCollabTargetRole(val)}
@@ -3764,12 +3770,12 @@ export default function CVGeneratorPage() {
                           <AlertCircle className="h-3.5 w-3.5" />
                           {gaps.length} Employment Gaps Detected
                         </div>
-                        <ul className="list-disc pl-4 mt-1 space-y-0.5 text-[11px] text-amber-600">
+                        <ul className="list-disc pl-4 mt-1 space-y-0.5 text-sm text-amber-600">
                           {gaps.map((g: any, i: number) => (
                             <li key={i}>{g.gapYears}yr gap between {g.prevCompany} &amp; {g.currCompany} ({g.from}-{g.to})</li>
                           ))}
                         </ul>
-                        <p className="text-[10px] text-amber-500 mt-1 font-semibold">Client will automatically be asked to declare activities for this gap.</p>
+                        <p className="text-sm text-amber-500 mt-1 font-semibold">Client will automatically be asked to declare activities for this gap.</p>
                       </div>
                     )}
 
@@ -3780,7 +3786,7 @@ export default function CVGeneratorPage() {
                           <AlertCircle className="h-3.5 w-3.5 text-slate-400" />
                           <span>Missing <strong>{item.label}</strong> details</span>
                           {item.missingItems && item.missingItems.length > 0 && (
-                            <span className="text-[10px] text-slate-400">({item.missingItems.join(', ')})</span>
+                            <span className="text-sm text-slate-400">({item.missingItems.join(', ')})</span>
                           )}
                         </div>
                       ))}
@@ -3800,7 +3806,7 @@ export default function CVGeneratorPage() {
                   <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-4 space-y-3.5 mt-auto">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-700">Secure Review URL</span>
-                      <span className="text-[10px] bg-emerald-50 text-emerald-600 font-extrabold uppercase px-1.5 py-0.5 rounded">Active</span>
+                      <span className="text-sm bg-emerald-50 text-emerald-600 font-extrabold uppercase px-1.5 py-0.5 rounded">Active</span>
                     </div>
                     <div className="flex gap-2">
                       <Input 
@@ -3857,7 +3863,7 @@ export default function CVGeneratorPage() {
             </div>
 
             {/* Right Column: Git-Style Review & Merge Panel */}
-            <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col gap-4 overflow-hidden text-left">
+            <div className="flex-1 bg-white border border-slate-200 shadow-sm p-6 flex flex-col gap-4 overflow-hidden text-left">
               
               {!hasClientSubmission ? (
                 <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-4">
@@ -3873,7 +3879,7 @@ export default function CVGeneratorPage() {
                   <div className="bg-slate-50 border border-slate-150 p-4 rounded-xl text-xs max-w-md text-left text-slate-500">
                     <strong className="text-slate-700 block mb-1">💡 Interactive Simulator Guide</strong>
                     To test the collaboration loop:
-                    <ol className="list-decimal pl-4 mt-1 space-y-1 text-[11px] text-slate-500">
+                    <ol className="list-decimal pl-4 mt-1 space-y-1 text-sm text-slate-500">
                       <li>Click <strong>Open Client View</strong> on the left to act as the client.</li>
                       <li>Review the dashboard, answer the gap questions, fill in links, and select a theme.</li>
                       <li>Click <strong>Submit to Recruiter</strong> at the end of the portal.</li>
@@ -3890,9 +3896,9 @@ export default function CVGeneratorPage() {
                         <CheckCircle2 className="h-4.5 w-4.5 text-emerald-500 animate-bounce" />
                         Client Submission Received!
                       </h3>
-                      <p className="text-[11px] text-slate-450 mt-0.5">GitHub-style comparison. Accept or reject modifications before updating registry.</p>
+                      <p className="text-sm text-slate-450 mt-0.5">GitHub-style comparison. Accept or reject modifications before updating registry.</p>
                     </div>
-                    <span className="text-[10px] bg-emerald-50 text-emerald-600 font-extrabold uppercase px-2 py-0.5 rounded">Ready for Merge</span>
+                    <span className="text-sm bg-emerald-50 text-emerald-600 font-extrabold uppercase px-2 py-0.5 rounded">Ready for Merge</span>
                   </div>
 
                   {/* Diff Items Container */}
@@ -3916,7 +3922,7 @@ export default function CVGeneratorPage() {
                                   onClick={() => {
                                     setAcceptedFields(prev => ({ ...prev, [diff.path]: true }));
                                   }}
-                                  className={`text-[10px] h-6 px-2.5 font-bold ${
+                                  className={`text-sm h-6 px-2.5 font-bold ${
                                     isAccepted ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'text-slate-500'
                                   }`}
                                 >
@@ -3928,7 +3934,7 @@ export default function CVGeneratorPage() {
                                   onClick={() => {
                                     setAcceptedFields(prev => ({ ...prev, [diff.path]: false }));
                                   }}
-                                  className={`text-[10px] h-6 px-2.5 font-bold ${
+                                  className={`text-sm h-6 px-2.5 font-bold ${
                                     !isAccepted ? 'bg-red-650 hover:bg-red-755 text-white' : 'text-slate-550 text-slate-500'
                                   }`}
                                 >
@@ -3940,13 +3946,13 @@ export default function CVGeneratorPage() {
                             {/* Side-by-side diff */}
                             <div className="grid grid-cols-2 text-xs leading-normal">
                               {/* Left - Old Registry */}
-                              <div className="p-3 bg-red-50/30 border-r border-slate-100 text-red-800 font-mono text-[11px] whitespace-pre-line text-left">
-                                <span className="text-[9px] uppercase font-bold text-red-400 block font-sans mb-1">- Registry Original</span>
+                              <div className="p-3 bg-red-50/30 border-r border-slate-100 text-red-800 font-mono text-sm whitespace-pre-line text-left">
+                                <span className="text-xs uppercase font-bold text-red-400 block font-sans mb-1">- Registry Original</span>
                                 {diff.oldVal}
                               </div>
                               {/* Right - Client New */}
-                              <div className="p-3 bg-emerald-50/30 text-emerald-800 font-mono text-[11px] whitespace-pre-line text-left">
-                                <span className="text-[9px] uppercase font-bold text-emerald-400 block font-sans mb-1">+ Client Submitted</span>
+                              <div className="p-3 bg-emerald-50/30 text-emerald-800 font-mono text-sm whitespace-pre-line text-left">
+                                <span className="text-xs uppercase font-bold text-emerald-400 block font-sans mb-1">+ Client Submitted</span>
                                 {diff.newVal}
                               </div>
                             </div>
@@ -3987,12 +3993,12 @@ export default function CVGeneratorPage() {
         {workflowStep === 'design-finalize' && (
           <div className="flex-1 flex gap-4">
             {/* Left — Design Studio (Tabbed) */}
-            <div className="w-80 shrink-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+            <div className="w-80 shrink-0 bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
               <div className="px-4 py-2.5 border-b border-slate-200">
                 <div className="flex gap-0.5 bg-slate-100 rounded-lg p-0.5">
                   {[{ key: 'theme', label: 'Layout' }, { key: 'colors', label: 'Color' }, { key: 'font', label: 'Font' }, { key: 'photo', label: 'Photo' }].map(tab => (
                     <button key={tab.key} onClick={() => setActiveDesignTab(tab.key)}
-                      className={`flex-1 text-[10px] font-semibold py-1.5 rounded-md transition-all ${activeDesignTab === tab.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                      className={`flex-1 text-sm font-semibold py-1.5 rounded-md transition-all ${activeDesignTab === tab.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     >{tab.label}</button>
                   ))}
                 </div>
@@ -4014,7 +4020,7 @@ export default function CVGeneratorPage() {
                         >
                           <Layout className={`h-4 w-4 mb-1 ${selectedLayout === t.key ? 'text-custom-blue' : 'text-slate-400'}`} />
                           <div className="text-xs font-bold text-slate-700">{t.label}</div>
-                          <div className="text-[10px] text-slate-400 mt-0.5">{t.desc}</div>
+                          <div className="text-sm text-slate-400 mt-0.5">{t.desc}</div>
                         </button>
                       ))}
                     </div>
@@ -4023,13 +4029,13 @@ export default function CVGeneratorPage() {
                       <div className="flex gap-2">
                         {['single-column', 'two-column', 'sidebar', 'executive'].map(col => (
                           <button key={col} onClick={() => {}}
-                            className={`flex-1 text-[10px] font-semibold py-2 rounded-lg border transition-all ${selectedLayout.includes(col) ? 'border-custom-blue bg-blue-50 text-custom-blue' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}
+                            className={`flex-1 text-sm font-semibold py-2 rounded-lg border transition-all ${selectedLayout.includes(col) ? 'border-custom-blue bg-blue-50 text-custom-blue' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}
                           >{col.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}</button>
                         ))}
                       </div>
                     </div>
                     <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                      <p className="text-[10px] text-amber-700">Choose a layout that matches your industry. Classic is best for conservative fields like finance. Modern works for tech. Minimal for creative roles.</p>
+                      <p className="text-sm text-amber-700">Choose a layout that matches your industry. Classic is best for conservative fields like finance. Modern works for tech. Minimal for creative roles.</p>
                     </div>
                   </div>
                 )}
@@ -4055,12 +4061,12 @@ export default function CVGeneratorPage() {
                       ))}
                     </div>
                     <div className="space-y-1.5">
-                      <span className="text-[10px] text-slate-500">Primary Color</span>
+                      <span className="text-sm text-slate-500">Primary Color</span>
                       <input type="color" value={cvSettings.primaryColor} onChange={e => updateCvSetting('primaryColor', e.target.value)}
                         className="w-full h-8 rounded border border-slate-200 p-0.5 cursor-pointer" />
                     </div>
                     <div className="space-y-1.5">
-                      <span className="text-[10px] text-slate-500">Accent Color</span>
+                      <span className="text-sm text-slate-500">Accent Color</span>
                       <input type="color" value={cvSettings.accentColor} onChange={e => updateCvSetting('accentColor', e.target.value)}
                         className="w-full h-8 rounded border border-slate-200 p-0.5 cursor-pointer" />
                     </div>
@@ -4084,7 +4090,7 @@ export default function CVGeneratorPage() {
                           className={`p-2.5 rounded-lg border-2 text-left transition-all ${(cvSettings as any).fontFamily === f.family ? 'border-custom-blue bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}
                         >
                           <div className="text-xs font-bold text-slate-700" style={{ fontFamily: f.family }}>{f.name}</div>
-                          <div className="text-[9px] text-slate-400">{f.desc}</div>
+                          <div className="text-xs text-slate-400">{f.desc}</div>
                         </button>
                       ))}
                     </div>
@@ -4124,23 +4130,23 @@ export default function CVGeneratorPage() {
                     </div>
                     <div className="space-y-3">
                       <div>
-                        <span className="text-[10px] text-slate-500">Size</span>
+                        <span className="text-sm text-slate-500">Size</span>
                         <input type="range" min={80} max={250} value={cvSettings.photoSize} onChange={e => updateCvSetting('photoSize', Number(e.target.value))}
                           className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-custom-blue mt-1" />
-                        <div className="flex justify-between text-[9px] text-slate-400"><span>Small</span><span>{cvSettings.photoSize}px</span><span>Large</span></div>
+                        <div className="flex justify-between text-xs text-slate-400"><span>Small</span><span>{cvSettings.photoSize}px</span><span>Large</span></div>
                       </div>
                       <div>
-                        <span className="text-[10px] text-slate-500">Shape</span>
+                        <span className="text-sm text-slate-500">Shape</span>
                         <div className="flex items-center border border-slate-200 rounded-md overflow-hidden h-7 bg-white mt-1">
                           {(['square','circle','rounded'] as const).map((s, i) => (
                             <button key={s} onClick={() => updateCvSetting('photoShape', s)}
-                              className={`flex-1 text-[10px] font-bold h-full transition-colors ${cvSettings.photoShape === s ? 'bg-custom-blue text-white' : 'text-slate-500 hover:bg-slate-50'} ${i > 0 ? 'border-l border-slate-200' : ''}`}
+                              className={`flex-1 text-sm font-bold h-full transition-colors ${cvSettings.photoShape === s ? 'bg-custom-blue text-white' : 'text-slate-500 hover:bg-slate-50'} ${i > 0 ? 'border-l border-slate-200' : ''}`}
                             >{s.charAt(0).toUpperCase() + s.slice(1)}</button>
                           ))}
                         </div>
                       </div>
                       <div>
-                        <span className="text-[10px] text-slate-500">Fit</span>
+                        <span className="text-sm text-slate-500">Fit</span>
                         <select value={cvSettings.photoFit} onChange={e => updateCvSetting('photoFit', e.target.value as any)}
                           className="w-full h-7 text-xs border border-slate-200 rounded-md px-2 bg-white text-slate-600 mt-1"
                         >
@@ -4150,7 +4156,7 @@ export default function CVGeneratorPage() {
                         </select>
                       </div>
                       <div>
-                        <span className="text-[10px] text-slate-500">Show/Hide</span>
+                        <span className="text-sm text-slate-500">Show/Hide</span>
                         <label className="flex items-center gap-2 mt-1 cursor-pointer">
                           <input type="checkbox" checked={cvSettings.showPhoto !== false}
                             onChange={e => updateCvSetting('showPhoto', e.target.checked)}
@@ -4176,7 +4182,7 @@ export default function CVGeneratorPage() {
                 {/* Save to Database */}
                 <div className="space-y-2 pt-4 border-t border-slate-200">
                   <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Save to Database</span>
-                  <p className="text-[10px] text-slate-400 leading-relaxed">Your CV is auto-saved locally. Save to database for permanent access.</p>
+                  <p className="text-sm text-slate-400 leading-relaxed">Your CV is auto-saved locally. Save to database for permanent access.</p>
                   <Button size="sm" onClick={() => setShowSaveCvPrompt(true)} className="bg-green-600 hover:bg-green-700 text-xs w-full h-9">
                     <Database className="h-3.5 w-3.5 mr-1.5" /> Save to Database
                   </Button>
@@ -4190,8 +4196,8 @@ export default function CVGeneratorPage() {
                       <button key={opt.value} type="button" onClick={() => setEnhancementLevel(opt.value)}
                         className={`text-left p-2.5 rounded-lg border-2 transition-all ${enhancementLevel === opt.value ? 'border-custom-blue bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}
                       >
-                        <div className="text-[10px] font-bold text-slate-700">{opt.label}</div>
-                        <div className="text-[9px] text-slate-400 leading-tight mt-0.5">{opt.description}</div>
+                        <div className="text-sm font-bold text-slate-700">{opt.label}</div>
+                        <div className="text-xs text-slate-400 leading-tight mt-0.5">{opt.description}</div>
                       </button>
                     ))}
                   </div>
@@ -4200,16 +4206,16 @@ export default function CVGeneratorPage() {
             </div>
 
             {/* Right — Preview + Viewport */}
-            <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+            <div className="flex-1 bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
               <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
                 <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Final Preview</span>
                 <div className="flex items-center gap-2">
                   <button onClick={() => setZoomLevel(Math.max(0.4, zoomLevel - 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomOut className="h-3.5 w-3.5 text-slate-500" /></button>
-                  <span className="text-[11px] font-bold text-slate-600 min-w-[36px] text-center">{Math.round(zoomLevel * 100)}%</span>
+                  <span className="text-sm font-bold text-slate-600 min-w-[36px] text-center">{Math.round(zoomLevel * 100)}%</span>
                   <button onClick={() => setZoomLevel(Math.min(1.2, zoomLevel + 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomIn className="h-3.5 w-3.5 text-slate-500" /></button>
                 </div>
               </div>
-              <div className="flex-1 overflow-auto p-8 flex items-start justify-center bg-slate-50">
+              <div className="flex-1 overflow-auto p-8 flex items-start justify-center bg-slate-50 custom-scrollbar">
                 <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center', transition: 'transform 0.15s ease-out' }} className="shrink-0">
                   <div ref={previewRef} id="cv-preview-container">{renderLayout()}</div>
                 </div>
