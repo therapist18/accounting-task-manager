@@ -3854,7 +3854,6 @@ export default function CVGeneratorPage() {
                     Simulate Client Submission
                   </Button>
                 </div>
-              </div>
             </div>
 
             {/* Right Column: Git-Style Review & Merge Panel */}
