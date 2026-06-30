@@ -3,11 +3,10 @@
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { unstable_batchedUpdates } from 'react-dom'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Settings, Search, X, TableProperties, RotateCcw, Edit, AlertCircle, Plus, Minus, Download, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2, LinkIcon, RefreshCw, UserPlus } from "lucide-react"
+import { Settings, Search, X, TableProperties, RotateCcw, Edit, AlertCircle, Plus, Minus, Download, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2, LinkIcon, RefreshCw, UserPlus, LayoutGrid, Settings2 } from "lucide-react"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { CancelConfirmationDialog } from "./components/CancelConfirmationDialog"
 import { EnquiryDialog } from "./components/EnquiryDialog"
@@ -43,6 +42,7 @@ import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, ev
 import { determineCurrentStage, getStageProgress } from './utils/stageUtils'
 import { calculateStageDate } from './utils/dateUtils'
 import { fetchUserAssignmentData, hasJobLevelAccess, getOfficerDisplayName, userService } from "@/lib/shared-user-assignment-service"
+import { cn } from "@/lib/utils"
 
 export default function DepartmentTasksManager({ error, onTaskAction, handleStageStatusSave, onTaskUpdate, getCurrentRequirements, initialSearchTerm, initialDeptId, initialSubDeptId }: DepartmentTasksManagerProps) {
   const [departments, setDepartments] = useState<Department[]>([])
@@ -946,220 +946,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const displayedTasks = activeTabConfig.tasks
   const activeTabTitle = activeTabConfig.title
 
-  const buildTaskExportRows = useCallback((tasksToExport: any[]) => {
-    const exportData = [];
-
-    for (const task of tasksToExport) {
-      const taskDeps = taskDependants.get(task.id.toString()) || [];
-
-      exportData.push({
-        'Task ID': getRawCellValue(departments, task, 'id', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Type': 'Applicant',
-        'Name': getRawCellValue(departments, task, 'applicant_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Nationality': getRawCellValue(departments, task, 'nationality', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Age': getRawCellValue(departments, task, 'age', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Relationship': 'Principal',
-        'Company': getRawCellValue(departments, task, 'company_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Sub Department': getRawCellValue(departments, task, 'sub_department', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Class': getRawCellValue(departments, task, 'job_level', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Immigration Document Type': getRawCellValue(departments, task, 'immigration_document_type', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Immigration Expiry Date': getRawCellValue(departments, task, 'immigration_expiry_date', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Current Stage': getRawCellValue(departments, task, 'current_stage_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Stage Status': getRawCellValue(departments, task, 'current_stage_status_value', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Stage Follow-up': getRawCellValue(departments, task, 'current_stage_follow_up', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Task Manager': getRawCellValue(departments, task, 'task_manager', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Officer': getRawCellValue(departments, task, 'officer', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Task Assistant': getRawCellValue(departments, task, 'task_assistant', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-        'Renewal Status': getRawCellValue(departments, task, 'renewal_new', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers)
-      });
-
-      taskDeps.forEach(dep => {
-        exportData.push({
-          'Task ID': task.id,
-          'Type': 'Dependant',
-          'Name': dep.full_name,
-          'Nationality': dep.nationality || 'N/A',
-          'Age': dep.age?.toString() || 'N/A',
-          'Relationship': dep.relationship || 'Dependant',
-          'Company': getRawCellValue(departments, task, 'company_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Sub Department': getRawCellValue(departments, task, 'sub_department', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Class': getRawCellValue(departments, task, 'job_level', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Immigration Document Type': 'N/A',
-          'Immigration Expiry Date': 'N/A',
-          'Current Stage': 'N/A',
-          'Stage Status': 'N/A',
-          'Stage Follow-up': 'N/A',
-          'Task Manager': getRawCellValue(departments, task, 'task_manager', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Officer': getRawCellValue(departments, task, 'officer', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Task Assistant': getRawCellValue(departments, task, 'task_assistant', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Renewal Status': task.renewal_status || 'New'
-        });
-      });
-    }
-
-    return exportData;
-  }, [
-    enhancedTasksData,
-    taskDependants,
-    departments,
-    companies,
-    getStaffName,
-    getEnhancedImmigrationStatusWrapper,
-    getCurrentStageStatusWrapper,
-    realOfficers
-  ]);
-
-  const handleExport = useCallback(async (tasks: any[], tableType: string) => {
-    if (!tasks.length) {
-      toast({ title: "No Data", description: "No data available to export.", variant: "destructive" });
-      return;
-    }
-
-    try {
-      const workbook = XLSX.utils.book_new();
-      const exportData = [];
-
-      for (const task of tasks) {
-        const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
-        const taskDeps = taskDependants.get(task.id.toString()) || [];
-
-        // Main row (Applicant)
-        const mainRow = {
-          'Task ID': getRawCellValue(departments, task, 'id', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Type': 'Applicant',
-          'Name': getRawCellValue(departments, task, 'applicant_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Nationality': getRawCellValue(departments, task, 'nationality', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Age': getRawCellValue(departments, task, 'age', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Relationship': 'Principal',
-          'Company': getRawCellValue(departments, task, 'company_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Sub Department': getRawCellValue(departments, task, 'sub_department', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Class': getRawCellValue(departments, task, 'job_level', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          // 'Immigration Status': getRawCellValue(departments, task, 'immigration_status', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Immigration Document Type': getRawCellValue(departments, task, 'immigration_document_type', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Immigration Expiry Date': getRawCellValue(departments, task, 'immigration_expiry_date', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Current Stage': getRawCellValue(departments, task, 'current_stage_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Stage Status': getRawCellValue(departments, task, 'current_stage_status_value', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Stage Follow-up': getRawCellValue(departments, task, 'current_stage_follow_up', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Task Manager': getRawCellValue(departments, task, 'task_manager', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Officer': getRawCellValue(departments, task, 'officer', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Task Assistant': getRawCellValue(departments, task, 'task_assistant', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-          'Renewal Status': getRawCellValue(departments, task, 'renewal_new', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers)
-        };
-        exportData.push(mainRow);
-
-        // Dependant rows
-        taskDeps.forEach(dep => {
-          const depRow = {
-            'Task ID': task.id,
-            'Type': 'Dependant',
-            'Name': dep.full_name,
-            'Nationality': dep.nationality || 'N/A',
-            'Age': dep.age?.toString() || 'N/A',
-            'Relationship': dep.relationship || 'Dependant',
-            'Company': getRawCellValue(departments, task, 'company_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-            'Sub Department': getRawCellValue(departments, task, 'sub_department', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-            'Class': getRawCellValue(departments, task, 'job_level', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-            // 'Immigration Status': 'N/A',
-            'Immigration Document Type': 'N/A',
-            'Immigration Expiry Date': 'N/A',
-            'Current Stage': 'N/A',
-            'Stage Status': 'N/A',
-            'Stage Follow-up': 'N/A',
-            'Task Manager': getRawCellValue(departments, task, 'task_manager', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-            'Officer': getRawCellValue(departments, task, 'officer', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-            'Task Assistant': getRawCellValue(departments, task, 'task_assistant', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
-            'Renewal Status': task.renewal_status || 'New'
-          };
-          exportData.push(depRow);
-        });
-      }
-
-      const worksheet = XLSX.utils.json_to_sheet(exportData);
-      XLSX.utils.book_append_sheet(workbook, worksheet, tableType);
-
-      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
-      const filename = `${tableType}_${timestamp}.xlsx`;
-
-      XLSX.writeFile(workbook, filename);
-
-      toast({
-        title: "Export Successful",
-        description: `${tableType} data exported to ${filename}`
-      });
-    } catch (error) {
-      console.error('Export error:', error);
-      toast({
-        title: "Export Failed",
-        description: "Failed to export data to Excel.",
-        variant: "destructive"
-      });
-    }
-  }, [
-    enhancedTasksData,
-    taskDependants,
-    departments,
-    companies,
-    getStaffName,
-    getEnhancedImmigrationStatusWrapper,
-    getCurrentStageStatusWrapper
-  ]);
-
-  const handleApiExport = useCallback(async (format: 'pdf' | 'word') => {
-    if (!displayedTasks.length) {
-      toast({ title: "No Data", description: "No data available to export.", variant: "destructive" });
-      return;
-    }
-
-    const rows = buildTaskExportRows(displayedTasks);
-    const endpoint = format === 'pdf' ? '/api/tasks/export/pdf' : '/api/tasks/export/word';
-    const fallbackFilename = `${activeTabTitle.replace(/\s+/g, '-')}.${format === 'pdf' ? 'pdf' : 'docx'}`;
-
-    setIsDownloading(true);
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: activeTabTitle,
-          rows
-        })
-      });
-
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => null);
-        throw new Error(errorBody?.error || `Failed to export ${format.toUpperCase()}`);
-      }
-
-      const blob = await response.blob();
-      const disposition = response.headers.get('Content-Disposition') || '';
-      const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
-      const filename = filenameMatch?.[1] || fallbackFilename;
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-
-      toast({
-        title: "Export Successful",
-        description: `${activeTabTitle} downloaded as ${format === 'pdf' ? 'PDF' : 'Word'}.`
-      });
-    } catch (error) {
-      console.error(`${format.toUpperCase()} export error:`, error);
-      toast({
-        title: "Export Failed",
-        description: error instanceof Error ? error.message : `Failed to export ${format.toUpperCase()}.`,
-        variant: "destructive"
-      });
-    } finally {
-      setIsDownloading(false);
-    }
-  }, [activeTabTitle, buildTaskExportRows, displayedTasks, toast]);
-
   const getClassesForSubdepartment = useCallback((deptId: number, subDeptId: number) => {
     const department = departments.find(d => d.id === deptId);
     if (!department) return [];
@@ -1168,15 +954,12 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     return subdepartment?.classes || [];
   }, [departments]);
 
-  // Fetch available task bundles
   const fetchAvailableBundles = useCallback(async () => {
     if (!departments.length) return;
 
     setLoadingBundles(true);
     try {
       const bundles: any[] = [];
-
-      // Fetch bundles for department 1 (Immigration)
       const { data: allBundles } = await supabase
         .from('tm_task_bundles')
         .select('*')
@@ -1219,7 +1002,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     }
   }, [departments]);
 
-  // Load bundles when departments are loaded
   useEffect(() => {
     if (departments.length > 0) {
       fetchAvailableBundles();
@@ -1230,8 +1012,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     const targetDeptId = 1;
     const targetSubDeptId = bundle.targetSubDeptId;
     const targetSubDeptName = bundle.subdepartmentName;
-
-    // Check if this bundle requires class selection
     if (bundle.targetClassId === null && bundle.trigger_job_level?.subdepartment_id) {
       const classes = getClassesForSubdepartment(targetDeptId, targetSubDeptId);
       if (classes.length > 0) {
@@ -1274,8 +1054,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
 
     try {
       const currentDate = new Date().toISOString();
-
-      // Use the provided bundle instead of fetching
       if (!bundle?.task_rules?.length) {
         throw new Error(`No task rules configured for ${targetSubDeptName}.`);
       }
@@ -2505,6 +2283,11 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
           if (nextStatus && STATUS_TAB_MAP[nextStatus] && STATUS_TAB_MAP[nextStatus] !== activeSubTab) {
             setActiveSubTab(STATUS_TAB_MAP[nextStatus]);
           }
+
+          // After a stage upload, silently confirm DB state matches the optimistic update
+          if (action.source === 'stage-upload') {
+            loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true);
+          }
         }
         break
       case 'refresh':
@@ -2514,7 +2297,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       default:
         onTaskAction?.(action)
     }
-  }, [onTaskAction, activeDepartmentTab, activeSubdepartmentTab, activeSubTab, refreshAllData])
+  }, [onTaskAction, activeDepartmentTab, activeSubdepartmentTab, activeSubTab, refreshAllData, loadTasksData])
 
   const renderCellContent = useCallback((row: any, task: any, columnType?: 'date' | 'actions') => {
     const value = row.getValue?.(task) ?? '';
@@ -3475,449 +3258,455 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   ].filter(Boolean);
 
   return (
-    <div className="flex-1 space-y-2 px-2 bg-slate-50/30 min-h-screen">
-      <div className="flex justify-between items-center px-1">
-        <h2 className="text-2xl font-bold text-slate-900">Task Manager</h2>
-        {!areTabsVisible && (
-          <div className="text-sm text-slate-600 font-medium flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-slate-800">Viewing:</span>
-            {breadcrumbParts.map((part, index) => (
-              <React.Fragment key={index}>
-                <span className="bg-slate-100 px-2 py-1 rounded-md">{part}</span>
-                {index < breadcrumbParts.length - 1 && <ChevronRight className="h-4 w-4 text-slate-400" />}
-              </React.Fragment>
-            ))}
+    <div className="flex flex-col h-full antialiased bg-white min-h-screen">
+      {/* Header Bar */}
+      <div className="border-b border-slate-200 bg-white px-6 py-4 flex items-center justify-between">
+        <div className="flex flex-col gap-1.5">
+          <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight leading-none">Task Manager</h1>
+          <div className="flex items-center text-sm text-slate-500 font-semibold gap-1">
+            <span className="text-blue-600 font-bold">{activeDept?.name || "Department"}</span>
+            {activeSubDept && (
+              <>
+                <span className="text-slate-300 mx-0.5">/</span>
+                <span className="truncate text-slate-500">{activeSubDept.name}</span>
+              </>
+            )}
+            {activeStatus && (
+              <>
+                <span className="text-slate-300 mx-0.5">/</span>
+                <span className="truncate text-slate-500">{activeStatus}</span>
+              </>
+            )}
           </div>
-        )}
+        </div>
+
         <Button
           variant="outline"
           size="sm"
+          className={cn(
+            "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+            !areTabsVisible
+              ? "bg-slate-100 border-slate-300 text-slate-700"
+              : "border-slate-200 text-slate-600 hover:bg-slate-50"
+          )}
           onClick={() => setAreTabsVisible(!areTabsVisible)}
-          className={`ml-auto transition-all ${!areTabsVisible ? 'bg-slate-100' : ''}`}
         >
-          {areTabsVisible ? <PanelLeftClose className="h-4 w-4 mr-2" /> : <PanelLeftOpen className="h-4 w-4 mr-2" />}
+          {areTabsVisible ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelLeftOpen className="h-3.5 w-3.5" />}
           {areTabsVisible ? 'Hide Navigation' : 'Show Navigation'}
         </Button>
       </div>
 
-      <Tabs value={activeDepartmentTab} onValueChange={setActiveDepartmentTab} className="space-y-2">
-        {areTabsVisible && (
-          <TabsList className="grid w-full rounded-lg p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200" style={{ gridTemplateColumns: `repeat(${departments.length}, 1fr)` }}>
-            {departments.map(dept => (
-              <TabsTrigger key={dept.id} value={dept.id.toString()} className="text-sm font-semibold text-slate-700 data-[state=active]:bg-custom-blue data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                {dept.name}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        )}
+      {/* Department Tabs - Pill-style */}
+      {areTabsVisible && (
+        <div className="px-6 py-3 flex items-center border-b border-slate-200 bg-white">
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-full border border-slate-200">
+            {departments.map(dept => {
+              const isActive = activeDepartmentTab === dept.id.toString();
+              return (
+                <button
+                  key={dept.id}
+                  onClick={() => setActiveDepartmentTab(dept.id.toString())}
+                  className={cn(
+                    "px-5 py-2 text-sm font-bold rounded-full transition-all flex items-center gap-2",
+                    isActive
+                      ? "bg-white text-blue-600 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800"
+                  )}
+                >
+                  {dept.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
-        {activeDept && (
-          <TabsContent value={activeDepartmentTab} className="space-y-4">
-            {/* Subdepartment Tabs */}
-            {areTabsVisible && defaultSubdepartments.length > 0 && (
-              <Tabs value={activeSubdepartmentTab} onValueChange={setActiveSubdepartmentTab}>
-                <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-gray-50 to-gray-100 border border-gray-200">
-                  <TabsTrigger value="" className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-gray-600 data-[state=active]:to-gray-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    All Subdepartments
-                  </TabsTrigger>
-                  {defaultSubdepartments.map(subdept => (
-                    <TabsTrigger key={subdept.id} value={subdept.id.toString()} className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-600 data-[state=active]:to-teal-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                      {subdept.name}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
-            )}
-
-            <Tabs value={activeSubTab} onValueChange={setActiveSubTab}>
-              {areTabsVisible && (
-                <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200">
-                  <TabsTrigger value="enquiries" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    Enquiries <Badge variant="secondary" className="bg-blue-100 text-blue-800">{enquiryTasks.length}</Badge>
-                  </TabsTrigger>
-                  <TabsTrigger value="wip-stages" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-amber-600 data-[state=active]:to-amber-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    WIP Stages <Badge variant="secondary" className="bg-amber-100 text-amber-800">{wipTasks.length}</Badge>
-                  </TabsTrigger>
-                  <TabsTrigger value="write_up_completed" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-600 data-[state=active]:to-green-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    Write Up Completed <Badge variant="secondary" className="bg-green-100 text-green-800">{completedTasks.length}</Badge>
-                  </TabsTrigger>
-                  <TabsTrigger value="endorsed" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    Endorsement Completed <Badge variant="secondary" className="bg-purple-100 text-purple-800">{endorsedTasks.length}</Badge>
-                  </TabsTrigger>
-                  <TabsTrigger value="cancelled" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-red-600 data-[state=active]:to-red-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    Cancelled <Badge variant="secondary" className="bg-red-100 text-red-800">{cancelledTasks.length}</Badge>
-                  </TabsTrigger>
-                </TabsList>
+      {/* Subdepartment Tabs - Pill-style */}
+      {areTabsVisible && defaultSubdepartments.length > 0 && (
+        <div className="px-6 py-2.5 flex items-center border-b border-slate-200 bg-white">
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-full border border-slate-200">
+            <button
+              onClick={() => setActiveSubdepartmentTab("")}
+              className={cn(
+                "px-4 py-1.5 text-sm font-bold rounded-full transition-all",
+                activeSubdepartmentTab === ""
+                  ? "bg-white text-slate-800 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800"
               )}
+            >
+              All Subdepartments
+            </button>
+            {defaultSubdepartments.map(subdept => {
+              const isActive = activeSubdepartmentTab === subdept.id.toString();
+              return (
+                <button
+                  key={subdept.id}
+                  onClick={() => setActiveSubdepartmentTab(subdept.id.toString())}
+                  className={cn(
+                    "px-4 py-1.5 text-sm font-bold rounded-full transition-all",
+                    isActive
+                      ? "bg-white text-blue-600 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800"
+                  )}
+                >
+                  {subdept.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
-              <TabsContent value={activeSubTab} className="mt-4">
-                <Card className="bg-white/80 backdrop-blur-sm shadow-lg border-slate-100">
-                  <CardHeader className="border-b border-slate-100 bg-white">
-                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
-                      <div>
-                        <CardTitle className="text-lg text-slate-800">
-                          {activeTabTitle} - {activeDept.name}
-                          {activeSubdepartmentTab && defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab) &&
-                            ` - ${defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab)?.name}`
-                          }
-                        </CardTitle>
-                        <CardDescription className="text-slate-600">
-                          Showing {displayedTasks.length} {globalSearchTerm ? 'filtered ' : ''}tasks {isTransposedView ? '(Transposed View)' : '(Standard View)'}
-                        </CardDescription>
-                      </div>
-                      <div className="flex items-center gap-2 flex-wrap justify-end">
-                        {activeSubTab === 'enquiries' && (
-                          <Button
-                            className="flex items-center gap-2"
-                            onClick={handleNewEnquiryClick}
-                          >
-                            <Plus className="h-4 w-4" />
-                            New Enquiry
-                          </Button>
-                        )}
-                        <div className="relative">
-                          <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
-                          <Input
-                            placeholder="Search tasks, applicants, companies..."
-                            value={globalSearchTerm}
-                            onChange={(e) => setGlobalSearchTerm(e.target.value)}
-                            className="pl-8 w-64"
-                          />
-                          {globalSearchTerm && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="absolute right-1 top-1 h-6 w-6"
-                              onClick={() => setGlobalSearchTerm('')}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-
-                        {isTransposedView && !activeReport && (
-                          <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => isAllExpanded ? collapseAll() : expandAll()}>
-                            {isAllExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                            {isAllExpanded ? 'Collapse All' : 'Expand All'}
-                          </Button>
-                        )}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex items-center gap-2"
-                          onClick={() => setIsTransposedView(!isTransposedView)}
-                        >
-                          {isTransposedView ? <TableProperties className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />}
-                          {isTransposedView ? 'Standard View' : 'Transposed View'}
-                        </Button>
-
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button variant="outline" size="sm" className="flex items-center gap-2">
-                              <Settings className="h-4 w-4" />
-                              {isTransposedView ? `Fields (${visibleHeaders.size + visibleStats.size + visibleStageIds.size})` : `Columns (${visibleHeaders.size + visibleStageIds.size})`}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-80 h-[65vh] overflow-y-auto">
-                            <div className="space-y-4">
-                              <div className="space-y-2">
-                                <h4 className="font-medium">
-                                  {isTransposedView ? 'Visible Fields & Rows' : 'Visible Columns'}
-                                </h4>
-                                <p className="text-sm text-muted-foreground">
-                                  {isTransposedView ? 'Select which fields and stages to display' : 'Select which columns to display'}
-                                </p>
-                              </div>
-                              {/* Stats Fields (only in transposed view) */}
-                              {isTransposedView && (
-                                <div className="space-y-2 border-t pt-2">
-                                  <h5 className="text-sm font-medium text-slate-700">Statistics ({visibleStats.size})</h5>
-                                  {STATS_HEADERS.map((stat) => (
-                                    <div key={stat.id} className="flex items-center space-x-2">
-                                      <Checkbox
-                                        id={stat.id}
-                                        checked={visibleStats.has(stat.id)}
-                                        onCheckedChange={() => toggleStatsVisibility(stat.id)}
-                                      />
-                                      <Label
-                                        htmlFor={stat.id}
-                                        className="text-sm font-normal cursor-pointer"
-                                      >
-                                        {stat.label}
-                                      </Label>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              {/* Case Details Fields */}
-                              <div className="space-y-2 border-t pt-2">
-                                <h5 className="text-sm font-medium text-slate-700">Case Details ({visibleHeaders.size})</h5>
-                                {currentTableHeaders.map((header) => (
-                                  <div key={header.id} className="flex items-center space-x-2">
-                                    <Checkbox
-                                      id={header.id}
-                                      checked={visibleHeaders.has(header.id)}
-                                      onCheckedChange={() => toggleHeaderVisibility(header.id)}
-                                    />
-                                    <Label
-                                      htmlFor={header.id}
-                                      className="text-sm font-normal cursor-pointer"
-                                    >
-                                      {header.label}
-                                    </Label>
-                                  </div>
-                                ))}
-
-                              </div>
-
-                              {/* Visible Stages Section */}
-                              <div className="space-y-2 border-t pt-2">
-                                <h5 className="text-sm font-medium text-slate-700">Visible Stages ({visibleStageIds.size})</h5>
-                                <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
-                                  {[...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0)).map((stage) => (
-                                    <div key={`vis-${stage.id}`} className="flex items-center space-x-2">
-                                      <Checkbox
-                                        id={`stage-vis-${stage.id}`}
-                                        checked={visibleStageIds.has(stage.id.toString())}
-                                        onCheckedChange={() => toggleStageVisibility(stage.id.toString())}
-                                      />
-                                      <Label
-                                        htmlFor={`stage-vis-${stage.id}`}
-                                        className="text-sm font-normal cursor-pointer"
-                                      >
-                                        {stage.name}
-                                      </Label>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-
-                              <div className="flex gap-2 pt-2 border-t">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => {
-                                    const defaultHeaders = currentTableHeaders.filter(h => h.default && (activeSubTab === 'cancelled' || h.id !== 'cancellation_reason'));
-                                    setVisibleHeaders(new Set(defaultHeaders.map(h => h.id)))
-                                    if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.filter(s => s.default).map(s => s.id)))
-                                    setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
-                                  }}
-                                >
-                                  Show Default Columns
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => {
-                                    setVisibleHeaders(new Set(currentTableHeaders.map(h => h.id)))
-                                    if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.map(s => s.id)))
-                                    setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
-                                  }}
-                                >
-                                  Reset
-                                </Button>
-                              </div>
-                            </div>
-                          </PopoverContent>
-                        </Popover>
-
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex items-center gap-2"
-                          onClick={() => setShowNAStages(!showNAStages)}
-                        >
-                          {showNAStages ? (
-                            <>
-                              <EyeOff className="h-4 w-4" /> Hide N/A Stages
-                            </>
-                          ) : (
-                            <>
-                              <Eye className="h-4 w-4" /> Show N/A Stages
-                            </>
-                          )}
-                        </Button>
-
-                        <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(displayedTasks, activeTabTitle)}>
-                          <Download className="h-4 w-4" />Export to Excel
-                        </Button>
-
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex items-center gap-2"
-                          onClick={() => handleApiExport('pdf')}
-                          disabled={isDownloading}
-                        >
-                          {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                          Export PDF
-                        </Button>
-
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex items-center gap-2"
-                          onClick={() => handleApiExport('word')}
-                          disabled={isDownloading}
-                        >
-                          {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                          Export Word
-                        </Button>
-
-                        <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={refreshAllData}>
-                          <RotateCcw className="h-4 w-4" />Refresh
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* {isWipTab && areTabsVisible && (
-                            <div className="space-y-4 pt-4">
-                              <Tabs value={activeFollowUpFilter} onValueChange={setActiveFollowUpFilter}>
-                                <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
-                                  <TabsTrigger value="all" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">All <Badge variant="outline">{wipTasks.length}</Badge></TabsTrigger>
-                                  <TabsTrigger value="bcl" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">BCL <Badge variant="outline">{getWIPTasksByFollowUp('bcl').length}</Badge></TabsTrigger>
-                                  <TabsTrigger value="officer" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Officers <Badge variant="outline">{getWIPTasksByFollowUp('officer').length}</Badge></TabsTrigger>
-                                  <TabsTrigger value="client" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Client <Badge variant="outline">{getWIPTasksByFollowUp('client').length}</Badge></TabsTrigger>
-                                </TabsList>
-                              </Tabs>
-
-                              {(activeFollowUpFilter === 'bcl' || activeFollowUpFilter === 'officer') && activeSubdepartmentTab && (
-                                <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-                                  {renderStaffTabs()}
-                                </div>
-                              )}
-                            </div>
-                          )} */}
-                  </CardHeader>
-                  <CardContent className="p-2 sm:p-4">
-                    {isTransposedView ? (
-                      <EnhancedTable
-                        departments={departments}
-                        tasks={displayedTasks}
-                        tableType={activeTabTitle}
-                        ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
-                        visibleHeaders={visibleHeaders}
-                        taskDependants={taskDependants}
-                        expandedDependants={expandedDependants}
-                        expandedSections={expandedSections}
-                        companies={companies}
-                        tableRows={tableRows}
-                        loading={isLoadingTasks}
-                        error={error}
-                        kycDocuments={kycDocuments}
-                        enhancedTasksData={enhancedTasksData}
-                        getCellContent={getCellContentWrapper}
-                        renderCellContent={renderCellContent}
-                        toggleSectionExpansion={toggleSectionExpansion}
-                        toggleStageExpansion={toggleStageExpansion}
-                        toggleDocumentExpansion={toggleDocumentExpansion}
-                        getTaskHierarchy={getTaskHierarchy}
-                        getStaffName={getStaffName}
-                        onDocumentPreview={async (doc) => {
-                          setPreviewDocument(doc);
-                          if (doc.document_id) {
-                            try {
-                              const { data: extractionData, error } = await supabase
-                                .from('document_extractions')
-                                .select('extracted_data')
-                                .eq('document_id', doc.document_id)
-                                .single();
-
-                              if (extractionData?.extracted_data) {
-                                setExtractedData(extractionData.extracted_data);
-                              } else {
-                                setExtractedData({});
-                              }
-                            } catch (error) {
-                              console.error('Error fetching extraction data:', error);
-                              setExtractedData({});
-                            }
-                          } else {
-                            setExtractedData({});
-                          }
-
-                          setIsDocumentPreviewOpen(true);
-                        }}
-                        onDeleteTask={async (task) => {
-                          try {
-                            setIsDeleting(true);
-
-                            const { error } = await supabase
-                              .from('tm_tasks')
-                              .delete()
-                              .eq('id', task.id);
-
-                            if (error) throw error;
-
-                            // Update tasks list by removing the deleted task
-                            setTasks(prevTasks => prevTasks.filter(t => t.id !== task.id));
-
-                            toast({
-                              title: 'Success',
-                              description: 'Task deleted successfully',
-                              variant: 'default'
-                            });
-
-                          } catch (error) {
-                            console.error('Error deleting task:', error);
-                            toast({
-                              title: 'Error',
-                              description: 'Failed to delete task. Please try again.',
-                              variant: 'destructive'
-                            });
-                          } finally {
-                            setIsDeleting(false);
-                          }
-                        }}
-                      />
-                    ) : (
-
-                      <StandardTable
-                        departments={departments}
-                        tasks={displayedTasks}
-                        tableType={activeTabTitle}
-                        ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
-                        stages={stages}
-                        companies={companies}
-                        visibleHeaders={visibleHeaders}
-                        visibleStageIds={visibleStageIds}
-                        expandedStages={expandedStages}
-                        expandedDocuments={expandedDocuments}
-                        expandedDependants={expandedDependants}
-                        taskDependants={taskDependants}
-                        kycDocuments={kycDocuments}
-                        allDocuments={allDocuments}
-                        sortConfig={sortConfig}
-                        dataLoading={{ tasks: isLoadingTasks }}
-                        error={error}
-                        isPushingCase={isPushingCase}
-                        isDownloading={isDownloading}
-                        enhancedTasksData={enhancedTasksData}
-                        getCellContent={getCellContentWrapper}
-                        getSortedTasks={getSortedTasks}
-                        getDocumentForTaskStage={getDocumentForTaskStage}
-                        getTaskHierarchy={getTaskHierarchy}
-                        getStaffName={getStaffName}
-                        requestSort={requestSort}
-                        handleTaskEdit={handleTaskEdit}
-                        handleStageDocumentUpload={handleStageDocumentUpload}
-                        handleViewDocument={handleViewDocument}
-                        handlePushCase={handlePushCase}
-                        handleDownloadZip={handleDownloadZip}
-                        onTaskAction={onTaskAction}
-                        enhancedHandleStageStatusSave={enhancedHandleStageStatusSave}
-                        getKycFields={getKycFields}
-                        toggleStageExpansion={toggleStageExpansion}
-                        toggleDocumentExpansion={toggleDocumentExpansion}
-                      />
+      <div className="flex justify-between border-b border-slate-200">
+        {/* Status Tabs Bar - Pill-style matching StatusFilterBar */}
+        {areTabsVisible && (
+          <div className="px-8 py-2.5 flex items-center bg-white">
+            <div className="flex gap-1.5">
+              {[
+                { id: 'enquiries', label: 'Enquiries', count: enquiryTasks.length },
+                { id: 'wip-stages', label: 'WIP Stages', count: wipTasks.length },
+                { id: 'write_up_completed', label: 'Write Up Completed', count: completedTasks.length },
+                { id: 'endorsed', label: 'Endorsed', count: endorsedTasks.length },
+                { id: 'cancelled', label: 'Cancelled', count: cancelledTasks.length },
+              ].map(tab => {
+                const isActive = activeSubTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveSubTab(tab.id)}
+                    className={cn(
+                      "h-8 px-4 text-sm font-semibold rounded-lg transition-all flex items-center gap-2",
+                      isActive
+                        ? "bg-custom-blue text-white shadow-sm"
+                        : "bg-white text-slate-500 border border-slate-200 hover:border-slate-300 hover:text-slate-700"
                     )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
-          </TabsContent>
+                  >
+                    {tab.label}
+                    <span className={cn(
+                      "px-1.5 py-0.5 rounded-md text-xs font-bold tabular-nums",
+                      isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                    )}>
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         )}
-      </Tabs>
+
+        <div className="flex items-center gap-3 shrink-0">
+          {/* View Toggle Pills */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-full border border-slate-200">
+            <button
+              onClick={() => setIsTransposedView(true)}
+              className={cn(
+                "px-4 py-1.5 text-sm font-bold rounded-full transition-all flex items-center gap-1.5",
+                isTransposedView
+                  ? "bg-white text-blue-600 shadow-sm"
+                  : "text-slate-500 hover:text-slate-900"
+              )}
+            >
+              <LayoutGrid className="h-3 w-3" /> Transposed
+            </button>
+            <button
+              onClick={() => setIsTransposedView(false)}
+              className={cn(
+                "px-4 py-1.5 text-sm font-bold rounded-full transition-all flex items-center gap-1.5",
+                !isTransposedView
+                  ? "bg-white text-blue-600 shadow-sm"
+                  : "text-slate-500 hover:text-slate-900"
+              )}
+            >
+              <TableProperties className="h-3 w-3" /> Standard
+            </button>
+          </div>
+
+          <div className="h-6 w-px bg-slate-200 mx-1" />
+
+          {/* Search Input */}
+          <div className="relative group w-[320px]">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Input
+              placeholder="Search tasks, applicants, companies..."
+              value={globalSearchTerm}
+              onChange={(e) => setGlobalSearchTerm(e.target.value)}
+              className="w-full h-10 pl-11 pr-10 bg-white border-slate-300 rounded-full text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
+            />
+            {globalSearchTerm && (
+              <button
+                onClick={() => setGlobalSearchTerm('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+
+          <div className="h-6 w-px bg-slate-200 mx-1" />
+
+          {/* Action Buttons */}
+          {activeSubTab === 'enquiries' && (
+            <Button
+              className="h-10 px-5 rounded-full text-sm font-bold gap-2 shadow-md transition-all"
+              style={{ backgroundColor: '#376bae' }}
+              onClick={handleNewEnquiryClick}
+            >
+              <Plus className="h-4 w-4" />
+              New Enquiry
+            </Button>
+          )}
+
+          {isTransposedView && !activeReport && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
+              onClick={() => isAllExpanded ? collapseAll() : expandAll()}
+            >
+              {isAllExpanded ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+              {isAllExpanded ? 'Collapse All' : 'Expand All'}
+            </Button>
+          )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
+            onClick={() => setShowNAStages(!showNAStages)}
+          >
+            {showNAStages ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            {showNAStages ? 'Hide N/A' : 'Show N/A'}
+          </Button>
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn(
+                  "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+                  (visibleHeaders.size + visibleStageIds.size) < (currentTableHeaders.length + stages.length)
+                    ? "bg-blue-50 border-blue-300 text-blue-700"
+                    : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                )}
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                Columns ({visibleHeaders.size + visibleStageIds.size})
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80 h-[65vh] overflow-y-auto">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <h4 className="font-medium">
+                    {isTransposedView ? 'Visible Fields & Rows' : 'Visible Columns'}
+                  </h4>
+                  <p className="text-sm text-muted-foreground">
+                    {isTransposedView ? 'Select which fields and stages to display' : 'Select which columns to display'}
+                  </p>
+                </div>
+                {isTransposedView && (
+                  <div className="space-y-2 border-t pt-2">
+                    <h5 className="text-sm font-medium text-slate-700">Statistics ({visibleStats.size})</h5>
+                    {STATS_HEADERS.map((stat) => (
+                      <div key={stat.id} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={stat.id}
+                          checked={visibleStats.has(stat.id)}
+                          onCheckedChange={() => toggleStatsVisibility(stat.id)}
+                        />
+                        <Label htmlFor={stat.id} className="text-sm font-normal cursor-pointer">{stat.label}</Label>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="space-y-2 border-t pt-2">
+                  <h5 className="text-sm font-medium text-slate-700">Case Details ({visibleHeaders.size})</h5>
+                  {currentTableHeaders.map((header) => (
+                    <div key={header.id} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={header.id}
+                        checked={visibleHeaders.has(header.id)}
+                        onCheckedChange={() => toggleHeaderVisibility(header.id)}
+                      />
+                      <Label htmlFor={header.id} className="text-sm font-normal cursor-pointer">{header.label}</Label>
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-2 border-t pt-2">
+                  <h5 className="text-sm font-medium text-slate-700">Visible Stages ({visibleStageIds.size})</h5>
+                  <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
+                    {[...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0)).map((stage) => (
+                      <div key={`vis-${stage.id}`} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={`stage-vis-${stage.id}`}
+                          checked={visibleStageIds.has(stage.id.toString())}
+                          onCheckedChange={() => toggleStageVisibility(stage.id.toString())}
+                        />
+                        <Label htmlFor={`stage-vis-${stage.id}`} className="text-sm font-normal cursor-pointer">{stage.name}</Label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-2 border-t">
+                  <Button variant="outline" size="sm" onClick={() => {
+                    const defaultHeaders = currentTableHeaders.filter(h => h.default && (activeSubTab === 'cancelled' || h.id !== 'cancellation_reason'));
+                    setVisibleHeaders(new Set(defaultHeaders.map(h => h.id)));
+                    if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.filter(s => s.default).map(s => s.id)));
+                    setVisibleStageIds(new Set(stages.map(s => s.id.toString())));
+                  }}>Show Default</Button>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    setVisibleHeaders(new Set(currentTableHeaders.map(h => h.id)));
+                    if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.map(s => s.id)));
+                    setVisibleStageIds(new Set(stages.map(s => s.id.toString())));
+                  }}>Reset</Button>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          <div className="h-6 w-px bg-slate-200 mx-1" />
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 px-5 rounded-full border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 transition-all"
+            onClick={refreshAllData}
+          >
+            <RotateCcw className="h-3.5 w-3.5 mr-1.5 text-slate-400" /> Refresh
+          </Button>
+        </div>
+      </div>
+
+      {/* Content Area */}
+      <div className="flex-1 py-4">
+        {activeDept && (
+          <div className="overflow-hidden">
+            {isTransposedView ? (
+              <EnhancedTable
+                departments={departments}
+                tasks={displayedTasks}
+                tableType={activeTabTitle}
+                ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
+                visibleHeaders={visibleHeaders}
+                taskDependants={taskDependants}
+                expandedDependants={expandedDependants}
+                expandedSections={expandedSections}
+                companies={companies}
+                tableRows={tableRows}
+                loading={isLoadingTasks}
+                error={error}
+                kycDocuments={kycDocuments}
+                enhancedTasksData={enhancedTasksData}
+                getCellContent={getCellContentWrapper}
+                renderCellContent={renderCellContent}
+                toggleSectionExpansion={toggleSectionExpansion}
+                toggleStageExpansion={toggleStageExpansion}
+                toggleDocumentExpansion={toggleDocumentExpansion}
+                getTaskHierarchy={getTaskHierarchy}
+                getStaffName={getStaffName}
+                onDocumentPreview={async (doc) => {
+                  setPreviewDocument(doc);
+                  if (doc.document_id) {
+                    try {
+                      const { data: extractionData, error } = await supabase
+                        .from('document_extractions')
+                        .select('extracted_data')
+                        .eq('document_id', doc.document_id)
+                        .single();
+
+                      if (extractionData?.extracted_data) {
+                        setExtractedData(extractionData.extracted_data);
+                      } else {
+                        setExtractedData({});
+                      }
+                    } catch (error) {
+                      console.error('Error fetching extraction data:', error);
+                      setExtractedData({});
+                    }
+                  } else {
+                    setExtractedData({});
+                  }
+
+                  setIsDocumentPreviewOpen(true);
+                }}
+                onDeleteTask={async (task) => {
+                  try {
+                    setIsDeleting(true);
+
+                    const { error } = await supabase
+                      .from('tm_tasks')
+                      .delete()
+                      .eq('id', task.id);
+
+                    if (error) throw error;
+
+                    // Update tasks list by removing the deleted task
+                    setTasks(prevTasks => prevTasks.filter(t => t.id !== task.id));
+
+                    toast({
+                      title: 'Success',
+                      description: 'Task deleted successfully',
+                      variant: 'default'
+                    });
+
+                  } catch (error) {
+                    console.error('Error deleting task:', error);
+                    toast({
+                      title: 'Error',
+                      description: 'Failed to delete task. Please try again.',
+                      variant: 'destructive'
+                    });
+                  } finally {
+                    setIsDeleting(false);
+                  }
+                }}
+              />
+            ) : (
+              <StandardTable
+                departments={departments}
+                tasks={displayedTasks}
+                tableType={activeTabTitle}
+                ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
+                stages={stages}
+                companies={companies}
+                visibleHeaders={visibleHeaders}
+                visibleStageIds={visibleStageIds}
+                expandedStages={expandedStages}
+                expandedDocuments={expandedDocuments}
+                expandedDependants={expandedDependants}
+                taskDependants={taskDependants}
+                kycDocuments={kycDocuments}
+                allDocuments={allDocuments}
+                sortConfig={sortConfig}
+                dataLoading={{ tasks: isLoadingTasks }}
+                error={error}
+                isPushingCase={isPushingCase}
+                isDownloading={isDownloading}
+                enhancedTasksData={enhancedTasksData}
+                getCellContent={getCellContentWrapper}
+                renderCellContent={renderCellContent}
+                getSortedTasks={getSortedTasks}
+                getDocumentForTaskStage={getDocumentForTaskStage}
+                getTaskHierarchy={getTaskHierarchy}
+                getStaffName={getStaffName}
+                requestSort={requestSort}
+                handleTaskEdit={handleTaskEdit}
+                handleStageDocumentUpload={handleStageDocumentUpload}
+                handleViewDocument={handleViewDocument}
+                handlePushCase={handlePushCase}
+                handleDownloadZip={handleDownloadZip}
+                onTaskAction={onTaskAction}
+                enhancedHandleStageStatusSave={enhancedHandleStageStatusSave}
+                getKycFields={getKycFields}
+                toggleStageExpansion={toggleStageExpansion}
+                toggleDocumentExpansion={toggleDocumentExpansion}
+              />
+            )}
+          </div>
+        )}
+      </div>
+
       <EnquiryDialog
         open={isEnquiryDialogOpen}
         onOpenChange={setIsEnquiryDialogOpen}
@@ -3954,19 +3743,21 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         }, {} as Record<string, string[]>) : {}}
         onAssign={(stageAssignments) => updateAllTaskStageOfficers(selectedTaskForOfficers?.id, stageAssignments)}
       />
-      {companyInquiryDialogOpen && editingTask && (
-        <NewCompanyInquiryDialog
-          open={companyInquiryDialogOpen}
-          onOpenChange={setCompanyInquiryDialogOpen}
-          initialData={editingTask}  // Pass the task data as initialData
-          departments={departments}
-          userData={userData}
-          onEnquiryCreated={(updatedTask) => {
-            handleTaskUpdate(updatedTask);
-            setCompanyInquiryDialogOpen(false);
-          }}
-        />
-      )}
+      {
+        companyInquiryDialogOpen && editingTask && (
+          <NewCompanyInquiryDialog
+            open={companyInquiryDialogOpen}
+            onOpenChange={setCompanyInquiryDialogOpen}
+            initialData={editingTask}  // Pass the task data as initialData
+            departments={departments}
+            userData={userData}
+            onEnquiryCreated={(updatedTask) => {
+              handleTaskUpdate(updatedTask);
+              setCompanyInquiryDialogOpen(false);
+            }}
+          />
+        )
+      }
       <StageUploadDialog
         key={stageDialogKey} // <--- THIS IS THE CRITICAL FIX
         open={isStageUploadDialogOpen}
@@ -3980,21 +3771,23 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         }}
       />
 
-      {linkingTask && (
-        <LinkSourceDocumentDialog
-          open={isLinkDialogOpen}
-          onOpenChange={setIsLinkDialogOpen}
-          task={linkingTask}
-          stages={stages}
-          allDocuments={allDocuments}
-          kycDocuments={kycDocuments}
-          onLinkSuccess={() => {
-            setIsLinkDialogOpen(false);
-            setLinkingTask(null);
-            refreshAllData();
-          }}
-        />
-      )}
+      {
+        linkingTask && (
+          <LinkSourceDocumentDialog
+            open={isLinkDialogOpen}
+            onOpenChange={setIsLinkDialogOpen}
+            task={linkingTask}
+            stages={stages}
+            allDocuments={allDocuments}
+            kycDocuments={kycDocuments}
+            onLinkSuccess={() => {
+              setIsLinkDialogOpen(false);
+              setLinkingTask(null);
+              refreshAllData();
+            }}
+          />
+        )
+      }
 
       <CancelConfirmationDialog
         open={cancelDialogOpen}
@@ -4067,6 +3860,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         setSelectedTaskForPush={setSelectedTaskForPush}
         executePushCase={executePushCase}
       />
-    </div>
+    </div >
   )
 }

@@ -69,8 +69,8 @@ export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'task_assistant', label: 'Task Assistant', default: false, width: 'w-32' },
   { id: 'r_number', label: 'R Number', default: false, width: 'w-28' },
   { id: 'cancellation_reason', label: 'Cancellation Reason', default: true, width: 'w-48' },
-  { id: 'cancellation_date', label: 'Cancellation Date', default: true, width: 'w-40' },
-  { id: 'cancelled_by', label: 'Cancelled By', default: true, width: 'w-32' },
+  { id: 'cancellation_date', label: 'Cancellation Date', default: false, width: 'w-40' },
+  { id: 'cancelled_by', label: 'Cancelled By', default: false, width: 'w-32' },
 ];
 
 export const ENHANCED_TABLE_HEADERS: TableHeader[] = [

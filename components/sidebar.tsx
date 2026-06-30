@@ -79,8 +79,7 @@ const navItems = [
             { title: "Admin Dashboard", href: "/dashboard/bcl-task-diary/admin", permission: "bcl_task_diary.admin.view" },
         ],
     },
-    { title: "Applications", href: "/dashboard/applications", icon: AppWindow, permission: "applications.view" },
-    { title: "Reports", href: "/dashboard/reports", icon: BarChart3, permission: "reports.view" },
+    { title: "Applications", href: "/dashboard/applications", icon: AppWindow, permission: "applications.view" }
 ];
 
 // --- Access & Permission Functions ---

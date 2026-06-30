@@ -25,19 +25,15 @@ interface ReportColumnVisibilityDialogProps {
   columns: Column[];
   visibleColumnIds: string[];
   setVisibleColumnIds: (ids: string[] | ((prev: string[]) => string[])) => void;
-  showTimeTrackingColumns: boolean;
-  setShowTimeTrackingColumns: (show: boolean) => void;
-  showDocRequirementsColumns: boolean;
-  setShowDocRequirementsColumns: (show: boolean) => void;
+  showDocRequirementsColumns?: boolean;
+  setShowDocRequirementsColumns?: (show: boolean) => void;
 }
 
 export function ReportColumnVisibilityDialog({
   columns,
   visibleColumnIds,
   setVisibleColumnIds,
-  showTimeTrackingColumns,
-  setShowTimeTrackingColumns,
-  showDocRequirementsColumns,
+  showDocRequirementsColumns = false,
   setShowDocRequirementsColumns,
 }: ReportColumnVisibilityDialogProps) {
   const [open, setOpen] = useState(false);
@@ -46,11 +42,10 @@ export function ReportColumnVisibilityDialog({
   const taskColumns = columns.filter(c => c.type === 'task');
   const timeTrackingColumns = columns.filter(c =>
     c.type === 'current_stage_age' ||
-    c.type === 'total_process_age' ||
-    c.type === 'current_stage_officer'
+    c.type === 'total_process_age'
   );
   const docReqColumns = columns.filter(c => c.type === 'reference_requirement');
-  const stageColumns = columns.filter(c => c.stageId && (c.type === 'stage_date' || c.type === 'stage_officers'));
+  const stageColumns = columns.filter(c => c.stageId && (c.type === 'stage_date' || c.type === 'stage_officer' || c.type === 'stage_doc_fields'));
 
   const handleColumnToggle = (colId: string, checked: boolean) => {
     setVisibleColumnIds(prev => {
@@ -59,19 +54,10 @@ export function ReportColumnVisibilityDialog({
     });
   };
 
-  const handleTimeTrackingToggle = (checked: boolean) => {
-    setShowTimeTrackingColumns(checked);
-    const timeTrackingColIds = timeTrackingColumns.map(c => c.id);
-    setVisibleColumnIds(prev => {
-      if (checked) {
-        return [...new Set([...prev, ...timeTrackingColIds])];
-      }
-      return prev.filter(id => !timeTrackingColIds.includes(id));
-    });
-  };
-
   const handleDocRequirementsToggle = (checked: boolean) => {
-    setShowDocRequirementsColumns(checked);
+    if (setShowDocRequirementsColumns) {
+      setShowDocRequirementsColumns(checked);
+    }
     const docReqColIds = docReqColumns.map(c => c.id);
     setVisibleColumnIds(prev => {
       if (checked) {
@@ -128,15 +114,10 @@ export function ReportColumnVisibilityDialog({
             </div>
           </div>
 
-          {/* Time Tracking */}
+          {/* Time Tracking - Always visible, no toggle */}
           <div className="rounded-lg border bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b p-4 bg-gray-50">
+            <div className="border-b p-4 bg-gray-50">
               <h3 className="font-semibold text-xs text-gray-500 uppercase tracking-wider">Time Tracking</h3>
-              <Checkbox
-                id="toggle-time-tracking"
-                checked={showTimeTrackingColumns}
-                onCheckedChange={(checked) => handleTimeTrackingToggle(checked === true)}
-              />
             </div>
             <div className="p-4 space-y-2">
               {filterColumns(timeTrackingColumns).map(col => (

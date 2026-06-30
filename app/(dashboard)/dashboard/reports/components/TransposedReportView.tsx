@@ -70,7 +70,7 @@ function UserDetailsPopover({ userId, users, officers = [], role, children, depa
 const safeRender = (content: any) => {
   if (React.isValidElement(content)) return content;
   if (typeof content === 'string') {
-    if (content === 'Undedicated' || content === 'N/A') return <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-rose-50 text-rose-600 text-[11px] font-bold ring-1 ring-inset ring-rose-200">Missing</span>;
+    if (content === 'Undedicated' || content === 'N/A') return <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-50 text-slate-400 text-[11px] font-medium italic ring-1 ring-inset ring-slate-200"><span className="h-1.5 w-1.5 rounded-full bg-slate-300" />N/A</span>;
     if (content === 'Completed') return <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 text-[11px] font-bold ring-1 ring-inset ring-emerald-200">Done</span>;
     if (content === 'Pending' || content === 'WIP') return <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 text-[11px] font-bold ring-1 ring-inset ring-amber-200">In Progress</span>;
     return <span className="text-slate-700 font-medium">{content}</span>;

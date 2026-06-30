@@ -14,6 +14,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { format, parseISO } from "date-fns"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { UploadModal } from "@/app/generic-components/UploadModal"
+import { performExtraction } from "@/lib/extractionUtils"
 import supabase from "@/lib/supabase/client";
 import {
   updateDocumentWorkflow,
@@ -306,7 +307,11 @@ const DocumentTabPanel = ({
   const [selectedExistingId, setSelectedExistingId] = useState("");
   const [messageText, setMessageText] = useState(messageState || "");
   const [isConverting, setIsConverting] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
   const [generatedFile, setGeneratedFile] = useState<File | null>(null);
+  const [generatedFileUrl, setGeneratedFileUrl] = useState<string | null>(null);
+  const [pdfExtractedData, setPdfExtractedData] = useState<Record<string, any>>({});
+  const [showPdfPreview, setShowPdfPreview] = useState(false);
 
   useEffect(() => {
     setMessageText(messageState || "");
@@ -347,21 +352,48 @@ const DocumentTabPanel = ({
       const fileName = `${documentName.replace(/\s+/g, '_')}_${Date.now()}.pdf`;
       const file = new File([blob], fileName, { type: 'application/pdf' });
 
+      if (generatedFileUrl) URL.revokeObjectURL(generatedFileUrl);
+      const blobUrl = URL.createObjectURL(blob);
+      setGeneratedFileUrl(blobUrl);
       setGeneratedFile(file);
+      setShowPdfPreview(true);
+      setIsConverting(false);
 
-      toast({
-        title: 'Success',
-        description: 'PDF generated successfully. Review the document below.',
-      });
+      // Run extraction against the document's fields
+      if (activeDocFields && activeDocFields.length > 0) {
+        setIsExtracting(true);
+        try {
+          const result = await performExtraction(
+            blobUrl,
+            activeDocFields,
+            documentName,
+            () => {},
+            fileName
+          );
+          const data = typeof result.extractedData === 'string'
+            ? JSON.parse(result.extractedData)
+            : result.extractedData || {};
+          setPdfExtractedData(data);
+        } catch (extractErr) {
+          console.error('Extraction error:', extractErr);
+          const emptyData: Record<string, any> = {};
+          activeDocFields.forEach((f: any) => { emptyData[f.name] = ''; });
+          setPdfExtractedData(emptyData);
+          toast({ title: 'Extraction incomplete', description: 'PDF generated — please fill in the fields manually.', variant: 'default' });
+        } finally {
+          setIsExtracting(false);
+        }
+      } else {
+        setPdfExtractedData({});
+      }
     } catch (error) {
       console.error('Conversion error:', error);
+      setIsConverting(false);
       toast({
         title: 'Error',
         description: error.message || 'Failed to convert text to PDF',
         variant: 'destructive',
       });
-    } finally {
-      setIsConverting(false);
     }
   };
 
@@ -399,11 +431,38 @@ const DocumentTabPanel = ({
 
   const handleClose = useCallback(() => { }, []);
   const handleSuccess = useCallback((newDoc: any) => {
+    if (generatedFileUrl) URL.revokeObjectURL(generatedFileUrl);
     setGeneratedFile(null);
+    setGeneratedFileUrl(null);
+    setPdfExtractedData({});
+    setShowPdfPreview(false);
     setMessageText("");
-  }, []);
+  }, [generatedFileUrl]);
 
-  const handleExternalFileClear = useCallback(() => setGeneratedFile(null), []);
+  const handleExternalFileClear = useCallback(() => {
+    if (generatedFileUrl) URL.revokeObjectURL(generatedFileUrl);
+    setGeneratedFile(null);
+    setGeneratedFileUrl(null);
+    setPdfExtractedData({});
+    setShowPdfPreview(false);
+  }, [generatedFileUrl]);
+
+  const handleConfirmPdfUpload = useCallback(() => {
+    if (!generatedFile) return;
+    onUploadSuccess({
+      files: [{
+        file: generatedFile,
+        extractedData: pdfExtractedData,
+        validationStatus: 'valid'
+      }]
+    }, doc);
+    if (generatedFileUrl) URL.revokeObjectURL(generatedFileUrl);
+    setGeneratedFile(null);
+    setGeneratedFileUrl(null);
+    setPdfExtractedData({});
+    setShowPdfPreview(false);
+    setMessageText("");
+  }, [generatedFile, generatedFileUrl, pdfExtractedData, onUploadSuccess, doc]);
 
   const handleBeforeUpload = useCallback(async (recordData: any) => {
     if (doc.onBeforeUpload) return doc.onBeforeUpload(recordData);
@@ -548,8 +607,6 @@ const DocumentTabPanel = ({
               documentIdFieldName="document_id"
               isCompanyUpload={false}
               additionalFields={additionalFieldsMemo}
-              externalFile={generatedFile}
-              onExternalFileClear={handleExternalFileClear}
               onBeforeUpload={handleBeforeUpload}
               onPendingChange={handlePendingChange}
             />
@@ -572,27 +629,80 @@ const DocumentTabPanel = ({
                 Write Message & Convert to PDF
               </Label>
 
-              <Textarea
-                placeholder={`Type your message here...`}
-                className="min-h-[120px] resize-none font-mono text-sm"
-                value={messageText}
-                onChange={(e) => handleMessageTextChange(e.target.value)}
-              />
+              {!showPdfPreview && (
+                <>
+                  <Textarea
+                    placeholder={`Type your message here...`}
+                    className="min-h-[120px] resize-none font-mono text-sm"
+                    value={messageText}
+                    onChange={(e) => handleMessageTextChange(e.target.value)}
+                  />
 
-              <div className="flex gap-2">
-                <Button
-                  onClick={handleConvertAndUpload}
-                  disabled={!messageText.trim() || isConverting}
-                  variant="outline"
-                  className="w-full border-dashed border-2 hover:bg-slate-50"
-                >
-                  {isConverting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
-                  {isConverting ? 'Generating PDF...' : 'Convert to PDF & Review'}
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground text-center">
-                This will convert your text into a PDF and open the document preview for final verification.
-              </p>
+                  <Button
+                    onClick={handleConvertAndUpload}
+                    disabled={!messageText.trim() || isConverting}
+                    variant="outline"
+                    className="w-full border-dashed border-2 hover:bg-slate-50"
+                  >
+                    {isConverting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+                    {isConverting ? 'Generating PDF...' : 'Convert to PDF & Review'}
+                  </Button>
+                </>
+              )}
+
+              {showPdfPreview && generatedFile && generatedFileUrl && (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-2 bg-slate-100 border-b">
+                    <span className="text-sm font-medium flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-red-500" />
+                      {generatedFile.name}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {isExtracting && (
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Loader2 className="h-3 w-3 animate-spin" /> Extracting fields...
+                        </span>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-slate-500 hover:text-slate-800"
+                        onClick={handleExternalFileClear}
+                        type="button"
+                        title="Discard and start over"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="p-4">
+                    <ExtractionPreview
+                      documentName={documentName}
+                      extractedData={pdfExtractedData}
+                      fields={activeDocFields || []}
+                      fileUrl={generatedFileUrl}
+                      fileName={generatedFile.name}
+                      expanded={true}
+                      showSaveButton={false}
+                      onDataChange={(fieldName, value) =>
+                        setPdfExtractedData(prev => ({ ...prev, [fieldName]: value }))
+                      }
+                    />
+                  </div>
+
+                  <div className="px-4 pb-4">
+                    <Button
+                      onClick={handleConfirmPdfUpload}
+                      className="w-full"
+                      disabled={isExtracting}
+                    >
+                      <Check className="mr-2 h-4 w-4" />
+                      Confirm & Add to Upload Queue
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </>

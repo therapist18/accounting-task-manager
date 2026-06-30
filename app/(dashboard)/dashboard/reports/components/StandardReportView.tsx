@@ -7,19 +7,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Plus, Minus, ArrowUpDown, SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
-import { differenceInDays, isValid } from "date-fns";
+import { Plus, Minus, ArrowUpDown, SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Clock } from "lucide-react";
+import { differenceInDays, isValid, format } from "date-fns";
 import { cn } from "@/lib/utils";
 
-const colBucket = (type: string) => {
-  if (type === 'current_stage_age' || type === 'total_process_age') return 'duration';
-  if (type === 'reference_requirement') return 'reference';
-  if (type === 'task' || type === 'current_stage_officer') return 'task';
-  return 'stage';
-};
-
 const DEFAULT_COL_WIDTH = 180;
-const MIN_COL_WIDTH = 80;
 const INDEX_COL_WIDTH = 56;
 
 const DataCell = ({ val, isMissing, isPrimary }: { val: React.ReactNode, isMissing: boolean, isPrimary?: boolean }) => (
@@ -29,7 +21,7 @@ const DataCell = ({ val, isMissing, isPrimary }: { val: React.ReactNode, isMissi
         <div className={cn(
           "block w-full truncate text-sm cursor-default leading-snug",
           isMissing
-            ? "text-rose-600 font-semibold bg-rose-50 px-1.5 py-0.5 rounded-full text-xs"
+            ? "text-slate-400 font-medium italic"
             : isPrimary
               ? "text-slate-900 font-semibold"
               : "text-slate-500 font-medium"
@@ -37,7 +29,7 @@ const DataCell = ({ val, isMissing, isPrimary }: { val: React.ReactNode, isMissi
           {val}
         </div>
       </TooltipTrigger>
-      {val && val !== 'Missing' && (
+      {val && val !== 'N/A' && (
         <TooltipContent side="top" className="max-w-sm bg-slate-800 text-white border-none shadow-xl text-sm rounded-lg px-3 py-2 z-[100] break-words">
           {val}
         </TooltipContent>
@@ -57,11 +49,18 @@ const parseDateSafeReport = (s: string | null | undefined): Date | null => {
   try { const d = new Date(s); return isValid(d) ? d : null; } catch { return null; }
 };
 
+const formatEstimatedMins = (minutes: number): string => {
+  if (!minutes || minutes <= 0) return "";
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const d = Math.floor(h / 24);
+  return d >= 1 ? `~${d}d` : `~${h}h`;
+};
+
 export function StandardReportView({
   allTasks, filteredColumns, sortConfig, expandedStageColumns,
   renderCellValue, safeRender, handleSort, toggleStageColumns,
-  isStageApplicableToCurrentFilter, initialRowsPerPage = 25,
-  stages = [], showTime = false, showDelta = false, showDurationRow = false,
+  initialRowsPerPage = 25, stages = [], showDelta = false,
 }: any) {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(initialRowsPerPage);
@@ -100,7 +99,6 @@ export function StandardReportView({
     return offsets;
   }, [filteredColumns, columnSizing]);
 
-  // Interleave delta columns between consecutive stage date columns
   const interleavedColumns = useMemo(() => {
     if (!showDelta) return filteredColumns;
     const result: any[] = [];
@@ -123,7 +121,6 @@ export function StandardReportView({
 
   return (
     <div className="flex flex-col h-full antialiased pt-0 bg-white">
-      {/* Table Wrapper: white card with subtle border */}
       <div className="relative overflow-hidden border border-slate-200 shadow-sm">
         <div className="overflow-auto max-h-[calc(100vh-280px)] custom-scrollbar">
           <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
@@ -135,9 +132,7 @@ export function StandardReportView({
             </colgroup>
 
             <TableHeader className="sticky top-0 z-40">
-              {/* Main Header Row — Dark Navy */}
               <TableRow className="hover:bg-transparent border-0">
-                {/* Index Header */}
                 <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-3 px-2" style={{ background: "#376bae" }}>
                   <span className="text-[10px] font-semibold text-white uppercase tracking-wider">#</span>
                 </TableHead>
@@ -153,7 +148,6 @@ export function StandardReportView({
                   const isSticky = stickyColumnIds.has(col.id);
                   const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
                   const isActive = sortConfig?.key === col.id;
-                  const isCentered = col.field === 'class' || col.field === 'duration' || col.type === 'current_stage_age' || col.type === 'total_process_age';
 
                   return (
                     <TableHead
@@ -162,8 +156,7 @@ export function StandardReportView({
                       className={cn(
                         "group relative border-r border-b border-white/30 transition-colors cursor-pointer select-none px-4 py-3",
                         isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.15)]",
-                        isActive && "bg-slate-700",
-                        isCentered && "text-center",
+                        isActive && "bg-slate-700"
                       )}
                       style={{
                         background: "#376bae",
@@ -171,9 +164,18 @@ export function StandardReportView({
                       }}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className={cn("text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap text-white")}>
-                          {col.label}
-                        </span>
+                        <TooltipProvider delayDuration={500}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className={cn("text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap text-white truncate")}>
+                                {col.label}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" className="bg-slate-900 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[200] max-w-[260px] break-words">
+                              {col.label}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
 
                         <div className="flex items-center gap-1.5">
                           {col.hasSubColumns && (
@@ -184,57 +186,56 @@ export function StandardReportView({
                               {expandedStageColumns.has(col.stageId) ? <Minus size={10} strokeWidth={2.5} /> : <Plus size={10} strokeWidth={2.5} />}
                             </button>
                           )}
-                          <ArrowUpDown className={cn(
-                            "h-3 w-3 shrink-0",
-                            isActive ? "text-white" : "text-slate-500 opacity-0 group-hover:opacity-100"
-                          )} />
+                          <ArrowUpDown className={cn("h-3 w-3 shrink-0", isActive ? "text-white" : "text-slate-500 opacity-0 group-hover:opacity-100")} />
                         </div>
                       </div>
-
-                      {/* Resize Handle */}
                       <div className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-slate-400/30 transition-colors" />
                     </TableHead>
                   );
                 })}
               </TableRow>
 
-              {/* Sub-Header Row: Estimates / Duration / Types — conditionally shown */}
-              {showDurationRow && (
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="sticky left-0 z-50 bg-blue-50 border-r border-b border-slate-200 h-6" />
-                  {interleavedColumns.map((col: any) => {
-                    if (col.isDelta) {
-                      return <TableHead key={col.id} className="border-r border-b border-slate-200 h-6 bg-blue-50" />;
+              {/* ═══ EST. TIME SUB-ROW ═══ */}
+              <TableRow className="hover:bg-transparent border-0">
+                <TableHead className="sticky left-0 z-30 border-r border-b border-slate-200 py-1.5 text-center bg-blue-50">
+                  <Clock className="h-3 w-3 text-blue-400 mx-auto" />
+                </TableHead>
+                {interleavedColumns.map((col: any) => {
+                  if (col.isDelta) {
+                    return <TableHead key={col.id} className="border-r border-b border-slate-200 px-1 py-1.5 bg-blue-50" />;
+                  }
+                  const isSticky = stickyColumnIds.has(col.id);
+                  const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
+
+                  let content: React.ReactNode = null;
+                  if (col.type === 'stage_date' && col.stageId) {
+                    const stage = stages?.find((s: any) => s.id === col.stageId);
+                    if (stage?.estimated_time) {
+                      content = (
+                        <span className="text-sm font-bold text-blue-600 italic whitespace-nowrap">
+                          {formatEstimatedMins(stage.estimated_time)}
+                        </span>
+                      );
                     }
-                    const isSticky = stickyColumnIds.has(col.id);
-                    const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
+                  }
 
-                    let content: React.ReactNode = null;
-
-                    if (col.type === 'stage_date' && col.stageId) {
-                      const stage = stages?.find((s: any) => s.id === col.stageId);
-                      if (stage?.estimated_time) {
-                        const hours = Math.floor(stage.estimated_time / 60);
-                        const mins = stage.estimated_time % 60;
-                        content = <span className="text-blue-600 font-bold italic">{hours > 0 ? `~${hours}h${mins > 0 ? ` ${mins}m` : ''}` : `${mins}m`}</span>;
-                      }
-                    }
-
-                    return (
-                      <TableHead
-                        key={`sub-${col.id}`}
-                        className={cn(
-                          "text-[9px] font-medium uppercase tracking-wider text-center border-r border-b border-slate-200 px-2 h-6 bg-blue-50 text-slate-500",
-                          isSticky && "sticky z-40 shadow-[2px_0_4px_rgba(0,0,0,0.02)]"
-                        )}
-                        style={isSticky ? { left: `${left}px` } : undefined}
-                      >
-                        {content}
-                      </TableHead>
-                    );
-                  })}
-                </TableRow>
-              )}
+                  return (
+                    <TableHead
+                      key={`sub-${col.id}`}
+                      className={cn(
+                        "text-[9px] font-medium uppercase tracking-wider text-center border-r border-b border-slate-200 px-2 py-1.5 bg-blue-50 text-slate-500",
+                        isSticky && "sticky z-40 shadow-[2px_0_4px_rgba(0,0,0,0.02)]"
+                      )}
+                      style={isSticky ? { left: `${left}px` } : undefined}
+                    >
+                      {col.type === 'task' && col.id === 'task_task_id' && (
+                        <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest whitespace-nowrap">Est. Time →</span>
+                      )}
+                      {content}
+                    </TableHead>
+                  );
+                })}
+              </TableRow>
             </TableHeader>
 
             <TableBody>
@@ -246,10 +247,9 @@ export function StandardReportView({
                       className={cn(
                         "group border-0 transition-colors",
                         idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
-                        "hover:bg-blue-50/40"
+                        "hover:bg-blue-50/50"
                       )}
                     >
-                      {/* Index Cell */}
                       <TableCell className={cn(
                         "sticky left-0 z-20 border-r border-b border-slate-200 text-center py-3",
                         idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
@@ -260,13 +260,11 @@ export function StandardReportView({
                         </span>
                       </TableCell>
 
-                      {/* Data Cells */}
                       {interleavedColumns.map((col: any) => {
                         if (col.isDelta) {
-                          // Delta cell: days between prevCol and nextCol stage dates
                           const prevDate = parseDateSafeReport(task.stages?.[col.prevCol?.stageId]?.date || task.stages?.[col.prevCol?.stageId]?.completedAt);
                           const nextDate = parseDateSafeReport(task.stages?.[col.nextCol?.stageId]?.date || task.stages?.[col.nextCol?.stageId]?.completedAt);
-                          const days = prevDate && nextDate ? differenceInDays(nextDate, prevDate) : null;
+                          const diff = prevDate && nextDate ? differenceInDays(nextDate, prevDate) : null;
                           return (
                             <TableCell
                               key={col.id}
@@ -276,12 +274,24 @@ export function StandardReportView({
                                 "group-hover:bg-blue-50/50"
                               )}
                             >
-                              {days !== null ? (
-                                <span className={cn("text-xs font-bold tabular-nums", days > 30 ? "text-rose-600" : days > 14 ? "text-amber-600" : "text-slate-500")}>
-                                  +{days}d
-                                </span>
+                              {diff !== null ? (
+                                <TooltipProvider delayDuration={200}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className={cn(
+                                        "text-sm font-bold tabular-nums cursor-default",
+                                        diff > 30 ? "text-rose-500" : diff > 14 ? "text-amber-500" : "text-slate-500"
+                                      )}>
+                                        {diff >= 0 ? `+${diff}d` : `${diff}d`}
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="bg-slate-900 text-white text-xs rounded-lg px-2 py-1.5 z-[100]">
+                                      {diff} day{Math.abs(diff) !== 1 ? "s" : ""} between stages
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
                               ) : (
-                                <span className="text-[9px] text-slate-300">—</span>
+                                <span className="text-slate-200 text-sm">—</span>
                               )}
                             </TableCell>
                           );
@@ -291,10 +301,8 @@ export function StandardReportView({
                         const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
 
                         const val = safeRender(renderCellValue(task, col));
-                        const isMissing = typeof val === 'string' && val.toLowerCase() === 'missing';
-
+                        const isMissing = typeof val === 'string' && (val.toLowerCase() === 'n/a' || val === 'N/A');
                         const isPrimary = col.field === 'applicant_name' || col.field === 'company_name';
-                        const isCentered = col.field === 'class' || col.field === 'duration' || col.type === 'current_stage_age' || col.type === 'total_process_age';
 
                         return (
                           <TableCell
@@ -303,12 +311,16 @@ export function StandardReportView({
                               "px-4 py-3 border-r border-b border-slate-200 transition-colors max-w-0 overflow-hidden",
                               isSticky ? "sticky z-20 shadow-[2px_0_4px_rgba(0,0,0,0.02)]" : "",
                               idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
-                              "group-hover:bg-blue-50/50",
-                              isCentered && "text-center"
+                              "group-hover:bg-blue-50/50"
                             )}
                             style={isSticky ? { left: `${left}px` } : undefined}
                           >
-                            <DataCell val={val} isMissing={isMissing} isPrimary={isPrimary} />
+                            {/* Bypass DataCell for Stage layout rendering to prevent tooltip collision */}
+                            {(col.type === 'stage_date' || col.type === 'stage_officer' || col.type === 'stage_doc_fields') ? (
+                              val
+                            ) : (
+                              <DataCell val={val} isMissing={isMissing} isPrimary={isPrimary} />
+                            )}
                           </TableCell>
                         );
                       })}
@@ -333,14 +345,11 @@ export function StandardReportView({
         </div>
       </div>
 
-      {/* Pagination Footer */}
       <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
-        {/* Left Stats Info */}
         <div className="text-[11px] text-slate-600 font-semibold">
           Showing <span className="text-slate-600">{((currentPage - 1) * rowsPerPage) + 1}</span> to <span className="font-medium text-slate-600">{Math.min(currentPage * rowsPerPage, allTasks.length)}</span> of <span className="font-medium text-slate-600">{allTasks.length}</span>
         </div>
 
-        {/* Right Controls */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-slate-600 font-semibold">Rows:</span>
@@ -355,23 +364,11 @@ export function StandardReportView({
           </div>
 
           <div className="flex items-center gap-0.5">
-            <PaginationButton onClick={() => setCurrentPage(1)} disabled={currentPage === 1}>
-              <ChevronsLeft size={12} />
-            </PaginationButton>
-            <PaginationButton onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}>
-              <ChevronLeft size={12} />
-            </PaginationButton>
-
-            <div className="px-2 py-1.5 text-[11px] font-medium text-slate-600 min-w-[24px] text-center">
-              {currentPage}
-            </div>
-
-            <PaginationButton onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages}>
-              <ChevronRight size={12} />
-            </PaginationButton>
-            <PaginationButton onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}>
-              <ChevronsRight size={12} />
-            </PaginationButton>
+            <PaginationButton onClick={() => setCurrentPage(1)} disabled={currentPage === 1}><ChevronsLeft size={12} /></PaginationButton>
+            <PaginationButton onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}><ChevronLeft size={12} /></PaginationButton>
+            <div className="px-2 py-1.5 text-[11px] font-medium text-slate-600 min-w-[24px] text-center">{currentPage}</div>
+            <PaginationButton onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages}><ChevronRight size={12} /></PaginationButton>
+            <PaginationButton onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}><ChevronsRight size={12} /></PaginationButton>
           </div>
         </div>
       </div>
@@ -379,7 +376,6 @@ export function StandardReportView({
   );
 }
 
-// Cleaned up pagination button to match SaaS standard
 const PaginationButton = ({ children, onClick, disabled }: any) => (
   <Button
     variant="ghost"

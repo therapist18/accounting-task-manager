@@ -149,7 +149,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
                     </button>
 
                     {isExpanded && activeSubDepartments.length > 0 && (
-                      <div className="pb-3 px-3 flex flex-col gap-0.5 bg-gray-100">
+                      <div className="pb-3 px-3 flex flex-col gap-0.5 bg-slate-100">
                         <button
                           onClick={() => setActiveSubDeptIds([])}
                           className={cn(
@@ -195,7 +195,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
   );
 }
 
-export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setView, handleSendReport, activeDepartment, activeSubDepartments, activeSubDeptIds, allTasksCount, wipTasksCount, writeUpCompletedCount, columns, visibleColumnIds, setVisibleColumnIds, showTimeTrackingColumns, setShowTimeTrackingColumns, showDocRequirementsColumns, setShowDocRequirementsColumns, showTime, setShowTime, showDelta, setShowDelta, showDurationRow, setShowDurationRow }: any) {
+export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setView, handleSendReport, activeDepartment, activeSubDepartments, activeSubDeptIds, allTasksCount, wipTasksCount, writeUpCompletedCount, columns, visibleColumnIds, setVisibleColumnIds, showTime, setShowTime, showDelta, setShowDelta }: any) {
 
   const selectedSubDeptText = React.useMemo(() => {
     if (activeSubDeptIds.length === 0) return "All Sub-units";
@@ -247,14 +247,10 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
             columns={columns}
             visibleColumnIds={visibleColumnIds}
             setVisibleColumnIds={setVisibleColumnIds}
-            showTimeTrackingColumns={showTimeTrackingColumns}
-            setShowTimeTrackingColumns={setShowTimeTrackingColumns}
-            showDocRequirementsColumns={showDocRequirementsColumns}
-            setShowDocRequirementsColumns={setShowDocRequirementsColumns}
           />
           <div className="h-6 w-px bg-slate-200 mx-1" />
 
-          {/* Show Time */}
+          {/* Show Time Toggle - Like Immigration Tracker */}
           {setShowTime && (
             <Button
               variant="outline"
@@ -270,23 +266,7 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
             </Button>
           )}
 
-          {/* Duration Row */}
-          {setShowDurationRow && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowDurationRow((v: boolean) => !v)}
-              className={cn(
-                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
-                showDurationRow ? "bg-amber-50 border-amber-300 text-amber-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
-              )}
-            >
-              <Layers className="h-3.5 w-3.5" />
-              {showDurationRow ? "Hide Est." : "Show Est."}
-            </Button>
-          )}
-
-          {/* Delta Toggle */}
+          {/* Delta Toggle - Like Immigration Tracker */}
           {setShowDelta && (
             <Button
               variant="outline"
