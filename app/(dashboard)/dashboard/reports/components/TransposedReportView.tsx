@@ -206,17 +206,23 @@ export function TransposedReportView({
                     {paginatedColumns.map(task => {
                       const rawCellVal = renderCellValue(task, row);
                       let content;
-                      if (rawCellVal && typeof rawCellVal === 'object' && rawCellVal.isCombinedStageDetails) {
+                     if (rawCellVal && typeof rawCellVal === 'object' && rawCellVal.isCombinedStageDetails) {
                           content = (
                               <div className="flex flex-col gap-2 text-left w-full h-full">
-                                  {rawCellVal.hasDocs && (
+                                  {rawCellVal.hasDate && (
                                       <div>
+                                         <span className="text-[10px] text-slate-400 font-bold uppercase block mb-0.5">Date</span>
+                                         {rawCellVal.dateNode}
+                                      </div>
+                                  )}
+                                  {rawCellVal.hasDocs && (
+                                      <div className={cn(rawCellVal.hasDate && "pt-2 border-t border-slate-100")}>
                                          <span className="text-[10px] text-slate-400 font-bold uppercase block mb-0.5">Docs</span>
                                          {rawCellVal.docNode}
                                       </div>
                                   )}
                                   {rawCellVal.hasOfficer && (
-                                      <div className={cn(rawCellVal.hasDocs && "pt-2 border-t border-slate-100")}>
+                                      <div className={cn((rawCellVal.hasDocs || rawCellVal.hasDate) && "pt-2 border-t border-slate-100")}>
                                          <span className="text-[10px] text-slate-400 font-bold uppercase block mb-0.5">Officer</span>
                                          {rawCellVal.officerNode}
                                       </div>

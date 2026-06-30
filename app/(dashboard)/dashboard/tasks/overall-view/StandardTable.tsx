@@ -41,7 +41,7 @@ interface StandardTableProps {
   toggleStageExpansion: (stageId: string) => void
   toggleDocumentExpansion: (docId: string) => void
   toggleDependantsExpansion: (taskId: string) => void
-  renderCellContent: (row: any, task: any, columnType?: 'date' | 'actions') => React.ReactNode
+  renderCellContent: (row: any, task: any, columnType?: 'date' | 'actions' | 'combined') => React.ReactNode
   officers?: any[]
 }
 
@@ -158,15 +158,30 @@ export const StandardTable: React.FC<StandardTableProps> = ({
 
   // --- STATS CALCULATOR ---
   const getColStats = useCallback((col: any) => {
-    if (col.type === 'case' || col.type === 'actions') return { total: '-', completed: '-', missing: '-' };
+    if (col.type === 'actions') return { total: '-', completed: '-', missing: '-' };
 
     let completed = 0;
     const total = sortedTasks.length;
 
     sortedTasks.forEach(t => {
-      if (col.type === 'stage') {
+      if (col.type === 'case') {
+        let hasValue = false;
+        const v = t[col.header.id];
+        
+        if (col.header.id === 'applicant_name') hasValue = !!(t.applicant_name || t.applicant_details?.name || t.full_name);
+        else if (col.header.id === 'company_name') hasValue = !!(t.company_name || t.company?.name || t.company_id);
+        else if (col.header.id === 'job_description') hasValue = !!t.job_description;
+        else if (col.header.id === 'task_ref' || col.header.id === 'id') hasValue = !!t.id;
+        else if (col.header.id === 'case_status' || col.header.id === 'status') hasValue = !!t.status;
+        else if (col.header.id === 'nationality') hasValue = !!(t.nationality || t.applicant_details?.nationality);
+        else if (col.header.id === 'passport_number') hasValue = !!(t.passport_number || t.applicant_details?.passport_number);
+        else hasValue = v !== null && v !== undefined && v !== '';
+        
+        if (hasValue) completed++;
+      }
+      else if (col.type === 'stage') {
         const status = t.stages?.[col.stage.id]?.status;
-        if (['write_up_completed', 'completed', 'endorsed'].includes(status)) completed++;
+        if (['write_up_completed', 'completed', 'endorsed', 'skipped'].includes(status)) completed++;
       }
       else if (col.type === 'document') {
         const docs = t.source_document_id?.[col.stage.id];
@@ -213,7 +228,6 @@ export const StandardTable: React.FC<StandardTableProps> = ({
     <div className="flex flex-col h-full antialiased bg-white border border-slate-200 shadow-sm overflow-hidden">
       <DeleteConfirmationDialog open={!!taskToDelete} onOpenChange={(open) => !open && setTaskToDelete(null)} onConfirm={handleConfirmDelete} title="Delete Task" confirmText="Delete" loading={dataLoading?.tasks || false} />
 
-      {/* DEFINED HEIGHT & OVERFLOW AUTO */}
       <div className="h-[calc(100vh-280px)] overflow-auto custom-scrollbar relative">
         <Table className="border-separate border-spacing-0 min-w-max w-full">
 
@@ -232,6 +246,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                       <button
                         onClick={() => requestSort(header.id)}
                         className="shrink-0 rounded bg-slate-600 hover:bg-slate-500 text-white p-0.5 transition-all"
+                        title="Sort"
                       >
                         {sortConfig?.key === header.id
                           ? (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)
@@ -244,14 +259,22 @@ export const StandardTable: React.FC<StandardTableProps> = ({
               ))}
 
               {visibleStages.map(stage => (
-                <TableHead key={stage.id} colSpan={getStageColSpan(stage)} rowSpan={getStageRowSpan(stage)} className={cn("border-r border-b border-white/30 text-center px-4 py-2.5 bg-[#376bae]", !expandedStages.has(stage.id.toString()) && COL_WIDTH)}>
+                <TableHead key={stage.id} colSpan={getStageColSpan(stage)} rowSpan={getStageRowSpan(stage)} className={cn("border-r border-b border-white/30 text-center px-2 py-2.5 bg-[#376bae]", !expandedStages.has(stage.id.toString()) && COL_WIDTH)}>
                   <div className="flex items-center justify-center gap-2">
                     <span className="text-xs font-semibold text-white uppercase tracking-wider truncate" title={stage.name}>{stage.name}</span>
-                    {stage.documents?.length > 0 && (
-                      <button onClick={() => toggleStageExpansion(stage.id.toString())} className="shrink-0 rounded bg-slate-600 hover:bg-slate-500 text-white p-0.5 transition-all">
-                        {expandedStages.has(stage.id.toString()) ? <Minus size={12} /> : <Plus size={12} />}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => requestSort(`stage_${stage.id}`)} className="shrink-0 rounded bg-slate-600 hover:bg-slate-500 text-white p-0.5 transition-all" title="Sort by Stage">
+                        {sortConfig?.key === `stage_${stage.id}`
+                          ? (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)
+                          : <ChevronUp size={12} className="opacity-50" />
+                        }
                       </button>
-                    )}
+                      {stage.documents?.length > 0 && (
+                        <button onClick={() => toggleStageExpansion(stage.id.toString())} className="shrink-0 rounded bg-slate-600 hover:bg-slate-500 text-white p-0.5 transition-all">
+                          {expandedStages.has(stage.id.toString()) ? <Minus size={12} /> : <Plus size={12} />}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </TableHead>
               ))}
@@ -360,7 +383,6 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                           )
                         }
                       } else {
-                        // Custom Dependant Data Rendering
                         if (['applicant_name', 'client_name'].includes(col.header.id)) content = <span className="text-sm font-semibold text-amber-900 truncate">{row.dependant.full_name} <span className="text-xs font-normal text-amber-600">({row.dependant.relationship})</span></span>;
                         else if (col.header.id === 'nationality') content = <span className="text-sm">{row.dependant.nationality || '-'}</span>;
                         else if (col.header.id === 'age') content = <span className="text-sm">{row.dependant.age || '-'}</span>;
@@ -381,12 +403,8 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                     // --- STAGE ---
                     if (col.type === 'stage') {
                       return (
-                        <TableCell key={`${row.key}-${col.id}`} className={cn("text-center px-4 py-2.5 border-r border-b border-slate-200", COL_WIDTH)}>
-                          <div className="flex flex-col gap-2 items-center justify-center">
-                            {renderCellContent({ type: 'stage', stage: col.stage }, row.task, 'date')}
-                            {/* THIS renders the missing Upload/View/Officer icons! */}
-                            {renderCellContent({ type: 'stage', stage: col.stage }, row.task, 'actions')}
-                          </div>
+                        <TableCell key={`${row.key}-${col.id}`} className={cn("text-center px-2 py-2 border-r border-b border-slate-200", COL_WIDTH)}>
+                          {renderCellContent({ type: 'stage', stage: col.stage }, row.task, 'combined')}
                         </TableCell>
                       );
                     }

@@ -262,7 +262,7 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
               )}
             >
               <User className="h-3.5 w-3.5" />
-              Officers: {showOfficers ? "Visible" : "Hidden"}
+              Officers Cols: {showOfficers ? "Visible" : "Hidden"}
             </Button>
           )}
 

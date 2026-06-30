@@ -171,49 +171,54 @@ export function StandardReportView({
                       }}
                     >
                       <div className="flex flex-col justify-center h-full gap-1">
-                         <div className="flex items-center justify-between gap-2">
-                            <TooltipProvider delayDuration={500}>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span className={cn("text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap text-white truncate")}>
-                                    {col.label}
-                                  </span>
-                                </TooltipTrigger>
-                                <TooltipContent side="bottom" className="bg-slate-900 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[200] max-w-[260px] break-words">
+                        <div className="flex items-center justify-between gap-2">
+                          <TooltipProvider delayDuration={500}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className={cn("text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap text-white truncate")}>
                                   {col.label}
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom" className="bg-slate-900 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[200] max-w-[260px] break-words">
+                                {col.label}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
 
-                            <div className="flex items-center gap-1.5">
-                              {col.hasSubColumns && (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); toggleStageColumns(col.stageId); }}
-                                  className="h-4 w-4 shrink-0 flex items-center justify-center rounded bg-slate-600 hover:bg-slate-500 text-white transition-all"
-                                >
-                                  {expandedStageColumns.has(col.stageId) ? <Minus size={10} strokeWidth={2.5} /> : <Plus size={10} strokeWidth={2.5} />}
-                                </button>
-                              )}
-                              <ArrowUpDown className={cn("h-3 w-3 shrink-0", isActive ? "text-white" : "text-slate-500 opacity-0 group-hover:opacity-100")} />
-                            </div>
-                         </div>
-                         
-                         {col.type === 'stage_details' && (
-                           <div className="flex items-center w-full text-[9px] font-bold text-white/70 uppercase tracking-widest mt-0.5">
-                              {col.fields?.length > 0 && (
-                                <div className={cn("flex-1 text-left", col.hasOfficer && showOfficers && "border-r border-white/30 pr-2")}>
-                                  Docs
-                                </div>
-                              )}
-                              {(col.hasOfficer && showOfficers) && (
-                                <div className="flex-1 text-left pl-2">
-                                  Officer
-                                </div>
-                              )}
-                           </div>
-                         )}
+                          <div className="flex items-center gap-1.5">
+                            {col.hasSubColumns && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); toggleStageColumns(col.stageId); }}
+                                className="h-4 w-4 shrink-0 flex items-center justify-center rounded bg-slate-600 hover:bg-slate-500 text-white transition-all"
+                              >
+                                {expandedStageColumns.has(col.stageId) ? <Minus size={10} strokeWidth={2.5} /> : <Plus size={10} strokeWidth={2.5} />}
+                              </button>
+                            )}
+                            <ArrowUpDown className={cn("h-3 w-3 shrink-0", isActive ? "text-white" : "text-slate-500 opacity-0 group-hover:opacity-100")} />
+                          </div>
+                        </div>
+
+                        {col.type === 'stage_info' && (
+                          <div className="flex items-center w-full text-[9px] font-bold text-white/70 uppercase tracking-widest mt-0.5">
+                            {col.hasDate && (
+                              <div className={cn("flex-1 text-left", (col.fields?.length > 0 || (col.hasOfficer && showOfficers)) && "border-r border-white/30 pr-2 mr-2")}>
+                                Date
+                              </div>
+                            )}
+                            {col.fields?.length > 0 && (
+                              <div className={cn("flex-1 text-left", (col.hasOfficer && showOfficers) && "border-r border-white/30 pr-2")}>
+                                Docs
+                              </div>
+                            )}
+                            {(col.hasOfficer && showOfficers) && (
+                              <div className="flex-1 text-left pl-2">
+                                Officer
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      
+
                       <div className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-slate-400/30 transition-colors" />
                     </TableHead>
                   );
@@ -329,35 +334,31 @@ export function StandardReportView({
 
                         let cellContent;
                         if (rawCellVal && typeof rawCellVal === 'object' && rawCellVal.isCombinedStageDetails) {
-                            cellContent = (
-                                <div className="flex items-stretch w-full min-h-full py-1">
-                                    {rawCellVal.hasDocs && (
-                                        <div className={cn("flex-1 overflow-hidden", (rawCellVal.hasOfficer && showOfficers) && "pr-2 border-r border-slate-200 mr-2")}>
-                                           {rawCellVal.docNode}
-                                        </div>
-                                    )}
-                                    {(rawCellVal.hasOfficer && showOfficers) && (
-                                        <div className="flex-1 overflow-hidden">
-                                           {rawCellVal.officerNode}
-                                        </div>
-                                    )}
-                                    {(!rawCellVal.hasDocs && rawCellVal.hasOfficer && !showOfficers) && (
-                                        <div className="flex-1 flex items-center justify-center text-[10px] text-slate-400 italic">
-                                            Hidden
-                                        </div>
-                                    )}
+                          cellContent = (
+                            <div className="flex items-stretch w-full min-h-[32px]">
+                              {rawCellVal.hasDate && (
+                                <div className={cn("flex-1 flex items-center overflow-hidden", (rawCellVal.hasDocs || (rawCellVal.hasOfficer && showOfficers)) && "pr-2 border-r border-slate-200 mr-2")}>
+                                  {rawCellVal.dateNode}
                                 </div>
-                            );
+                              )}
+                              {rawCellVal.hasDocs && (
+                                <div className={cn("flex-1 flex items-center overflow-hidden", (rawCellVal.hasOfficer && showOfficers) && "pr-2 border-r border-slate-200 mr-2")}>
+                                  {rawCellVal.docNode}
+                                </div>
+                              )}
+                              {(rawCellVal.hasOfficer && showOfficers) && (
+                                <div className="flex-1 flex items-center overflow-hidden">
+                                  {rawCellVal.officerNode}
+                                </div>
+                              )}
+                            </div>
+                          );
                         } else {
-                            const val = safeRender(rawCellVal);
-                            const isMissing = typeof val === 'string' && (val.toLowerCase() === 'n/a' || val === 'N/A');
-                            const isPrimary = col.field === 'applicant_name' || col.field === 'company_name';
+                          const val = safeRender(rawCellVal);
+                          const isMissing = React.isValidElement(val) && val.props?.className?.includes('text-rose-600');
+                          const isPrimary = col.field === 'applicant_name' || col.field === 'company_name';
 
-                            cellContent = (col.type === 'stage_date' || col.type === 'stage_officer' || col.type === 'stage_doc_fields') ? (
-                              val
-                            ) : (
-                              <DataCell val={val} isMissing={isMissing} isPrimary={isPrimary} />
-                            );
+                          cellContent = isMissing ? val : <DataCell val={val} isMissing={val === 'N/A'} isPrimary={isPrimary} />;
                         }
 
                         return (
