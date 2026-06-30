@@ -29,6 +29,7 @@ import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
 import { ReportsSidebar, ReportsHeader, PersonFilterStrip, StatusFilterBar } from "./components/ReportsHeader";
 
+// ... (keep earlier helper functions parseDateSafe, formatDate, formatDateTimeForDisplay, safeRender, isStageApplicableToTask exactly as they were) ...
 const SPECIAL_STAGE_IDS = [
   '072b9710-45df-4a05-ba65-01b4ef29d61d',
   'caefd742-5de5-4341-a3bb-81d7b9dd2b73'
@@ -36,8 +37,6 @@ const SPECIAL_STAGE_IDS = [
 
 const WRITE_UP_STAGE_ID = '072b9710-45df-4a05-ba65-01b4ef29d61d';
 const PP_ENDORSEMENT_STAGE_ID = 'caefd742-5de5-4341-a3bb-81d7b9dd2b73';
-
-// ── Shared Date Formatting Tools (Matched to Tracker) ──
 
 const parseDateSafe = (s: string | null | undefined): Date | null => {
   if (!s) return null;
@@ -135,6 +134,7 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boo
 };
 
 export default function ReportsPage() {
+  // ... (keep all state and shared hooks up to useMemo for columns) ...
   const [activeReport, setActiveReport] = useState<any | null>(null);
   const [availableReports, setAvailableReports] = useState<any[]>([]);
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
@@ -175,6 +175,7 @@ export default function ReportsPage() {
   const [view, setView] = useState<'standard' | 'transposed'>('standard');
   const [showTime, setShowTime] = useState(false);
   const [showDelta, setShowDelta] = useState(false);
+  const [showOfficers, setShowOfficers] = useState(false);
   const [expandedSections, setExpandedSections] = useState(() => new Set(['task_details']));
   const [showNARows, setShowNARows] = useState(true);
   const [showDocRequirementsColumns, setShowDocRequirementsColumns] = useState(false);
@@ -433,6 +434,32 @@ export default function ReportsPage() {
   const endorsedCount = useMemo(() => tasksByFilters.filter(t => t.status === 'endorsed').length, [tasksByFilters]);
   const cancelledCount = useMemo(() => tasksByFilters.filter(t => t.status === 'cancel').length, [tasksByFilters]);
 
+  const officerTaskCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: 0 };
+    for (const o of availableOfficers) {
+      const oTasks = tasksByFilters.filter(t => getStageOfficerIds(t, 'current').includes(o.id.toString()));
+      counts[o.id.toString()] = oTasks.length;
+      counts.all += oTasks.length;
+    }
+    const unallocated = tasksByFilters.filter(t => getStageOfficerIds(t, 'current').length === 0);
+    counts.__unallocated__ = unallocated.length;
+    counts.all += unallocated.length;
+    return counts;
+  }, [tasksByFilters, availableOfficers, getStageOfficerIds]);
+
+  const taskManagerTaskCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: 0 };
+    for (const tm of availableTaskManagers) {
+      const tmTasks = tasksByFilters.filter(t => t.task_manager?.id?.toString() === tm.id.toString());
+      counts[tm.id.toString()] = tmTasks.length;
+      counts.all += tmTasks.length;
+    }
+    const unallocated = tasksByFilters.filter(t => !t.task_manager?.id);
+    counts.__unallocated__ = unallocated.length;
+    counts.all += unallocated.length;
+    return counts;
+  }, [tasksByFilters, availableTaskManagers]);
+
   const searchedTasks = useMemo(() => {
     let filtered = tasksByFilters.filter(task => {
       if (activeStatus === 'wip' && ['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'].includes(task.status)) return false;
@@ -502,12 +529,10 @@ export default function ReportsPage() {
         cols.push({ id: `stage_${stage.id}_date`, label: stage.name, type: 'stage_date', stageId: stage.id, stageName: stage.name, requiresUpload });
       }
 
-      if (stage.follow_up?.toLowerCase() === 'officer' && !cols.some(c => c.id === `stage_${stage.id}_officer`)) {
-        cols.push({ id: `stage_${stage.id}_officer`, label: `${stage.name} (Officer)`, type: 'stage_officer', stageId: stage.id, stageName: stage.name });
-      }
+      const hasOfficer = stage.follow_up?.toLowerCase() === 'officer';
+      const allFields: { kycId: string; fieldId: string; fieldName: string }[] = [];
 
       if (config.documents && Object.keys(config.documents).length > 0) {
-        const allFields: { kycId: string; fieldId: string; fieldName: string }[] = [];
         Object.entries(config.documents).forEach(([kycId, docConfig]) => {
           const kycDoc = kycDocuments.get(kycId);
           if (!kycDoc) return;
@@ -517,16 +542,18 @@ export default function ReportsPage() {
             allFields.push({ kycId, fieldId: field.id, fieldName: fieldInfo.fieldName || field.id });
           });
         });
-        if (allFields.length > 0) {
-          cols.push({
-            id: `stage_${stage.id}_doc_fields`,
-            label: `${stage.name} (Document)`,
-            type: 'stage_doc_fields',
-            stageId: stage.id,
-            stageName: stage.name,
-            fields: allFields,
-          });
-        }
+      }
+
+      if (hasOfficer || allFields.length > 0) {
+        cols.push({
+          id: `stage_${stage.id}_details`,
+          label: `${stage.name} (Info)`,
+          type: 'stage_details',
+          stageId: stage.id,
+          stageName: stage.name,
+          hasOfficer,
+          fields: allFields,
+        });
       }
     });
     return cols;
@@ -659,75 +686,94 @@ export default function ReportsPage() {
       );
     }
 
-    if (col.type === 'stage_officer') {
-      const stageData = task.stages?.[col.stageId];
-      const officerIds = Array.isArray(stageData?.officer_ids) ? stageData.officer_ids.map(String).filter(Boolean) : [];
-      if (!officerIds.length) return <span className="text-sm text-gray-400 italic">—</span>;
-      const names = officerIds.map(id => {
-        const o = unifiedOfficers.find((u: any) => u.id.toString() === id.toString());
-        return o ? getOfficerDisplayName(o) : 'Unknown';
-      }).filter(Boolean);
-      return (
-        <div className="flex flex-wrap gap-1">
-          {names.map((n: string, i: number) => <Badge key={i} variant="outline" className="text-xs px-1.5 py-0 bg-violet-50 text-violet-700 border-violet-200">{n}</Badge>)}
-        </div>
-      );
-    }
+    if (col.type === 'stage_details') {
+      let officerNode: React.ReactNode = null;
+      if (col.hasOfficer) {
+        const stageData = task.stages?.[col.stageId];
+        const officerIds = Array.isArray(stageData?.officer_ids) ? stageData.officer_ids.map(String).filter(Boolean) : [];
+        if (!officerIds.length) {
+          officerNode = <span className="text-xs text-gray-400 italic">—</span>;
+        } else {
+          const names = officerIds.map(id => {
+            const o = unifiedOfficers.find((u: any) => u.id.toString() === id.toString());
+            return o ? getOfficerDisplayName(o) : 'Unknown';
+          }).filter(Boolean);
+          officerNode = (
+            <div className="flex flex-wrap gap-1">
+              {names.map((n: string, i: number) => <Badge key={i} variant="outline" className="text-[10px] px-1.5 py-0 bg-violet-50 text-violet-700 border-violet-200">{n}</Badge>)}
+            </div>
+          );
+        }
+      }
 
-    if (col.type === 'stage_doc_fields') {
-      const sourceDocRef = task.source_document_id?.[col.stageId];
-      let doc: any = null;
+      let docNode: React.ReactNode = null;
+      if (col.fields && col.fields.length > 0) {
+        const sourceDocRef = task.source_document_id?.[col.stageId];
+        let doc: any = null;
 
-      if (sourceDocRef) {
-        const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
-        const firstRef = docIds[0];
-        if (firstRef) {
-          const docId = typeof firstRef === 'string' ? firstRef : firstRef?.id;
-          if (docId) {
-            doc = allDocuments.find((d: any) => d.id?.toString() === docId?.toString());
+        if (sourceDocRef) {
+          const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
+          const firstRef = docIds[0];
+          if (firstRef) {
+            const docId = typeof firstRef === 'string' ? firstRef : firstRef?.id;
+            if (docId) {
+              doc = allDocuments.find((d: any) => d.id?.toString() === docId?.toString());
+            }
+          }
+        }
+
+        if (!doc) {
+          const stageData = task.stages?.[col.stageId];
+          if (stageData?.documents) {
+            const docs = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
+            if (docs.length > 0) doc = docs[0];
+          }
+        }
+
+        if (!doc) {
+          docNode = <span className="text-xs text-gray-400 italic">—</span>;
+        } else {
+          const fieldValues: { fieldName: string; value: any }[] = [];
+          for (const f of col.fields) {
+            const val = doc.extracted_details?.[f.fieldName] || doc.edited_details?.[f.fieldName] || doc.extracted_data?.[f.fieldName];
+            if (val !== null && val !== undefined && val !== '') {
+              fieldValues.push({ fieldName: f.fieldName, value: val });
+            }
+          }
+
+          if (fieldValues.length === 0) {
+            docNode = <span className="text-xs text-gray-400 italic">—</span>;
+          } else {
+            docNode = (
+              <div className="flex flex-col gap-0.5">
+                {fieldValues.map((fv, i) => {
+                  let displayVal = String(fv.value);
+                  if (typeof fv.value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(fv.value)) {
+                    try {
+                      const d = new Date(fv.value);
+                      if (isValid(d)) displayVal = format(d, 'dd/MM/yyyy');
+                    } catch { }
+                  }
+                  return (
+                    <div key={i} className="text-xs text-slate-700 leading-tight">
+                      <span className="text-[10px] font-medium text-slate-500 uppercase">{fv.fieldName}:</span>{' '}
+                      <span className="font-medium">{displayVal}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
           }
         }
       }
 
-      if (!doc) {
-        const stageData = task.stages?.[col.stageId];
-        if (stageData?.documents) {
-          const docs = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
-          if (docs.length > 0) doc = docs[0];
-        }
-      }
-
-      if (!doc) return <span className="text-sm text-gray-400">—</span>;
-
-      const fieldValues: { fieldName: string; value: any }[] = [];
-      for (const f of col.fields) {
-        const val = doc.extracted_details?.[f.fieldName] || doc.edited_details?.[f.fieldName] || doc.extracted_data?.[f.fieldName];
-        if (val !== null && val !== undefined && val !== '') {
-          fieldValues.push({ fieldName: f.fieldName, value: val });
-        }
-      }
-
-      if (fieldValues.length === 0) return <span className="text-sm text-gray-400">—</span>;
-
-      return (
-        <div className="flex flex-col gap-0.5">
-          {fieldValues.map((fv, i) => {
-            let displayVal = String(fv.value);
-            if (typeof fv.value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(fv.value)) {
-              try {
-                const d = new Date(fv.value);
-                if (isValid(d)) displayVal = format(d, 'dd/MM/yyyy');
-              } catch { }
-            }
-            return (
-              <div key={i} className="text-sm text-slate-700 leading-tight">
-                <span className="text-[10px] font-medium text-slate-500 uppercase">{fv.fieldName}:</span>{' '}
-                <span className="font-medium">{displayVal}</span>
-              </div>
-            );
-          })}
-        </div>
-      );
+      return {
+        isCombinedStageDetails: true,
+        hasOfficer: col.hasOfficer,
+        hasDocs: col.fields && col.fields.length > 0,
+        officerNode,
+        docNode
+      };
     }
 
     if (col.type === 'reference_requirement') {
@@ -753,40 +799,52 @@ export default function ReportsPage() {
       const dateVal = task.stages?.[col.stageId]?.date || task.stages?.[col.stageId]?.completedAt;
       return dateVal ? formatDate(dateVal, false) : 'Pending';
     }
-    if (col.type === 'stage_officer') {
-      const stageData = task.stages?.[col.stageId];
-      const officerIds = Array.isArray(stageData?.officer_ids) ? stageData.officer_ids.map(String).filter(Boolean) : [];
-      if (!officerIds.length) return '';
-      return officerIds.map(id => {
-        const o = unifiedOfficers.find((u: any) => u.id.toString() === id.toString());
-        return o ? getOfficerDisplayName(o) : 'Unknown';
-      }).join(', ');
-    }
-    if (col.type === 'stage_doc_fields') {
-      const sourceDocRef = task.source_document_id?.[col.stageId];
-      let doc: any = null;
-      if (sourceDocRef) {
-        const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
-        const firstRef = docIds[0];
-        if (firstRef) {
-          const docId = typeof firstRef === 'string' ? firstRef : firstRef?.id;
-          if (docId) doc = allDocuments.find((d: any) => d.id?.toString() === docId?.toString());
-        }
-      }
-      if (!doc) {
+    if (col.type === 'stage_details') {
+      let officerText = '';
+      if (col.hasOfficer) {
         const stageData = task.stages?.[col.stageId];
-        if (stageData?.documents) {
-          const docs = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
-          if (docs.length > 0) doc = docs[0];
+        const officerIds = Array.isArray(stageData?.officer_ids) ? stageData.officer_ids.map(String).filter(Boolean) : [];
+        if (officerIds.length) {
+          officerText = officerIds.map(id => {
+            const o = unifiedOfficers.find((u: any) => u.id.toString() === id.toString());
+            return o ? getOfficerDisplayName(o) : 'Unknown';
+          }).join(', ');
         }
       }
-      if (!doc) return '';
-      const parts: string[] = [];
-      for (const f of col.fields) {
-        const val = doc.extracted_details?.[f.fieldName] || doc.edited_details?.[f.fieldName] || doc.extracted_data?.[f.fieldName];
-        if (val !== null && val !== undefined && val !== '') parts.push(`${f.fieldName}: ${val}`);
+
+      let docText = '';
+      if (col.fields && col.fields.length > 0) {
+        const sourceDocRef = task.source_document_id?.[col.stageId];
+        let doc: any = null;
+        if (sourceDocRef) {
+          const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
+          const firstRef = docIds[0];
+          if (firstRef) {
+            const docId = typeof firstRef === 'string' ? firstRef : firstRef?.id;
+            if (docId) doc = allDocuments.find((d: any) => d.id?.toString() === docId?.toString());
+          }
+        }
+        if (!doc) {
+          const stageData = task.stages?.[col.stageId];
+          if (stageData?.documents) {
+            const docs = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
+            if (docs.length > 0) doc = docs[0];
+          }
+        }
+        if (doc) {
+          const parts: string[] = [];
+          for (const f of col.fields) {
+            const val = doc.extracted_details?.[f.fieldName] || doc.edited_details?.[f.fieldName] || doc.extracted_data?.[f.fieldName];
+            if (val !== null && val !== undefined && val !== '') parts.push(`${f.fieldName}: ${val}`);
+          }
+          docText = parts.join(', ');
+        }
       }
-      return parts.join(', ');
+
+      if (col.hasOfficer && col.fields?.length > 0) {
+        return `Docs: ${docText || 'N/A'} | Officers: ${officerText || 'N/A'}`;
+      }
+      return docText || officerText || '';
     }
     return '';
   }, [departments, stages, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, unifiedOfficers, allDocuments]);
@@ -1217,10 +1275,11 @@ export default function ReportsPage() {
           visibleColumnIds={visibleColumnIds} setVisibleColumnIds={setVisibleColumnIds} view={view} setView={setView}
           handleSendReport={handleSendReport} activeDepartment={activeDepartment} activeSubDepartments={activeSubDepartments}
           activeSubDeptIds={activeSubDeptIds} showTime={showTime} setShowTime={setShowTime} showDelta={showDelta} setShowDelta={setShowDelta}
+          showOfficers={showOfficers} setShowOfficers={setShowOfficers}
         />
         <PersonFilterStrip
           activePerspective={activePerspective} setActivePerspective={setActivePerspective} allTasksCount={allTasksCount}
-          officerTaskCounts={{}} taskManagerTaskCounts={{}} clientTaskCounts={{}} availableOfficers={availableOfficers}
+          officerTaskCounts={officerTaskCounts} taskManagerTaskCounts={taskManagerTaskCounts} clientTaskCounts={{}} availableOfficers={availableOfficers}
           activeOfficerTab={activeOfficerTab} setActiveOfficerTab={setActiveOfficerTab} officerFilterMode={officerFilterMode} setOfficerFilterMode={setOfficerFilterMode}
           availableTaskManagers={availableTaskManagers} activeTaskManagerTab={activeTaskManagerTab} setActiveTaskManagerTab={setActiveTaskManagerTab}
           taskManagerFilterMode={taskManagerFilterMode} setTaskManagerFilterMode={setTaskManagerFilterMode}
@@ -1248,12 +1307,12 @@ export default function ReportsPage() {
               allTasks={filteredByNARows} filteredColumns={filteredColumns} sortConfig={sortConfig}
               expandedStageColumns={expandedStageColumns} renderCellValue={renderCellValue} safeRender={safeRender}
               handleSort={handleSort} toggleStageColumns={toggleStageColumns} isStageApplicableToCurrentFilter={isStageApplicableToCurrentFilter}
-              departments={departments} stages={stages} showTime={showTime} showDelta={showDelta} activeDeptId={activeDeptId}
+              departments={departments} stages={stages} showTime={showTime} showDelta={showDelta} showOfficers={showOfficers} activeDeptId={activeDeptId}
             />
           ) : (
             <TransposedReportView
               paginatedTasks={filteredByNARows} transposedRows={[]} currentPage={1} itemsPerPage={filteredByNARows.length}
-              expandedSections={expandedSections} renderCellValue={renderCellValue} toggleSection={() => {}}
+              expandedSections={expandedSections} renderCellValue={renderCellValue} toggleSection={() => { }}
               userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
               departments={departments}
             />

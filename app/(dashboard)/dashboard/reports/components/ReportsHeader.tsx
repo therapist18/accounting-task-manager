@@ -195,7 +195,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
   );
 }
 
-export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setView, handleSendReport, activeDepartment, activeSubDepartments, activeSubDeptIds, allTasksCount, wipTasksCount, writeUpCompletedCount, columns, visibleColumnIds, setVisibleColumnIds, showTime, setShowTime, showDelta, setShowDelta }: any) {
+export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setView, handleSendReport, activeDepartment, activeSubDepartments, activeSubDeptIds, allTasksCount, wipTasksCount, writeUpCompletedCount, columns, visibleColumnIds, setVisibleColumnIds, showTime, setShowTime, showDelta, setShowDelta, showOfficers, setShowOfficers }: any) {
 
   const selectedSubDeptText = React.useMemo(() => {
     if (activeSubDeptIds.length === 0) return "All Sub-units";
@@ -249,6 +249,22 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
             setVisibleColumnIds={setVisibleColumnIds}
           />
           <div className="h-6 w-px bg-slate-200 mx-1" />
+
+          {/* Officers Toggle */}
+          {setShowOfficers && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowOfficers((v: boolean) => !v)}
+              className={cn(
+                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+                showOfficers ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              <User className="h-3.5 w-3.5" />
+              Officers: {showOfficers ? "Visible" : "Hidden"}
+            </Button>
+          )}
 
           {/* Show Time Toggle - Like Immigration Tracker */}
           {setShowTime && (

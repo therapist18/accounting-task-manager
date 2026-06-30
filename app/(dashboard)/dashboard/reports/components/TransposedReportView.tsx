@@ -84,11 +84,9 @@ export function TransposedReportView({
 }: any) {
   const [columnsPage, setColumnsPage] = useState(1);
   const [columnsPerPage, setColumnsPerPage] = useState(initialColumnsPerPage);
-
   const totalColumns = paginatedTasks.length;
   const totalPages = Math.ceil(totalColumns / columnsPerPage);
   const paginatedColumns = paginatedTasks.slice((columnsPage - 1) * columnsPerPage, columnsPage * columnsPerPage);
-
   const bodyRows = transposedRows.filter(row => row.id !== 'task_details' && row.type !== 'task');
   const taskDetailsRows = transposedRows.filter(row => row.type === 'task');
 
@@ -205,13 +203,38 @@ export function TransposedReportView({
                         {row.isSubRow && <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Sub-Attribute</span>}
                       </div>
                     </TableCell>
-                    {paginatedColumns.map(task => (
-                      <TableCell key={task.id} className={cn("border-b border-slate-100 text-center px-4 py-3", DATA_COLUMN_WIDTH)}>
-                        <div className="text-[13px] leading-relaxed">
-                          {safeRender(renderCellValue(task, row))}
-                        </div>
-                      </TableCell>
-                    ))}
+                    {paginatedColumns.map(task => {
+                      const rawCellVal = renderCellValue(task, row);
+                      let content;
+                      if (rawCellVal && typeof rawCellVal === 'object' && rawCellVal.isCombinedStageDetails) {
+                          content = (
+                              <div className="flex flex-col gap-2 text-left w-full h-full">
+                                  {rawCellVal.hasDocs && (
+                                      <div>
+                                         <span className="text-[10px] text-slate-400 font-bold uppercase block mb-0.5">Docs</span>
+                                         {rawCellVal.docNode}
+                                      </div>
+                                  )}
+                                  {rawCellVal.hasOfficer && (
+                                      <div className={cn(rawCellVal.hasDocs && "pt-2 border-t border-slate-100")}>
+                                         <span className="text-[10px] text-slate-400 font-bold uppercase block mb-0.5">Officer</span>
+                                         {rawCellVal.officerNode}
+                                      </div>
+                                  )}
+                              </div>
+                          );
+                      } else {
+                          content = safeRender(rawCellVal);
+                      }
+
+                      return (
+                        <TableCell key={task.id} className={cn("border-b border-slate-100 text-center px-4 py-3 align-top", DATA_COLUMN_WIDTH)}>
+                          <div className="text-[13px] leading-relaxed">
+                            {content}
+                          </div>
+                        </TableCell>
+                      );
+                    })}
                   </TableRow>
                 );
               })}
