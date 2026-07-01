@@ -1516,7 +1516,7 @@ export default function CVGeneratorPage() {
       const age = cvData.personalDetails?.dateOfBirth
         ? (() => { const dob = cvData.personalDetails.dateOfBirth; const [d, m, y] = dob.includes('/') ? dob.split('/').map(Number) : [0, 0, Number(dob.split('-')[0])]; const birth = new Date(y, m ? m - 1 : 0, d || 1); return `${Math.floor((Date.now() - birth.getTime()) / (365.25 * 24 * 3600 * 1000))}`; })()
         : '';
-      const rec = recommender.name ? recommender.name.replace(/\s+/g, '_') : 'BCL';
+      const rec = 'BCL';
       const prof = (cvData.personalInfo?.title || '').replace(/\s+/g, '_').slice(0, 30);
       const applicantName = (cvData.personalInfo.fullName || 'CV').replace(/\s+/g, '_');
       const fileName = [applicantName, age, 'REF', rec, prof].filter(Boolean).join('_') + '.pdf';
