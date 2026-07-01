@@ -2,15 +2,17 @@
 "use client";
 
 import React, { useState, useCallback, useMemo } from "react";
+import Link from "next/link";
 import { Table, TableBody, TableCell, TableRow, TableHeader, TableHead } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { 
   Plus, Minus, Briefcase, AlertTriangle, Loader2, 
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, 
-  Building, Layers, Shield, User as UserIcon, Users, SearchX 
+  Building, Layers, Shield, User as UserIcon, Users, SearchX, Upload, CheckCircle2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getOfficerDisplayName } from "@/lib/shared-user-assignment-service";
@@ -77,6 +79,35 @@ const safeRender = (content: any) => {
   }
   return content;
 };
+
+const PendingUploadLink = ({ taskId, stageId, subdeptId, deptId }: any) => (
+  <Link
+    href={`/dashboard/tasks?deptId=${deptId || ''}&subDeptId=${subdeptId}&taskId=${taskId}&stageId=${stageId}`}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="inline-flex items-center gap-1.5 text-slate-400 hover:text-blue-600 transition-colors cursor-pointer"
+    onClick={e => e.stopPropagation()}
+  >
+    <span className="h-1.5 w-1.5 rounded-full bg-slate-300 shrink-0" />
+    <span className="text-sm font-medium italic">Pending</span>
+    <Upload className="h-3.5 w-3.5 shrink-0" />
+  </Link>
+);
+
+const NAPill = () => (
+  <TooltipProvider delayDuration={200}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-50 text-slate-400 text-[11px] font-medium italic ring-1 ring-inset ring-slate-200 cursor-default">
+          <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />N/A
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="bg-slate-800 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[9999]">
+        Stage not applicable for this task's Job Level
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);
 
 export function TransposedReportView({
   paginatedTasks, transposedRows, expandedSections, renderCellValue, toggleSection,
@@ -206,29 +237,50 @@ export function TransposedReportView({
                     {paginatedColumns.map(task => {
                       const rawCellVal = renderCellValue(task, row);
                       let content;
-                     if (rawCellVal && typeof rawCellVal === 'object' && rawCellVal.isCombinedStageDetails) {
-                          content = (
-                              <div className="flex flex-col gap-2 text-left w-full h-full">
-                                  {rawCellVal.hasDate && (
-                                      <div>
-                                         <span className="text-[10px] text-slate-400 font-bold uppercase block mb-0.5">Date</span>
-                                         {rawCellVal.dateNode}
-                                      </div>
-                                  )}
-                                  {rawCellVal.hasDocs && (
-                                      <div className={cn(rawCellVal.hasDate && "pt-2 border-t border-slate-100")}>
-                                         <span className="text-[10px] text-slate-400 font-bold uppercase block mb-0.5">Docs</span>
-                                         {rawCellVal.docNode}
-                                      </div>
-                                  )}
-                                  {rawCellVal.hasOfficer && (
-                                      <div className={cn((rawCellVal.hasDocs || rawCellVal.hasDate) && "pt-2 border-t border-slate-100")}>
-                                         <span className="text-[10px] text-slate-400 font-bold uppercase block mb-0.5">Officer</span>
-                                         {rawCellVal.officerNode}
-                                      </div>
-                                  )}
-                              </div>
-                          );
+                      if (rawCellVal && typeof rawCellVal === 'object' && rawCellVal.isCombinedStageDetails) {
+                           if (rawCellVal.isApplicable === false) {
+                             content = <NAPill />;
+                           } else {
+                              const sdp = rawCellVal.stageDateRawProps;
+                              const isLate = !!sdp?.isOverdue && !!sdp?.dateValue;
+
+                             content = (
+                                 <div className="flex flex-col gap-2 text-left w-full h-full">
+                                      {rawCellVal.hasDate && sdp && (
+                                        <div>
+                                           <span className="text-[10px] text-slate-400 font-bold uppercase block mb-0.5">Status</span>
+                                           {sdp.isSkipped ? (
+                                            <span className="text-sm text-amber-600 font-medium italic">Skipped</span>
+                                          ) : sdp.dateValue ? (
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                              <CheckCircle2 className={cn("h-3.5 w-3.5 shrink-0", isLate ? "text-amber-500" : "text-emerald-500")} />
+                                              <span className={cn("text-sm font-semibold", isLate ? "text-amber-700" : "text-slate-700")}>{sdp.dateValue}</span>
+                                              {isLate && <span className="text-[8px] font-black text-amber-600 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded uppercase">LATE</span>}
+                                            </div>
+                                          ) : sdp.requiresUpload ? (
+                                            <PendingUploadLink taskId={sdp.taskId} stageId={sdp.stageId} subdeptId={sdp.subdeptId} deptId={sdp.deptId} />
+                                          ) : (
+                                            <span className="text-sm text-slate-400 italic">Add Date</span>
+                                          )}
+                                       </div>
+                                     )}
+                                      {rawCellVal.hasDocs && (
+                                        <div className={cn(rawCellVal.hasDate && "pt-2 border-t border-slate-100")}>
+                                           <span className="text-[10px] text-slate-400 font-bold uppercase block mb-0.5">Docs</span>
+                                           {rawCellVal.docIsPending ? (
+                                             <PendingUploadLink taskId={sdp.taskId} stageId={sdp.stageId} subdeptId={sdp.subdeptId} deptId={sdp.deptId} />
+                                           ) : rawCellVal.docNode}
+                                        </div>
+                                      )}
+                                     {rawCellVal.hasOfficer && (
+                                       <div className={cn((rawCellVal.hasDocs || rawCellVal.hasDate) && "pt-2 border-t border-slate-100")}>
+                                          <span className="text-[10px] text-slate-400 font-bold uppercase block mb-0.5">Officer</span>
+                                          {rawCellVal.officerNode}
+                                       </div>
+                                     )}
+                                 </div>
+                             );
+                           }
                       } else {
                           content = safeRender(rawCellVal);
                       }

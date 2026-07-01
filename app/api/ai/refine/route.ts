@@ -34,7 +34,7 @@ async function handleSingleRefine(prompt: string, fieldName: string) {
     }
 
     const genAI = new GoogleGenerativeAI(API_KEYS[2] || '');
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 
     console.log('🔥 [API] Calling Gemini model...');
 

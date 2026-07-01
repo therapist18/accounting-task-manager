@@ -29,7 +29,6 @@ import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
 import { ReportsSidebar, ReportsHeader, PersonFilterStrip, StatusFilterBar } from "./components/ReportsHeader";
 
-// ... (keep earlier helper functions parseDateSafe, formatDate, formatDateTimeForDisplay, safeRender, isStageApplicableToTask exactly as they were) ...
 const SPECIAL_STAGE_IDS = [
   '072b9710-45df-4a05-ba65-01b4ef29d61d',
   'caefd742-5de5-4341-a3bb-81d7b9dd2b73'
@@ -61,20 +60,6 @@ const formatDate = (dateStr: string | null, showTime: boolean): string => {
   return dateStr;
 };
 
-const formatDateTimeForDisplay = (date: any): string => {
-  if (!date) return '-';
-  if (typeof date === 'string') {
-    const t = date.trim();
-    if (/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/.test(t)) return t.endsWith(' 00:00') ? t.slice(0, -6) : t;
-  }
-  const d = parseDateSafe(date);
-  if (!d) return '-';
-  try {
-    const formatted = format(d, 'dd/MM/yyyy HH:mm');
-    return formatted.endsWith(' 00:00') ? formatted.slice(0, -6) : formatted;
-  } catch { return '-'; }
-};
-
 const safeRender = (content: any) => {
   if (React.isValidElement(content)) return content;
   if (typeof content === 'string') {
@@ -103,23 +88,27 @@ const safeRender = (content: any) => {
 const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boolean => {
   if (!task || !stage || !departments?.length) return true;
   try {
-    const dept = departments.find(d => d.id === (task.department?.id || task.department_id));
+    // Utilize job_level if available to accurately determine N/A status
+    const deptId = task.job_level?.department_id || task.department?.id || task.department_id;
+    const subdeptId = task.job_level?.subdepartment_id || task.subdepartment?.id || task.subdepartment_id;
+    const classId = task.job_level?.class_id || task.class_id;
+    const subclassId = task.job_level?.subclass_id || task.subclass_id;
+
+    const dept = departments.find(d => d.id === deptId);
     if (!dept) return true;
 
-    const subdept = dept.tm_subdepartments?.find((s: any) =>
-      s.id === (task.subdepartment?.id || task.subdepartment_id)
-    );
+    const subdept = dept.tm_subdepartments?.find((s: any) => s.id === subdeptId);
     if (!subdept) return true;
 
-    if (task.subclass_id) {
-      const cls = subdept.classes?.find((c: any) => c.id.toString() === task.class_id?.toString());
-      const subCls = cls?.subClasses?.find((sc: any) => sc.id.toString() === task.subclass_id?.toString());
+    if (subclassId) {
+      const cls = subdept.classes?.find((c: any) => c.id.toString() === classId?.toString());
+      const subCls = cls?.subClasses?.find((sc: any) => sc.id.toString() === subclassId?.toString());
       const subClassStage = subCls?.stages?.find((s: any) => s.stage_id === stage.id);
       if (subClassStage && typeof subClassStage.applicable === 'boolean') return subClassStage.applicable;
     }
 
-    if (task.class_id) {
-      const cls = subdept.classes?.find((c: any) => c.id.toString() === task.class_id?.toString());
+    if (classId) {
+      const cls = subdept.classes?.find((c: any) => c.id.toString() === classId?.toString());
       const classStage = cls?.stages?.find((s: any) => s.stage_id === stage.id);
       if (classStage && typeof classStage.applicable === 'boolean') return classStage.applicable;
     }
@@ -134,7 +123,6 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boo
 };
 
 export default function ReportsPage() {
-  // ... (keep all state and shared hooks up to useMemo for columns) ...
   const [activeReport, setActiveReport] = useState<any | null>(null);
   const [availableReports, setAvailableReports] = useState<any[]>([]);
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
@@ -541,8 +529,9 @@ export default function ReportsPage() {
         });
       }
 
-      // Push ONE unified column if any of the elements are requested
-      if (hasDate || hasOfficer || allFields.length > 0) {
+      // Push ONE unified column if any of the elements are requested,
+      // or if the stage requires document upload (always show pending/upload state)
+      if (hasDate || hasOfficer || allFields.length > 0 || requiresUpload) {
         cols.push({
           id: `stage_${stage.id}_info`,
           label: stage.name,
@@ -589,112 +578,77 @@ export default function ReportsPage() {
         unifiedOfficers, stages
       );
     }
+
     if (col.type === 'stage_info') {
       const stage = stages.find(s => s.id === col.stageId);
       if (!stage) return <span className="text-sm text-slate-400">—</span>;
 
       // Check overarching applicability
       if (!checkStageApplicableForTask(stage, task)) {
-        return (
-          <TooltipProvider delayDuration={200}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex items-center gap-1.5 text-sm text-slate-400 font-medium italic cursor-default">
-                  <span className="h-2 w-2 rounded-full bg-slate-300 shrink-0" />
-                  N/A
-                </span>
-              </TooltipTrigger>
-              <TooltipContent className="bg-slate-50 text-slate-600 border-slate-200 shadow-xl p-2 text-xs">
-                <span>Stage not applicable for this task</span>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        );
+        return {
+          isCombinedStageDetails: true,
+          isApplicable: false,
+        };
       }
 
-      let dateNode: React.ReactNode = null;
       let officerNode: React.ReactNode = null;
       let docNode: React.ReactNode = null;
+      let docIsPending = false;
 
-      // --- 1. Date Rendering ---
-      if (col.hasDate) {
-        const stageData = task.stages?.[col.stageId];
-        if (stageData?.status === 'skipped') {
-          dateNode = (
-            <TooltipProvider delayDuration={200}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="flex items-center gap-1 text-sm text-amber-600 font-medium cursor-help">
-                    <AlertCircle className="h-4 w-4" /> Skipped
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="bg-white text-gray-700 border-gray-200 shadow-xl p-2 text-sm space-y-1">
-                  <p><span className="font-semibold text-gray-500">Reason:</span> {stageData.reason || 'None provided'}</p>
-                  {stageData.skippedAt && <p><span className="font-semibold text-gray-500">Date:</span> {formatDateTimeForDisplay(stageData.skippedAt)}</p>}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          );
-        } else {
-          const dateValue = stageData?.date || stageData?.completedAt || null;
-          const hasDateValue = !!dateValue;
-          let isOverdue = false;
+      // --- 1. Date Raw Props ---
+      const stageData = task.stages?.[col.stageId];
+      const isSkipped = stageData?.status === 'skipped';
+      const isCompleted = stageData?.status === 'completed' || stageData?.documentsUploaded === true;
+      const dateValue = !isSkipped ? (stageData?.date || stageData?.completedAt || stageData?.date_completed || null) : null;
+      let isOverdue = false;
 
-          if (hasDateValue && stage.estimated_time) {
-            const sortedStagesList = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-            const currentStageIndex = sortedStagesList.findIndex(s => s.id === stage.id);
-            const prevStage = currentStageIndex > 0 ? sortedStagesList[currentStageIndex - 1] : null;
+      // Robust LATE badge calculation mirroring Immigration Tracker / EditableStageCell
+      if (dateValue && stage.estimated_time) {
+        const sortedStagesList = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+        const currentStageIndex = sortedStagesList.findIndex(s => s.id === stage.id);
 
-            const startStr = prevStage ? (task.stages?.[prevStage.id]?.date || task.stages?.[prevStage.id]?.completedAt) : (task.date_initiated || task.created_at);
-            const start = parseDateSafe(startStr);
-            const end = parseDateSafe(dateValue);
-            if (start && end) isOverdue = (end.getTime() - start.getTime()) / 60000 > stage.estimated_time;
-          }
+        let prevStage = currentStageIndex > 0 ? sortedStagesList[currentStageIndex - 1] : null;
+        let prevDateStr = null;
 
-          if (hasDateValue) {
-            const completedBlock = (
-              <div className="flex items-center gap-1.5 cursor-default select-none">
-                {isOverdue ? <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" /> : <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />}
-                <span className={cn("text-sm font-semibold whitespace-nowrap", isOverdue ? "text-amber-700" : "text-slate-800")}>
-                  {formatDate(dateValue, showTime)}
-                </span>
-                {isOverdue && <span className="text-[8px] font-black text-amber-600 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded uppercase">LATE</span>}
-              </div>
-            );
-            dateNode = (
-              <TooltipProvider delayDuration={200}>
-                <Tooltip>
-                  <TooltipTrigger asChild>{completedBlock}</TooltipTrigger>
-                  <TooltipContent side="top" className={cn("border shadow-md text-xs rounded-lg px-3 py-2 z-[100]", isOverdue ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-emerald-50 border-emerald-200 text-emerald-900")}>
-                    <p className="font-bold mb-0.5">{isOverdue ? "Completed — Overdue" : "Completed On Time"}</p>
-                    <p className="text-slate-600 text-sm">{formatDate(dateValue, true)}</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            );
-          } else if (col.requiresUpload) {
-            const subDeptId = task.subdepartment_id || task.job_level?.subdepartment_id || '';
-            dateNode = (
-              <Link href={`/dashboard/tasks?deptId=${activeDeptId || ''}&subDeptId=${subDeptId}&taskId=${task.id}&stageId=${stage.id}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 group/cell text-slate-400 hover:text-blue-600 transition-colors cursor-pointer" onClick={e => e.stopPropagation()}>
-                <div className="h-2 w-2 rounded-full bg-slate-300 shrink-0 group-hover/cell:bg-blue-400 transition-colors" />
-                <span className="text-sm font-medium italic">Pending</span>
-                <Upload className="h-3 w-3 opacity-0 group-hover/cell:opacity-100 transition-opacity ml-0.5 shrink-0" />
-              </Link>
-            );
-          } else {
-            dateNode = (
-              <Link href={`/dashboard/tasks?deptId=${activeDeptId || ''}&subDeptId=${task.subdepartment_id || task.job_level?.subdepartment_id || ''}&taskId=${task.id}&stageId=${stage.id}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 group/cell text-slate-400 hover:text-blue-600 transition-colors cursor-pointer" onClick={e => e.stopPropagation()}>
-                <Clock className="h-3 w-3 shrink-0" />
-                <span className="text-sm font-medium italic">Add Date</span>
-              </Link>
-            );
-          }
+        while (prevStage) {
+          prevDateStr = task.stages?.[prevStage.id]?.date || task.stages?.[prevStage.id]?.completedAt || task.stages?.[prevStage.id]?.date_completed;
+          if (prevDateStr) break;
+          const prevIndex = sortedStagesList.findIndex(s => s.id === prevStage.id);
+          if (prevIndex <= 0) break;
+          prevStage = sortedStagesList[prevIndex - 1];
+        }
+
+        const startStr = prevDateStr || task.date_initiated || task.created_at;
+        const start = parseDateSafe(startStr);
+        const end = parseDateSafe(dateValue);
+
+        if (start && end) {
+          const durationMs = end.getTime() - start.getTime();
+          const durationMinutes = Math.floor(durationMs / (1000 * 60));
+          isOverdue = durationMinutes > stage.estimated_time;
         }
       }
 
+      const isPending = !isCompleted && !isSkipped;
+
+      // Ensure stageDateRawProps is universally generated so that StandardReportView
+      // can deploy the "Pending Link" or "Add Date" logic correctly.
+      const stageDateRawProps = {
+        dateValue,
+        isCompleted,
+        isPending,
+        isOverdue,
+        requiresUpload: col.requiresUpload,
+        taskId: task.id,
+        stageId: col.stageId,
+        subdeptId: task.job_level?.subdepartment_id || task.subdepartment_id || '',
+        deptId: task.job_level?.department_id || task.department_id || activeDeptId || '',
+        isSkipped,
+        skipReason: stageData?.reason || stageData?.skip_reason || '',
+      };
+
       // --- 2. Officer Rendering ---
       if (col.hasOfficer) {
-        const stageData = task.stages?.[col.stageId];
         const officerIds = Array.isArray(stageData?.officer_ids) ? stageData.officer_ids.map(String).filter(Boolean) : [];
         if (!officerIds.length) {
           officerNode = <span className="text-xs text-gray-400 italic">—</span>;
@@ -714,47 +668,63 @@ export default function ReportsPage() {
       // --- 3. Docs Rendering ---
       if (col.fields && col.fields.length > 0) {
         const sourceDocRef = task.source_document_id?.[col.stageId];
-        let doc: any = null;
+        let docsForStage: any[] = [];
 
         if (sourceDocRef) {
           const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
-          if (docIds[0]) {
-            const docId = typeof docIds[0] === 'string' ? docIds[0] : docIds[0]?.id;
-            if (docId) doc = allDocuments.find((d: any) => d.id?.toString() === docId?.toString());
-          }
+          docsForStage = docIds.map(d => {
+            const docId = typeof d === 'string' ? d : d?.id;
+            return allDocuments.find((ad: any) => ad.id?.toString() === docId?.toString());
+          }).filter(Boolean);
         }
 
-        if (!doc) {
-          const stageData = task.stages?.[col.stageId];
-          if (stageData?.documents) {
-            const docs = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
-            if (docs.length > 0) doc = docs[0];
-          }
+          if (docsForStage.length === 0 && stageData?.documents) {
+            docsForStage = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
         }
 
-        if (!doc) {
-          docNode = <span className="text-xs text-gray-400 italic">—</span>;
-        } else {
-          const fieldValues: { fieldName: string; value: any }[] = [];
-          for (const f of col.fields) {
-            const val = doc.extracted_details?.[f.fieldName] || doc.edited_details?.[f.fieldName] || doc.extracted_data?.[f.fieldName];
-            if (val !== null && val !== undefined && val !== '') fieldValues.push({ fieldName: f.fieldName, value: val });
-          }
+        if (docsForStage.length === 0) {
+          docIsPending = !!col.requiresUpload;
+            docNode = <span className="text-xs text-gray-400 italic">—</span>;
+          } else {
+            const fieldValues: { fieldName: string; value: any }[] = [];
+            const seenDocFieldNames = new Set<string>();
+            for (const f of col.fields) {
+              let matchedDoc = docsForStage.find(d =>
+                d.document_id === f.kycId ||
+                d.document_type_id === f.kycId ||
+                d.kyc_document_id === f.kycId
+              );
+
+              if (!matchedDoc) {
+                matchedDoc = docsForStage.find(d =>
+                  (d.extracted_details && d.extracted_details[f.fieldName] !== undefined) ||
+                  (d.edited_details && d.edited_details[f.fieldName] !== undefined) ||
+                  (d.extracted_data && d.extracted_data[f.fieldName] !== undefined)
+                );
+              }
+
+              if (matchedDoc) {
+                const val = matchedDoc.extracted_details?.[f.fieldName] ||
+                  matchedDoc.edited_details?.[f.fieldName] ||
+                  matchedDoc.extracted_data?.[f.fieldName];
+                if (val !== null && val !== undefined && val !== '') {
+                  if (!seenDocFieldNames.has(f.fieldName)) {
+                    seenDocFieldNames.add(f.fieldName);
+                    fieldValues.push({ fieldName: f.fieldName, value: val });
+                  }
+                }
+              }
+            }
+
           if (fieldValues.length === 0) {
             docNode = <span className="text-xs text-gray-400 italic">—</span>;
           } else {
             docNode = (
-              <div className="flex flex-col gap-0.5">
-                {fieldValues.map((fv, i) => {
-                  let displayVal = String(fv.value);
-                  if (typeof fv.value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(fv.value)) {
-                    try {
-                      const d = new Date(fv.value);
-                      if (isValid(d)) displayVal = format(d, 'dd/MM/yyyy');
-                    } catch { }
-                  }
-                  return <div key={i} className="text-[11px] text-slate-700 leading-tight"><span className="font-medium">{displayVal}</span></div>;
-                })}
+                <div className="flex flex-col gap-0.5">
+                  {fieldValues.map((fv, i) => {
+                    let displayVal = String(fv.value);
+                    return <div key={i} className="text-[11px] text-slate-700 leading-tight"><span className="font-medium">{fv.fieldName}: {displayVal}</span></div>;
+                  })}
               </div>
             );
           }
@@ -766,7 +736,9 @@ export default function ReportsPage() {
         hasDate: col.hasDate,
         hasOfficer: col.hasOfficer,
         hasDocs: col.fields && col.fields.length > 0,
-        dateNode,
+        docIsPending,
+        isPending,
+        stageDateRawProps,
         docNode,
         officerNode
       };
@@ -785,6 +757,42 @@ export default function ReportsPage() {
     return <span className="text-sm text-gray-400">—</span>;
   }, [stages, departments, kycDocuments, companies, enhancedTasksData, taskDependants, showTime, activeDeptId, unifiedOfficers, allDocuments]);
 
+  const handleSaveStageDate = useCallback(async (taskId: string, stageId: string, date: string) => {
+    try {
+      const { data: currentTask, error: fetchError } = await supabase
+        .from('tm_tasks')
+        .select('stages')
+        .eq('id', taskId)
+        .single();
+      if (fetchError) throw fetchError;
+
+      const existingStages = currentTask?.stages || {};
+      const timestamp = new Date().toISOString();
+      const updatedStages = {
+        ...existingStages,
+        [stageId]: {
+          ...existingStages[stageId],
+          date,
+          status: 'completed',
+          completedAt: timestamp,
+          updatedAt: timestamp,
+        },
+      };
+
+      const { error: updateError } = await supabase
+        .from('tm_tasks')
+        .update({ stages: updatedStages, updated_at: timestamp })
+        .eq('id', taskId);
+      if (updateError) throw updateError;
+
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, stages: updatedStages } : t));
+      toast({ title: 'Saved', description: 'Stage date updated successfully.' });
+    } catch (err) {
+      console.error('Failed to save stage date:', err);
+      toast({ title: 'Error', description: 'Failed to save stage date.', variant: 'destructive' });
+    }
+  }, []);
+
   const getExportCellValue = useCallback((task: any, col: any): string => {
     if (col.type === 'task') {
       const val = getRawCellValue(departments, task, col.field, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper);
@@ -792,6 +800,9 @@ export default function ReportsPage() {
       return isEmpty ? 'Missing' : String(val ?? '');
     }
     if (col.type === 'stage_info') {
+      const stage = stages.find(s => s.id === col.stageId);
+      if (stage && !checkStageApplicableForTask(stage, task)) return 'N/A';
+
       const parts: string[] = [];
 
       if (col.hasDate) {
@@ -801,27 +812,45 @@ export default function ReportsPage() {
 
       if (col.fields && col.fields.length > 0) {
         const sourceDocRef = task.source_document_id?.[col.stageId];
-        let doc: any = null;
+        let docsForStage: any[] = [];
         if (sourceDocRef) {
           const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
-          const firstRef = docIds[0];
-          if (firstRef) {
-            const docId = typeof firstRef === 'string' ? firstRef : firstRef?.id;
-            if (docId) doc = allDocuments.find((d: any) => d.id?.toString() === docId?.toString());
-          }
+          docsForStage = docIds.map(d => {
+            const docId = typeof d === 'string' ? d : d?.id;
+            return allDocuments.find((ad: any) => ad.id?.toString() === docId?.toString());
+          }).filter(Boolean);
         }
-        if (!doc) {
+        if (docsForStage.length === 0) {
           const stageData = task.stages?.[col.stageId];
           if (stageData?.documents) {
-            const docs = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
-            if (docs.length > 0) doc = docs[0];
+            docsForStage = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
           }
         }
-        if (doc) {
+        if (docsForStage.length > 0) {
           const docParts: string[] = [];
           for (const f of col.fields) {
-            const val = doc.extracted_details?.[f.fieldName] || doc.edited_details?.[f.fieldName] || doc.extracted_data?.[f.fieldName];
-            if (val !== null && val !== undefined && val !== '') docParts.push(`${f.fieldName}: ${val}`);
+            let matchedDoc = docsForStage.find(d =>
+              d.document_id === f.kycId ||
+              d.document_type_id === f.kycId ||
+              d.kyc_document_id === f.kycId
+            );
+
+            if (!matchedDoc) {
+              matchedDoc = docsForStage.find(d =>
+                (d.extracted_details && d.extracted_details[f.fieldName] !== undefined) ||
+                (d.edited_details && d.edited_details[f.fieldName] !== undefined) ||
+                (d.extracted_data && d.extracted_data[f.fieldName] !== undefined)
+              );
+            }
+
+            if (matchedDoc) {
+              const val = matchedDoc.extracted_details?.[f.fieldName] ||
+                matchedDoc.edited_details?.[f.fieldName] ||
+                matchedDoc.extracted_data?.[f.fieldName];
+              if (val !== null && val !== undefined && val !== '') {
+                docParts.push(`${f.fieldName}: ${val}`);
+              }
+            }
           }
           if (docParts.length > 0) parts.push(`Docs: ${docParts.join(', ')}`);
         }
@@ -1272,6 +1301,7 @@ export default function ReportsPage() {
           handleSendReport={handleSendReport} activeDepartment={activeDepartment} activeSubDepartments={activeSubDepartments}
           activeSubDeptIds={activeSubDeptIds} showTime={showTime} setShowTime={setShowTime} showDelta={showDelta} setShowDelta={setShowDelta}
           showOfficers={showOfficers} setShowOfficers={setShowOfficers}
+          showNARows={showNARows} setShowNARows={setShowNARows}
         />
         <PersonFilterStrip
           activePerspective={activePerspective} setActivePerspective={setActivePerspective} allTasksCount={allTasksCount}
@@ -1304,6 +1334,7 @@ export default function ReportsPage() {
               expandedStageColumns={expandedStageColumns} renderCellValue={renderCellValue} safeRender={safeRender}
               handleSort={handleSort} toggleStageColumns={toggleStageColumns} isStageApplicableToCurrentFilter={isStageApplicableToCurrentFilter}
               departments={departments} stages={stages} showTime={showTime} showDelta={showDelta} showOfficers={showOfficers} activeDeptId={activeDeptId}
+              onSaveStageDate={handleSaveStageDate}
             />
           ) : (
             <TransposedReportView

@@ -2,13 +2,14 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { ChevronDown, Filter, RotateCcw, X, Download, Search, Send, ChevronRight, ChevronLeft, Plus, Minus, ArrowUpDown, SearchX, ChevronsLeft, ChevronsRight, Shield, User, Clock, Sparkles, AlertCircle, ListChecks, Check, Layers, Settings2, TableProperties, LayoutGrid, Building2, Eye, GitCompare } from "lucide-react";
+import { ChevronDown, Filter, RotateCcw, X, Download, Search, Send, ChevronRight, ChevronLeft, Plus, Minus, ArrowUpDown, SearchX, ChevronsLeft, ChevronsRight, Shield, User, Clock, Sparkles, AlertCircle, ListChecks, Check, Layers, Settings2, TableProperties, LayoutGrid, Building2, Eye, EyeOff, GitCompare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Loader2 } from "lucide-react";
 import { ReportColumnVisibilityDialog } from "./ReportColumnVisibilityDialog";
 
 interface ReportsSidebarProps {
@@ -195,7 +196,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
   );
 }
 
-export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setView, handleSendReport, activeDepartment, activeSubDepartments, activeSubDeptIds, allTasksCount, wipTasksCount, writeUpCompletedCount, columns, visibleColumnIds, setVisibleColumnIds, showTime, setShowTime, showDelta, setShowDelta, showOfficers, setShowOfficers }: any) {
+export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setView, handleSendReport, activeDepartment, activeSubDepartments, activeSubDeptIds, allTasksCount, wipTasksCount, writeUpCompletedCount, columns, visibleColumnIds, setVisibleColumnIds, showTime, setShowTime, showDelta, setShowDelta, showOfficers, setShowOfficers, showNARows, setShowNARows }: any) {
 
   const selectedSubDeptText = React.useMemo(() => {
     if (activeSubDeptIds.length === 0) return "All Sub-units";
@@ -295,6 +296,22 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
             >
               <GitCompare className="h-3.5 w-3.5" />
               {showDelta ? "Hide Δ" : "Show Δ"}
+            </Button>
+          )}
+
+          {/* Show/Hide N/A Toggle */}
+          {setShowNARows && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowNARows((v: boolean) => !v)}
+              className={cn(
+                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+                !showNARows ? "bg-amber-50 border-amber-300 text-amber-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              {showNARows ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+              {showNARows ? "Hide N/A" : "Show N/A"}
             </Button>
           )}
 
@@ -483,7 +500,8 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
             disabled={loading}
             className="h-10 px-5 rounded-full border-slate-200 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 shrink-0"
           >
-            <RotateCcw className={cn("h-4 w-4 mr-2 text-slate-400", loading && "animate-spin")} /> Refresh
+            {loading ? <Loader2 className="h-4 w-4 mr-2 text-slate-400 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-2 text-slate-400" />}
+            {loading ? "Refreshing..." : "Refresh"}
           </Button>
         </div>
       </div>

@@ -782,7 +782,7 @@ export default function EditableStageCell({
     const showSkip = !isStageCompleted;
     const hasMoreActions = showAutomation || showSkip;
     const btnSizeClass = isCompact ? "h-6 w-6" : "h-7 w-7";
-    const iconSizeClass = isCompact ? "h-3.5 w-3.5" : "h-3.5 w-3.5";
+    const iconSizeClass = isCompact ? "h-16 w-16" : "h-16 w-16";
 
     let officerContent: React.ReactNode = null;
     if (onOfficerChange && officers.length > 0 && stage.follow_up?.toLowerCase() === 'officer') {
@@ -817,7 +817,6 @@ export default function EditableStageCell({
           </Button>
         </DialogTrigger>
         <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
-          {/* ... Dialog contents logic remains same ... */}
           <DialogHeader className="p-4 border-b">
             <DialogTitle className="text-lg">
               <div className="flex items-center justify-between">

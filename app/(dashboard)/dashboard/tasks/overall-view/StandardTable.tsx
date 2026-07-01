@@ -241,7 +241,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                   className={cn("border-r border-b border-white/30 text-center px-4 py-2.5 bg-[#376bae]", COL_WIDTH, getStickyClasses(idx))}
                 >
                   <div className="flex items-center justify-between gap-2 overflow-hidden">
-                    <span className="text-xs font-semibold text-white uppercase tracking-wider truncate" title={header.label}>{header.label}</span>
+                    <span className="text-[11px] font-semibold text-white uppercase tracking-wider truncate" title={header.label}>{header.label}</span>
                     {header.sortable && (
                       <button
                         onClick={() => requestSort(header.id)}
@@ -261,7 +261,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
               {visibleStages.map(stage => (
                 <TableHead key={stage.id} colSpan={getStageColSpan(stage)} rowSpan={getStageRowSpan(stage)} className={cn("border-r border-b border-white/30 text-center px-2 py-2.5 bg-[#376bae]", !expandedStages.has(stage.id.toString()) && COL_WIDTH)}>
                   <div className="flex items-center justify-center gap-2">
-                    <span className="text-xs font-semibold text-white uppercase tracking-wider truncate" title={stage.name}>{stage.name}</span>
+                    <span className="text-[11px] font-semibold text-white uppercase tracking-wider truncate" title={stage.name}>{stage.name}</span>
                     <div className="flex items-center gap-1 shrink-0">
                       <button onClick={() => requestSort(`stage_${stage.id}`)} className="shrink-0 rounded bg-slate-600 hover:bg-slate-500 text-white p-0.5 transition-all" title="Sort by Stage">
                         {sortConfig?.key === `stage_${stage.id}`
