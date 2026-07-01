@@ -1,4 +1,4 @@
-// @ts-nocheck
+﻿// @ts-nocheck
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
@@ -14,6 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { exportToDocx } from "@/lib/cvDocxExporter";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase/client";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import AIWriterModule from "./components/AIWriterModule";
 import ATSOptimizer from "./components/ATSOptimizer";
 import JobMatch from "./components/JobMatch";
@@ -21,6 +22,8 @@ import CoverLetterGenerator from "./components/CoverLetter";
 import ResumeVersions from "./components/ResumeVersions";
 import ResumeAnalytics from "./components/ResumeAnalytics";
 import AdvancedExport from "./components/AdvancedExport";
+import { CreatableCombobox, type ComboOption } from "./components/CreatableCombobox";
+import { RecommenderSelect, type Recommender } from "./components/RecommenderSelect";
 
 const PASSPORT_PHOTO_ID = '48f48255-e5db-4944-8864-6f35b3af4696';
 const CLEAR_PHOTO_ID = 'fa74ff82-09ce-418d-8985-174158d73316';
@@ -229,6 +232,19 @@ const ENHANCEMENT_OPTIONS: { value: EnhancementLevel; label: string; description
   { value: "professional", label: "Professional",  description: "Action verbs, cleaner phrasing, no invented details" },
   { value: "executive",    label: "Executive",     description: "Strategic language, leadership framing, impact-focused" },
 ];
+
+const CONSENT_VERSION = 'v1-2026-07-01';
+
+const PRIVACY_NOTICE = {
+  intro: "Before you continue, please review how BookSmart Consultancy Ltd. will use the information you provide below.",
+  points: [
+    { title: 'What we collect', body: 'Your contact details, work history, education, a professional photo, and other career-related information you choose to share — including personal details such as date of birth, nationality, and work-permit status where relevant to a role.' },
+    { title: 'Why we collect it', body: 'Solely to prepare, verify, and present your CV to prospective employers and to support your job placement process.' },
+    { title: 'Who we share it with', body: 'BookSmart Consultancy staff handling your application, the prospective employer/client you are being placed with, and any named referee/recommender whose details you provide. We do not sell your data or use it for unrelated marketing.' },
+    { title: 'How long we keep it', body: 'For as long as your application is active, and for a reasonable period afterwards in case you are considered for future roles, unless you ask us to delete it sooner.' },
+    { title: 'Your rights', body: 'You can ask to see, correct, or delete the information we hold about you at any time by contacting info@booksmartconsult.com.' },
+  ],
+};
 
 const LS_PREFIX = 'cv_generator_';
 
@@ -609,9 +625,19 @@ export default function CVGeneratorPage() {
   const updateCvSetting = <K extends keyof typeof cvSettings>(key: K, value: typeof cvSettings[K]) =>
     setCvSettings(prev => ({ ...prev, [key]: value }));
 
-  const [workflowStep, setWorkflowStep] = useState<'import' | 'review-edit' | 'collaboration' | 'client-portal' | 'design-finalize'>('import');
+  const [workflowStep, setWorkflowStep] = useState<'import' | 'review-edit' | 'collaboration' | 'client-portal'>('import');
+  const [showDesignPanel, setShowDesignPanel] = useState(false);
+  const [showSendCvModal, setShowSendCvModal] = useState(false);
+  const [recommenderContactId, setRecommenderContactId] = useState<string | null>(null);
+  const [selectedRecommender, setSelectedRecommender] = useState<any>(null);
+  const [sendCvRecipients, setSendCvRecipients] = useState({ applicant: true, sandip: true, recommender: false });
+  const [thirdParties, setThirdParties] = useState<{ name: string; email: string; role: string }[]>([]);
+  const [coverLetterText, setCoverLetterText] = useState('');
+  const [sendMethod, setSendMethod] = useState<'email' | 'whatsapp'>('email');
   const [activeSection, setActiveSection] = useState('contact');
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(() => loadFromLocalStorage('collapsedGroups', {}));
+  const [collapsedItems, setCollapsedItems] = useState<Record<string, boolean>>({});
+  const toggleItem = (key: string) => setCollapsedItems(p => ({ ...p, [key]: !p[key] }));
   const [showAiWriter, setShowAiWriter] = useState(false);
   const [showAtsOptimizer, setShowAtsOptimizer] = useState(false);
   const [showJobMatch, setShowJobMatch] = useState(false);
@@ -621,6 +647,47 @@ export default function CVGeneratorPage() {
   const [showAdvancedExport, setShowAdvancedExport] = useState(false);
   const [cvVersions, setCvVersions] = useState<{ id: string; name: string; data: any; createdAt: string }[]>(() => loadFromLocalStorage('cvVersions', []));
   const [activeDesignTab, setActiveDesignTab] = useState('theme');
+
+  // Company options for references and recommender (from both client and third-party tables)
+  const [companyOptions, setCompanyOptions] = useState<ComboOption[]>([]);
+
+  const loadCompanyOptions = useCallback(async () => {
+    try {
+      const [clientRes, tpcRes] = await Promise.all([
+        supabase.from("acc_portal_company_duplicate").select("id, company_name").order("company_name"),
+        supabase.from("third_party_companies").select("id, company_name").eq("status", "active").order("company_name"),
+      ]);
+      const compSet = new Map<string, string>();
+      (clientRes.data || []).forEach((c: any) => {
+        if (c.company_name) compSet.set(c.company_name.trim(), c.company_name.trim());
+      });
+      (tpcRes.data || []).forEach((c: any) => {
+        if (c.company_name) compSet.set(c.company_name.trim(), c.company_name.trim());
+      });
+      setCompanyOptions([...compSet.values()].sort().map(n => ({ value: n, label: n })));
+    } catch (e) {
+      console.error("Error loading company options:", e);
+    }
+  }, [supabase]);
+
+  const handleCreateCompany = async (label: string): Promise<string> => {
+    await supabase.from("third_party_companies").insert({ company_name: label });
+    setCompanyOptions(prev => [...prev, { value: label, label }].sort((a, b) => a.label.localeCompare(b.label)));
+    return label;
+  };
+
+  // Load company options on mount
+  useEffect(() => { loadCompanyOptions(); }, [loadCompanyOptions]);
+
+  // Draft system — metadata cached locally, full data in Supabase storage
+  const [cvDrafts, setCvDrafts] = useState<{ id: string; name: string; data: any; createdAt: string; isPortalDraft: boolean }[]>(() => loadFromLocalStorage('cvDrafts', []));
+  const [showSaveDraftModal, setShowSaveDraftModal] = useState(false);
+  const [draftNameInput, setDraftNameInput] = useState('');
+  const [savingDraftForPortal, setSavingDraftForPortal] = useState(false);
+  const [currentPortalDraftId, setCurrentPortalDraftId] = useState<string | null>(() => loadFromLocalStorage('currentPortalDraftId', null));
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [showDraftsList, setShowDraftsList] = useState(false);
+  const [portalDraftId, setPortalDraftId] = useState<string | null>(null);
 
   // AI Resume Collaboration Portal State
   const [collabTargetCountry, setCollabTargetCountry] = useState<'kenya' | 'other'>(() => loadFromLocalStorage('collabTargetCountry', 'kenya'));
@@ -634,6 +701,20 @@ export default function CVGeneratorPage() {
   // Client Portal Navigation / Steps
   const [portalStep, setPortalStep] = useState<number>(1);
   const [clientEdits, setClientEdits] = useState<any>(null); // For temporary edits inside client portal
+
+  // Data-protection consent gate — applicant must accept before the portal form is shown
+  const [portalConsentAccepted, setPortalConsentAccepted] = useState(false);
+  const [portalConsentTimestamp, setPortalConsentTimestamp] = useState<string | null>(null);
+  const [portalConsentChecked, setPortalConsentChecked] = useState(false);
+
+  const handleAcceptPortalConsent = () => {
+    const ts = new Date().toISOString();
+    setPortalConsentAccepted(true);
+    setPortalConsentTimestamp(ts);
+    if (portalDraftId) {
+      saveToLocalStorage(`portalConsent_${portalDraftId}`, { accepted: true, timestamp: ts, version: CONSENT_VERSION });
+    }
+  };
 
   // Auto-save to localStorage on changes
   const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -650,9 +731,11 @@ export default function CVGeneratorPage() {
       saveToLocalStorage('collabTargetRole', collabTargetRole);
       saveToLocalStorage('hasClientSubmission', hasClientSubmission);
       saveToLocalStorage('clientSubmission', clientSubmission);
+      saveToLocalStorage('cvDrafts', cvDrafts);
+      saveToLocalStorage('currentPortalDraftId', currentPortalDraftId);
     }, 500);
     return () => { if (autoSaveRef.current) clearTimeout(autoSaveRef.current); };
-  }, [cvData, cvSettings, selectedLayout, collapsedGroups, cvVersions, zoomLevel, collabTargetCountry, collabTargetRole, hasClientSubmission, clientSubmission]);
+  }, [cvData, cvSettings, selectedLayout, collapsedGroups, cvVersions, zoomLevel, collabTargetCountry, collabTargetRole, hasClientSubmission, clientSubmission, cvDrafts, currentPortalDraftId]);
 
   // Initialize client edits in client portal
   useEffect(() => {
@@ -668,6 +751,29 @@ export default function CVGeneratorPage() {
       const params = new URLSearchParams(window.location.search);
       if (params.get('portal') === 'true') {
         setWorkflowStep('client-portal');
+        const draftId = params.get('draftId');
+        if (draftId) {
+          setPortalDraftId(draftId);
+          const storedConsent = loadFromLocalStorage<{ accepted: boolean; timestamp: string; version: string } | null>(`portalConsent_${draftId}`, null);
+          if (storedConsent?.accepted && storedConsent.version === CONSENT_VERSION) {
+            setPortalConsentAccepted(true);
+            setPortalConsentTimestamp(storedConsent.timestamp);
+          }
+          // Try to load draft data from Supabase storage
+          supabase.storage.from('kyc-documents').download(`cv-drafts/${draftId}/draft.json`)
+            .then(({ data, error }) => {
+              if (!error && data) {
+                data.text().then(text => {
+                  try {
+                    const draft = JSON.parse(text);
+                    if (draft.data) setCvData(draft.data);
+                    if (draft.cvSettings) setCvSettings(draft.cvSettings);
+                    if (draft.selectedLayout) setSelectedLayout(draft.selectedLayout);
+                  } catch (e) { /* ignore */ }
+                });
+              }
+            });
+        }
       }
     }
   }, []);
@@ -767,6 +873,83 @@ export default function CVGeneratorPage() {
       ...prev,
       personalInfo: { ...prev.personalInfo, [field]: value }
     }));
+  };
+
+  const handleClientPersonalDetailsChange = (field: string, value: any) => {
+    setClientEdits((prev: any) => ({
+      ...prev,
+      personalDetails: { ...prev.personalDetails, [field]: value }
+    }));
+  };
+
+  // Draft functions — all drafts persisted to Supabase storage
+  const saveDraft = async (name: string, forPortal: boolean = false): Promise<string> => {
+    setIsSavingDraft(true);
+    const id = (forPortal && currentPortalDraftId) ? currentPortalDraftId : (crypto.randomUUID ? crypto.randomUUID() : `draft-${Date.now()}`);
+    const newDraft = {
+      id,
+      name,
+      data: JSON.parse(JSON.stringify(cvData)),
+      createdAt: new Date().toISOString(),
+      isPortalDraft: forPortal,
+      cvSettings,
+      selectedLayout,
+    };
+    setCvDrafts(prev => { const filtered = prev.filter(d => d.id !== id); return [newDraft, ...filtered]; });
+    if (forPortal) setCurrentPortalDraftId(id);
+    try {
+      const payload = JSON.stringify(newDraft);
+      const blob = new Blob([payload], { type: 'application/json' });
+      await supabase.storage.from('kyc-documents').upload(`cv-drafts/${id}/draft.json`, blob, { upsert: true });
+    } catch (e) {
+      console.warn('Draft storage save failed:', e);
+    }
+    setIsSavingDraft(false);
+    return id;
+  };
+
+  const loadDraft = async (draft: any) => {
+    try {
+      const { data, error } = await supabase.storage.from('kyc-documents').download(`cv-drafts/${draft.id}/draft.json`);
+      if (!error && data) {
+        const text = await data.text();
+        const stored = JSON.parse(text);
+        if (stored.data) setCvData(stored.data);
+        if (stored.cvSettings) setCvSettings(stored.cvSettings);
+        if (stored.selectedLayout) setSelectedLayout(stored.selectedLayout);
+      } else if (draft.data) {
+        setCvData(draft.data);
+        if (draft.cvSettings) setCvSettings(draft.cvSettings);
+        if (draft.selectedLayout) setSelectedLayout(draft.selectedLayout);
+      }
+    } catch {
+      if (draft.data) setCvData(draft.data);
+    }
+    setWorkflowStep('review-edit');
+    setActiveSection('contact');
+    toast.success(`Draft "${draft.name}" loaded`);
+  };
+
+  const deleteDraft = async (id: string) => {
+    setCvDrafts(prev => prev.filter(d => d.id !== id));
+    try {
+      await supabase.storage.from('kyc-documents').remove([`cv-drafts/${id}/draft.json`]);
+    } catch { /* ignore */ }
+  };
+
+  const checkForClientSubmission = async () => {
+    if (!currentPortalDraftId) { toast.info('No portal draft linked yet.'); return; }
+    try {
+      const { data, error } = await supabase.storage.from('kyc-documents').download(`cv-drafts/${currentPortalDraftId}/client-submission.json`);
+      if (error || !data) { toast.info('No client submission found yet.'); return; }
+      const text = await data.text();
+      const submission = JSON.parse(text);
+      setClientSubmission(submission.clientEdits || submission);
+      setHasClientSubmission(true);
+      toast.success('Client submission loaded from database!');
+    } catch (e) {
+      toast.info('No client submission found yet.');
+    }
   };
 
   const handlePersonalDetailsChange = (field: string, value: any) => {
@@ -1330,7 +1513,13 @@ export default function CVGeneratorPage() {
         heightLeft -= pageHeight;
       }
 
-      const fileName = `${(cvData.personalInfo.fullName || "CV").replace(/\s+/g, "_")}_CV.pdf`;
+      const age = cvData.personalDetails?.dateOfBirth
+        ? (() => { const dob = cvData.personalDetails.dateOfBirth; const [d, m, y] = dob.includes('/') ? dob.split('/').map(Number) : [0, 0, Number(dob.split('-')[0])]; const birth = new Date(y, m ? m - 1 : 0, d || 1); return `${Math.floor((Date.now() - birth.getTime()) / (365.25 * 24 * 3600 * 1000))}`; })()
+        : '';
+      const rec = recommender.name ? recommender.name.replace(/\s+/g, '_') : 'BCL';
+      const prof = (cvData.personalInfo?.title || '').replace(/\s+/g, '_').slice(0, 30);
+      const applicantName = (cvData.personalInfo.fullName || 'CV').replace(/\s+/g, '_');
+      const fileName = [applicantName, age, 'REF', rec, prof].filter(Boolean).join('_') + '.pdf';
       pdf.save(fileName);
       toast.success("PDF downloaded successfully!");
     } catch (error: any) {
@@ -1995,6 +2184,326 @@ export default function CVGeneratorPage() {
           </div>
         </div>
       );
+    } else if (selectedLayout === "theme5") {
+      // THEME 5: Creative Split – Bold left accent strip with colorful header
+      const acc = cvSettings.accentColor;
+      const pri = cvSettings.primaryColor;
+      return (
+        <div className="w-[210mm] min-h-[297mm] bg-white text-[#333] flex relative shadow-2xl text-left font-sans leading-normal" style={fontScaleStyle}>
+          {/* Thin accent strip */}
+          <div style={{ backgroundColor: acc }} className="w-2 shrink-0" />
+          {/* Left sidebar */}
+          <aside style={{ backgroundColor: pri }} className="w-[200px] shrink-0 text-white p-5 flex flex-col gap-5">
+            {(cvSettings as any).showPhoto !== false && (
+              <div style={{ width: 90, height: 90, borderRadius: cvSettings.photoShape === 'circle' ? '50%' : '10px', borderColor: acc }} className="border-[3px] mx-auto overflow-hidden bg-white">
+                <img src={personalInfo.photoUrl || 'https://via.placeholder.com/90'} alt="Profile" style={{ objectFit: cvSettings.photoFit, width: '100%', height: '100%' }} />
+              </div>
+            )}
+            <div>
+              <p style={{ color: acc }} className="text-xs font-black uppercase tracking-widest mb-2">Contact</p>
+              <div className="space-y-1.5 text-xs opacity-90">
+                {personalInfo.location && <div>📍 {personalInfo.location}</div>}
+                {personalInfo.phone && <div>📞 {personalInfo.phone}</div>}
+                {personalInfo.email && <div className="break-all">✉️ {personalInfo.email}</div>}
+                {personalInfo.linkedin && <div className="break-all">🔗 {personalInfo.linkedin}</div>}
+                {personalInfo.github && <div className="break-all">🐙 {personalInfo.github}</div>}
+              </div>
+            </div>
+            <div>
+              <p style={{ color: acc }} className="text-xs font-black uppercase tracking-widest mb-2">Skills</p>
+              {skills.length > 0 ? skills.map((g: any, i: number) => (
+                <div key={i} className="mb-2">
+                  <div style={{ color: acc }} className="text-xs font-bold">{g.category}</div>
+                  <div className="text-xs opacity-80 mt-0.5">{g.items}</div>
+                </div>
+              )) : <p className="text-xs italic opacity-50">No skills.</p>}
+            </div>
+            <div>
+              <p style={{ color: acc }} className="text-xs font-black uppercase tracking-widest mb-2">Languages</p>
+              {languages.length > 0 ? languages.map((l: any, i: number) => (
+                <div key={i} className="text-xs opacity-90">{l.language}{l.proficiency ? ` · ${l.proficiency}` : ''}</div>
+              )) : <p className="text-xs italic opacity-50">No languages.</p>}
+            </div>
+            <div>
+              <p style={{ color: acc }} className="text-xs font-black uppercase tracking-widest mb-2">Details</p>
+              <div className="space-y-1 text-xs opacity-80">
+                {personalDetails.dateOfBirth && <div><strong>DOB:</strong> {personalDetails.dateOfBirth}</div>}
+                {personalDetails.nationality && <div><strong>Nationality:</strong> {personalDetails.nationality}</div>}
+                {personalDetails.maritalStatus && <div><strong>Status:</strong> {personalDetails.maritalStatus}</div>}
+                {personalDetails.kenyaStatus && <div><strong>Kenya:</strong> {personalDetails.kenyaStatus}</div>}
+              </div>
+            </div>
+          </aside>
+          {/* Main */}
+          <main className="flex-1 p-6 flex flex-col gap-5 overflow-hidden">
+            <div style={{ borderBottomColor: acc }} className="border-b-2 pb-3">
+              <h1 style={{ color: pri }} className="text-3xl font-black uppercase tracking-tight leading-tight">{personalInfo.fullName || 'Your Name'}</h1>
+              <div style={{ color: acc }} className="text-sm font-bold uppercase tracking-wide mt-1">{personalInfo.title || 'Professional Title'}</div>
+            </div>
+            {summary && (
+              <div>
+                <h2 style={{ color: pri }} className="text-xs font-black uppercase tracking-widest mb-1.5">Profile</h2>
+                <p className="text-xs leading-relaxed text-slate-600 text-justify">{summary}</p>
+              </div>
+            )}
+            <div>
+              <h2 style={{ color: pri }} className="text-xs font-black uppercase tracking-widest mb-2">Experience</h2>
+              {experience.length > 0 ? experience.map((exp: any, idx: number) => (
+                <div key={idx} className="mb-3 pl-3" style={{ borderLeftColor: acc, borderLeftWidth: 2 }}>
+                  <div className="flex justify-between items-start">
+                    <div><div className="text-sm font-bold text-slate-900">{exp.role}</div><div className="text-xs text-slate-500 font-semibold">{exp.company}{exp.location ? ` · ${exp.location}` : ''}</div></div>
+                    <div style={{ color: acc }} className="text-xs font-bold whitespace-nowrap">{exp.startDate}–{exp.endDate}</div>
+                  </div>
+                  {exp.companyDesc && <p className="text-xs italic text-slate-400 mt-0.5">{exp.companyDesc}</p>}
+                  <ul className="list-disc pl-4 text-xs text-slate-600 mt-1 space-y-0.5">
+                    {(Array.isArray(exp.responsibilities) ? exp.responsibilities : [exp.responsibilities]).filter(Boolean).map((r: string, ri: number) => <li key={ri}>{r}</li>)}
+                  </ul>
+                </div>
+              )) : <p className="text-xs italic text-slate-400">No experience added.</p>}
+            </div>
+            <div>
+              <h2 style={{ color: pri }} className="text-xs font-black uppercase tracking-widest mb-2">Education</h2>
+              {education.length > 0 ? education.map((edu: any, idx: number) => (
+                <div key={idx} className="mb-1.5 text-xs"><strong className="text-slate-800">{edu.degree}</strong> — {edu.institution} ({edu.year})</div>
+              )) : <p className="text-xs italic text-slate-400">No education.</p>}
+            </div>
+            {certifications.length > 0 && (
+              <div>
+                <h2 style={{ color: pri }} className="text-xs font-black uppercase tracking-widest mb-2">Certifications</h2>
+                {certifications.map((c: any, i: number) => <div key={i} className="text-xs text-slate-600"><strong>{c.name}</strong> — {c.issuer} ({c.date})</div>)}
+              </div>
+            )}
+            {achievements.length > 0 && (
+              <div>
+                <h2 style={{ color: pri }} className="text-xs font-black uppercase tracking-widest mb-2">Achievements</h2>
+                {achievements.map((a: any, i: number) => <div key={i} className="text-xs text-slate-600 mb-1"><strong>{a.title}</strong>{a.date ? ` (${a.date})` : ''} — {a.description}</div>)}
+              </div>
+            )}
+            {references.length > 0 && (
+              <div>
+                <h2 style={{ color: pri }} className="text-xs font-black uppercase tracking-widest mb-2">References</h2>
+                <div className="grid grid-cols-2 gap-3">
+                  {references.map((ref: any, i: number) => <div key={i} className="text-xs"><strong>{ref.name}</strong><br />{ref.title} · {ref.company}<br /><span style={{ color: acc }}>{ref.contact}</span></div>)}
+                </div>
+              </div>
+            )}
+            {declaration && <div className="mt-auto pt-2 text-xs italic text-slate-400 border-t border-slate-100">{declaration}</div>}
+          </main>
+        </div>
+      );
+    } else if (selectedLayout === "theme6") {
+      // THEME 6: Academic – clean serif-inspired scholarly layout
+      const acc = cvSettings.accentColor;
+      const pri = cvSettings.primaryColor;
+      return (
+        <div className="w-[210mm] min-h-[297mm] bg-white text-[#222] flex flex-col relative shadow-2xl text-left font-serif leading-normal" style={{ ...fontScaleStyle, fontFamily: (cvSettings as any).fontFamily || 'Georgia, serif' }}>
+          {/* Top header band */}
+          <header className="px-10 pt-8 pb-5 flex items-center gap-6" style={{ borderBottomColor: pri, borderBottomWidth: 3 }}>
+            {(cvSettings as any).showPhoto !== false && (
+              <div style={{ width: 100, height: 100, borderRadius: cvSettings.photoShape === 'circle' ? '50%' : '8px', borderColor: pri }} className="border-2 overflow-hidden shrink-0 bg-slate-100">
+                <img src={personalInfo.photoUrl || 'https://via.placeholder.com/100'} alt="Profile" style={{ objectFit: cvSettings.photoFit, width: '100%', height: '100%' }} />
+              </div>
+            )}
+            <div className="flex-1">
+              <h1 style={{ color: pri }} className="text-3xl font-bold tracking-tight">{personalInfo.fullName || 'Your Name'}</h1>
+              <div style={{ color: acc }} className="text-base italic mt-0.5">{personalInfo.title || 'Academic Title'}</div>
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-2 text-xs text-slate-500 font-sans">
+                {personalInfo.email && <span>✉ {personalInfo.email}</span>}
+                {personalInfo.phone && <span>☏ {personalInfo.phone}</span>}
+                {personalInfo.location && <span>⌖ {personalInfo.location}</span>}
+                {personalInfo.linkedin && <span>🔗 {personalInfo.linkedin}</span>}
+              </div>
+            </div>
+          </header>
+          <div className="flex-1 px-10 py-6 flex gap-8">
+            {/* Main column */}
+            <div className="flex-1 space-y-5">
+              {summary && (
+                <section>
+                  <h2 style={{ color: pri, borderBottomColor: `${acc}88` }} className="text-sm font-bold uppercase tracking-widest border-b pb-1 mb-2">Research Profile</h2>
+                  <p className="text-xs leading-relaxed text-justify">{summary}</p>
+                </section>
+              )}
+              <section>
+                <h2 style={{ color: pri, borderBottomColor: `${acc}88` }} className="text-sm font-bold uppercase tracking-widest border-b pb-1 mb-2">Professional Experience</h2>
+                {experience.length > 0 ? experience.map((exp: any, idx: number) => (
+                  <div key={idx} className="mb-3">
+                    <div className="flex justify-between items-baseline">
+                      <div className="font-bold text-sm">{exp.role}</div>
+                      <div style={{ color: acc }} className="text-xs font-sans">{exp.startDate} – {exp.endDate}</div>
+                    </div>
+                    <div className="text-xs italic text-slate-500">{exp.company}{exp.location ? `, ${exp.location}` : ''}</div>
+                    <ul className="list-disc pl-5 text-xs mt-1 space-y-0.5 text-slate-700">
+                      {(Array.isArray(exp.responsibilities) ? exp.responsibilities : [exp.responsibilities]).filter(Boolean).map((r: string, ri: number) => <li key={ri}>{r}</li>)}
+                    </ul>
+                  </div>
+                )) : <p className="text-xs italic text-slate-400">No experience.</p>}
+              </section>
+              <section>
+                <h2 style={{ color: pri, borderBottomColor: `${acc}88` }} className="text-sm font-bold uppercase tracking-widest border-b pb-1 mb-2">Education</h2>
+                {education.length > 0 ? education.map((edu: any, idx: number) => (
+                  <div key={idx} className="mb-2">
+                    <div className="font-bold text-sm">{edu.degree}</div>
+                    <div className="text-xs italic text-slate-500">{edu.institution} — <span className="font-sans not-italic">{edu.year}</span></div>
+                    {edu.details && <p className="text-xs text-slate-600 mt-0.5">{edu.details}</p>}
+                  </div>
+                )) : <p className="text-xs italic text-slate-400">No education.</p>}
+              </section>
+              {projects.length > 0 && (
+                <section>
+                  <h2 style={{ color: pri, borderBottomColor: `${acc}88` }} className="text-sm font-bold uppercase tracking-widest border-b pb-1 mb-2">Publications & Projects</h2>
+                  {projects.map((p: any, i: number) => <div key={i} className="mb-1.5 text-xs"><strong>{p.title}</strong>{p.year ? ` (${p.year})` : ''} — {p.description}</div>)}
+                </section>
+              )}
+            </div>
+            {/* Right sidebar */}
+            <aside className="w-[170px] shrink-0 space-y-4 font-sans">
+              <div>
+                <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider border-b border-slate-200 pb-1 mb-2">Personal</h3>
+                <div className="space-y-1 text-xs text-slate-600">
+                  {personalDetails.dateOfBirth && <div><strong>DOB:</strong> {personalDetails.dateOfBirth}</div>}
+                  {personalDetails.nationality && <div><strong>Nat:</strong> {personalDetails.nationality}</div>}
+                  {personalDetails.maritalStatus && <div><strong>Status:</strong> {personalDetails.maritalStatus}</div>}
+                  {personalDetails.kenyaStatus && <div><strong>Kenya:</strong> {personalDetails.kenyaStatus}</div>}
+                </div>
+              </div>
+              <div>
+                <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider border-b border-slate-200 pb-1 mb-2">Competencies</h3>
+                {skills.length > 0 ? skills.map((g: any, i: number) => (
+                  <div key={i} className="mb-1.5"><div className="text-xs font-bold text-slate-700">{g.category}</div><div className="text-xs text-slate-500">{g.items}</div></div>
+                )) : <p className="text-xs italic text-slate-400">No skills.</p>}
+              </div>
+              <div>
+                <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider border-b border-slate-200 pb-1 mb-2">Languages</h3>
+                {languages.length > 0 ? languages.map((l: any, i: number) => (
+                  <div key={i} className="text-xs text-slate-600">{l.language} — {l.proficiency}</div>
+                )) : <p className="text-xs italic text-slate-400">No languages.</p>}
+              </div>
+              {certifications.length > 0 && (
+                <div>
+                  <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider border-b border-slate-200 pb-1 mb-2">Certifications</h3>
+                  {certifications.map((c: any, i: number) => <div key={i} className="text-xs text-slate-600 mb-1"><strong>{c.name}</strong><br />{c.issuer}</div>)}
+                </div>
+              )}
+              {references.length > 0 && (
+                <div>
+                  <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider border-b border-slate-200 pb-1 mb-2">References</h3>
+                  {references.map((ref: any, i: number) => <div key={i} className="text-xs text-slate-600 mb-1.5"><strong>{ref.name}</strong><br /><span className="italic">{ref.title}</span><br />{ref.company}<br /><span style={{ color: acc }}>{ref.contact}</span></div>)}
+                </div>
+              )}
+            </aside>
+          </div>
+          {declaration && <div className="px-10 pb-4 text-xs italic text-slate-400 font-sans border-t border-slate-100 pt-2">{declaration}</div>}
+        </div>
+      );
+    } else if (selectedLayout === "theme7") {
+      // THEME 7: Timeline – vertical chronological timeline layout
+      const acc = cvSettings.accentColor;
+      const pri = cvSettings.primaryColor;
+      return (
+        <div className="w-[210mm] min-h-[297mm] bg-white relative shadow-2xl text-left font-sans leading-normal" style={fontScaleStyle}>
+          {/* Top header */}
+          <header style={{ background: `linear-gradient(135deg, ${pri} 0%, ${acc} 100%)` }} className="text-white px-10 py-7">
+            <div className="flex items-center gap-5">
+              {(cvSettings as any).showPhoto !== false && (
+                <div style={{ width: 90, height: 90, borderRadius: cvSettings.photoShape === 'circle' ? '50%' : '10px' }} className="border-2 border-white/50 overflow-hidden shrink-0 bg-white/20">
+                  <img src={personalInfo.photoUrl || 'https://via.placeholder.com/90'} alt="Profile" style={{ objectFit: cvSettings.photoFit, width: '100%', height: '100%' }} />
+                </div>
+              )}
+              <div>
+                <h1 className="text-3xl font-extrabold tracking-tight leading-tight">{personalInfo.fullName || 'Your Name'}</h1>
+                <div className="text-base font-medium opacity-90 mt-0.5">{personalInfo.title || 'Professional Title'}</div>
+                <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-2 text-xs opacity-80">
+                  {personalInfo.email && <span>✉ {personalInfo.email}</span>}
+                  {personalInfo.phone && <span>☏ {personalInfo.phone}</span>}
+                  {personalInfo.location && <span>📍 {personalInfo.location}</span>}
+                  {personalInfo.linkedin && <span>🔗 {personalInfo.linkedin}</span>}
+                </div>
+              </div>
+            </div>
+          </header>
+          <div className="px-10 py-6 flex gap-8">
+            {/* Left: timeline content */}
+            <div className="flex-1 space-y-5">
+              {summary && (
+                <section>
+                  <h2 style={{ color: pri }} className="text-sm font-extrabold uppercase tracking-widest mb-2">About</h2>
+                  <p className="text-xs leading-relaxed text-slate-600">{summary}</p>
+                </section>
+              )}
+              <section>
+                <h2 style={{ color: pri }} className="text-sm font-extrabold uppercase tracking-widest mb-3">Career Timeline</h2>
+                <div className="relative pl-5" style={{ borderLeftColor: acc, borderLeftWidth: 2 }}>
+                  {experience.length > 0 ? experience.map((exp: any, idx: number) => (
+                    <div key={idx} className="relative mb-4">
+                      <div style={{ backgroundColor: acc, left: -22 }} className="absolute top-1 w-3.5 h-3.5 rounded-full border-2 border-white shadow" />
+                      <div style={{ color: acc }} className="text-xs font-bold mb-0.5">{exp.startDate} – {exp.endDate}</div>
+                      <div className="font-bold text-sm text-slate-900">{exp.role}</div>
+                      <div className="text-xs text-slate-500 font-semibold">{exp.company}{exp.location ? ` · ${exp.location}` : ''}</div>
+                      {exp.companyDesc && <p className="text-xs italic text-slate-400 mt-0.5">{exp.companyDesc}</p>}
+                      <ul className="list-disc pl-4 text-xs text-slate-600 mt-1 space-y-0.5">
+                        {(Array.isArray(exp.responsibilities) ? exp.responsibilities : [exp.responsibilities]).filter(Boolean).map((r: string, ri: number) => <li key={ri}>{r}</li>)}
+                      </ul>
+                    </div>
+                  )) : <p className="text-xs italic text-slate-400">No experience added.</p>}
+                </div>
+              </section>
+              <section>
+                <h2 style={{ color: pri }} className="text-sm font-extrabold uppercase tracking-widest mb-3">Education</h2>
+                <div className="relative pl-5" style={{ borderLeftColor: acc, borderLeftWidth: 2 }}>
+                  {education.length > 0 ? education.map((edu: any, idx: number) => (
+                    <div key={idx} className="relative mb-3">
+                      <div style={{ backgroundColor: acc, left: -22 }} className="absolute top-1 w-3.5 h-3.5 rounded-full border-2 border-white shadow" />
+                      <div style={{ color: acc }} className="text-xs font-bold">{edu.year}</div>
+                      <div className="font-bold text-sm text-slate-900">{edu.degree}</div>
+                      <div className="text-xs text-slate-500">{edu.institution}</div>
+                    </div>
+                  )) : <p className="text-xs italic text-slate-400">No education.</p>}
+                </div>
+              </section>
+            </div>
+            {/* Right sidebar */}
+            <aside className="w-[180px] shrink-0 space-y-4">
+              <div>
+                <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider mb-2 border-b border-slate-200 pb-1">Personal</h3>
+                <div className="space-y-1 text-xs text-slate-600">
+                  {personalDetails.dateOfBirth && <div><strong>DOB:</strong> {personalDetails.dateOfBirth}</div>}
+                  {personalDetails.nationality && <div><strong>Nat:</strong> {personalDetails.nationality}</div>}
+                  {personalDetails.maritalStatus && <div><strong>Status:</strong> {personalDetails.maritalStatus}</div>}
+                  {personalDetails.kenyaStatus && <div><strong>Kenya:</strong> {personalDetails.kenyaStatus}</div>}
+                  {personalDetails.nairobiRes && <div><strong>Nairobi:</strong> {personalDetails.nairobiRes}</div>}
+                  {personalDetails.drivingExperience && <div><strong>Driving:</strong> {personalDetails.drivingExperience}</div>}
+                </div>
+              </div>
+              <div>
+                <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider mb-2 border-b border-slate-200 pb-1">Skills</h3>
+                {skills.length > 0 ? skills.map((g: any, i: number) => (
+                  <div key={i} className="mb-2"><div className="text-xs font-bold text-slate-700">{g.category}</div><div className="text-xs text-slate-500 mt-0.5">{g.items}</div></div>
+                )) : <p className="text-xs italic text-slate-400">No skills.</p>}
+              </div>
+              <div>
+                <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider mb-2 border-b border-slate-200 pb-1">Languages</h3>
+                {languages.length > 0 ? languages.map((l: any, i: number) => (
+                  <div key={i} className="text-xs text-slate-600">{l.language}{l.proficiency ? ` — ${l.proficiency}` : ''}</div>
+                )) : <p className="text-xs italic text-slate-400">No languages.</p>}
+              </div>
+              {achievements.length > 0 && (
+                <div>
+                  <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider mb-2 border-b border-slate-200 pb-1">Achievements</h3>
+                  {achievements.map((a: any, i: number) => <div key={i} className="text-xs text-slate-600 mb-1"><strong>{a.title}</strong> — {a.description}</div>)}
+                </div>
+              )}
+              {references.length > 0 && (
+                <div>
+                  <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider mb-2 border-b border-slate-200 pb-1">References</h3>
+                  {references.map((ref: any, i: number) => <div key={i} className="text-xs text-slate-600 mb-1.5"><strong className="block">{ref.name}</strong>{ref.title} · {ref.company}<br /><span style={{ color: acc }}>{ref.contact}</span></div>)}
+                </div>
+              )}
+            </aside>
+          </div>
+          {declaration && <div className="px-10 pb-4 text-xs italic text-slate-400 border-t border-slate-100 pt-2">{declaration}</div>}
+        </div>
+      );
     } else {
       // THEME 4: Executive Layout
       const acc = cvSettings.accentColor;
@@ -2132,28 +2641,58 @@ export default function CVGeneratorPage() {
   const renderClientPortal = () => {
     if (!clientEdits) return null;
 
-    const { completionPercent, checklist, gaps } = analyzeCVCompleteness(clientEdits);
+    if (!portalConsentAccepted) {
+      return (
+        <div className="flex flex-col h-screen overflow-hidden bg-[#FAFAFC] text-slate-800 font-sans">
+          <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-3 shrink-0">
+            <div className="h-9 w-9 rounded-lg bg-custom-blue flex items-center justify-center">
+              <FileText className="h-4 w-4 text-white" />
+            </div>
+            <div className="text-left">
+              <h1 className="text-sm font-bold text-slate-900">AI Client Review Portal</h1>
+              <p className="text-sm text-slate-500">Collaboration &amp; Verification</p>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto p-4 sm:p-6 flex flex-col items-center justify-center custom-scrollbar">
+            <div className="w-full max-w-xl bg-white rounded-2xl border border-slate-200 shadow-md p-8 space-y-5">
+              <div>
+                <h2 className="text-lg font-extrabold text-slate-800">Before you continue</h2>
+                <p className="text-xs text-slate-500 mt-1">Please review how your information will be used.</p>
+              </div>
+              <p className="text-sm text-slate-600 leading-relaxed">{PRIVACY_NOTICE.intro}</p>
+              <div className="space-y-3">
+                {PRIVACY_NOTICE.points.map(p => (
+                  <div key={p.title}>
+                    <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide">{p.title}</h4>
+                    <p className="text-xs text-slate-500 leading-relaxed mt-0.5">{p.body}</p>
+                  </div>
+                ))}
+              </div>
+              <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer pt-3 border-t border-slate-100">
+                <Checkbox checked={portalConsentChecked} onCheckedChange={(c) => setPortalConsentChecked(!!c)} className="mt-0.5" />
+                <span>I have read the above and I consent to BookSmart Consultancy Ltd. collecting, using, and sharing my information as described, for the purpose of preparing and submitting my CV.</span>
+              </label>
+              <Button
+                className="w-full bg-custom-blue hover:bg-custom-blue/90 text-white font-bold h-10"
+                disabled={!portalConsentChecked}
+                onClick={handleAcceptPortalConsent}
+              >
+                I Agree &amp; Continue
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
-    const steps = [
-      { id: 1, name: "Overview" },
-      { id: 2, name: "Review Sections" },
-      { id: 3, name: "AI Gaps" },
-      { id: 4, name: "Custom Details" },
-      { id: 5, name: "Resume Design" },
-      { id: 6, name: "Submit" }
-    ];
+    const { gaps } = analyzeCVCompleteness(clientEdits);
+    const missingPhoto = !clientEdits.personalInfo?.photoUrl;
+    const missingLinkedIn = !clientEdits.personalInfo?.linkedin;
+    const missingGitHub = !clientEdits.personalInfo?.github;
+    const jobsMissingDesc = (clientEdits.experience || []).filter((e: any) => !e.companyDesc || e.companyDesc.trim().length < 5);
+    const jobsMissingMonths = (clientEdits.experience || []).filter((e: any) => isJustYear(e.startDate) || isJustYear(e.endDate));
 
-    const getStepTitle = (s: number) => {
-      switch (s) {
-        case 1: return "AI Extraction Summary";
-        case 2: return "Smart Section Review";
-        case 3: return "AI Smart Questions";
-        case 4: return "Additional Profile Details";
-        case 5: return "Resume Design";
-        case 6: return "Submit";
-        default: return "";
-      }
-    };
+    const isSubmitted = portalStep === 7;
 
     return (
       <div className="flex flex-col h-screen overflow-hidden bg-[#FAFAFC] text-slate-800 font-sans">
@@ -2176,468 +2715,147 @@ export default function CVGeneratorPage() {
           </div>
         </div>
 
-        {/* Step Progress Bar */}
-        <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shrink-0 overflow-x-auto max-w-full">
-          <div className="flex-1 max-w-4xl mx-auto flex items-center justify-between gap-1 sm:gap-2">
-            {steps.map((st, i) => (
-              <React.Fragment key={st.id}>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <div className={`h-6 w-6 rounded-full flex items-center justify-center text-sm font-extrabold transition-all ${
-                    portalStep === st.id 
-                      ? 'bg-custom-blue text-white shadow-sm' 
-                      : portalStep > st.id 
-                        ? 'bg-emerald-500 text-white' 
-                        : 'bg-slate-100 text-slate-400'
-                  }`}>
-                    {portalStep > st.id ? "✓" : st.id}
-                  </div>
-                  <span className={`text-sm font-semibold hidden sm:inline ${
-                    portalStep === st.id ? 'text-custom-blue font-bold' : 'text-slate-500'
-                  }`}>
-                    {st.name}
-                  </span>
-                </div>
-                {i < steps.length - 1 && (
-                  <div className={`flex-1 h-0.5 mx-1 sm:mx-3 rounded shrink-0 min-w-[10px] ${
-                    portalStep > st.id ? 'bg-emerald-500' : 'bg-slate-200'
-                  }`} />
-                )}
-              </React.Fragment>
-            ))}
-          </div>
+        {/* Subtitle bar */}
+        <div className="bg-slate-50 border-b border-slate-200 px-6 py-2 shrink-0">
+          <p className="text-xs text-slate-500">Please review your details and fill in any missing information below. This helps us prepare the best possible CV for you.</p>
         </div>
 
-        {/* Main Work Area */}
-        <div className="flex-1 overflow-auto p-3 sm:p-6 flex flex-col items-center custom-scrollbar">
-          <div className="w-full max-w-3xl bg-white rounded-2xl border border-slate-200/80 shadow-lg p-4 sm:p-8 flex flex-col transition-all">
-            
-            {/* Step Header */}
-            {portalStep < 7 && (
-              <div className="mb-6 border-b border-slate-100 pb-4 text-left">
-                <span className="text-sm bg-slate-100 text-slate-500 font-extrabold uppercase px-2 py-0.5 rounded-full tracking-wider">Step {portalStep} of 6</span>
-                <h2 className="text-xl font-extrabold text-slate-800 mt-1">{getStepTitle(portalStep)}</h2>
-              </div>
-            )}
+        {/* Main Work Area — simplified single-page form */}
+        <div className="flex-1 overflow-auto p-4 sm:p-6 flex flex-col items-center custom-scrollbar">
+          <div className="w-full max-w-2xl space-y-4 pb-10">
 
-            {/* STEP 1: Overview */}
-            {portalStep === 1 && (
-              <div className="space-y-6 text-left">
-                <div className="bg-blue-50/50 border border-blue-100 p-5 rounded-2xl flex items-start gap-4">
+            {/* Success screen after submit */}
+            {isSubmitted ? (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-10 flex flex-col items-center text-center gap-5">
+                <div className="h-16 w-16 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600">
+                  <Check className="h-8 w-8 stroke-[3]" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-extrabold text-slate-800">Details Submitted!</h3>
+                  <p className="text-sm text-slate-500 max-w-sm mx-auto mt-2 leading-relaxed">
+                    Thank you! Your details have been saved. The recruiter will review and finalise your CV shortly.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Welcome card */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex items-start gap-4">
                   <div className="h-10 w-10 bg-custom-blue rounded-xl flex items-center justify-center text-white shrink-0">
                     <User className="h-5 w-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-slate-800">Hello {clientEdits.personalInfo?.fullName || "there"}!</h3>
+                    <h3 className="text-base font-bold text-slate-800">Hello, {clientEdits.personalInfo?.fullName || 'there'}!</h3>
                     <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                      We've used AI to automatically extract information from your CV. 
-                      To make your profile stand out to recruiters, please review the parsed sections below, confirm their accuracy, and answer a few smart questions.
+                      Please fill in the details below. Only sections with missing or incomplete information are shown.
                     </p>
                   </div>
                 </div>
 
-                {/* Progress Indicators */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="border border-slate-200 rounded-xl p-4 flex flex-col items-center justify-center text-center bg-slate-50/50">
-                    <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Profile Completeness</span>
-                    <span className="text-3xl font-extrabold text-custom-blue mt-1.5">{completionPercent}%</span>
-                    <div className="w-full bg-slate-200 h-2 rounded-full mt-3 overflow-hidden">
-                      <div className="bg-custom-blue h-full rounded-full transition-all duration-500" style={{ width: `${completionPercent}%` }} />
-                    </div>
-                  </div>
-                  <div className="border border-slate-200 rounded-xl p-4 flex flex-col items-center justify-center text-center bg-slate-50/50">
-                    <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Estimated Review Time</span>
-                    <span className="text-3xl font-extrabold text-slate-800 mt-1.5">5 mins</span>
-                    <span className="text-sm text-slate-400 mt-3">We just need a few missing details!</span>
-                  </div>
-                </div>
-
-                {/* Checklist */}
-                <div className="space-y-2.5">
-                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Section Audit</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {checklist.map((item: any) => (
-                      <div key={item.id} className="border border-slate-100 rounded-lg p-3 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          {item.status === 'success' ? (
-                            <span className="h-4 w-4 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-sm font-bold">✓</span>
-                          ) : (
-                            <span className="h-4 w-4 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center text-sm font-bold">!</span>
-                          )}
-                          <span className="text-xs font-semibold text-slate-700">{item.label}</span>
-                        </div>
-                        <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${
-                          item.status === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
-                        }`}>
-                          {item.status === 'success' ? 'Complete' : 'Needs Review'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-4 border-t border-slate-100">
-                  <Button onClick={() => setPortalStep(2)} className="bg-custom-blue hover:bg-[#2d5a94] text-white font-bold h-10 px-6 gap-2">
-                    Start Review <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 2: Section Review */}
-            {portalStep === 2 && (
-              <div className="space-y-6 text-left">
-                <p className="text-xs text-slate-500 leading-relaxed -mt-3">
-                  Please review the main sections parsed by the AI. Verify their details and confirm accuracy.
-                </p>
-
-                <div className="space-y-4">
-                  {/* Contact Card */}
-                  <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                    <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                        <span className="text-xs font-bold text-slate-700">Contact &amp; Personal Details</span>
-                      </div>
-                      <span className="text-sm font-bold text-slate-400 uppercase">Confidence: 98%</span>
-                    </div>
-                    <div className="p-4 space-y-3 text-xs">
-                      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center pb-2 border-b border-slate-100">
-                        {clientEdits.personalInfo?.photoUrl ? (
-                          <img src={clientEdits.personalInfo.photoUrl} className="h-12 w-12 rounded-lg object-cover border border-slate-200" alt="Avatar" />
-                        ) : (
-                          <div className="flex flex-col items-center justify-center h-12 w-12 rounded-lg bg-amber-50 border border-dashed border-amber-200 text-amber-500 shrink-0">
-                            <User className="h-5 w-5" />
-                          </div>
-                        )}
-                        <div className="text-left">
-                          <div className="font-bold text-slate-900 text-sm">{clientEdits.personalInfo?.fullName || "—"}</div>
-                          <div className="text-slate-500 text-sm">{clientEdits.personalInfo?.title || "—"}</div>
-                          {!clientEdits.personalInfo?.photoUrl && (
-                            <span className="text-sm text-amber-600 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 mt-1 inline-block font-semibold">⚠️ Photo Missing</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 pt-1 text-left">
-                        <div><strong className="text-slate-400 font-semibold">Email:</strong> {clientEdits.personalInfo?.email || "—"}</div>
-                        <div><strong className="text-slate-400 font-semibold">Phone:</strong> {clientEdits.personalInfo?.phone || "—"}</div>
-                        <div><strong className="text-slate-400 font-semibold">Location:</strong> {clientEdits.personalInfo?.location || "—"}</div>
-                        <div><strong className="text-slate-400 font-semibold">Nationality:</strong> {clientEdits.personalDetails?.nationality || "—"}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Summary Card */}
-                  <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                    <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                        <span className="text-xs font-bold text-slate-700">Professional Profile</span>
-                      </div>
-                      <span className="text-sm font-bold text-slate-400 uppercase">Confidence: 92%</span>
-                    </div>
-                    <div className="p-4 text-xs leading-relaxed text-left text-slate-600">
-                      {clientEdits.summary || <span className="italic text-slate-400">No profile summary extracted.</span>}
-                    </div>
-                  </div>
-
-                  {/* Experience Card */}
-                  <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                    <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                        <span className="text-xs font-bold text-slate-700">Work Experience</span>
-                      </div>
-                      <span className="text-sm font-bold text-slate-400 uppercase">Confidence: 95%</span>
-                    </div>
-                    <div className="p-4 space-y-4">
-                      {clientEdits.experience?.map((exp: any, idx: number) => (
-                        <div key={idx} className="text-xs border-b border-slate-100 last:border-0 pb-3 last:pb-0 text-left">
-                          <div className="flex justify-between font-bold text-slate-800">
-                            <span>{exp.company} — {exp.role}</span>
-                            <span className="text-slate-500 font-semibold">{exp.startDate} - {exp.endDate}</span>
-                          </div>
-                          {exp.companyDesc ? (
-                            <p className="text-sm text-slate-500 italic mt-1 font-medium bg-slate-50 p-1.5 rounded border border-slate-100">
-                              Company Profile / Specialization: {exp.companyDesc}
-                            </p>
-                          ) : (
-                            <p className="text-sm text-amber-600 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 inline-block mt-1 font-semibold">
-                              ⚠️ Missing company description &amp; specialization details
-                            </p>
-                          )}
-                          {exp.responsibilities && (
-                            <ul className="list-disc pl-4 text-slate-500 mt-2 space-y-0.5 text-left">
-                              {Array.isArray(exp.responsibilities) 
-                                ? exp.responsibilities.map((r: string, ri: number) => <li key={ri}>{r}</li>)
-                                : <li>{exp.responsibilities}</li>
-                              }
-                            </ul>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Education Card */}
-                  <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                    <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                        <span className="text-xs font-bold text-slate-700">Education</span>
-                      </div>
-                      <span className="text-sm font-bold text-emerald-600 uppercase">Confirmed</span>
-                    </div>
-                    <div className="p-4 space-y-2 text-xs">
-                      {clientEdits.education?.map((edu: any, idx: number) => (
-                        <div key={idx} className="flex justify-between text-slate-700 font-medium">
-                          <span>{edu.degree} from {edu.institution}</span>
-                          <span className="text-slate-500">{edu.year}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3 items-start">
-                  <Check className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
-                  <div>
-                    <h5 className="text-xs font-bold text-slate-800">All parsed details look accurate?</h5>
-                    <p className="text-sm text-slate-500 mt-0.5">You can skip manual edits. We'll proceed to add any missing profile URLs, language declarations, or requirements in the next steps.</p>
-                  </div>
-                </div>
-
-                <div className="flex justify-between pt-4 border-t border-slate-100">
-                  <Button variant="outline" onClick={() => setPortalStep(1)} className="text-xs font-semibold h-10 px-4">Back</Button>
-                  <Button onClick={() => setPortalStep(3)} className="bg-custom-blue hover:bg-[#2d5a94] text-white font-bold h-10 px-6 gap-2">
-                    Looks Good! Next <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 3: Smart Questions */}
-            {portalStep === 3 && (
-              <div className="space-y-6 text-left">
-                <p className="text-xs text-slate-500 leading-relaxed -mt-3">
-                  AI detected some missing details or employment gaps in your profile. Complete them below to optimize your score.
-                </p>
-
-                {/* Professional Photo Upload */}
-                {!clientEdits.personalInfo?.photoUrl && (
-                  <div className="border border-slate-200 rounded-xl p-4 space-y-3.5 bg-amber-50/10 border-amber-200/50">
-                    <h4 className="text-xs font-extrabold text-slate-700 flex items-center gap-1.5">
-                      <User className="h-4 w-4 text-slate-400" />
-                      Professional Photo Missing (Required White Background)
-                    </h4>
-                    <p className="text-sm text-slate-500 leading-relaxed">
-                      Please upload a professional passport-sized photo with a <strong>plain white background</strong>. An appropriate professional photo is highly recommended for employment verification:
-                    </p>
+                {/* ── Photo ── */}
+                {missingPhoto && (
+                  <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><ImagePlus className="h-4 w-4 text-amber-500" /> Professional Photo Required</h4>
+                    <p className="text-xs text-slate-500 leading-relaxed">Please upload a passport-sized photo with a <strong>plain white background</strong>.</p>
                     <div className="flex items-center gap-3">
-                      <div className="h-12 w-12 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-350 shrink-0">
-                        <User className="h-5 w-5" />
-                      </div>
-                      <Input 
-                        type="file" 
-                        accept="image/*" 
-                        className="text-xs h-9 bg-white cursor-pointer"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            const reader = new FileReader();
-                            reader.onload = () => {
-                              handleClientPersonalInfoChange("photoUrl", reader.result as string);
-                              toast.success("Professional photo with white background attached!");
-                            };
-                            reader.readAsDataURL(file);
-                          }
-                        }}
-                      />
+                      {clientEdits.personalInfo?.photoUrl && <img src={clientEdits.personalInfo.photoUrl} className="h-14 w-14 rounded-lg object-cover border border-slate-200" alt="Preview" />}
+                      <Input type="file" accept="image/*" className="text-xs h-9 bg-white" onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) { const reader = new FileReader(); reader.onload = () => handleClientPersonalInfoChange('photoUrl', reader.result as string); reader.readAsDataURL(file); }
+                      }} />
                     </div>
-                    <p className="text-xs text-slate-400 italic">Please make sure the background is solid white. Snapshots with busy backdrops or informal attire are often rejected.</p>
                   </div>
                 )}
 
-                {/* Missing Months in Work Experience Dates */}
-                {clientEdits.experience?.map((exp: any, idx: number) => {
-                  const startNeedsMonth = isJustYear(exp.startDate);
-                  const endNeedsMonth = isJustYear(exp.endDate);
-                  if (startNeedsMonth || endNeedsMonth) {
-                    return (
-                      <div key={`date-warn-${idx}`} className="border border-slate-200 rounded-xl p-4 space-y-3 bg-amber-50/10 border-amber-200/50">
-                        <h4 className="text-xs font-extrabold text-amber-800 flex items-center gap-1.5">
-                          <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
-                          Specify Month &amp; Year: {exp.company || 'Employer'}
-                        </h4>
-                        <p className="text-sm text-slate-500">
-                          AI detected that you only provided the year for your role as <strong>{exp.role || 'Employee'}</strong>. Please edit the date(s) to include both the month and year (e.g. 'Jan 2021' or '05/2021'):
-                        </p>
-                        <div className="grid grid-cols-2 gap-3 text-left">
-                          {startNeedsMonth && (
-                            <div className="space-y-1">
-                              <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Start Date</Label>
-                              <Input 
-                                placeholder="e.g. Jan 2021 or 01/2021"
-                                value={exp.startDate || ''}
-                                onChange={(e) => {
-                                  const updated = [...clientEdits.experience];
-                                  updated[idx] = { ...updated[idx], startDate: e.target.value };
-                                  setClientEdits((prev: any) => ({ ...prev, experience: updated }));
-                                }}
-                                className="h-9 text-xs bg-white"
-                              />
-                            </div>
-                          )}
-                          {endNeedsMonth && (
-                            <div className="space-y-1">
-                              <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">End Date</Label>
-                              <Input 
-                                placeholder="e.g. Dec 2023 or Present"
-                                value={exp.endDate || ''}
-                                onChange={(e) => {
-                                  const updated = [...clientEdits.experience];
-                                  updated[idx] = { ...updated[idx], endDate: e.target.value };
-                                  setClientEdits((prev: any) => ({ ...prev, experience: updated }));
-                                }}
-                                className="h-9 text-xs bg-white"
-                              />
-                            </div>
-                          )}
+                {/* ── Online Presence ── */}
+                {(missingLinkedIn || missingGitHub) && (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Globe className="h-4 w-4 text-custom-blue" /> Online Profiles</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {missingLinkedIn && (
+                        <div className="space-y-1.5">
+                          <Label className="text-xs font-bold text-slate-500 uppercase">LinkedIn URL</Label>
+                          <Input placeholder="linkedin.com/in/username" value={clientEdits.personalInfo?.linkedin || ''} onChange={(e) => handleClientPersonalInfoChange('linkedin', e.target.value)} className="h-9 text-xs" />
                         </div>
-                      </div>
-                    );
-                  }
-                  return null;
-                })}
-
-                {/* Missing Company Descriptions in Experience */}
-                {clientEdits.experience?.map((exp: any, idx: number) => {
-                  if (!exp.companyDesc || exp.companyDesc.trim().length < 5) {
-                    return (
-                      <div key={`desc-warn-${idx}`} className="border border-slate-200 rounded-xl p-4 space-y-3 bg-amber-50/10 border-amber-200/50">
-                        <h4 className="text-xs font-extrabold text-amber-800 flex items-center gap-1.5">
-                          <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
-                          Company Specialization Missing: {exp.company || 'Employer'}
-                        </h4>
-                        <p className="text-sm text-slate-500">
-                          Please describe what <strong>{exp.company || 'this company'}</strong> specializes in or what its primary business field is:
-                        </p>
-                        <Input 
-                          placeholder="e.g. Professional accounting consultancy firm serving SMBs in Nairobi"
-                          value={exp.companyDesc || ''}
-                          onChange={(e) => {
-                            const updated = [...clientEdits.experience];
-                            updated[idx] = { ...updated[idx], companyDesc: e.target.value };
-                            setClientEdits((prev: any) => ({ ...prev, experience: updated }));
-                          }}
-                          className="h-9 text-xs bg-white"
-                        />
-                      </div>
-                    );
-                  }
-                  return null;
-                })}
-
-                {/* Missing LinkedIn / Portfolio */}
-                <div className="border border-slate-200 rounded-xl p-4 space-y-4">
-                  <h4 className="text-xs font-extrabold text-slate-700 flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-                    Missing Professional Links
-                  </h4>
-                  <p className="text-sm text-slate-400">We couldn't find these in your CV. Add them to showcase your network &amp; work:</p>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">LinkedIn URL</Label>
-                      <Input 
-                        placeholder="linkedin.com/in/username" 
-                        value={clientEdits.personalInfo?.linkedin || ''} 
-                        onChange={(e) => handleClientPersonalInfoChange('linkedin', e.target.value)} 
-                        className="h-9 text-xs bg-white" 
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">GitHub / Portfolio URL</Label>
-                      <Input 
-                        placeholder="github.com/username" 
-                        value={clientEdits.personalInfo?.github || ''} 
-                        onChange={(e) => handleClientPersonalInfoChange('github', e.target.value)} 
-                        className="h-9 text-xs bg-white" 
-                      />
+                      )}
+                      {missingGitHub && (
+                        <div className="space-y-1.5">
+                          <Label className="text-xs font-bold text-slate-500 uppercase">GitHub / Portfolio URL</Label>
+                          <Input placeholder="github.com/username" value={clientEdits.personalInfo?.github || ''} onChange={(e) => handleClientPersonalInfoChange('github', e.target.value)} className="h-9 text-xs" />
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
+                )}
 
-                {/* Gaps Detection Question */}
-                {gaps.length > 0 && (
-                  <div className="border border-slate-200 rounded-xl p-4 space-y-4 bg-amber-50/20 border-amber-200/50">
-                    <h4 className="text-xs font-extrabold text-amber-700 flex items-center gap-2">
-                      <AlertCircle className="h-4 w-4 text-amber-600" />
-                      Employment Gap Audit
-                    </h4>
-                    {gaps.map((gap: any, idx: number) => (
-                      <div key={idx} className="space-y-3">
-                        <p className="text-xs text-slate-600 leading-normal">
-                          There appears to be an employment gap of <strong>{gap.gapYears} years</strong> (between your role at <strong>{gap.prevCompany}</strong> and <strong>{gap.currCompany}</strong>).
-                          What were you doing during this period?
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          {["Studying", "Freelancing", "Running Business", "Career Break", "Family/Personal reasons"].map(ans => {
-                            const currentAns = clientEdits.personalDetails?.kenyaStatus || '';
-                            const isSelected = currentAns.includes(ans) || (ans === 'Running Business' && currentAns.includes('Furniture'));
-                            return (
-                              <button 
-                                key={ans}
-                                type="button"
-                                onClick={() => {
-                                  handleClientPersonalDetailsChange('kenyaStatus', `During my employment gap, I was: ${ans}`);
-                                }}
-                                className={`text-xs px-3 py-1.5 rounded-full border font-semibold transition-all ${
-                                  isSelected 
-                                    ? 'bg-custom-blue text-white border-custom-blue shadow-sm' 
-                                    : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200'
-                                }`}
-                              >
-                                {ans}
-                              </button>
-                            );
-                          })}
+                {/* ── Company Descriptions ── */}
+                {jobsMissingDesc.length > 0 && (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Briefcase className="h-4 w-4 text-slate-500" /> Company Specializations</h4>
+                    <p className="text-xs text-slate-500">Briefly describe what each company does / specializes in.</p>
+                    {(clientEdits.experience || []).map((exp: any, idx: number) => {
+                      if (exp.companyDesc && exp.companyDesc.trim().length >= 5) return null;
+                      return (
+                        <div key={idx} className="space-y-1.5">
+                          <Label className="text-xs font-semibold text-slate-600">{exp.company || `Position #${idx + 1}`} — {exp.role}</Label>
+                          <Input placeholder="e.g. Professional accounting consultancy firm in Nairobi" value={exp.companyDesc || ''} onChange={(e) => { const updated = [...clientEdits.experience]; updated[idx] = { ...updated[idx], companyDesc: e.target.value }; setClientEdits((prev: any) => ({ ...prev, experience: updated })); }} className="h-9 text-xs" />
                         </div>
-                        <Input 
-                          placeholder="Other details (e.g. freelance python consulting)" 
-                          className="h-9 text-xs mt-2 bg-white" 
-                          onChange={(e) => handleClientPersonalDetailsChange('kenyaStatus', `Employment gap explanation: ${e.target.value}`)}
-                        />
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* ── Dates needing months ── */}
+                {jobsMissingMonths.length > 0 && (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><AlertCircle className="h-4 w-4 text-amber-500" /> Employment Dates — Add Month</h4>
+                    <p className="text-xs text-slate-500">Some dates only have a year. Please provide the month too (e.g. Jan 2021).</p>
+                    {(clientEdits.experience || []).map((exp: any, idx: number) => {
+                      const sNeed = isJustYear(exp.startDate), eNeed = isJustYear(exp.endDate);
+                      if (!sNeed && !eNeed) return null;
+                      return (
+                        <div key={idx} className="space-y-2">
+                          <span className="text-xs font-semibold text-slate-700">{exp.company} — {exp.role}</span>
+                          <div className="grid grid-cols-2 gap-3">
+                            {sNeed && <div className="space-y-1"><Label className="text-xs text-slate-500">Start Date</Label><Input placeholder="e.g. Jan 2021" value={exp.startDate || ''} onChange={(e) => { const updated = [...clientEdits.experience]; updated[idx] = { ...updated[idx], startDate: e.target.value }; setClientEdits((prev: any) => ({ ...prev, experience: updated })); }} className="h-9 text-xs" /></div>}
+                            {eNeed && <div className="space-y-1"><Label className="text-xs text-slate-500">End Date</Label><Input placeholder="e.g. Dec 2023 or Present" value={exp.endDate || ''} onChange={(e) => { const updated = [...clientEdits.experience]; updated[idx] = { ...updated[idx], endDate: e.target.value }; setClientEdits((prev: any) => ({ ...prev, experience: updated })); }} className="h-9 text-xs" /></div>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* ── Employment Gaps ── */}
+                {gaps.length > 0 && (
+                  <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><AlertCircle className="h-4 w-4 text-amber-500" /> Employment Gap</h4>
+                    {gaps.map((gap: any, idx: number) => (
+                      <div key={idx} className="space-y-2">
+                        <p className="text-xs text-slate-600">There's a <strong>{gap.gapYears}-year gap</strong> between <strong>{gap.prevCompany}</strong> and <strong>{gap.currCompany}</strong>. What were you doing during this time?</p>
+                        <div className="flex flex-wrap gap-2">
+                          {['Studying', 'Freelancing', 'Running Business', 'Career Break', 'Family reasons'].map(ans => (
+                            <button key={ans} type="button" onClick={() => handleClientPersonalDetailsChange('kenyaStatus', `Gap: ${ans}`)} className={`text-xs px-3 py-1.5 rounded-full border font-semibold transition-all ${(clientEdits.personalDetails?.kenyaStatus || '').includes(ans) ? 'bg-custom-blue text-white border-custom-blue' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{ans}</button>
+                          ))}
+                        </div>
+                        <Input placeholder="Add more detail..." className="h-9 text-xs" onChange={(e) => handleClientPersonalDetailsChange('kenyaStatus', `Gap explanation: ${e.target.value}`)} />
                       </div>
                     ))}
                   </div>
                 )}
 
-                {/* Languages */}
-                <div className="border border-slate-200 rounded-xl p-4 space-y-3">
-                  <h4 className="text-xs font-extrabold text-slate-700">Languages Spoken</h4>
-                  <p className="text-sm text-slate-400">Which languages do you speak? Check all that apply:</p>
-                  <div className="grid grid-cols-3 gap-3 pt-1">
-                    {["English", "Swahili", "French", "German", "Hindi", "Arabic"].map(lang => {
-                      const isChecked = clientEdits.languages?.some((l: any) => l.language === lang);
+                {/* ── Languages ── */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Globe className="h-4 w-4 text-slate-500" /> Languages Spoken</h4>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['English', 'Swahili', 'French', 'German', 'Hindi', 'Arabic'].map(lang => {
+                      const isChecked = (clientEdits.languages || []).some((l: any) => l.language === lang);
                       return (
                         <label key={lang} className="flex items-center gap-2 text-xs font-semibold cursor-pointer text-slate-700">
-                          <Checkbox 
-                            checked={isChecked}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                const currentLangs = clientEdits.languages || [];
-                                if (!currentLangs.some((l: any) => l.language === lang)) {
-                                  setClientEdits((prev: any) => ({
-                                    ...prev,
-                                    languages: [...currentLangs, { language: lang, proficiency: lang === 'English' ? 'Professional' : 'Basic' }]
-                                  }));
-                                }
-                              } else {
-                                const updated = (clientEdits.languages || []).filter((l: any) => l.language !== lang);
-                                setClientEdits((prev: any) => ({ ...prev, languages: updated }));
-                              }
-                            }}
-                          />
+                          <Checkbox checked={isChecked} onCheckedChange={(checked) => {
+                            if (checked) { const langs = clientEdits.languages || []; if (!langs.some((l: any) => l.language === lang)) setClientEdits((prev: any) => ({ ...prev, languages: [...langs, { language: lang, proficiency: lang === 'English' ? 'Professional' : 'Basic' }] })); }
+                            else setClientEdits((prev: any) => ({ ...prev, languages: (prev.languages || []).filter((l: any) => l.language !== lang) }));
+                          }} />
                           {lang}
                         </label>
                       );
@@ -2645,114 +2863,41 @@ export default function CVGeneratorPage() {
                   </div>
                 </div>
 
-                {/* Missing Achievements */}
-                <div className="border border-slate-200 rounded-xl p-4 space-y-3">
-                  <h4 className="text-xs font-extrabold text-slate-700">Measurable Achievements</h4>
-                  <p className="text-sm text-slate-405 text-slate-400">Add an achievement to stand out (e.g. reduced processing time, led a team, won an award):</p>
-                  <Textarea 
-                    placeholder="Tell us one major project delivery or optimization you spearheaded..."
-                    rows={3}
-                    onChange={(e) => {
-                      const achs = clientEdits.achievements || [];
-                      const updated = [...achs];
-                      if (updated.length > 0) {
-                        updated[0] = { title: "Key Achievement", description: e.target.value, date: "Recent" };
-                      } else {
-                        updated.push({ title: "Key Achievement", description: e.target.value, date: "Recent" });
-                      }
-                      setClientEdits((prev: any) => ({ ...prev, achievements: updated }));
-                    }}
-                  />
-                </div>
-
-                <div className="flex justify-between pt-4 border-t border-slate-100">
-                  <Button variant="outline" onClick={() => setPortalStep(2)} className="text-xs font-semibold h-10 px-4">Back</Button>
-                  <Button onClick={() => setPortalStep(4)} className="bg-custom-blue hover:bg-[#2d5a94] text-white font-bold h-10 px-6 gap-2">
-                    Next: Custom Profile Details <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 4: Custom Profile Details */}
-            {portalStep === 4 && (
-              <div className="space-y-6 text-left">
-                <p className="text-xs text-slate-500 leading-relaxed -mt-3">
-                  These profile questions are customized specifically for the <strong>{collabTargetRole.replace('-', ' ')}</strong> role and region of application.
-                </p>
-
-                {/* Country specific questions */}
+                {/* ── Kenya / Regional Details ── */}
                 {collabTargetCountry === 'kenya' && (
-                  <div className="border border-slate-200 rounded-xl p-4 space-y-4 bg-slate-50/50">
-                    <h4 className="text-xs font-extrabold text-slate-700 flex items-center gap-1.5">
-                      <Globe className="h-4 w-4 text-slate-450" />
-                      East Africa &amp; Kenya Local Requirements
-                    </h4>
-                    
-                    <div className="grid grid-cols-2 gap-4 text-left">
-                      <div className="space-y-1.5 text-left">
-                        <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Driving Licence status</Label>
-                        <Select 
-                          value={clientEdits.personalDetails?.drivingExperience || 'No Licence'} 
-                          onValueChange={(val) => handleClientPersonalDetailsChange('drivingExperience', val)}
-                        >
-                          <SelectTrigger className="h-9 text-xs bg-white text-left">
-                            <SelectValue placeholder="Select licence status" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="No Licence">No Licence</SelectItem>
-                            <SelectItem value="Class B (Light vehicles)">Class B (Light vehicles)</SelectItem>
-                            <SelectItem value="Class C (Heavy trucks)">Class C (Heavy trucks)</SelectItem>
-                            <SelectItem value="9 Years Experience">9 Years Experience (Valid Class A/B)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Globe className="h-4 w-4 text-custom-blue" /> Kenya / East Africa Details</h4>
+                    <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1.5">
-                        <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Residence (Nairobi Neighborhood)</Label>
-                        <Input 
-                          placeholder="e.g. Westlands, Kileleshwa, Kilimani" 
-                          value={clientEdits.personalDetails?.nairobiRes || ''}
-                          onChange={(e) => handleClientPersonalDetailsChange('nairobiRes', e.target.value)}
-                          className="h-9 text-xs bg-white"
-                        />
-                      </div>
-
-                      <div className="space-y-1.5 text-left">
-                        <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Work Permit status</Label>
-                        <Select 
-                          value={clientEdits.personalDetails?.kenyaStatus || 'Citizen'} 
-                          onValueChange={(val) => handleClientPersonalDetailsChange('kenyaStatus', val)}
-                        >
-                          <SelectTrigger className="h-9 text-xs bg-white text-left">
-                            <SelectValue placeholder="Select work permit status" />
-                          </SelectTrigger>
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Work Permit Status</Label>
+                        <Select value={clientEdits.personalDetails?.kenyaStatus || ''} onValueChange={(val) => handleClientPersonalDetailsChange('kenyaStatus', val)}>
+                          <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select status" /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="Citizen">Kenyan Citizen / Permanent Resident</SelectItem>
                             <SelectItem value="Needs Work Permit">Needs Work Permit Sponsorship</SelectItem>
-                            <SelectItem value="Willing to bear Special Work Permit expenses">Willing to bear Work Permit expenses</SelectItem>
+                            <SelectItem value="Willing to bear Special Work Permit expenses">Will bear own permit costs</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
-
-                      <div className="space-y-1.5 text-left">
-                        <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Notice Period</Label>
-                        <Select 
-                          onValueChange={(val) => {
-                            const add = clientEdits.additionalInfo || [];
-                            const index = add.findIndex((item: any) => item.label === 'Notice Period');
-                            const updated = [...add];
-                            if (index > -1) {
-                              updated[index] = { label: 'Notice Period', value: val };
-                            } else {
-                              updated.push({ label: 'Notice Period', value: val });
-                            }
-                            setClientEdits((prev: any) => ({ ...prev, additionalInfo: updated }));
-                          }}
-                        >
-                          <SelectTrigger className="h-9 text-xs bg-white text-left">
-                            <SelectValue placeholder="Select notice period" />
-                          </SelectTrigger>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Driving Licence</Label>
+                        <Select value={clientEdits.personalDetails?.drivingExperience || ''} onValueChange={(val) => handleClientPersonalDetailsChange('drivingExperience', val)}>
+                          <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select licence" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="No Licence">No Licence</SelectItem>
+                            <SelectItem value="Class B (Light vehicles)">Class B — Light vehicles</SelectItem>
+                            <SelectItem value="Class C (Heavy trucks)">Class C — Heavy trucks</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Nairobi Neighbourhood</Label>
+                        <Input placeholder="e.g. Westlands, Kilimani" value={clientEdits.personalDetails?.nairobiRes || ''} onChange={(e) => handleClientPersonalDetailsChange('nairobiRes', e.target.value)} className="h-9 text-xs" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Notice Period</Label>
+                        <Select onValueChange={(val) => { const add = clientEdits.additionalInfo || []; const idx = add.findIndex((i: any) => i.label === 'Notice Period'); const updated = [...add]; if (idx > -1) updated[idx] = { label: 'Notice Period', value: val }; else updated.push({ label: 'Notice Period', value: val }); setClientEdits((prev: any) => ({ ...prev, additionalInfo: updated })); }}>
+                          <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select period" /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="Immediate">Immediate / No Notice</SelectItem>
                             <SelectItem value="1 Month">1 Month</SelectItem>
@@ -2765,289 +2910,48 @@ export default function CVGeneratorPage() {
                   </div>
                 )}
 
-                {/* Role specific questions */}
-                <div className="border border-slate-200 rounded-xl p-4 space-y-4 text-left">
-                  <h4 className="text-xs font-extrabold text-slate-700 flex items-center gap-1.5">
-                    <Briefcase className="h-4 w-4 text-slate-400" />
-                    Category Specific: {collabTargetRole.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
-                  </h4>
-
-                  {collabTargetRole === 'software-engineer' && (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1.5">
-                          <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Portfolio Website URL</Label>
-                          <Input 
-                            placeholder="e.g. portfolio.dev" 
-                            className="h-9 text-xs bg-white"
-                            onChange={(e) => {
-                              const add = clientEdits.additionalInfo || [];
-                              const updated = [...add, { label: 'Portfolio', value: e.target.value }];
-                              setClientEdits((prev: any) => ({ ...prev, additionalInfo: updated }));
-                            }} 
-                          />
-                        </div>
-                        <div className="space-y-1.5 text-left">
-                          <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">AI Experience &amp; Prompt Eng.</Label>
-                          <Select 
-                            onValueChange={(val) => {
-                              const add = clientEdits.additionalInfo || [];
-                              const updated = [...add, { label: 'AI Experience', value: val }];
-                              setClientEdits((prev: any) => ({ ...prev, additionalInfo: updated }));
-                            }}
-                          >
-                            <SelectTrigger className="h-9 text-xs text-left">
-                              <SelectValue placeholder="Select level" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="None">None</SelectItem>
-                              <SelectItem value="Basic LLM tools integration">Basic API integration</SelectItem>
-                              <SelectItem value="Advanced AI workflows & agents">Advanced Agentic / Workflows</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Primary Cloud Platform</Label>
-                        <div className="flex gap-2">
-                          {["AWS", "Azure", "Google Cloud", "Heroku/Vercel"].map(cloud => (
-                            <button
-                              key={cloud}
-                              type="button"
-                              onClick={() => {
-                                const add = clientEdits.additionalInfo || [];
-                                const updated = [...add, { label: 'Cloud Focus', value: cloud }];
-                                setClientEdits((prev: any) => ({ ...prev, additionalInfo: updated }));
-                              }}
-                              className="flex-1 text-sm py-1.5 border rounded border-slate-200 hover:bg-slate-50 font-semibold"
-                            >
-                              {cloud}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {collabTargetRole === 'accountant' && (
-                    <div className="space-y-4 text-left">
-                      <div className="space-y-1.5">
-                        <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Accounting Softwares Experienced</Label>
-                        <div className="grid grid-cols-3 gap-2">
-                          {["QuickBooks", "Sage ERP", "Xero", "SAP", "Tally"].map(tool => (
-                            <label key={tool} className="flex items-center gap-2 text-xs cursor-pointer text-slate-705 text-slate-700 font-semibold">
-                              <Checkbox 
-                                onCheckedChange={(checked) => {
-                                  const add = clientEdits.additionalInfo || [];
-                                  if (checked) {
-                                    setClientEdits((prev: any) => ({ ...prev, additionalInfo: [...add, { label: 'Accounting Tool', value: tool }] }));
-                                  }
-                                }}
-                              />
-                              {tool}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1.5 text-left">
-                          <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Professional Certification</Label>
-                          <Select 
-                            onValueChange={(val) => {
-                              const certs = clientEdits.certifications || [];
-                              setClientEdits((prev: any) => ({ ...prev, certifications: [...certs, { name: val, issuer: 'ICPAK/ACCA', date: 'Active', url: '' }] }));
-                            }}
-                          >
-                            <SelectTrigger className="h-9 text-xs text-left">
-                              <SelectValue placeholder="Choose Cert" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="CPA Kenya (ICPAK)">CPA Kenya</SelectItem>
-                              <SelectItem value="ACCA Professional">ACCA</SelectItem>
-                              <SelectItem value="CFA Charterholder">CFA</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {collabTargetRole !== 'software-engineer' && collabTargetRole !== 'accountant' && (
-                    <div className="space-y-1.5">
-                      <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Briefly detail your core specializations:</Label>
-                      <Input placeholder="e.g. Pediatric Nursing, IB Curriculum, Project Management" onChange={(e) => {
-                        const add = clientEdits.additionalInfo || [];
-                        setClientEdits((prev: any) => ({ ...prev, additionalInfo: [...add, { label: 'Specialization', value: e.target.value }] }));
-                      }} />
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex justify-between pt-4 border-t border-slate-100">
-                  <Button variant="outline" onClick={() => setPortalStep(3)} className="text-xs font-semibold h-10 px-4">Back</Button>
-                  <Button onClick={() => setPortalStep(5)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-10 px-6 gap-2">
-                    Next: Theme Layout <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 5: Resume Styling & Theme Preview */}
-            {portalStep === 5 && (
-              <div className="space-y-6 text-left">
-                <p className="text-xs text-slate-500 leading-relaxed -mt-3">
-                  Confirm the styling and see a quick draft. Select your theme layout.
-                </p>
-
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Theme buttons */}
-                  <div className="space-y-3">
-                    <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider block">Choose Theme Style</Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[
-                        { key: "theme1", name: "Classic Blue", desc: "Clean sidebar" },
-                        { key: "theme2", name: "Modern Accent", desc: "Top header" },
-                        { key: "theme3", name: "Minimalist", desc: "Clean serif" },
-                        { key: "theme4", name: "Executive", desc: "Bold leadership" }
-                      ].map(t => (
-                        <button
-                          key={t.key}
-                          type="button"
-                          onClick={() => setSelectedLayout(t.key)}
-                          className={`p-3 rounded-lg border-2 text-left transition-all ${
-                            selectedLayout === t.key ? 'border-blue-600 bg-blue-50/50' : 'border-slate-200 hover:border-slate-350'
-                          }`}
-                        >
-                          <div className="text-xs font-bold text-slate-700">{t.name}</div>
-                          <div className="text-sm text-slate-450 mt-0.5">{t.desc}</div>
-                        </button>
-                      ))}
-                    </div>
+                {/* ── Achievement ── */}
+                {(!clientEdits.achievements || clientEdits.achievements.length === 0) && (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Award className="h-4 w-4 text-slate-500" /> Key Achievement (Optional)</h4>
+                    <Textarea placeholder="Describe one major achievement, award, or project impact..." rows={3} className="text-xs" onChange={(e) => { const val = e.target.value; if (val.trim()) setClientEdits((prev: any) => ({ ...prev, achievements: [{ title: 'Key Achievement', description: val, date: 'Recent' }] })); }} />
                   </div>
+                )}
 
-                  {/* AI polish */}
-                  <div className="space-y-3">
-                    <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider block">AI Enhancements</Label>
-                    <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2">
-                      <p className="text-sm text-slate-550 text-slate-500">Enable AI to automatically polish descriptions to professional framing during finalize:</p>
-                      
-                      <div className="space-y-2 pt-1.5">
-                        <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer text-slate-700">
-                          <Checkbox checked={enhancementLevel === 'professional'} onCheckedChange={() => setEnhancementLevel('professional')} />
-                          Professional Action Phrasing
-                        </label>
-                        <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer text-slate-700">
-                          <Checkbox checked={enhancementLevel === 'executive'} onCheckedChange={() => setEnhancementLevel('executive')} />
-                          ATS Score Optimization (+18 pts)
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Micro-preview container */}
-                <div className="border border-slate-200 rounded-xl overflow-hidden shadow-inner bg-slate-100 p-4 flex justify-center">
-                  <div className="shadow-lg max-h-[220px] overflow-y-auto w-full max-w-[500px]">
-                    <div className="scale-[0.6] origin-top center bg-white w-[210mm] min-h-[297mm] p-6 shadow-md border-0 pointer-events-none">
-                      {renderLayout()}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-between pt-4 border-t border-slate-100">
-                  <Button variant="outline" onClick={() => setPortalStep(4)} className="text-xs font-semibold h-10 px-4">Back</Button>
-                  <Button onClick={() => setPortalStep(6)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-10 px-6 gap-2">
-                    Next: Final Review <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 6: Document Upload & Submission */}
-            {portalStep === 6 && (
-              <div className="space-y-6 text-left">
-                <p className="text-xs text-slate-500 leading-relaxed -mt-3">
-                  Upload any supporting documents (e.g. proof of certifications) if available, and submit your profile updates.
-                </p>
-
-                {/* Upload certifications */}
-                <div className="border border-slate-200 rounded-xl p-4 space-y-4 bg-slate-50/50">
-                  <h4 className="text-xs font-extrabold text-slate-700 flex items-center gap-1.5">
-                    <Upload className="h-4 w-4 text-slate-400" />
-                    Missing Document Proof
-                  </h4>
-                  <p className="text-sm text-slate-400">
-                    If you listed certifications (e.g., Red Hat, Python Developer), upload a file to attach to your permanent registry portfolio:
-                  </p>
-                  
-                  <div className="border-2 border-dashed border-slate-200 bg-white rounded-xl p-6 flex flex-col items-center justify-center text-center gap-2 hover:border-slate-300 transition-colors">
-                    <FileText className="h-6 w-6 text-slate-400" />
-                    <div>
-                      <span className="text-xs font-bold text-slate-700">Drag cert file here, or browse</span>
-                      <span className="text-sm text-slate-400 block mt-0.5">Supports PDF, JPG, PNG up to 5MB</span>
-                    </div>
-                    <Input type="file" className="hidden" id="portal-cert-upload" />
-                    <Button asChild variant="outline" size="sm" className="h-8 text-xs mt-1">
-                      <label htmlFor="portal-cert-upload" className="cursor-pointer">Choose File</label>
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Summary of edits */}
-                <div className="border border-blue-50 border-t-4 border-t-blue-500 rounded-lg p-4 bg-blue-50/20">
-                  <h5 className="text-xs font-bold text-slate-800">Review Submission Summary</h5>
-                  <ul className="list-disc pl-4 text-xs text-slate-555 text-slate-500 mt-2 space-y-1">
-                    <li>Contact links updated</li>
-                    {clientEdits.personalDetails?.kenyaStatus && <li>Gap explanation detailed</li>}
-                    {clientEdits.languages && <li>Languages spoken configured</li>}
-                    {clientEdits.personalDetails?.drivingExperience && <li>Driving experience verified</li>}
-                    <li>Theme preferences saved ({selectedLayout === 'theme1' ? 'Classic' : selectedLayout === 'theme2' ? 'Modern' : 'Minimalist'})</li>
-                  </ul>
-                </div>
-
-                <div className="flex justify-between pt-4 border-t border-slate-100">
-                  <Button variant="outline" onClick={() => setPortalStep(5)} className="text-xs font-semibold h-10 px-4">Back</Button>
-                  <Button onClick={() => {
-                    setClientSubmission(clientEdits);
-                    setHasClientSubmission(true);
-                    setPortalStep(7);
-                    toast.success("Changes submitted successfully! Recruiter can now merge your updates.");
-                  }} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-10 px-6 gap-2">
+                {/* ── Submit ── */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                  <Button
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-10 gap-2"
+                    onClick={async () => {
+                      if (portalDraftId) {
+                        try {
+                          const payload = JSON.stringify({
+                            clientEdits,
+                            submittedAt: new Date().toISOString(),
+                            consent: { given: portalConsentAccepted, version: CONSENT_VERSION, timestamp: portalConsentTimestamp },
+                          });
+                          const blob = new Blob([payload], { type: 'application/json' });
+                          await supabase.storage.from('kyc-documents').upload(`cv-drafts/${portalDraftId}/client-submission.json`, blob, { upsert: true });
+                        } catch (e) { console.warn('Submission save failed:', e); }
+                      }
+                      setClientSubmission(clientEdits);
+                      setHasClientSubmission(true);
+                      setPortalStep(7);
+                      toast.success('Details submitted! Recruiter will review shortly.');
+                    }}
+                  >
                     Submit to Recruiter <Check className="h-4 w-4" />
                   </Button>
+                  <p className="text-xs text-slate-400 text-center mt-2">Your details will be reviewed and merged into your finalised CV.</p>
                 </div>
-              </div>
+              </>
             )}
-
-            {/* STEP 7: Thank You Success Screen */}
-            {portalStep === 7 && (
-              <div className="flex flex-col items-center text-center py-8 space-y-5">
-                <div className="h-16 w-16 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600 shadow-sm">
-                  <Check className="h-8 w-8 stroke-[3]" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-extrabold text-slate-850 text-slate-800">Verification Submitted!</h3>
-                  <p className="text-xs text-slate-500 max-w-md mx-auto mt-2 leading-relaxed">
-                    Thank you! Your profile changes and answers have been successfully uploaded. 
-                    The recruiter will review the updates against the registry and merge them into your finalized ATS-optimized CV.
-                  </p>
-                </div>
-                <div className="border-t border-slate-100 w-full pt-6 flex justify-center">
-                  <Button onClick={() => {
-                    setWorkflowStep('collaboration');
-                    setClientEdits(null);
-                  }} className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-10 px-6 gap-2 shadow">
-                    Go to Recruiter Dashboard <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            )}
-
           </div>
         </div>
       </div>
     );
   };
+
 
   if (workflowStep === 'client-portal') {
     return renderClientPortal();
@@ -3056,27 +2960,26 @@ export default function CVGeneratorPage() {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-[#FAFAFC]">
       {/* HEADER with workflow steps */}
-      <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="bg-white border-b border-slate-200 px-4 py-2.5 flex items-center justify-between gap-4 shrink-0">
+        <div className="flex items-center gap-3 shrink-0">
           <div className="h-9 w-9 rounded-lg bg-custom-blue flex items-center justify-center">
             <FileText className="h-4 w-4 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-900">CV Builder</h1>
-            <p className="text-sm text-slate-500">Import → Review &amp; Edit → Client Collaboration → Design &amp; Finalize</p>
+            <h1 className="text-2xl font-bold text-slate-900 leading-tight">CV Builder</h1>
+            <p className="text-sm text-slate-500">Import → Review → Collaborate</p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 bg-slate-100 rounded-full p-1">
+        <div className="flex items-center gap-1 bg-slate-100 rounded-full p-1">
           {([
             { key: 'import', label: 'Import' },
             { key: 'review-edit', label: 'Review & Edit' },
-            { key: 'collaboration', label: 'Client Collaboration' },
-            { key: 'design-finalize', label: 'Design & Finalize' },
+            { key: 'collaboration', label: 'Collaboration' },
           ] as const).map((step, i) => (
             <button
               key={step.key}
               onClick={() => setWorkflowStep(step.key)}
-              className={`relative text-sm font-semibold px-4 py-1.5 rounded-full transition-all ${
+              className={`relative text-sm font-semibold px-3 py-1.5 rounded-full transition-all ${
                 workflowStep === step.key
                   ? 'bg-custom-blue text-white shadow-sm'
                   : 'text-slate-500 hover:text-slate-700'
@@ -3086,129 +2989,170 @@ export default function CVGeneratorPage() {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleDownloadDocx}
-            className="text-xs h-8 gap-1.5 border-slate-200"
-          >
+        <div className="flex items-center gap-1.5">
+          <Button size="sm" variant="outline" onClick={() => { setDraftNameInput(`CV - ${cvData.personalInfo?.fullName || 'Draft'} - ${new Date().toLocaleDateString()}`); setShowSaveDraftModal(true); setSavingDraftForPortal(false); }} className="text-xs h-8 gap-1.5 border-slate-200">
+            <Save className="h-3.5 w-3.5" /> Save Draft
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setShowSendCvModal(true)} className="text-xs h-8 gap-1.5 border-slate-200 text-emerald-700 border-emerald-200 hover:bg-emerald-50">
+            <MessageSquare className="h-3.5 w-3.5" /> Send CV
+          </Button>
+          <Button size="sm" variant="outline" onClick={handleDownloadDocx} className="text-xs h-8 gap-1.5 border-slate-200">
             <Download className="h-3.5 w-3.5" /> Word
           </Button>
-          <Button
-            size="sm"
-            onClick={handleDownloadPdf}
-            disabled={isDownloadingPdf}
-            className="text-xs h-8 gap-1.5 bg-custom-blue hover:bg-[#2d5a94] text-white"
-          >
+          <Button size="sm" onClick={handleDownloadPdf} disabled={isDownloadingPdf} className="text-xs h-8 gap-1.5 bg-custom-blue hover:bg-[#2d5a94] text-white">
             {isDownloadingPdf ? (
               <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Generating...</>
             ) : (
               <><Download className="h-3.5 w-3.5" /> PDF</>
             )}
           </Button>
+          <Button size="sm" variant="outline" onClick={() => setShowDesignPanel(p => !p)} className={`text-xs h-8 gap-1.5 border-slate-200 ${showDesignPanel ? 'bg-custom-blue text-white border-custom-blue' : ''}`}>
+            <Palette className="h-3.5 w-3.5" /> Design
+          </Button>
         </div>
       </div>
 
       {/* MAIN CONTENT */}
-      <div className="flex-1 flex gap-4 overflow-auto max-h-[calc(100vh-98px)] custom-scrollbar">
+      <div className="flex-1 flex overflow-hidden relative">
 
         {/* ─── STEP 1: IMPORT ─────────────────────────────────────────────── */}
         {workflowStep === 'import' && (
-          <div className="flex-1 flex">
-            <div className="flex-1 grid grid-cols-3 gap-4 content-start">
-              {/* Upload CV */}
-              <div className="bg-white border border-slate-200 shadow-sm p-6 flex flex-col items-center text-center gap-4">
-                <div className="h-14 w-14 rounded-2xl bg-blue-50 flex items-center justify-center">
-                  <Upload className="h-6 w-6 text-custom-blue" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-800">Upload CV</h3>
-                  <p className="text-xs text-slate-400 mt-1">Parse an existing CV file</p>
-                </div>
-                <div className="flex flex-wrap gap-1.5 justify-center">
-                  <span className="text-sm font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">PDF</span>
-                  <span className="text-sm font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">DOCX</span>
-                  <span className="text-sm font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">TXT</span>
-                </div>
-                <Input type="file" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg" onChange={handleFileUpload} className="hidden" id="import-file-upload" disabled={isExtracting} />
-                <Button asChild variant="outline" className="w-full" disabled={isExtracting}>
-                  <label htmlFor="import-file-upload" className="cursor-pointer">Choose File</label>
-                </Button>
-                {isExtracting && (
-                  <div className="flex items-center gap-2 text-xs text-custom-blue">
-                    <div className="w-3 h-3 border-2 border-custom-blue border-t-transparent rounded-full animate-spin" />
-                    {extractionProgress}
-                  </div>
-                )}
-              </div>
-
-              {/* Import From Registry */}
-              <div className="bg-white border border-slate-200 shadow-sm p-6 flex flex-col gap-4">
-                <div className="flex flex-col items-center text-center gap-4">
-                  <div className="h-14 w-14 rounded-2xl bg-blue-50 flex items-center justify-center">
-                    <Users className="h-6 w-6 text-custom-blue" />
+          <PanelGroup direction="horizontal" className="flex-1">
+            <Panel defaultSize={55} minSize={30} className="flex flex-col gap-4 overflow-y-auto p-4">
+              {/* Top row: 3 import cards */}
+              <div className="grid grid-cols-3 gap-4">
+                {/* Upload CV */}
+                <div className="bg-white border border-slate-200 shadow-sm p-5 flex flex-col items-center text-center gap-3">
+                  <div className="h-12 w-12 rounded-2xl bg-blue-50 flex items-center justify-center">
+                    <Upload className="h-5 w-5 text-custom-blue" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-slate-800">Import From Registry</h3>
-                    <p className="text-xs text-slate-400 mt-1">Search the individual registry</p>
+                    <h3 className="text-sm font-bold text-slate-800">Upload CV</h3>
+                    <p className="text-xs text-slate-400 mt-0.5">Parse an existing CV file</p>
                   </div>
-                </div>
-
-                {/* Search */}
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                  <Input
-                    className="pl-9 pr-4 h-9 text-sm bg-slate-50 border-slate-200 focus:bg-white"
-                    placeholder="Search by name..."
-                    value={individualSearch}
-                    onChange={(e) => handleIndividualSearchChange(e.target.value)}
-                  />
-                  {isSearching && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-slate-400" />}
-                </div>
-
-                {searchResults.length > 0 && (
-                  <div className="border border-slate-200 rounded-lg overflow-hidden max-h-[220px] overflow-y-auto">
-                    {searchResults.map((ind: any) => (
-                      <button key={ind.id} onClick={() => handleSelectIndividual(ind)} className="w-full text-left px-3 py-2.5 hover:bg-blue-50 border-b border-slate-100 last:border-0 transition-colors">
-                        <div className="text-sm font-semibold text-slate-800">{ind.full_name}</div>
-                        <div className="text-sm text-slate-400">{ind.gender} {ind.contact_details?.email?.primary ? `• ${ind.contact_details.email.primary}` : ''}</div>
-                      </button>
-                    ))}
+                  <div className="flex flex-wrap gap-1 justify-center">
+                    <span className="text-xs font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">PDF</span>
+                    <span className="text-xs font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">DOCX</span>
+                    <span className="text-xs font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">TXT</span>
                   </div>
-                )}
-
-                {selectedIndividual && (
-                  <div className="border border-blue-200 rounded-lg bg-blue-50/30 p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-slate-800">{selectedIndividual.full_name}</span>
-                      <button onClick={() => { setSelectedIndividual(null); setIndividualPhoto(null); setPendingPhotoPreview(null); setPendingPhotoFile(null); setShowSavePhotoPrompt(false); setShowSaveCvPrompt(false); }} className="text-slate-400 hover:text-slate-600 p-1"><X className="h-3 w-3" /></button>
+                  <Input type="file" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg" onChange={handleFileUpload} className="hidden" id="import-file-upload" disabled={isExtracting} />
+                  <Button asChild variant="outline" className="w-full h-8 text-xs" disabled={isExtracting}>
+                    <label htmlFor="import-file-upload" className="cursor-pointer">Choose File</label>
+                  </Button>
+                  {isExtracting && (
+                    <div className="flex items-center gap-2 text-xs text-custom-blue">
+                      <div className="w-3 h-3 border-2 border-custom-blue border-t-transparent rounded-full animate-spin" />
+                      {extractionProgress}
                     </div>
-                    <Button onClick={applyIndividualToCV} className="w-full" size="sm"><CheckCircle2 className="h-4 w-4 mr-2" /> Apply to CV</Button>
+                  )}
+                </div>
+
+                {/* Import From Registry */}
+                <div className="bg-white border border-slate-200 shadow-sm p-5 flex flex-col gap-3">
+                  <div className="flex flex-col items-center text-center gap-2">
+                    <div className="h-12 w-12 rounded-2xl bg-blue-50 flex items-center justify-center">
+                      <Users className="h-5 w-5 text-custom-blue" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800">Import From Registry</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">Search the individual registry</p>
+                    </div>
+                  </div>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                    <Input className="pl-9 pr-4 h-8 text-xs bg-slate-50 border-slate-200 focus:bg-white" placeholder="Search by name..." value={individualSearch} onChange={(e) => handleIndividualSearchChange(e.target.value)} />
+                    {isSearching && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-slate-400" />}
+                  </div>
+                  {searchResults.length > 0 && (
+                    <div className="border border-slate-200 rounded-lg overflow-hidden max-h-[160px] overflow-y-auto">
+                      {searchResults.map((ind: any) => (
+                        <button key={ind.id} onClick={() => handleSelectIndividual(ind)} className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-100 last:border-0 transition-colors">
+                          <div className="text-xs font-semibold text-slate-800">{ind.full_name}</div>
+                          <div className="text-xs text-slate-400">{ind.gender}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {selectedIndividual && (
+                    <div className="border border-blue-200 rounded-lg bg-blue-50/30 p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800">{selectedIndividual.full_name}</span>
+                        <button onClick={() => { setSelectedIndividual(null); setIndividualPhoto(null); setPendingPhotoPreview(null); setPendingPhotoFile(null); setShowSavePhotoPrompt(false); setShowSaveCvPrompt(false); }} className="text-slate-400 hover:text-slate-600 p-1"><X className="h-3 w-3" /></button>
+                      </div>
+                      <Button onClick={applyIndividualToCV} className="w-full h-7 text-xs" size="sm"><CheckCircle2 className="h-3.5 w-3.5 mr-1.5" /> Apply to CV</Button>
+                    </div>
+                  )}
+                  {!selectedIndividual && !searchResults.length && !isSearching && individualSearch.length < 2 && (
+                    <p className="text-xs text-slate-400 text-center py-1">Type a name to search</p>
+                  )}
+                </div>
+
+                {/* Start From Scratch */}
+                <div className="bg-white border border-slate-200 shadow-sm p-5 flex flex-col items-center text-center gap-3">
+                  <div className="h-12 w-12 rounded-2xl bg-blue-50 flex items-center justify-center">
+                    <FileText className="h-5 w-5 text-custom-blue" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-800">Start From Scratch</h3>
+                    <p className="text-xs text-slate-400 mt-0.5">Build your CV manually</p>
+                  </div>
+                  <Button onClick={() => { setCvData(EMPTY_CV_DATA); setWorkflowStep('review-edit'); setActiveSection('contact'); }} className="w-full h-8 text-xs bg-custom-blue hover:bg-[#2d5a94]">Start Building</Button>
+                </div>
+              </div>
+
+              {/* Saved Drafts Section */}
+              <div className="bg-white border border-slate-200 shadow-sm rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setShowDraftsList(prev => !prev)}
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <Save className="h-4 w-4 text-custom-blue" />
+                    <span className="text-sm font-bold text-slate-800">Saved Drafts</span>
+                    {cvDrafts.length > 0 && (
+                      <span className="bg-custom-blue text-white text-xs font-bold px-2 py-0.5 rounded-full">{cvDrafts.length}</span>
+                    )}
+                  </div>
+                  {showDraftsList ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
+                </button>
+
+                {showDraftsList && (
+                  <div className="border-t border-slate-100">
+                    {cvDrafts.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center py-6">No saved drafts yet. Save a draft from Review &amp; Edit.</p>
+                    ) : (
+                      <div className="divide-y divide-slate-100 max-h-[240px] overflow-y-auto">
+                        {cvDrafts.map((draft) => (
+                          <div key={draft.id} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 group">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-semibold text-slate-800 truncate">{draft.name}</span>
+                                {draft.isPortalDraft && (
+                                  <span className="text-xs bg-blue-50 text-blue-600 font-semibold px-1.5 py-0.5 rounded shrink-0">Portal</span>
+                                )}
+                              </div>
+                              <span className="text-xs text-slate-400">{new Date(draft.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                              {draft.data?.personalInfo?.fullName && (
+                                <span className="text-xs text-slate-500 block">{draft.data.personalInfo.fullName}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 ml-3">
+                              <Button size="sm" onClick={() => loadDraft(draft)} className="h-7 text-xs bg-custom-blue hover:bg-[#2d5a94] text-white px-3">Load</Button>
+                              <Button size="sm" variant="ghost" onClick={() => deleteDraft(draft.id)} className="h-7 w-7 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"><Trash2 className="h-3.5 w-3.5" /></Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
-
-                {!selectedIndividual && !searchResults.length && !isSearching && individualSearch.length < 2 && (
-                  <p className="text-sm text-slate-400 text-center py-2">Type a name to search the registry</p>
-                )}
               </div>
+            </Panel>
 
-              {/* Start From Scratch */}
-              <div className="bg-white border border-slate-200 shadow-sm p-6 flex flex-col items-center text-center gap-4">
-                <div className="h-14 w-14 rounded-2xl bg-blue-50 flex items-center justify-center">
-                  <FileText className="h-6 w-6 text-custom-blue" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-800">Start From Scratch</h3>
-                  <p className="text-xs text-slate-400 mt-1">Build your CV manually</p>
-                </div>
-                <Button onClick={() => { setCvData(EMPTY_CV_DATA); setWorkflowStep('review-edit'); setActiveSection('contact'); }} className="w-full bg-custom-blue hover:bg-[#2d5a94]">Start Building</Button>
-              </div>
-            </div>
+            <PanelResizeHandle className="w-1.5 bg-slate-100 hover:bg-custom-blue/30 transition-colors cursor-col-resize flex-shrink-0" />
 
-            {/* Right preview during import */}
-            <div className="w-[45%] bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-              <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+            <Panel defaultSize={45} minSize={25} className="bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+              <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between shrink-0">
                 <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Preview</span>
                 <div className="flex items-center gap-2">
                   <button onClick={() => setZoomLevel(Math.max(0.4, zoomLevel - 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomOut className="h-3.5 w-3.5 text-slate-500" /></button>
@@ -3221,15 +3165,15 @@ export default function CVGeneratorPage() {
                   <div ref={previewRef} id="cv-preview-container">{renderLayout()}</div>
                 </div>
               </div>
-            </div>
-          </div>
+            </Panel>
+          </PanelGroup>
         )}
 
         {/* ─── STEP 2: REVIEW & EDIT ──────────────────────────────────────── */}
         {workflowStep === 'review-edit' && (
-          <div className="flex-1 flex">
+          <PanelGroup direction="horizontal" className="flex-1">
             {/* Left — Sections Sidebar (Collapsible Accordion) */}
-            <div className="w-56 shrink-0 bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+            <Panel defaultSize={14} minSize={10} className="bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
               <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between">
                 <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Sections</span>
               </div>
@@ -3288,10 +3232,12 @@ export default function CVGeneratorPage() {
                   Client Collaboration <ArrowRight className="h-3 w-3 ml-1" />
                 </Button>
               </div>
-            </div>
+            </Panel>
+
+            <PanelResizeHandle className="w-1.5 bg-slate-100 hover:bg-custom-blue/30 transition-colors cursor-col-resize flex-shrink-0" />
 
             {/* Center — Editor Panel */}
-            <div className="flex-1 bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+            <Panel defaultSize={41} minSize={25} className="bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
               <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
                 <h2 className="text-lg font-bold text-slate-700 uppercase tracking-wider">{sectionMeta.find(s => s.id === activeSection)?.label || 'Section'}</h2>
                 <span className="text-sm text-slate-400">Confidence Score <span className="text-emerald-600 font-bold">92%</span></span>
@@ -3386,37 +3332,47 @@ export default function CVGeneratorPage() {
                       </div>
                     </div>
                     {cvData.experience.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No experience entries yet. Click "Add" to create one.</p>}
-                    <div className="space-y-4">
-                      {cvData.experience.map((exp: any, idx: number) => (
-                        <div key={idx} className="p-4 border border-slate-200 rounded-xl space-y-3">
-                          <div className="flex justify-between items-center">
-                            <span className="text-xs font-bold text-slate-500">Position #{idx + 1}</span>
-                            <Button variant="ghost" size="icon" onClick={() => removeExperience(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
-                          </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <Input placeholder="Company Name" value={exp.company ?? ""} onChange={(e) => handleExperienceChange(idx, "company", e.target.value)} />
-                            <Input placeholder="Location" value={exp.location ?? ""} onChange={(e) => handleExperienceChange(idx, "location", e.target.value)} />
-                            <Input placeholder="Role / Job Title" value={exp.role ?? ""} onChange={(e) => handleExperienceChange(idx, "role", e.target.value)} />
-                            <div className="grid grid-cols-2 gap-2">
-                              <Input placeholder="Start Date" value={exp.startDate ?? ""} onChange={(e) => handleExperienceChange(idx, "startDate", e.target.value)} />
-                              <Input placeholder="End Date" value={exp.endDate ?? ""} onChange={(e) => handleExperienceChange(idx, "endDate", e.target.value)} />
-                            </div>
-                            <Input placeholder="Company Description" className="col-span-2" value={exp.companyDesc ?? ""} onChange={(e) => handleExperienceChange(idx, "companyDesc", e.target.value)} />
-                            <div className="col-span-2 space-y-2">
-                              <div className="flex justify-between items-center">
-                                <span className="text-xs text-slate-500">Key Responsibilities</span>
-                                <Button type="button" variant="ghost" size="sm" onClick={() => addRespToExperience(idx)} className="h-6 text-sm text-blue-600"><Plus className="h-2.5 w-2.5" /> Add</Button>
+                    <div className="space-y-3">
+                      {cvData.experience.map((exp: any, idx: number) => {
+                        const key = `exp-${idx}`;
+                        const collapsed = collapsedItems[key];
+                        return (
+                          <div key={idx} className="border border-slate-200 rounded-xl overflow-hidden">
+                            <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 cursor-pointer" onClick={() => toggleItem(key)}>
+                              <div className="flex items-center gap-2">
+                                {collapsed ? <ChevronRight className="h-3.5 w-3.5 text-slate-400" /> : <ChevronDown className="h-3.5 w-3.5 text-slate-400" />}
+                                <span className="text-xs font-bold text-slate-700">{exp.role || 'Position'} {exp.company ? `— ${exp.company}` : `#${idx + 1}`}</span>
+                                {exp.startDate && <span className="text-xs text-slate-400">{exp.startDate}–{exp.endDate}</span>}
                               </div>
-                              {exp.responsibilities?.map((resp: string, rIdx: number) => (
-                                <div key={rIdx} className="flex gap-2 items-center">
-                                  <Input value={resp ?? ""} placeholder="e.g. Designed backend system" onChange={(e) => handleRespChangeInExperience(idx, rIdx, e.target.value)} className="h-8 text-xs" />
-                                  <Button variant="ghost" size="icon" onClick={() => removeRespFromExperience(idx, rIdx)} className="h-8 w-8 text-red-400 hover:text-red-600"><Trash2 className="h-3 w-3" /></Button>
-                                </div>
-                              ))}
+                              <Button variant="ghost" size="icon" onClick={e => { e.stopPropagation(); removeExperience(idx); }} className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50"><Trash2 className="h-3 w-3" /></Button>
                             </div>
+                            {!collapsed && (
+                              <div className="p-4 grid grid-cols-2 gap-3">
+                                <Input placeholder="Company Name" value={exp.company ?? ""} onChange={(e) => handleExperienceChange(idx, "company", e.target.value)} />
+                                <Input placeholder="Location" value={exp.location ?? ""} onChange={(e) => handleExperienceChange(idx, "location", e.target.value)} />
+                                <Input placeholder="Role / Job Title" value={exp.role ?? ""} onChange={(e) => handleExperienceChange(idx, "role", e.target.value)} />
+                                <div className="grid grid-cols-2 gap-2">
+                                  <Input placeholder="Start Date" value={exp.startDate ?? ""} onChange={(e) => handleExperienceChange(idx, "startDate", e.target.value)} />
+                                  <Input placeholder="End Date" value={exp.endDate ?? ""} onChange={(e) => handleExperienceChange(idx, "endDate", e.target.value)} />
+                                </div>
+                                <Input placeholder="Company Description" className="col-span-2" value={exp.companyDesc ?? ""} onChange={(e) => handleExperienceChange(idx, "companyDesc", e.target.value)} />
+                                <div className="col-span-2 space-y-2">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-xs text-slate-500">Key Responsibilities</span>
+                                    <Button type="button" variant="ghost" size="sm" onClick={() => addRespToExperience(idx)} className="h-6 text-sm text-blue-600"><Plus className="h-2.5 w-2.5" /> Add</Button>
+                                  </div>
+                                  {exp.responsibilities?.map((resp: string, rIdx: number) => (
+                                    <div key={rIdx} className="flex gap-2 items-center">
+                                      <Input value={resp ?? ""} placeholder="e.g. Designed backend system" onChange={(e) => handleRespChangeInExperience(idx, rIdx, e.target.value)} className="h-8 text-xs" />
+                                      <Button variant="ghost" size="icon" onClick={() => removeRespFromExperience(idx, rIdx)} className="h-8 w-8 text-red-400 hover:text-red-600"><Trash2 className="h-3 w-3" /></Button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -3428,20 +3384,29 @@ export default function CVGeneratorPage() {
                       <Button size="sm" variant="outline" onClick={addEducation} className="h-7 text-sm gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
                     </div>
                     {cvData.education.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No education entries yet.</p>}
-                    {cvData.education.map((edu: any, idx: number) => (
-                      <div key={idx} className="p-4 border border-slate-200 rounded-xl space-y-3">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-bold text-slate-500">Education #{idx + 1}</span>
-                          <Button variant="ghost" size="icon" onClick={() => removeEducation(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                    {cvData.education.map((edu: any, idx: number) => {
+                      const key = `edu-${idx}`; const collapsed = collapsedItems[key];
+                      return (
+                        <div key={idx} className="border border-slate-200 rounded-xl overflow-hidden">
+                          <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 cursor-pointer" onClick={() => toggleItem(key)}>
+                            <div className="flex items-center gap-2">
+                              {collapsed ? <ChevronRight className="h-3.5 w-3.5 text-slate-400" /> : <ChevronDown className="h-3.5 w-3.5 text-slate-400" />}
+                              <span className="text-xs font-bold text-slate-700">{edu.degree || `Education #${idx + 1}`}{edu.institution ? ` — ${edu.institution}` : ''}</span>
+                              {edu.year && <span className="text-xs text-slate-400">({edu.year})</span>}
+                            </div>
+                            <Button variant="ghost" size="icon" onClick={e => { e.stopPropagation(); removeEducation(idx); }} className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50"><Trash2 className="h-3 w-3" /></Button>
+                          </div>
+                          {!collapsed && (
+                            <div className="p-4 grid grid-cols-2 gap-3">
+                              <Input placeholder="Degree / Certificate" value={edu.degree ?? ""} onChange={(e) => handleEducationChange(idx, "degree", e.target.value)} />
+                              <Input placeholder="Year of Completion" value={edu.year ?? ""} onChange={(e) => handleEducationChange(idx, "year", e.target.value)} />
+                              <Input placeholder="Institution" className="col-span-2" value={edu.institution ?? ""} onChange={(e) => handleEducationChange(idx, "institution", e.target.value)} />
+                              <Input placeholder="Extra Details / Certifications" className="col-span-2" value={edu.details ?? ""} onChange={(e) => handleEducationChange(idx, "details", e.target.value)} />
+                            </div>
+                          )}
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <Input placeholder="Degree / Certificate" value={edu.degree ?? ""} onChange={(e) => handleEducationChange(idx, "degree", e.target.value)} />
-                          <Input placeholder="Year of Completion" value={edu.year ?? ""} onChange={(e) => handleEducationChange(idx, "year", e.target.value)} />
-                          <Input placeholder="Institution" className="col-span-2" value={edu.institution ?? ""} onChange={(e) => handleEducationChange(idx, "institution", e.target.value)} />
-                          <Input placeholder="Extra Details / Certifications" className="col-span-2" value={edu.details ?? ""} onChange={(e) => handleEducationChange(idx, "details", e.target.value)} />
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
@@ -3453,15 +3418,26 @@ export default function CVGeneratorPage() {
                       <Button size="sm" variant="outline" onClick={addSkillGroup} className="h-7 text-sm gap-1 border-dashed"><Plus className="h-3 w-3" /> Add</Button>
                     </div>
                     {cvData.skills.length === 0 && <p className="text-xs text-slate-400 italic py-4 text-center">No skills added yet.</p>}
-                    {cvData.skills.map((skill: any, idx: number) => (
-                      <div key={idx} className="flex gap-3 items-start p-3 border border-slate-200 rounded-lg">
-                        <div className="flex-1 space-y-2">
-                          <Input placeholder="Category (e.g. Frameworks & Tools)" value={skill.category ?? ""} onChange={(e) => handleSkillGroupChange(idx, "category", e.target.value)} />
-                          <Textarea placeholder="Comma-separated items" rows={2} value={skill.items ?? ""} onChange={(e) => handleSkillGroupChange(idx, "items", e.target.value)} />
+                    {cvData.skills.map((skill: any, idx: number) => {
+                      const key = `skill-${idx}`; const collapsed = collapsedItems[key];
+                      return (
+                        <div key={idx} className="border border-slate-200 rounded-xl overflow-hidden">
+                          <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 cursor-pointer" onClick={() => toggleItem(key)}>
+                            <div className="flex items-center gap-2">
+                              {collapsed ? <ChevronRight className="h-3.5 w-3.5 text-slate-400" /> : <ChevronDown className="h-3.5 w-3.5 text-slate-400" />}
+                              <span className="text-xs font-bold text-slate-700">{skill.category || `Skill Group #${idx + 1}`}</span>
+                            </div>
+                            <Button variant="ghost" size="icon" onClick={e => { e.stopPropagation(); removeSkillGroup(idx); }} className="h-6 w-6 text-red-400 hover:text-red-600"><Trash2 className="h-3 w-3" /></Button>
+                          </div>
+                          {!collapsed && (
+                            <div className="p-3 space-y-2">
+                              <Input placeholder="Category (e.g. Frameworks & Tools)" value={skill.category ?? ""} onChange={(e) => handleSkillGroupChange(idx, "category", e.target.value)} />
+                              <Textarea placeholder="Comma-separated items" rows={2} value={skill.items ?? ""} onChange={(e) => handleSkillGroupChange(idx, "items", e.target.value)} />
+                            </div>
+                          )}
                         </div>
-                        <Button variant="ghost" size="icon" onClick={() => removeSkillGroup(idx)} className="text-red-500 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
@@ -3565,7 +3541,14 @@ export default function CVGeneratorPage() {
                         <div className="grid grid-cols-2 gap-3">
                           <Input placeholder="Reference Name" value={ref.name ?? ""} onChange={(e) => handleReferenceChange(idx, "name", e.target.value)} />
                           <Input placeholder="Title / Role" value={ref.title ?? ""} onChange={(e) => handleReferenceChange(idx, "title", e.target.value)} />
-                          <Input placeholder="Company" value={ref.company ?? ""} onChange={(e) => handleReferenceChange(idx, "company", e.target.value)} />
+                          <CreatableCombobox
+                            options={companyOptions}
+                            value={ref.company ?? ""}
+                            onChange={(v) => handleReferenceChange(idx, "company", v)}
+                            onCreateOption={handleCreateCompany}
+                            placeholder="Select or create company..."
+                            createLabel="Use new company"
+                          />
                           <Input placeholder="Contact (Phone / Email)" value={ref.contact ?? ""} onChange={(e) => handleReferenceChange(idx, "contact", e.target.value)} />
                           <Input placeholder="Address / Office" className="col-span-2" value={ref.address ?? ""} onChange={(e) => handleReferenceChange(idx, "address", e.target.value)} />
                         </div>
@@ -3658,10 +3641,12 @@ export default function CVGeneratorPage() {
                 )}
 
               </div>
-            </div>
+            </Panel>
+
+            <PanelResizeHandle className="w-1.5 bg-slate-100 hover:bg-custom-blue/30 transition-colors cursor-col-resize flex-shrink-0" />
 
             {/* Right — Preview Panel (Review & Edit step) */}
-            <div className="w-[45%] bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+            <Panel defaultSize={45} minSize={25} className="bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
               <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
                 <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Live Preview</span>
                 <div className="flex items-center gap-2">
@@ -3682,15 +3667,15 @@ export default function CVGeneratorPage() {
                   <div ref={previewRef} id="cv-preview-container">{renderLayout()}</div>
                 </div>
               </div>
-            </div>
-          </div>
+            </Panel>
+          </PanelGroup>
         )}
 
         {/* ─── STEP 3: CLIENT COLLABORATION ─────────────────────────────── */}
         {workflowStep === 'collaboration' && (
-          <div className="flex-1 flex gap-4 overflow-hidden">
+          <PanelGroup direction="horizontal" className="flex-1 overflow-hidden">
             {/* Left Column: Configuration & Audit */}
-            <div className="w-[45%] bg-white border border-slate-200 shadow-sm p-6 flex flex-col gap-6 overflow-y-auto text-left">
+            <Panel defaultSize={45} minSize={30} className="bg-white border border-slate-200 shadow-sm p-6 flex flex-col gap-6 overflow-y-auto text-left">
               
               {/* Header section */}
               <div>
@@ -3799,26 +3784,36 @@ export default function CVGeneratorPage() {
               {(() => {
                 const getCollabPortalLink = () => {
                   const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
-                  return `${origin}/dashboard/cv-generator?portal=true&id=${cvData.personalInfo?.fullName?.toLowerCase().replace(/\s+/g, '-') || 'client'}`;
+                  const draftParam = currentPortalDraftId ? `&draftId=${currentPortalDraftId}` : '';
+                  return `${origin}/dashboard/cv-generator?portal=true${draftParam}`;
                 };
                 const collabLink = getCollabPortalLink();
                 return (
                   <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-4 space-y-3.5 mt-auto">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-700">Secure Review URL</span>
-                      <span className="text-sm bg-emerald-50 text-emerald-600 font-extrabold uppercase px-1.5 py-0.5 rounded">Active</span>
+                      {currentPortalDraftId
+                        ? <span className="text-sm bg-emerald-50 text-emerald-600 font-extrabold uppercase px-1.5 py-0.5 rounded">Draft Saved</span>
+                        : <span className="text-sm bg-amber-50 text-amber-600 font-extrabold uppercase px-1.5 py-0.5 rounded">Save Draft First</span>
+                      }
                     </div>
                     <div className="flex gap-2">
-                      <Input 
-                        readOnly 
-                        value={collabLink} 
-                        className="h-8 text-xs font-mono bg-white select-all text-slate-500" 
+                      <Input
+                        readOnly
+                        value={currentPortalDraftId ? collabLink : 'Save draft first to generate secure link...'}
+                        className="h-8 text-xs font-mono bg-white select-all text-slate-500"
                       />
-                      <Button size="sm" onClick={() => {
-                        navigator.clipboard.writeText(collabLink);
-                        toast.success("Client review link copied to clipboard!");
+                      <Button size="sm" onClick={async () => {
+                        if (!currentPortalDraftId) {
+                          setDraftNameInput(`CV - ${cvData.personalInfo?.fullName || 'Draft'} - ${new Date().toLocaleDateString()}`);
+                          setSavingDraftForPortal(true);
+                          setShowSaveDraftModal(true);
+                        } else {
+                          navigator.clipboard.writeText(collabLink);
+                          toast.success("Client review link copied to clipboard!");
+                        }
                       }} className="text-xs h-8 px-3">
-                        Copy
+                        {currentPortalDraftId ? 'Copy' : 'Save & Copy'}
                       </Button>
                     </div>
                   </div>
@@ -3860,10 +3855,12 @@ export default function CVGeneratorPage() {
                     Simulate Client Submission
                   </Button>
                 </div>
-            </div>
+            </Panel>
+
+            <PanelResizeHandle className="w-1.5 bg-slate-100 hover:bg-custom-blue/30 transition-colors cursor-col-resize flex-shrink-0" />
 
             {/* Right Column: Git-Style Review & Merge Panel */}
-            <div className="flex-1 bg-white border border-slate-200 shadow-sm p-6 flex flex-col gap-4 overflow-hidden text-left">
+            <Panel defaultSize={55} minSize={30} className="bg-white border border-slate-200 shadow-sm p-6 flex flex-col gap-4 overflow-hidden text-left">
               
               {!hasClientSubmission ? (
                 <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-4">
@@ -3886,6 +3883,14 @@ export default function CVGeneratorPage() {
                       <li>You'll be redirected back here to review and merge their entries with a full Git-style diff!</li>
                     </ol>
                   </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs h-9 border-slate-200 gap-2 hover:bg-slate-50"
+                    onClick={checkForClientSubmission}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" /> Check for Client Updates
+                  </Button>
                 </div>
               ) : (
                 <div className="flex-1 flex flex-col h-full overflow-hidden text-left">
@@ -3985,62 +3990,89 @@ export default function CVGeneratorPage() {
                   </div>
                 </div>
               )}
-            </div>
+            </Panel>
+          </PanelGroup>
+        )}
+
+
+        {/* ─── Module Modals (close on backdrop click) ─── */}
+        {showAiWriter && (
+          <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowAiWriter(false); }}>
+            <AIWriterModule cvData={cvData} setCvData={setCvData} onClose={() => setShowAiWriter(false)} />
+          </div>
+        )}
+        {showAtsOptimizer && (
+          <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowAtsOptimizer(false); }}>
+            <ATSOptimizer cvData={cvData} onClose={() => setShowAtsOptimizer(false)} />
+          </div>
+        )}
+        {showJobMatch && (
+          <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowJobMatch(false); }}>
+            <JobMatch cvData={cvData} onClose={() => setShowJobMatch(false)} />
+          </div>
+        )}
+        {showCoverLetter && (
+          <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowCoverLetter(false); }}>
+            <CoverLetterGenerator cvData={cvData} onClose={() => setShowCoverLetter(false)} />
+          </div>
+        )}
+        {showResumeVersions && (
+          <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowResumeVersions(false); }}>
+            <ResumeVersions cvData={cvData} setCvData={setCvData} cvVersions={cvVersions} setCvVersions={setCvVersions} onClose={() => setShowResumeVersions(false)} />
+          </div>
+        )}
+        {showAnalytics && (
+          <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowAnalytics(false); }}>
+            <ResumeAnalytics cvData={cvData} onClose={() => setShowAnalytics(false)} />
+          </div>
+        )}
+        {showAdvancedExport && (
+          <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowAdvancedExport(false); }}>
+            <AdvancedExport cvData={cvData} previewRef={previewRef as React.RefObject<HTMLDivElement>} onClose={() => setShowAdvancedExport(false)} />
           </div>
         )}
 
-        {/* ─── STEP 4: DESIGN & FINALIZE ──────────────────────────────────── */}
-        {workflowStep === 'design-finalize' && (
-          <div className="flex-1 flex gap-4">
-            {/* Left — Design Studio (Tabbed) */}
-            <div className="w-80 shrink-0 bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-              <div className="px-4 py-2.5 border-b border-slate-200">
-                <div className="flex gap-0.5 bg-slate-100 rounded-lg p-0.5">
-                  {[{ key: 'theme', label: 'Layout' }, { key: 'colors', label: 'Color' }, { key: 'font', label: 'Font' }, { key: 'photo', label: 'Photo' }].map(tab => (
-                    <button key={tab.key} onClick={() => setActiveDesignTab(tab.key)}
-                      className={`flex-1 text-sm font-semibold py-1.5 rounded-md transition-all ${activeDesignTab === tab.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                    >{tab.label}</button>
-                  ))}
-                </div>
+        {/* ─── Design Side Panel ─── */}
+        {showDesignPanel && (
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setShowDesignPanel(false)} />
+            <div className="fixed right-0 top-[56px] bottom-0 w-72 bg-white border-l border-slate-200 shadow-2xl z-40 flex flex-col overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between shrink-0">
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Palette className="h-4 w-4 text-custom-blue" /> Design Panel</h3>
+                <button onClick={() => setShowDesignPanel(false)} className="text-slate-400 hover:text-slate-600"><X className="h-4 w-4" /></button>
+              </div>
+              <div className="flex gap-0.5 bg-slate-100 rounded-lg p-0.5 mx-3 mt-3 shrink-0">
+                {[{ key: 'theme', label: 'Layout' }, { key: 'colors', label: 'Color' }, { key: 'font', label: 'Font' }, { key: 'photo', label: 'Photo' }].map(tab => (
+                  <button key={tab.key} onClick={() => setActiveDesignTab(tab.key)}
+                    className={`flex-1 text-xs font-semibold py-1.5 rounded-md transition-all ${activeDesignTab === tab.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >{tab.label}</button>
+                ))}
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {/* Layout Tab */}
                 {activeDesignTab === 'theme' && (
                   <div className="space-y-3">
-                    <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Theme Layout</span>
+                    <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">CV Layout</span>
                     <div className="grid grid-cols-2 gap-2">
                       {[
-                        { key: "theme1", label: "Classic", desc: "Two-column sidebar", icon: Layout },
-                        { key: "theme2", label: "Modern", desc: "Top header layout", icon: Layout },
-                        { key: "theme3", label: "Minimal", desc: "Single column", icon: Layout },
-                        { key: "theme4", label: "Executive", desc: "Bold leadership focus", icon: Layout },
+                        { key: "theme1", label: "Classic", desc: "Two-column sidebar" },
+                        { key: "theme2", label: "Modern", desc: "Top-header layout" },
+                        { key: "theme3", label: "Minimal", desc: "Single column" },
+                        { key: "theme4", label: "Executive", desc: "Bold leadership" },
+                        { key: "theme5", label: "Creative", desc: "Split accent bar" },
+                        { key: "theme6", label: "Academic", desc: "Scholar format" },
+                        { key: "theme7", label: "Timeline", desc: "Vertical timeline" },
                       ].map(t => (
                         <button key={t.key} onClick={() => setSelectedLayout(t.key)}
-                          className={`p-3 rounded-lg border-2 text-left transition-all ${selectedLayout === t.key ? 'border-custom-blue bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}
+                          className={`p-2.5 rounded-lg border-2 text-left transition-all ${selectedLayout === t.key ? 'border-custom-blue bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}
                         >
-                          <Layout className={`h-4 w-4 mb-1 ${selectedLayout === t.key ? 'text-custom-blue' : 'text-slate-400'}`} />
+                          <Layout className={`h-3.5 w-3.5 mb-1 ${selectedLayout === t.key ? 'text-custom-blue' : 'text-slate-400'}`} />
                           <div className="text-xs font-bold text-slate-700">{t.label}</div>
-                          <div className="text-sm text-slate-400 mt-0.5">{t.desc}</div>
+                          <div className="text-xs text-slate-400">{t.desc}</div>
                         </button>
                       ))}
                     </div>
-                    <div className="space-y-1.5">
-                      <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Column Style</span>
-                      <div className="flex gap-2">
-                        {['single-column', 'two-column', 'sidebar', 'executive'].map(col => (
-                          <button key={col} onClick={() => {}}
-                            className={`flex-1 text-sm font-semibold py-2 rounded-lg border transition-all ${selectedLayout.includes(col) ? 'border-custom-blue bg-blue-50 text-custom-blue' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}
-                          >{col.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}</button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                      <p className="text-sm text-amber-700">Choose a layout that matches your industry. Classic is best for conservative fields like finance. Modern works for tech. Minimal for creative roles.</p>
-                    </div>
                   </div>
                 )}
-
-                {/* Color Tab */}
                 {activeDesignTab === 'colors' && (
                   <div className="space-y-3">
                     <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Color Scheme</span>
@@ -4049,31 +4081,16 @@ export default function CVGeneratorPage() {
                         <button key={preset.name} title={preset.name}
                           onClick={() => { updateCvSetting('primaryColor', preset.primary); updateCvSetting('accentColor', preset.accent); }}
                           className="relative w-full aspect-square rounded-xl border-2 transition-all hover:scale-105"
-                          style={{
-                            background: `linear-gradient(135deg, ${preset.primary} 50%, ${preset.accent} 50%)`,
-                            borderColor: (cvSettings.primaryColor === preset.primary && cvSettings.accentColor === preset.accent) ? '#376bae' : 'transparent',
-                          }}
+                          style={{ background: `linear-gradient(135deg, ${preset.primary} 50%, ${preset.accent} 50%)`, borderColor: (cvSettings.primaryColor === preset.primary && cvSettings.accentColor === preset.accent) ? '#376bae' : 'transparent' }}
                         >
-                          {(cvSettings.primaryColor === preset.primary && cvSettings.accentColor === preset.accent) && (
-                            <Check className="absolute inset-0 m-auto h-4 w-4 text-white drop-shadow" />
-                          )}
+                          {(cvSettings.primaryColor === preset.primary && cvSettings.accentColor === preset.accent) && <Check className="absolute inset-0 m-auto h-4 w-4 text-white drop-shadow" />}
                         </button>
                       ))}
                     </div>
-                    <div className="space-y-1.5">
-                      <span className="text-sm text-slate-500">Primary Color</span>
-                      <input type="color" value={cvSettings.primaryColor} onChange={e => updateCvSetting('primaryColor', e.target.value)}
-                        className="w-full h-8 rounded border border-slate-200 p-0.5 cursor-pointer" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <span className="text-sm text-slate-500">Accent Color</span>
-                      <input type="color" value={cvSettings.accentColor} onChange={e => updateCvSetting('accentColor', e.target.value)}
-                        className="w-full h-8 rounded border border-slate-200 p-0.5 cursor-pointer" />
-                    </div>
+                    <div className="space-y-1.5"><span className="text-xs text-slate-500">Primary</span><input type="color" value={cvSettings.primaryColor} onChange={e => updateCvSetting('primaryColor', e.target.value)} className="w-full h-8 rounded border border-slate-200 p-0.5 cursor-pointer" /></div>
+                    <div className="space-y-1.5"><span className="text-xs text-slate-500">Accent</span><input type="color" value={cvSettings.accentColor} onChange={e => updateCvSetting('accentColor', e.target.value)} className="w-full h-8 rounded border border-slate-200 p-0.5 cursor-pointer" /></div>
                   </div>
                 )}
-
-                {/* Font Tab */}
                 {activeDesignTab === 'font' && (
                   <div className="space-y-3">
                     <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Font Family</span>
@@ -4083,7 +4100,7 @@ export default function CVGeneratorPage() {
                         { name: 'Roboto', family: 'Roboto, sans-serif', desc: 'Versatile' },
                         { name: 'Poppins', family: 'Poppins, sans-serif', desc: 'Friendly' },
                         { name: 'Lato', family: 'Lato, sans-serif', desc: 'Professional' },
-                        { name: 'Merriweather', family: 'Merriweather, serif', desc: 'Elegant serif' },
+                        { name: 'Merriweather', family: 'Merriweather, serif', desc: 'Elegant' },
                         { name: 'System', family: '-apple-system, sans-serif', desc: 'Default' },
                       ].map(f => (
                         <button key={f.name} onClick={() => updateCvSetting('fontFamily', f.family)}
@@ -4094,175 +4111,229 @@ export default function CVGeneratorPage() {
                         </button>
                       ))}
                     </div>
-                    <span className="text-xs font-bold text-slate-600 uppercase tracking-wider mt-3 block">Font Size</span>
+                    <span className="text-xs font-bold text-slate-600 uppercase tracking-wider block mt-2">Font Size</span>
                     <div className="flex items-center border border-slate-200 rounded-md overflow-hidden h-8 bg-white">
                       {([0.85, 1, 1.15] as const).map((s, i) => (
-                        <button key={s} onClick={() => updateCvSetting('fontScale', s)}
-                          className={`flex-1 text-xs font-bold h-full transition-colors ${cvSettings.fontScale === s ? 'bg-custom-blue text-white' : 'text-slate-500 hover:bg-slate-50'} ${i > 0 ? 'border-l border-slate-200' : ''}`}
-                        >{['Small', 'Medium', 'Large'][i]}</button>
+                        <button key={s} onClick={() => updateCvSetting('fontScale', s)} className={`flex-1 text-xs font-bold h-full transition-colors ${cvSettings.fontScale === s ? 'bg-custom-blue text-white' : 'text-slate-500 hover:bg-slate-50'} ${i > 0 ? 'border-l border-slate-200' : ''}`}>{['Sm', 'Md', 'Lg'][i]}</button>
                       ))}
                     </div>
                   </div>
                 )}
-
-                {/* Photo Tab */}
                 {activeDesignTab === 'photo' && (
                   <div className="space-y-3">
-                    <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Photo Settings</span>
-                    <div className="flex justify-center">
-                      <div className="relative">
-                        <div
-                          style={{
-                            width: cvSettings.photoSize,
-                            height: cvSettings.photoSize,
-                            borderRadius: cvSettings.photoShape === 'circle' ? '50%' : cvSettings.photoShape === 'rounded' ? '12px' : '0',
-                            objectFit: cvSettings.photoFit,
-                          }}
-                          className="bg-slate-100 border-2 border-slate-200 flex items-center justify-center overflow-hidden"
-                        >
-                          {cvData.personalInfo?.photoUrl ? (
-                            <img src={cvData.personalInfo.photoUrl} alt="Preview" style={{ width: '100%', height: '100%', objectFit: cvSettings.photoFit }} />
-                          ) : (
-                            <User className="h-8 w-8 text-slate-400" />
-                          )}
-                        </div>
-                      </div>
+                    <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Photo Shape</span>
+                    <div className="flex gap-2">
+                      {(['circle', 'rounded', 'square'] as const).map(shape => (
+                        <button key={shape} onClick={() => updateCvSetting('photoShape', shape)}
+                          className={`flex-1 py-2 text-xs font-bold rounded-lg border-2 capitalize transition-all ${cvSettings.photoShape === shape ? 'border-custom-blue bg-blue-50 text-custom-blue' : 'border-slate-200 text-slate-500'}`}
+                        >{shape}</button>
+                      ))}
                     </div>
-                    <div className="space-y-3">
-                      <div>
-                        <span className="text-sm text-slate-500">Size</span>
-                        <input type="range" min={80} max={250} value={cvSettings.photoSize} onChange={e => updateCvSetting('photoSize', Number(e.target.value))}
-                          className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-custom-blue mt-1" />
-                        <div className="flex justify-between text-xs text-slate-400"><span>Small</span><span>{cvSettings.photoSize}px</span><span>Large</span></div>
-                      </div>
-                      <div>
-                        <span className="text-sm text-slate-500">Shape</span>
-                        <div className="flex items-center border border-slate-200 rounded-md overflow-hidden h-7 bg-white mt-1">
-                          {(['square','circle','rounded'] as const).map((s, i) => (
-                            <button key={s} onClick={() => updateCvSetting('photoShape', s)}
-                              className={`flex-1 text-sm font-bold h-full transition-colors ${cvSettings.photoShape === s ? 'bg-custom-blue text-white' : 'text-slate-500 hover:bg-slate-50'} ${i > 0 ? 'border-l border-slate-200' : ''}`}
-                            >{s.charAt(0).toUpperCase() + s.slice(1)}</button>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <span className="text-sm text-slate-500">Fit</span>
-                        <select value={cvSettings.photoFit} onChange={e => updateCvSetting('photoFit', e.target.value as any)}
-                          className="w-full h-7 text-xs border border-slate-200 rounded-md px-2 bg-white text-slate-600 mt-1"
-                        >
-                          <option value="cover">Cover (crop to fill)</option>
-                          <option value="contain">Fit (show all)</option>
-                          <option value="fill">Stretch (fill)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <span className="text-sm text-slate-500">Show/Hide</span>
-                        <label className="flex items-center gap-2 mt-1 cursor-pointer">
-                          <input type="checkbox" checked={cvSettings.showPhoto !== false}
-                            onChange={e => updateCvSetting('showPhoto', e.target.checked)}
-                            className="rounded border-slate-300 text-custom-blue focus:ring-custom-blue h-4 w-4" />
-                          <span className="text-xs text-slate-600">Show photo in CV</span>
-                        </label>
-                      </div>
+                    <span className="text-xs font-bold text-slate-600 uppercase tracking-wider block">Photo Size</span>
+                    <div className="flex gap-2">
+                      {([{ label: 'S', val: '80px' }, { label: 'M', val: '110px' }, { label: 'L', val: '140px' }]).map(sz => (
+                        <button key={sz.val} onClick={() => updateCvSetting('photoSize', sz.val)}
+                          className={`flex-1 py-2 text-xs font-bold rounded-lg border-2 transition-all ${cvSettings.photoSize === sz.val ? 'border-custom-blue bg-blue-50 text-custom-blue' : 'border-slate-200 text-slate-500'}`}
+                        >{sz.label}</button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <Checkbox id="showPhoto" checked={(cvSettings as any).showPhoto !== false} onCheckedChange={v => updateCvSetting('showPhoto', v)} />
+                      <label htmlFor="showPhoto" className="text-xs font-semibold text-slate-700 cursor-pointer">Show Photo</label>
                     </div>
                   </div>
                 )}
-
-                {/* Export */}
-                <div className="space-y-2 pt-4 border-t border-slate-200">
-                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Export</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button size="sm" onClick={handleDownloadPdf} disabled={isDownloadingPdf} className="bg-custom-blue hover:bg-[#2d5a94] text-xs h-9">
-                      {isDownloadingPdf ? 'Generating...' : 'Download PDF'}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={handleDownloadDocx} className="text-xs h-9">Download Word</Button>
-                  </div>
-                </div>
-
-                {/* Save to Database */}
-                <div className="space-y-2 pt-4 border-t border-slate-200">
-                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Save to Database</span>
-                  <p className="text-sm text-slate-400 leading-relaxed">Your CV is auto-saved locally. Save to database for permanent access.</p>
-                  <Button size="sm" onClick={() => setShowSaveCvPrompt(true)} className="bg-green-600 hover:bg-green-700 text-xs w-full h-9">
-                    <Database className="h-3.5 w-3.5 mr-1.5" /> Save to Database
-                  </Button>
-                </div>
-
-                {/* AI Enhancement */}
-                <div className="space-y-2 pt-4 border-t border-slate-200">
-                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">AI Enhancement</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    {ENHANCEMENT_OPTIONS.map((opt) => (
-                      <button key={opt.value} type="button" onClick={() => setEnhancementLevel(opt.value)}
-                        className={`text-left p-2.5 rounded-lg border-2 transition-all ${enhancementLevel === opt.value ? 'border-custom-blue bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}
-                      >
-                        <div className="text-sm font-bold text-slate-700">{opt.label}</div>
-                        <div className="text-xs text-slate-400 leading-tight mt-0.5">{opt.description}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
               </div>
             </div>
+          </>
+        )}
 
-            {/* Right — Preview + Viewport */}
-            <div className="flex-1 bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-              <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Final Preview</span>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setZoomLevel(Math.max(0.4, zoomLevel - 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomOut className="h-3.5 w-3.5 text-slate-500" /></button>
-                  <span className="text-sm font-bold text-slate-600 min-w-[36px] text-center">{Math.round(zoomLevel * 100)}%</span>
-                  <button onClick={() => setZoomLevel(Math.min(1.2, zoomLevel + 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomIn className="h-3.5 w-3.5 text-slate-500" /></button>
+        {/* Save Draft Modal */}
+        {showSaveDraftModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-lg bg-custom-blue flex items-center justify-center shrink-0">
+                  <Save className="h-4 w-4 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">Save CV Draft</h3>
+                  <p className="text-xs text-slate-400">{savingDraftForPortal ? 'Required before sharing the secure client link.' : 'Save your progress to continue later.'}</p>
                 </div>
               </div>
-              <div className="flex-1 overflow-auto p-8 flex items-start justify-center bg-slate-50 custom-scrollbar">
-                <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center', transition: 'transform 0.15s ease-out' }} className="shrink-0">
-                  <div ref={previewRef} id="cv-preview-container">{renderLayout()}</div>
-                </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-600">Draft Name</label>
+                <Input
+                  value={draftNameInput}
+                  onChange={(e) => setDraftNameInput(e.target.value)}
+                  placeholder="e.g. John Smith CV – Draft 1"
+                  className="h-9 text-sm"
+                  autoFocus
+                />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button
+                  variant="outline"
+                  className="flex-1 h-9 text-sm"
+                  onClick={() => { setShowSaveDraftModal(false); setSavingDraftForPortal(false); }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="flex-1 h-9 text-sm bg-custom-blue hover:bg-[#2d5a94] text-white font-bold gap-1.5"
+                  disabled={!draftNameInput.trim() || isSavingDraft}
+                  onClick={async () => {
+                    const name = draftNameInput.trim();
+                    if (!name) return;
+                    const draftId = await saveDraft(name, savingDraftForPortal);
+                    setShowSaveDraftModal(false);
+                    if (savingDraftForPortal) {
+                      const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+                      const link = `${origin}/dashboard/cv-generator?portal=true&draftId=${draftId}`;
+                      navigator.clipboard.writeText(link);
+                      toast.success('Draft saved! Client link copied to clipboard.');
+                    } else {
+                      toast.success(`Draft "${name}" saved!`);
+                    }
+                    setSavingDraftForPortal(false);
+                  }}
+                >
+                  {isSavingDraft ? 'Saving...' : savingDraftForPortal ? 'Save & Copy Link' : 'Save Draft'}
+                </Button>
               </div>
             </div>
           </div>
         )}
 
-        {/* AI Writer Modal */}
-        {showAiWriter && (
-          <AIWriterModule cvData={cvData} setCvData={setCvData} onClose={() => setShowAiWriter(false)} />
-        )}
+        {/* ─── Send CV Modal ─── */}
+        {showSendCvModal && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowSendCvModal(false); }}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0"><MessageSquare className="h-4 w-4 text-white" /></div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-800">Send CV</h3>
+                    <p className="text-xs text-slate-400">Email or WhatsApp the candidate CV</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowSendCvModal(false)} className="text-slate-400 hover:text-slate-600"><X className="h-4 w-4" /></button>
+              </div>
 
-        {/* ATS Optimizer Modal */}
-        {showAtsOptimizer && (
-          <ATSOptimizer cvData={cvData} onClose={() => setShowAtsOptimizer(false)} />
-        )}
+              {/* Send method */}
+              <div className="flex gap-2">
+                {(['email', 'whatsapp'] as const).map(m => (
+                  <button key={m} onClick={() => setSendMethod(m)}
+                    className={`flex-1 py-2 rounded-lg border-2 text-sm font-bold capitalize transition-all ${sendMethod === m ? (m === 'whatsapp' ? 'border-green-500 bg-green-50 text-green-700' : 'border-custom-blue bg-blue-50 text-custom-blue') : 'border-slate-200 text-slate-500'}`}
+                  >{m === 'whatsapp' ? '📱 WhatsApp' : '✉️ Email'}</button>
+                ))}
+              </div>
 
-        {/* Job Match Modal */}
-        {showJobMatch && (
-          <JobMatch cvData={cvData} onClose={() => setShowJobMatch(false)} />
-        )}
+              {/* Recommender details */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Recommender / Referrer</h4>
+                <RecommenderSelect
+                  value={recommenderContactId}
+                  onChange={(rec) => { setRecommenderContactId(rec ? rec.id : null); setSelectedRecommender(rec); }}
+                  placeholder="Search recommender..."
+                />
+                <p className="text-[10px] text-slate-400">Select an existing recommender or create a new one.</p>
+              </div>
 
-        {/* Cover Letter Modal */}
-        {showCoverLetter && (
-          <CoverLetterGenerator cvData={cvData} onClose={() => setShowCoverLetter(false)} />
-        )}
+              {/* Recipients */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Recipients</h4>
+                <div className="space-y-2 bg-slate-50 rounded-xl p-3 border border-slate-200">
+                  {[
+                    { key: 'sandip', label: 'Sandip Patel (BCL)', detail: sendMethod === 'email' ? 'info@booksmartconsult.com' : '+254 700 505275' },
+                    { key: 'applicant', label: 'Applicant', detail: cvData.personalInfo?.email || cvData.personalInfo?.phone || 'No contact set' },
+                    { key: 'recommender', label: 'Recommender', detail: selectedRecommender?.email_address || selectedRecommender?.personal_mobile || 'Select a recommender' },
+                  ].map(r => (
+                    <label key={r.key} className="flex items-center gap-2 cursor-pointer">
+                      <Checkbox checked={sendCvRecipients[r.key]} onCheckedChange={v => setSendCvRecipients(p => ({ ...p, [r.key]: !!v }))} />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs font-semibold text-slate-700">{r.label}</span>
+                        <span className="text-xs text-slate-400 ml-2 truncate">{r.detail}</span>
+                      </div>
+                    </label>
+                  ))}
+                </div>
 
-        {/* Resume Versions Modal */}
-        {showResumeVersions && (
-          <ResumeVersions
-            cvData={cvData}
-            setCvData={setCvData}
-            cvVersions={cvVersions}
-            setCvVersions={setCvVersions}
-            onClose={() => setShowResumeVersions(false)}
-          />
-        )}
+                {/* Third-party contacts */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-600">Additional Recipients</span>
+                    <button onClick={() => setThirdParties(p => [...p, { name: '', email: '', role: 'recruiter' }])} className="text-xs text-custom-blue font-bold hover:underline">+ Add</button>
+                  </div>
+                  {thirdParties.map((tp, i) => (
+                    <div key={i} className="flex gap-1.5 items-center">
+                      <Input placeholder="Name" value={tp.name} onChange={e => setThirdParties(p => p.map((x, xi) => xi === i ? { ...x, name: e.target.value } : x))} className="h-7 text-xs flex-1" />
+                      <Input placeholder="Email / Phone" value={tp.email} onChange={e => setThirdParties(p => p.map((x, xi) => xi === i ? { ...x, email: e.target.value } : x))} className="h-7 text-xs flex-1" />
+                      <select value={tp.role} onChange={e => setThirdParties(p => p.map((x, xi) => xi === i ? { ...x, role: e.target.value } : x))} className="h-7 text-xs border border-slate-200 rounded-md px-1 bg-white">
+                        <option value="recruiter">Recruiter (To)</option>
+                        <option value="applicant">Applicant (CC)</option>
+                        <option value="cc">CC</option>
+                      </select>
+                      <button onClick={() => setThirdParties(p => p.filter((_, xi) => xi !== i))} className="text-slate-400 hover:text-red-500 shrink-0"><X className="h-3.5 w-3.5" /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
 
-        {/* Analytics Modal */}
-        {showAnalytics && (
-          <ResumeAnalytics cvData={cvData} onClose={() => setShowAnalytics(false)} />
-        )}
+              {/* Cover letter */}
+              {sendMethod === 'email' && (
+                <div className="space-y-2">
+                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Cover Letter / Message Body</h4>
+                  <Textarea
+                    rows={5}
+                    placeholder={`Dear Hiring Manager,\n\nI am pleased to submit the CV of ${cvData.personalInfo?.fullName || 'the applicant'} for the position of ${cvData.personalInfo?.title || 'the role in question'}.\n\n${recommender.name ? `This applicant was referred by ${recommender.name}${recommender.company ? ` of ${recommender.company}` : ''}.` : ''}\n\nKind regards,\nBCL Recruitment Team`}
+                    value={coverLetterText}
+                    onChange={e => setCoverLetterText(e.target.value)}
+                    className="text-xs"
+                  />
+                  <p className="text-xs text-slate-400">Subject: CV Submission – {cvData.personalInfo?.fullName || 'Applicant'} – {cvData.personalInfo?.title || 'Role'}</p>
+                </div>
+              )}
 
-        {/* Advanced Export Modal */}
-        {showAdvancedExport && (
-          <AdvancedExport cvData={cvData} previewRef={previewRef as React.RefObject<HTMLDivElement>} onClose={() => setShowAdvancedExport(false)} />
+              {/* Action buttons */}
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" className="flex-1 h-9 text-sm" onClick={() => setShowSendCvModal(false)}>Cancel</Button>
+                <Button
+                  className="flex-1 h-9 text-sm font-bold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onClick={async () => {
+                    const name = cvData.personalInfo?.fullName || 'Applicant';
+                    const role = cvData.personalInfo?.title || '';
+
+// Recommender is already saved when selected via RecommenderSelect component
+// No need to save again here
+
+if (sendMethod === 'whatsapp') {
+                      const toSandip = sendCvRecipients.sandip;
+                      const phone = toSandip ? '+254700505275' : (cvData.personalInfo?.phone || '');
+                      const msg = encodeURIComponent(`Hi Sandip, please find attached the CV of ${name}${role ? ` for the ${role} position` : ''}.${recommender.name ? ` Referred by ${recommender.name}${recommender.company ? ` (${recommender.company})` : ''}.` : ''}`);
+                      window.open(`https://wa.me/${phone.replace(/\D/g, '')}?text=${msg}`, '_blank');
+                    } else {
+                      const recipients = [
+                        sendCvRecipients.sandip ? 'info@booksmartconsult.com' : '',
+                        sendCvRecipients.applicant ? (cvData.personalInfo?.email || '') : '',
+                        sendCvRecipients.recommender ? recommender.email : '',
+                        ...thirdParties.filter(t => t.role === 'recruiter').map(t => t.email),
+                      ].filter(Boolean).join(',');
+                      const cc = thirdParties.filter(t => t.role !== 'recruiter').map(t => t.email).filter(Boolean).join(',');
+                      const subject = encodeURIComponent(`CV Submission – ${name}${role ? ` – ${role}` : ''}`);
+                      const body = encodeURIComponent(coverLetterText || `Dear Hiring Manager,\n\nPlease find attached the CV of ${name}${role ? ` for the ${role} position` : ''}.\n\nKind regards,\nBCL Recruitment Team`);
+                      const ccParam = cc ? `&cc=${cc}` : '';
+                      window.open(`mailto:${recipients}?subject=${subject}${ccParam}&body=${body}`, '_blank');
+                    }
+                    toast.success(`Opening ${sendMethod === 'whatsapp' ? 'WhatsApp' : 'email client'}…`);
+                    setShowSendCvModal(false);
+                  }}
+                >
+                  {sendMethod === 'whatsapp' ? '📱 Send via WhatsApp' : '✉️ Open Email Client'}
+                </Button>
+              </div>
+            </div>
+          </div>
         )}
 
       </div>

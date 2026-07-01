@@ -35,8 +35,7 @@ const navItems = [
         items: [
             { title: "Tasks Requirements", href: "/dashboard/tasks-requirements", permission: "tasks_requirements.view" },
             { title: "Tasks Tracking", href: "/dashboard/tasks", permission: "tasks.view" },
-            { title: "Reports Dashboard", href: "/dashboard/reports", permission: "reports.view" },
-            { title: "Immigration Tracker", href: "/dashboard/immigration-tracker", permission: "reports.view" },
+            { title: "Reports Dashboard", href: "/dashboard/reports", permission: "reports.view" }
         ],
     },
     {

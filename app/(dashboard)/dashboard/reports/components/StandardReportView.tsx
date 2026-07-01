@@ -370,14 +370,14 @@ export function StandardReportView({
             {/* ═══ HEADER ═══ */}
             <TableHeader className="sticky top-0 z-40">
               <TableRow className="hover:bg-transparent border-0">
-                <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-2.5 px-2 bg-custom-blue" style={{ background: "#376bae" }}>
+                <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-2.5 px-2 bg-custom-blue">
                   <span className="text-[10px] font-semibold text-white uppercase tracking-wider">#</span>
                 </TableHead>
 
                 {interleavedColumns.map((col: any) => {
                   if (col.isDelta) {
                     return (
-                      <TableHead key={col.id} className="border-r border-b border-white/30 text-center px-1 py-2.5 bg-custom-blue" style={{ background: "#376bae", width: 62 }}>
+                      <TableHead key={col.id} className="border-r border-b border-white/30 text-center px-1 py-2.5 bg-custom-blue" style={{ width: 62 }}>
                         <span className="text-[9px] font-bold text-blue-300/60 uppercase">Δ</span>
                       </TableHead>
                     );
@@ -397,7 +397,6 @@ export function StandardReportView({
                         col.id === firstStageColId && "border-l-[3px] border-l-amber-400"
                       )}
                       style={{
-                        background: "#376bae",
                         ...(isSticky ? { left: `${left}px` } : undefined),
                       }}
                     >
@@ -579,7 +578,7 @@ export function StandardReportView({
                             </TooltipProvider>
                           );
                         } else {
-                            const { hasDate, hasDocs, hasOfficer, docIsPending, stageDateRawProps, docNode, officerNode } = rawCellVal;
+                            const { hasDate, hasDocs, hasOfficer, docIsPending, stageDateRawProps, docNode, officerNode, docIsOverdue, docDateValue, docStageName, docEstimatedTime, docIsCompleted } = rawCellVal;
 
                             cellContent = (
                               <div className="flex items-center w-full min-h-[26px]">
@@ -601,15 +600,56 @@ export function StandardReportView({
                                    "flex-1 flex items-center",
                                    (hasOfficer && showOfficers) && "pr-2 border-r border-slate-200 mr-2"
                                  )}>
-                                    {docIsPending ? (
-                                      <PendingUploadLink
-                                        taskId={stageDateRawProps.taskId}
-                                        stageId={stageDateRawProps.stageId}
-                                        subdeptId={stageDateRawProps.subdeptId}
-                                        deptId={stageDateRawProps.deptId}
-                                      />
-                                    ) : docNode}
-                                  </div>
+                                     {docIsPending ? (
+                                       <PendingUploadLink
+                                         taskId={stageDateRawProps.taskId}
+                                         stageId={stageDateRawProps.stageId}
+                                         subdeptId={stageDateRawProps.subdeptId}
+                                         deptId={stageDateRawProps.deptId}
+                                       />
+                                     ) : docIsOverdue ? (
+                                       <TooltipProvider delayDuration={150}>
+                                         <Tooltip>
+                                           <TooltipTrigger asChild>
+                                             <div className="flex items-center gap-1.5 cursor-default select-none group/cell">
+                                               <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                               {docNode}
+                                               <span className="text-[8px] font-black text-amber-600 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded uppercase ml-1">LATE</span>
+                                             </div>
+                                           </TooltipTrigger>
+                                           <TooltipContent
+                                             side="top"
+                                             className="border shadow-lg text-xs rounded-lg px-3 py-2 z-[9999] bg-amber-50 border-amber-200 text-amber-900"
+                                           >
+                                             <p className="font-bold mb-0.5">Completed — Overdue</p>
+                                             <p className="text-slate-600 text-sm">{formatDateCell(docDateValue, showTime)}</p>
+                                             {docEstimatedTime && <p className="text-slate-500 text-[10px] mt-1">Est. {formatEstimatedMins(docEstimatedTime)}</p>}
+                                             {docStageName && <p className="text-slate-500 text-[10px]">{docStageName}</p>}
+                                           </TooltipContent>
+                                         </Tooltip>
+                                       </TooltipProvider>
+                                     ) : docIsCompleted && docDateValue ? (
+                                       <TooltipProvider delayDuration={150}>
+                                         <Tooltip>
+                                           <TooltipTrigger asChild>
+                                             <div className="flex items-center gap-1.5 cursor-default select-none group/cell">
+                                               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                               {docNode}
+                                             </div>
+                                           </TooltipTrigger>
+                                           <TooltipContent
+                                             side="top"
+                                             className="border shadow-lg text-xs rounded-lg px-3 py-2 z-[9999] bg-emerald-50 border-emerald-200 text-emerald-900"
+                                           >
+                                             <p className="font-bold mb-0.5">Completed On Time</p>
+                                             <p className="text-slate-600 text-sm">{formatDateCell(docDateValue, true)}</p>
+                                             {docEstimatedTime && <p className="text-slate-500 text-[10px] mt-1">Est. {formatEstimatedMins(docEstimatedTime)}</p>}
+                                             {docStageName && <p className="text-slate-500 text-[10px]">{docStageName}</p>}
+                                           </TooltipContent>
+                                         </Tooltip>
+                                       </TooltipProvider>
+                                     ) : docNode}
+                                   </div>
                                 )}
                                {(hasOfficer && showOfficers) && (
                                  <div className="flex-1 flex items-center">

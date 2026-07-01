@@ -23,7 +23,7 @@ import { getOfficerDisplayName } from "@/lib/shared-user-assignment-service";
 import { fetchDepartments } from "../departments/departments/database";
 import { userService } from "@/lib/shared-user-assignment-service";
 import { MemorizedReportDialog } from "./MemorizedReportDialog";
-import { findDateInObject } from "../tasks/utils/dateUtils";
+import { calculateStageDate } from "../tasks/utils/dateUtils";
 import { cn } from "@/lib/utils";
 import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
@@ -515,7 +515,7 @@ export default function ReportsPage() {
 
       const hasDate = !!config.isStageDateSelected;
       const hasOfficer = stage.follow_up?.toLowerCase() === 'officer';
-      const allFields: { kycId: string; fieldId: string; fieldName: string }[] = [];
+      const allFields: { kycId: string; fieldId: string; fieldName: string; isImmigrationDate: boolean }[] = [];
 
       if (config.documents && Object.keys(config.documents).length > 0) {
         Object.entries(config.documents).forEach(([kycId, docConfig]) => {
@@ -524,7 +524,7 @@ export default function ReportsPage() {
           (docConfig as any).fields?.forEach((field: any) => {
             const fieldInfo = kycDoc.fields?.find((f: any) => f.id === field.id);
             if (!fieldInfo) return;
-            allFields.push({ kycId, fieldId: field.id, fieldName: fieldInfo.fieldName || field.id });
+            allFields.push({ kycId, fieldId: field.id, fieldName: fieldInfo.fieldName || field.id, isImmigrationDate: !!fieldInfo.isImmigrationDate });
           });
         });
       }
@@ -595,15 +595,54 @@ export default function ReportsPage() {
       let docNode: React.ReactNode = null;
       let docIsPending = false;
 
-      // --- 1. Date Raw Props ---
+      // --- 1. Stage Data & Doc Resolution (before dateValue so we can use calculateStageDate) ---
       const stageData = task.stages?.[col.stageId];
       const isSkipped = stageData?.status === 'skipped';
       const isCompleted = stageData?.status === 'completed' || stageData?.documentsUploaded === true;
-      const dateValue = !isSkipped ? (stageData?.date || stageData?.completedAt || stageData?.date_completed || null) : null;
+
+      // Resolve docs early so we can pass them to calculateStageDate
+      let docsForStage: any[] = [];
+      if (col.fields && col.fields.length > 0) {
+        const sourceDocRef = task.source_document_id?.[col.stageId];
+        if (sourceDocRef) {
+          const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
+          docsForStage = docIds.map(d => {
+            const docId = typeof d === 'string' ? d : d?.id;
+            return allDocuments.find((ad: any) => ad.id?.toString() === docId?.toString());
+          }).filter(Boolean);
+        }
+        if (docsForStage.length === 0 && stageData?.documents) {
+          docsForStage = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
+        }
+      }
+
+      const linkedDocument = docsForStage.length > 0 ? docsForStage[0] : null;
+      const documentFields = linkedDocument?.document_type_id ? (kycDocuments.get(linkedDocument.document_type_id)?.fields || []) : [];
+
+      // --- 2. Date Raw Props (using calculateStageDate for isImmigrationDate support) ---
+      const dateValue = !isSkipped ? calculateStageDate(stage, stageData, linkedDocument, documentFields, null, false) : null;
       let isOverdue = false;
 
+      // Extract isImmigrationDate field value directly from docs for LATE badge
+      const immigrationDateField = col.fields?.find((f: any) => f.isImmigrationDate);
+      let immigrationDateValue: string | null = null;
+      if (immigrationDateField && docsForStage.length > 0) {
+        for (const doc of docsForStage) {
+          const val = doc.extracted_details?.[immigrationDateField.fieldName] ||
+            doc.edited_details?.[immigrationDateField.fieldName] ||
+            doc.extracted_data?.[immigrationDateField.fieldName];
+          if (val && typeof val === 'string' && val.trim()) {
+            immigrationDateValue = val.trim();
+            break;
+          }
+        }
+      }
+
+      // Use immigrationDateValue as fallback for dateValue when calculateStageDate returns empty
+      const effectiveDateValue = dateValue || immigrationDateValue;
+
       // Robust LATE badge calculation mirroring Immigration Tracker / EditableStageCell
-      if (dateValue && stage.estimated_time) {
+      if (effectiveDateValue && stage.estimated_time) {
         const sortedStagesList = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
         const currentStageIndex = sortedStagesList.findIndex(s => s.id === stage.id);
 
@@ -620,7 +659,7 @@ export default function ReportsPage() {
 
         const startStr = prevDateStr || task.date_initiated || task.created_at;
         const start = parseDateSafe(startStr);
-        const end = parseDateSafe(dateValue);
+        const end = parseDateSafe(effectiveDateValue);
 
         if (start && end) {
           const durationMs = end.getTime() - start.getTime();
@@ -647,7 +686,7 @@ export default function ReportsPage() {
         skipReason: stageData?.reason || stageData?.skip_reason || '',
       };
 
-      // --- 2. Officer Rendering ---
+      // --- 3. Officer Rendering ---
       if (col.hasOfficer) {
         const officerIds = Array.isArray(stageData?.officer_ids) ? stageData.officer_ids.map(String).filter(Boolean) : [];
         if (!officerIds.length) {
@@ -665,66 +704,52 @@ export default function ReportsPage() {
         }
       }
 
-      // --- 3. Docs Rendering ---
+      // --- 4. Docs Rendering (value-only, no field names) ---
       if (col.fields && col.fields.length > 0) {
-        const sourceDocRef = task.source_document_id?.[col.stageId];
-        let docsForStage: any[] = [];
-
-        if (sourceDocRef) {
-          const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
-          docsForStage = docIds.map(d => {
-            const docId = typeof d === 'string' ? d : d?.id;
-            return allDocuments.find((ad: any) => ad.id?.toString() === docId?.toString());
-          }).filter(Boolean);
-        }
-
-          if (docsForStage.length === 0 && stageData?.documents) {
-            docsForStage = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
-        }
-
         if (docsForStage.length === 0) {
           docIsPending = !!col.requiresUpload;
-            docNode = <span className="text-xs text-gray-400 italic">—</span>;
-          } else {
-            const fieldValues: { fieldName: string; value: any }[] = [];
-            const seenDocFieldNames = new Set<string>();
-            for (const f of col.fields) {
-              let matchedDoc = docsForStage.find(d =>
-                d.document_id === f.kycId ||
-                d.document_type_id === f.kycId ||
-                d.kyc_document_id === f.kycId
+          docNode = <span className="text-xs text-gray-400 italic">—</span>;
+        } else {
+          const fieldValues: { value: any }[] = [];
+          const seenFieldNames = new Set<string>();
+          for (const f of col.fields) {
+            let matchedDoc = docsForStage.find(d =>
+              d.document_id === f.kycId ||
+              d.document_type_id === f.kycId ||
+              d.kyc_document_id === f.kycId
+            );
+
+            if (!matchedDoc) {
+              matchedDoc = docsForStage.find(d =>
+                (d.extracted_details && d.extracted_details[f.fieldName] !== undefined) ||
+                (d.edited_details && d.edited_details[f.fieldName] !== undefined) ||
+                (d.extracted_data && d.extracted_data[f.fieldName] !== undefined)
               );
+            }
 
-              if (!matchedDoc) {
-                matchedDoc = docsForStage.find(d =>
-                  (d.extracted_details && d.extracted_details[f.fieldName] !== undefined) ||
-                  (d.edited_details && d.edited_details[f.fieldName] !== undefined) ||
-                  (d.extracted_data && d.extracted_data[f.fieldName] !== undefined)
-                );
-              }
-
-              if (matchedDoc) {
-                const val = matchedDoc.extracted_details?.[f.fieldName] ||
-                  matchedDoc.edited_details?.[f.fieldName] ||
-                  matchedDoc.extracted_data?.[f.fieldName];
-                if (val !== null && val !== undefined && val !== '') {
-                  if (!seenDocFieldNames.has(f.fieldName)) {
-                    seenDocFieldNames.add(f.fieldName);
-                    fieldValues.push({ fieldName: f.fieldName, value: val });
-                  }
+            if (matchedDoc) {
+              const val = matchedDoc.extracted_details?.[f.fieldName] ||
+                matchedDoc.edited_details?.[f.fieldName] ||
+                matchedDoc.extracted_data?.[f.fieldName];
+              if (val !== null && val !== undefined && val !== '') {
+                if (!seenFieldNames.has(f.fieldName)) {
+                  seenFieldNames.add(f.fieldName);
+                  fieldValues.push({ value: val });
                 }
               }
             }
+          }
 
           if (fieldValues.length === 0) {
             docNode = <span className="text-xs text-gray-400 italic">—</span>;
           } else {
             docNode = (
-                <div className="flex flex-col gap-0.5">
-                  {fieldValues.map((fv, i) => {
-                    let displayVal = String(fv.value);
-                    return <div key={i} className="text-[11px] text-slate-700 leading-tight"><span className="font-medium">{fv.fieldName}: {displayVal}</span></div>;
-                  })}
+              <div className="flex flex-col gap-0.5">
+                {fieldValues.map((fv, i) => (
+                  <div key={i} className="text-[11px] text-slate-700 leading-tight">
+                    <span className="font-medium">{String(fv.value)}</span>
+                  </div>
+                ))}
               </div>
             );
           }
@@ -740,6 +765,11 @@ export default function ReportsPage() {
         isPending,
         stageDateRawProps,
         docNode,
+        docIsOverdue: immigrationDateValue ? isOverdue : false,
+        docDateValue: immigrationDateValue,
+        docStageName: stage.name,
+        docEstimatedTime: stage.estimated_time || null,
+        docIsCompleted: isCompleted,
         officerNode
       };
     }
@@ -803,16 +833,13 @@ export default function ReportsPage() {
       const stage = stages.find(s => s.id === col.stageId);
       if (stage && !checkStageApplicableForTask(stage, task)) return 'N/A';
 
+      const stageData = task.stages?.[col.stageId];
       const parts: string[] = [];
 
-      if (col.hasDate) {
-        const dateVal = task.stages?.[col.stageId]?.date || task.stages?.[col.stageId]?.completedAt;
-        parts.push(`Date: ${dateVal ? formatDate(dateVal, false) : 'Pending'}`);
-      }
-
+      // Resolve docs for calculateStageDate
+      let docsForStage: any[] = [];
       if (col.fields && col.fields.length > 0) {
         const sourceDocRef = task.source_document_id?.[col.stageId];
-        let docsForStage: any[] = [];
         if (sourceDocRef) {
           const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
           docsForStage = docIds.map(d => {
@@ -820,14 +847,22 @@ export default function ReportsPage() {
             return allDocuments.find((ad: any) => ad.id?.toString() === docId?.toString());
           }).filter(Boolean);
         }
-        if (docsForStage.length === 0) {
-          const stageData = task.stages?.[col.stageId];
-          if (stageData?.documents) {
-            docsForStage = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
-          }
+        if (docsForStage.length === 0 && stageData?.documents) {
+          docsForStage = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
         }
+      }
+      const linkedDocument = docsForStage.length > 0 ? docsForStage[0] : null;
+      const documentFields = linkedDocument?.document_type_id ? (kycDocuments.get(linkedDocument.document_type_id)?.fields || []) : [];
+
+      if (col.hasDate) {
+        const dateVal = calculateStageDate(stage, stageData, linkedDocument, documentFields, null, false);
+        parts.push(`Date: ${dateVal ? formatDate(dateVal, false) : 'Pending'}`);
+      }
+
+      if (col.fields && col.fields.length > 0) {
         if (docsForStage.length > 0) {
           const docParts: string[] = [];
+          const seenFieldNames = new Set<string>();
           for (const f of col.fields) {
             let matchedDoc = docsForStage.find(d =>
               d.document_id === f.kycId ||
@@ -848,7 +883,10 @@ export default function ReportsPage() {
                 matchedDoc.edited_details?.[f.fieldName] ||
                 matchedDoc.extracted_data?.[f.fieldName];
               if (val !== null && val !== undefined && val !== '') {
-                docParts.push(`${f.fieldName}: ${val}`);
+                if (!seenFieldNames.has(f.fieldName)) {
+                  seenFieldNames.add(f.fieldName);
+                  docParts.push(String(val));
+                }
               }
             }
           }
@@ -858,7 +896,6 @@ export default function ReportsPage() {
 
       // Officer string
       if (col.hasOfficer) {
-        const stageData = task.stages?.[col.stageId];
         const officerIds = Array.isArray(stageData?.officer_ids) ? stageData.officer_ids.map(String).filter(Boolean) : [];
         if (officerIds.length) {
           const officerNames = officerIds.map(id => {
@@ -872,7 +909,7 @@ export default function ReportsPage() {
       return parts.join(' | ');
     }
     return '';
-  }, [departments, stages, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, unifiedOfficers, allDocuments]);
+  }, [departments, stages, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, unifiedOfficers, allDocuments, kycDocuments]);
 
   const sortedTasks = useMemo(() => {
     if (!sortConfig || !filteredColumns.length) return searchedTasks;

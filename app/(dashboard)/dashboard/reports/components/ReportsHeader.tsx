@@ -227,7 +227,7 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
             <button onClick={() => setView('standard')} className={cn(
               "px-4 py-1.5 text-sm font-bold rounded-full transition-all flex items-center gap-1.5",
               view === 'standard'
-                ? "bg-white text-blue-600 shadow-sm"
+                ? "bg-custom-blue text-white shadow-sm"
                 : "text-slate-500 hover:text-slate-900"
             )}>
               <LayoutGrid className="h-3 w-3" /> Overall View
@@ -235,7 +235,7 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
             <button onClick={() => setView('transposed')} className={cn(
               "px-4 py-1.5 text-sm font-bold rounded-full transition-all flex items-center gap-1.5",
               view === 'transposed'
-                ? "bg-white text-blue-600 shadow-sm"
+                ? "bg-custom-blue text-white shadow-sm"
                 : "text-slate-500 hover:text-slate-900"
             )}>
               <TableProperties className="h-3 w-3" /> Transposed
@@ -389,9 +389,9 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
         <div className="flex items-center gap-2.5">
           <div className="flex items-center gap-0.5 bg-slate-100 p-1 rounded-full border border-slate-200 shrink-0">
             {[
-              { id: 'overview', label: 'Overview', activeBg: 'bg-white', activeText: 'text-blue-600' },
-              { id: 'officers', label: 'Officers', activeBg: 'bg-white', activeText: 'text-blue-600' },
-              { id: 'managers', label: 'Managers', activeBg: 'bg-white', activeText: 'text-blue-600' }
+              { id: 'overview', label: 'Overview', activeBg: 'bg-custom-blue', activeText: 'text-white' },
+              { id: 'officers', label: 'Officers', activeBg: 'bg-amber-500', activeText: 'text-white' },
+              { id: 'managers', label: 'Managers', activeBg: 'bg-violet-500', activeText: 'text-white' }
             ].map(p => (
               <button
                 key={p.id}
@@ -406,7 +406,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                 {p.label}
                 <span className={cn(
                   "text-sm font-black tabular-nums px-1.5 py-0.5 rounded-full font-medium",
-                  activePerspective === p.id ? "bg-blue-50 text-blue-500" : "text-slate-400"
+                  activePerspective === p.id ? `bg-white/20 ${p.activeText}` : "text-slate-400"
                 )}>
                   {perspectiveCounts[p.id]}
                 </span>
@@ -588,8 +588,6 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
   );
 }
 
-
-
 export function StatusFilterBar({ activeStatus, setActiveStatus, allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount }: any) {
   const counts = { all: allTasksCount || 0, wip: wipTasksCount || 0, write_up_completed: writeUpCompletedCount || 0, endorsed: endorsedCount || 0, cancelled: cancelledCount || 0 };
   const tabs = [
@@ -609,7 +607,7 @@ export function StatusFilterBar({ activeStatus, setActiveStatus, allTasksCount, 
               key={tab.id}
               onClick={() => setActiveStatus(tab.id)}
               className={cn(
-                "h-8 px-4 text-sm font-semibold rounded-lg transition-all flex items-center gap-2",
+                "h-10 px-5 text-base font-semibold rounded-lg transition-all flex items-center gap-2",
                 isActive
                   ? "bg-custom-blue text-white shadow-sm"
                   : "bg-white text-slate-500 border border-slate-200 hover:border-slate-300 hover:text-slate-700"
@@ -617,7 +615,7 @@ export function StatusFilterBar({ activeStatus, setActiveStatus, allTasksCount, 
             >
               {tab.label}
               <span className={cn(
-                "px-1.5 py-0.5 rounded-md text-xs font-bold tabular-nums",
+                "px-2 py-1 rounded-md text-sm font-bold tabular-nums",
                 isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
               )}>
                 {counts[tab.id]}

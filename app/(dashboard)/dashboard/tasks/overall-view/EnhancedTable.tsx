@@ -362,38 +362,28 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   onEditTask,
   users = [],
   officers = [],
-  initialColumnsPerPage = 10,  // Set default render to 10
+  initialColumnsPerPage = 10,  
   allDocuments = [],
   kycDocuments = new Map(),
   enhancedTasksData = new Map(),
 }) => {
   const didLogRef = useRef(false);
-
-  // Create a wrapper for getCellContent that includes cancellation parameters using EnhancedTable's own state
   const getCellContentWithCancel = useCallback((task: any, headerId: string) => {
-    // Since getCellContent is already fully parameterized from DepartmentTasksManager,
-    // we don't need to add cancellation parameters here - they're already included
     return getCellContent(task, headerId);
   }, [getCellContent]);
-
   useEffect(() => {
     if (DEBUG && !didLogRef.current) {
       didLogRef.current = true;
     }
   }, [tasks, kycDocuments]);
-
-  // State
   const [currentPage, setCurrentPage] = useState(1);
   const [columnsPerPage, setColumnsPerPage] = useState(initialColumnsPerPage);
   const [taskToDelete, setTaskToDelete] = useState<any>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<any>(null);
   const [showNAStages, setShowNAStages] = useState(false);
-
-  // Memoized derived data
   const processedDocuments = useMemo(() => processDocumentsForTasks(tasks, allDocuments), [tasks, allDocuments]);
 
-  // Reset to page 1 ONLY when the base dataset changes (e.g. search filter applied)
   useEffect(() => {
     setCurrentPage(1);
   }, [tasks]);
@@ -404,16 +394,10 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
     return tasks.flatMap(task => {
       if (!task) return [];
       const taskId = task.id || Math.random().toString(36).substr(2, 9);
-
-      // Extract participants from participants_details
       const officerFromParticipants = getParticipantByRole(task, 'officer');
       const managerFromParticipants = getParticipantByRole(task, 'task_manager');
       const assistantFromParticipants = getParticipantByRole(task, 'task_assistant');
-
-      // Get inherited officer if no direct officer assignment
       const inheritedOfficer = getInheritedOfficerForTask(task, departments || [], officers || []);
-
-      // Use participants_details first, then inherited officer, then fallback to task.officer
       const officerWithInheritance = officerFromParticipants || task.officer || inheritedOfficer || { id: task.officer_id, name: '' };
       const managerWithDetails = managerFromParticipants || task.task_manager || { id: task.task_manager_id, name: '' };
       const assistantWithDetails = assistantFromParticipants || task.task_assistant || { id: task.task_assistant_id, name: '' };
@@ -457,7 +441,6 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   );
 
   const totalColumns = headerStructure.length;
-  // Make sure totalPages is at least 1 to prevent UI glitches
   const totalPages = Math.max(1, Math.ceil(totalColumns / columnsPerPage));
 
   const paginatedHeaderStructure = useMemo(() => {
@@ -470,7 +453,6 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
     return tableRows.filter(row => !(row.type === 'stage' && row.isNA && row.stage?.documents?.length === 0));
   }, [tableRows, showNAStages]);
 
-  // Callbacks
   const handleAutomationClick = useCallback((classId: string, requirementId: number, taskId: string) => {
     const task = tasks.find(t => t.id === taskId);
     if (task) {
@@ -503,10 +485,9 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
 
   const handleColumnsPerPageChange = useCallback((value: string) => {
     setColumnsPerPage(parseInt(value, 10));
-    setCurrentPage(1); // Reset to first page when changing page size
+    setCurrentPage(1); 
   }, []);
 
-  // Render logic
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
@@ -613,7 +594,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
         )}
       </div>
 
-      <div className="bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 300px)' }}>
+      <div className="bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 260px)' }}>
         <Table className="min-w-full border-separate border-spacing-0">
           <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
             {expandedSections.has('case_details') && visibleCaseDetailHeaders.map((header, index) => (
@@ -687,7 +668,6 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
         users={users}
         officers={officers}
         onEnquiryCreated={(updatedTask) => {
-          // Handle task update - parent component should handle this
           if (onEditTask) {
             onEditTask(updatedTask);
           }

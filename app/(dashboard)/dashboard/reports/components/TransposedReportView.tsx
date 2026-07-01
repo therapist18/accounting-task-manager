@@ -264,11 +264,32 @@ export function TransposedReportView({
                                           )}
                                        </div>
                                      )}
-                                      {rawCellVal.hasDocs && (
+                                       {rawCellVal.hasDocs && (
                                         <div className={cn(rawCellVal.hasDate && "pt-2 border-t border-slate-100")}>
                                            <span className="text-[10px] text-slate-400 font-bold uppercase block mb-0.5">Docs</span>
                                            {rawCellVal.docIsPending ? (
                                              <PendingUploadLink taskId={sdp.taskId} stageId={sdp.stageId} subdeptId={sdp.subdeptId} deptId={sdp.deptId} />
+                                           ) : rawCellVal.docIsOverdue ? (
+                                             <TooltipProvider delayDuration={150}>
+                                               <Tooltip>
+                                                 <TooltipTrigger asChild>
+                                                   <div className="flex items-center gap-1.5 cursor-default select-none">
+                                                     <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                                     {rawCellVal.docNode}
+                                                     <span className="text-[8px] font-black text-amber-600 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded uppercase ml-1">LATE</span>
+                                                   </div>
+                                                 </TooltipTrigger>
+                                                 <TooltipContent side="top" className="border shadow-lg text-xs rounded-lg px-3 py-2 z-[9999] bg-amber-50 border-amber-200 text-amber-900">
+                                                   <p className="font-bold mb-0.5">Completed — Overdue</p>
+                                                   <p className="text-slate-600 text-sm">{rawCellVal.docDateValue}</p>
+                                                 </TooltipContent>
+                                               </Tooltip>
+                                             </TooltipProvider>
+                                           ) : rawCellVal.docIsCompleted && rawCellVal.docDateValue ? (
+                                             <div className="flex items-center gap-1.5">
+                                               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                               {rawCellVal.docNode}
+                                             </div>
                                            ) : rawCellVal.docNode}
                                         </div>
                                       )}

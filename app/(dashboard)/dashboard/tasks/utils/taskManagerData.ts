@@ -84,6 +84,7 @@ const transformKycFields = (fields: any[]): any[] => {
       isArray: isArray,
       isEffectiveTo: field.isEffectiveTo,
       isEffectiveFrom: field.isEffectiveFrom,
+      isImmigrationDate: field.isImmigrationDate === true,
     }
 
     if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
