@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import { Briefcase, FileText, Loader2, Search, UploadCloud, Eye, Zap, FileType, Wand2, Download, FileUp, Trash2, AlertCircle, Edit3, RefreshCw } from "lucide-react"
+import { Briefcase, FileText, Loader2, Search, UploadCloud, Eye, Zap, FileType, Wand2, Download, FileUp, Trash2, AlertCircle, Edit3, RefreshCw, Send, AlertTriangle } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
@@ -14,6 +14,8 @@ import RequirementsTableCombined from "./RequirementsTableCombined"
 import { UploadModal } from "@/app/generic-components/UploadModal"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { AutomationMappingDialog } from "../tasks/components/AutomationMappingDialog"
+import { SendRequirementsDialog } from "./components/SendRequirementsDialog"
+import { ReviewSubmissionDialog } from "./components/ReviewSubmissionDialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import * as XLSX from 'xlsx'
 import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types"
@@ -121,6 +123,10 @@ export function RequirementsTable({
   const [automationWebdataMap, setAutomationWebdataMap] = useState<Record<string, { name: string; webdata: any[] }>>({});
   const [groupToDelete, setGroupToDelete] = useState<any>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [fieldSourceDataCache, setFieldSourceDataCache] = useState<Record<string, Record<string, any>>>({});
+  const [fieldMasterComputedCache, setFieldMasterComputedCache] = useState<Record<string, any>>({});
+  const [isSendRequirementsOpen, setIsSendRequirementsOpen] = useState(false);
+  const [isReviewSubmissionOpen, setIsReviewSubmissionOpen] = useState(false);
 
   const parseSelectionId = useCallback((selectionId: string) => {
     const cleanId = selectionId.replace(/_\d+_\d+$/, '');
@@ -544,6 +550,12 @@ export function RequirementsTable({
 
   const searchedGroupedTasks = useMemo(() => !sidebarSearchQuery ? groupedTasks : groupedTasks.filter(group => group.applicantName.toLowerCase().includes(sidebarSearchQuery.toLowerCase())), [groupedTasks, sidebarSearchQuery]);
   const filteredGroupedTasks = useMemo(() => !selectedApplicant ? (searchedGroupedTasks.length > 0 ? [searchedGroupedTasks[0]] : []) : searchedGroupedTasks.filter(group => group.applicantName === selectedApplicant), [searchedGroupedTasks, selectedApplicant]);
+
+  const hasPendingClientSubmission = useMemo(() => {
+    const group = groupedTasks.find(g => g.applicantName === selectedApplicant);
+    const tasks = group?.tasks || [];
+    return tasks.some(task => task.registry_metadata?.client_requirements_draft?.status === 'submitted');
+  }, [groupedTasks, selectedApplicant]);
 
   useEffect(() => {
     if (searchedGroupedTasks.length > 0 && !selectedApplicant) {
@@ -1193,6 +1205,24 @@ export function RequirementsTable({
       </div>
       {filteredGroupedTasks.length > 0 ? (
         <div className="flex-1 flex flex-col border rounded-md bg-background shadow-sm">
+          {hasPendingClientSubmission && (
+            <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 flex items-center justify-between shadow-sm animate-pulse">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+                <p className="text-sm font-medium text-amber-800">
+                  Client has submitted missing requirements and fields draft!
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-white hover:bg-amber-50 text-amber-700 border-amber-300 shadow-sm"
+                onClick={() => setIsReviewSubmissionOpen(true)}
+              >
+                Review Submission
+              </Button>
+            </div>
+          )}
           <div className="p-4 border-b flex justify-between">
             <div className="relative">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -1207,6 +1237,14 @@ export function RequirementsTable({
               >
                 <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
                 {isRefreshing ? 'Refreshing...' : 'Refresh'}
+              </Button>
+              <Button
+                variant="default"
+                onClick={() => setIsSendRequirementsOpen(true)}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <Send className="h-4 w-4" />
+                Send Requirements
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild><Button variant="outline"><Download className="mr-2 h-4 w-4" /> Export</Button></DropdownMenuTrigger>
@@ -1245,6 +1283,10 @@ export function RequirementsTable({
               jobLevel={currentClassRequirements[0]?.job_level}
               automationWebdataMap={automationWebdataMap}
               classRequirements={currentClassRequirements}
+              fieldSourceDataCache={fieldSourceDataCache}
+              setFieldSourceDataCache={setFieldSourceDataCache}
+              fieldMasterComputedCache={fieldMasterComputedCache}
+              setFieldMasterComputedCache={setFieldMasterComputedCache}
             />
           </div>
         </div>
@@ -1360,6 +1402,43 @@ export function RequirementsTable({
           />
         </>
       )}
+
+      <SendRequirementsDialog
+        isOpen={isSendRequirementsOpen}
+        onClose={() => setIsSendRequirementsOpen(false)}
+        selectedApplicant={selectedApplicant || ''}
+        tasks={filteredGroupedTasks.flatMap(g => g.tasks)}
+        taskClassRequirements={taskClassRequirements}
+        automationWebdataMap={automationWebdataMap}
+        allCompanyDocuments={allCompanyDocuments}
+        allIndividualDocuments={allIndividualDocuments}
+        fieldSourceDataCache={fieldSourceDataCache}
+        fieldMasterComputedCache={fieldMasterComputedCache}
+        jobFieldsRecord={documents.reduce((acc, d) => ({ ...acc, [d.id]: d }), {})}
+        relationshipData={filteredGroupedTasks.map(g => {
+          const task = g.tasks[0];
+          const participants = task?.participants_details || [];
+          return {
+            company: participants.find(p => p.type === 'company') || (task?.applicant_details?.type === 'company' ? task.applicant_details : null),
+            principal: participants.find(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')),
+            directors: participants.filter(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('director') : p.role === 'director')),
+            dependants: participants.filter(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant')),
+          };
+        })}
+      />
+
+      <ReviewSubmissionDialog
+        isOpen={isReviewSubmissionOpen}
+        onClose={() => setIsReviewSubmissionOpen(false)}
+        task={filteredGroupedTasks.find(g => g.applicantName === selectedApplicant)?.tasks?.[0]}
+        taskClassRequirements={taskClassRequirements}
+        automationWebdataMap={automationWebdataMap}
+        allCompanyDocuments={allCompanyDocuments}
+        allIndividualDocuments={allIndividualDocuments}
+        fieldSourceDataCache={fieldSourceDataCache}
+        fieldMasterComputedCache={fieldMasterComputedCache}
+        onRefresh={refreshDocuments}
+      />
 
       <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <DialogContent className="max-w-md">

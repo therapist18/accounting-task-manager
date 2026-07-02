@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, ChevronDown, ChevronRight, Users2, User, Building2, Zap, FileType, UploadCloud, Eye, Calendar, CheckCircle2, XCircle, AlertCircle, Heart, HeartPulse, Database, Paperclip, FunctionSquare, TableIcon, HelpCircle } from "lucide-react"
+import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, ChevronDown, ChevronRight, Users2, User, Building2, Zap, FileType, UploadCloud, Eye, Calendar, CheckCircle2, XCircle, AlertCircle, Heart, HeartPulse, Database, Paperclip, FunctionSquare, TableIcon, HelpCircle, Check, X, Pencil } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import * as XLSX from 'xlsx'
@@ -32,6 +32,12 @@ import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types"
 import { UploadModal } from "@/app/generic-components/UploadModal"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { isValidValue, updateJsonValue, cleanFieldValue as cleanFieldValueStr } from "../tasks/utils/AutomationMappingDialog"
+import { resolveVariableValueImpl, resolveTargetEntityIdImpl, getArrayFieldDataImpl, fetchSourceDataImpl, getFieldValueImpl, type FieldResolutionContext } from "../tasks/utils/fieldResolution"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { SearchableSelect } from "@/components/ui/searchable-select"
+import { cn } from "@/lib/utils"
 
 // Helper functions for entity type styling and checking
 const getEntityTypeConfig = (type: string) => {
@@ -113,7 +119,7 @@ const getFileUrl = (filePath: string) => {
   return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`;
 };
 
-export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, onSaveDocument, onSave, toggleDocumentExpansion, renderDocumentStatus, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, documentTemplates, allIndividualDocuments, allCompanyDocuments, searchQuery = "", refreshDocuments, jobLevel, automationWebdataMap = {} }: any) {
+export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, onSaveDocument, onSave, toggleDocumentExpansion, renderDocumentStatus, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, documentTemplates, allIndividualDocuments, allCompanyDocuments, searchQuery = "", refreshDocuments, jobLevel, automationWebdataMap = {}, fieldSourceDataCache, setFieldSourceDataCache, fieldMasterComputedCache, setFieldMasterComputedCache }: any) {
   const [expandedSections, setExpandedSections] = useState({
     company: true,
     individual: true,
@@ -172,6 +178,18 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const [documentMetadataCache, setDocumentMetadataCache] = useState<Map<string, any>>(new Map());
   const [documentStatusCache, setDocumentStatusCache] = useState<Map<string, any>>(new Map());
   const [compositeStatusCache, setCompositeStatusCache] = useState<Map<string, any>>(new Map());
+
+  // Automation field value resolution (reuses AutomationMappingDialog's resolution logic)
+  const [editingFieldCell, setEditingFieldCell] = useState<{ automationId: string; fieldVariableName: string; groupIndex: number; entityId: string; table: string; path: string; linkingVariable: string; colId?: string } | null>(null);
+  const [editFieldValue, setEditFieldValue] = useState('');
+  const [isSavingFieldEdit, setIsSavingFieldEdit] = useState(false);
+  const hasFetchedFieldDataKey = useRef<string>('');
+
+  const jobFieldsRecord = useMemo(() => {
+    const rec: Record<string, any> = {};
+    masterFields.forEach((value, key) => { rec[String(key)] = value; });
+    return rec;
+  }, [masterFields]);
 
   const groupedRequirements = useMemo(() => {
     if (!organizedRequirements?.documents) return { general: [], processing: [], issuance: [], other: [] };
@@ -1213,6 +1231,153 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
   const relationshipData = useMemo(() => getRelationshipData(), [getRelationshipData]);
 
+  // Resolve automation field values for every (automation, applicant group) pair rendered
+  // in the Web Data Configuration section, reusing AutomationMappingDialog's resolution logic.
+  useEffect(() => {
+    const automationIds = Object.keys(automationWebdataMap || {});
+    if (automationIds.length === 0 || Object.keys(jobFieldsRecord).length === 0 || relationshipData.length === 0) return;
+    const fetchKey = `${automationIds.join(',')}|${relationshipData.length}|${Object.keys(jobFieldsRecord).length}`;
+    if (hasFetchedFieldDataKey.current === fetchKey) return;
+    hasFetchedFieldDataKey.current = fetchKey;
+
+    const loadAll = async () => {
+      const mergedSource: Record<string, Record<string, any>> = {};
+      const mergedComputed: Record<string, any> = {};
+      const calls: Promise<void>[] = [];
+      automationIds.forEach(automationId => {
+        const entry = automationWebdataMap[automationId];
+        if (!entry?.webdata?.length) return;
+        relationshipData.forEach((relData: any, groupIndex: number) => {
+          const task = filteredGroupedTasks[groupIndex]?.tasks?.[0];
+          if (!task) return;
+          calls.push(
+            fetchSourceDataImpl({
+              selectedAutomationId: automationId,
+              webData: [{ automationId, fields: entry.webdata }],
+              jobFields: jobFieldsRecord,
+              relationshipData: relData,
+              taskId: task.id,
+              currentIndividualId: task.individual_id?.toString(),
+              task
+            }).then(({ sourceData: sd, masterFieldComputedValues: mc }) => {
+              Object.entries(sd).forEach(([table, records]) => {
+                if (!mergedSource[table]) mergedSource[table] = {};
+                Object.assign(mergedSource[table], records);
+              });
+              if (mc) Object.assign(mergedComputed, mc);
+            }).catch(err => console.error('Error resolving field values for automation', automationId, err))
+          );
+        });
+      });
+      await Promise.all(calls);
+      setFieldSourceDataCache(prev => {
+        const next = { ...prev };
+        Object.entries(mergedSource).forEach(([table, records]) => {
+          next[table] = { ...(next[table] || {}), ...records };
+        });
+        return next;
+      });
+      setFieldMasterComputedCache(prev => ({ ...prev, ...mergedComputed }));
+    };
+    loadAll();
+  }, [automationWebdataMap, jobFieldsRecord, relationshipData, filteredGroupedTasks]);
+
+  const buildTableFieldCtx = useCallback((automationId: string, fields: any[], groupIndex: number, task: any): FieldResolutionContext => ({
+    sourceData: fieldSourceDataCache,
+    jobFields: jobFieldsRecord,
+    webData: [{ automationId, fields }],
+    selectedAutomationId: automationId,
+    masterFieldComputedValues: fieldMasterComputedCache,
+    relationshipData: relationshipData[groupIndex],
+    taskId: task?.id,
+    currentIndividualId: task?.individual_id?.toString(),
+    task,
+  }), [fieldSourceDataCache, jobFieldsRecord, fieldMasterComputedCache, relationshipData]);
+
+  const buildTableFieldCtxForColumn = useCallback((automationId: string, fields: any[], col: any): FieldResolutionContext => ({
+    sourceData: fieldSourceDataCache,
+    jobFields: jobFieldsRecord,
+    webData: [{ automationId, fields }],
+    selectedAutomationId: automationId,
+    masterFieldComputedValues: fieldMasterComputedCache,
+    relationshipData: relationshipData[col.groupIndex],
+    taskId: col.task?.id,
+    currentIndividualId: isCompanyType(col.type) ? col.task?.individual_id?.toString() : col.id?.toString(),
+    task: col.task,
+  }), [fieldSourceDataCache, jobFieldsRecord, fieldMasterComputedCache, relationshipData]);
+
+  const startFieldEdit = useCallback((automationId: string, field: any, groupIndex: number, entityId: string, currentValue: any, colId?: any) => {
+    const masterId = field.linkedMasterFields?.[0] || field.masterFieldIds?.[0];
+    if (!masterId) return;
+    const jobField = jobFieldsRecord[String(masterId)];
+    const source = jobField?.sources?.find((s: any) => !s.is_computed && s.table && s.path);
+    if (!source) return;
+    setEditingFieldCell({
+      automationId, fieldVariableName: field.variableName, groupIndex, entityId: String(entityId),
+      table: source.table, path: source.path, linkingVariable: source.linking_variable || 'id',
+      colId: colId ? String(colId) : undefined
+    });
+    setEditFieldValue(isValidValue(currentValue) ? String(currentValue) : '');
+  }, [jobFieldsRecord]);
+
+  const cancelFieldEdit = useCallback(() => { setEditingFieldCell(null); setEditFieldValue(''); }, []);
+
+  const saveFieldEdit = useCallback(async (isDropdown?: boolean, dropdownOptions?: { label: string; value: string }[]) => {
+    if (!editingFieldCell) return;
+    const { table, path, entityId } = editingFieldCell;
+    let valueToSave = editFieldValue;
+    if (isDropdown && dropdownOptions && dropdownOptions.length > 0) {
+      const selectedOption = dropdownOptions.find(opt => opt.value === editValue || opt.label === editValue);
+      if (selectedOption) {
+        valueToSave = selectedOption.label;
+      }
+    }
+    setIsSavingFieldEdit(true);
+    try {
+      let record = fieldSourceDataCache[table]?.[entityId];
+      let queryField = 'id';
+      let recordPK: any = entityId;
+      if (!record) {
+        let query = supabase.from(table).select('*');
+        query = table === 'tm_tasks' ? query.eq('id', entityId) : query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`);
+        const { data: fetchedData, error: fetchError } = await query.maybeSingle();
+        if (fetchError) throw fetchError;
+        if (!fetchedData) throw new Error(`Record not found in table ${table}`);
+        record = fetchedData;
+      }
+      if (table === 'tm_tasks') { queryField = 'id'; recordPK = record.id; }
+      else if (record.director_id) { queryField = 'director_id'; recordPK = record.director_id; }
+      else if (record.company_id) { queryField = 'company_id'; recordPK = record.company_id; }
+      else { queryField = 'id'; recordPK = record.id; }
+
+      const { data: existing, error: fetchExistingError } = await supabase.from(table).select('*').eq(queryField, recordPK).single();
+      if (fetchExistingError) throw fetchExistingError;
+      if (!existing) throw new Error('Record not found in database');
+
+      const updated = updateJsonValue(existing, path, valueToSave);
+      const { data: updatedRecord, error: updateError } = await supabase
+        .from(table)
+        .update({ ...updated, updated_at: new Date().toISOString() })
+        .eq(queryField, recordPK)
+        .select()
+        .single();
+      if (updateError) throw updateError;
+
+      if (updatedRecord) {
+        setFieldSourceDataCache(prev => ({ ...prev, [table]: { ...(prev[table] || {}), [entityId]: updatedRecord } }));
+        toast.success('Field updated successfully');
+        if (refreshDocuments) refreshDocuments();
+      }
+    } catch (error: any) {
+      console.error('Error saving field edit:', error);
+      toast.error(`Failed to update field: ${error.message || 'Unknown error'}`);
+    } finally {
+      setIsSavingFieldEdit(false);
+      setEditingFieldCell(null);
+      setEditFieldValue('');
+    }
+  }, [editingFieldCell, editFieldValue, fieldSourceDataCache, refreshDocuments]);
+
   const handleViewDocuments = (documents: any[], docInfo: any, column: any, requirementId?: string) => {
     if (!documents || documents.length === 0) return;
 
@@ -1873,163 +2038,239 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
     return null;
   }, [allCompanyDocuments, allIndividualDocuments]);
-
-  const renderWebDataConfiguration = () => {
+  const renderWebDataRows = () => {
     if (!automationWebdataMap || Object.keys(automationWebdataMap).length === 0) return null;
 
-    return (
-      <div className="space-y-4 p-4 bg-blue-50/30 rounded-lg border border-blue-200">
-        <div className="flex items-center justify-between border-b pb-3">
-          <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-            <Database className="h-4 w-4 text-blue-600" /> Automation Fields
-          </h3>
-          <Badge variant="outline" className="bg-white">{Object.keys(automationWebdataMap).length} Automation{Object.keys(automationWebdataMap).length !== 1 ? 's' : ''}</Badge>
-        </div>
-        {Object.entries(automationWebdataMap).map(([automationId, { name: automationName, webdata }], index) => {
-          const hasMultipleFields = webdata.length > 1;
-          const isExpanded = expandedArrayFields.has(`automation-${index}`);
+    const rows: React.ReactNode[] = [];
 
-          return (
-            <div key={automationId} className="space-y-2">
-              <div
-                className={
-                  "flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all " +
-                  "bg-white border border-blue-200 hover:bg-blue-50/50 shadow-sm "
-                }
-                onClick={() => toggleArrayFieldExpansion(`automation-${index}`)}
-              >
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-                    {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                  </Button>
-                    <Database className="h-4 w-4 text-blue-600" />
-                    <span className="font-medium text-blue-700 truncate max-w-[200px]">
-                      {automationName}
+    Object.entries(automationWebdataMap).forEach(([automationId, { name: automationName, webdata }], index) => {
+      const isExpanded = expandedArrayFields.has(`automation-${index}`);
+
+      // 1. Render Automation Header Row
+      rows.push(
+        <TableRow
+          key={`auto-header-${automationId}`}
+          className="bg-blue-50/50 hover:bg-blue-100/50 cursor-pointer"
+          onClick={() => toggleArrayFieldExpansion(`automation-${index}`)}
+        >
+          <TableCell className="sticky left-0 border-r text-center font-bold text-blue-700 bg-blue-50/50">
+            {index + 1}
+          </TableCell>
+          <TableCell className="sticky left-16 border-r font-bold text-blue-700 bg-blue-50/50 pl-6">
+            <span className="flex items-center gap-2">
+              {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}
+              <Database className="h-4 w-4 text-blue-600" />
+              <span className="truncate max-w-[250px]">{automationName}</span>
+              <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">
+                {webdata.length} Field{webdata.length !== 1 ? 's' : ''}
+              </Badge>
+            </span>
+          </TableCell>
+          <TableCell colSpan={columnDefinitions.length} className="bg-blue-50/50" />
+        </TableRow>
+      );
+
+      // 2. Render Field Rows (if expanded)
+      if (isExpanded && webdata && webdata.length > 0) {
+        webdata.forEach((field: any, fieldIndex: number) => {
+          const isDocument = field.fieldType === 'document';
+          const isComputed = field.fieldType === 'computed';
+          const isArray = field.fieldType === 'array';
+          const isEditableField = !isDocument && !isComputed && !isArray;
+
+          rows.push(
+            <TableRow
+              key={`auto-field-${automationId}-${field.variableName}`}
+              className="bg-white hover:bg-slate-50/50"
+            >
+              <TableCell className="sticky left-0 border-r text-center text-xs font-mono text-blue-600 bg-white">
+                {index + 1}.{fieldIndex + 1}
+              </TableCell>
+              <TableCell className="sticky left-16 border-r bg-white pl-8">
+                <div className="flex flex-col">
+                  <span className="font-medium text-slate-700 text-sm">
+                    {field.efnsDisplayName || field.name || field.variableName}
+                  </span>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded text-[9px] uppercase font-semibold">
+                      {field.fieldType}
                     </span>
-                  <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">
-                    {webdata.length} Field{webdata.length !== 1 ? 's' : ''}
-                  </Badge>
+                    {field.entityTypes && field.entityTypes.map((et: string) => (
+                      <span key={et} className="bg-slate-200 text-slate-700 px-1 py-0.5 rounded text-[9px] capitalize">
+                        {et}
+                      </span>
+                    ))}
+                    {!field.entityTypes && field.entityType && (
+                      <span className="bg-slate-200 text-slate-700 px-1 py-0.5 rounded text-[9px] capitalize">
+                        {field.entityType}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
+              </TableCell>
+              {columnDefinitions.map((col, colIdx) => {
+                const isApplicable = checkApplicability(col.type, field);
+                if (!isApplicable) {
+                  return (
+                    <TableCell key={`field-cell-${field.variableName}-${colIdx}`} className="text-center border p-3 align-middle bg-slate-50/30">
+                      <span className="inline-flex items-center justify-center px-2 py-1 text-sm text-slate-400 font-medium italic">
+                        N/A
+                      </span>
+                    </TableCell>
+                  );
+                }
 
-              {isExpanded && webdata && webdata.length > 0 && (
-                <div className="pl-8 pr-4 space-y-2">
-                  {webdata.map((field, fieldIndex) => {
-                    const isDocument = field.fieldType === 'document';
-                    const isComputed = field.fieldType === 'computed';
-                    const isArray = field.fieldType === 'array';
-                    const hasSources = (field.linkedMasterFields?.length || 0) + (field.linkedJobQuestionIds?.length || 0) + (field.linkedKycDocuments?.length || 0) + (field.arrayItems?.length || 0) > 0;
+                const ctx = buildTableFieldCtxForColumn(automationId, webdata, col);
+                let displayValue: any = '-';
+                let targetEntityId: any = null;
 
-                    return (
-                      <div
-                        key={fieldIndex}
-                        className={
-                          "flex items-center justify-between p-2 rounded-md border " +
-                          "bg-white hover:bg-blue-50/30 transition-colors"
-                        }
-                      >
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <div className="flex items-center gap-1 text-slate-500 w-6">
-                            <span className="text-xs font-mono text-blue-600">#{fieldIndex + 1}</span>
-                          </div>
+                if (isArray) {
+                  const rowsData = getArrayFieldDataImpl(field, ctx);
+                  displayValue = rowsData.length > 0 ? `${rowsData.length} item(s)` : 'Missing';
+                } else if (isDocument) {
+                  displayValue = 'Document mapping';
+                } else if (isComputed) {
+                  displayValue = 'Computed';
+                } else {
+                  targetEntityId = resolveTargetEntityIdImpl(field, ctx);
+                  displayValue = targetEntityId != null ? resolveVariableValueImpl(field, String(targetEntityId), ctx) : 'Missing';
+                }
 
-                          <div className="flex items-center gap-2">
-                            {isDocument && (
-                              <Paperclip className="h-3.5 w-3.5 text-amber-600" />
-                            )}
-                            {isComputed && (
-                              <FunctionSquare className="h-3.5 w-3.5 text-purple-600" />
-                            )}
-                            {isArray && (
-                              <TableIcon className="h-3.5 w-3.5 text-blue-600" />
-                            )}
-                            {!hasSources && !isDocument && !isComputed && !isArray && (
-                              <HelpCircle className="h-3.5 w-3.5 text-slate-400" />
-                            )}
-                          </div>
+                const isEditingThis = editingFieldCell?.automationId === automationId &&
+                                      editingFieldCell?.fieldVariableName === field.variableName &&
+                                      editingFieldCell?.colId === String(col.id);
+                const isMissing = !isValidValue(displayValue);
 
-                          <div className="flex-1 min-w-0 ml-2">
-                            <div className="text-xs font-medium text-slate-700 truncate">
-                              {field.efnsDisplayName || field.name || field.variableName}
-                            </div>
-                            <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
-                              <span className="bg-slate-100 px-1.5 py-0.5 rounded text-[9px]">
-                                {field.fieldType}
-                              </span>
-                              {Array.isArray(field.entityTypes) && field.entityTypes.map((et: string) => (
-                                <span key={et} className="bg-slate-200 px-1 py-0.5 rounded text-[9px] capitalize">
-                                  {et}
-                                </span>
-                              ))}
-                              {field.entityType && !Array.isArray(field.entityTypes) && (
-                                <span className="bg-slate-200 px-1 py-0.5 rounded text-[9px] capitalize">
-                                  {field.entityType}
-                                </span>
-                              )}
-                              {isDocument && field.linkedKycDocuments && (
-                                <>
-                                  <Paperclip className="h-3 w-3 text-amber-600" />
-                                  <span className="text-[9px] text-amber-600">
-                                    {field.linkedKycDocuments.length} Document{field.linkedKycDocuments.length !== 1 ? 's' : ''}
-                                  </span>
-                                </>
-                              )}
-                              {field.linkedMasterFields && field.linkedMasterFields.length > 0 && (
-                                <>
-                                  <Database className="h-3 w-3 text-blue-600" />
-                                  <span className="text-[9px] text-blue-600">
-                                    {field.linkedMasterFields.length} Field{field.linkedMasterFields.length !== 1 ? 's' : ''}
-                                  </span>
-                                </>
-                              )}
-                              {field.linkedJobQuestionIds && field.linkedJobQuestionIds.length > 0 && (
-                                <>
-                                  <HelpCircle className="h-3 w-3 text-purple-600" />
-                                  <span className="text-[9px] text-purple-600">
-                                    {field.linkedJobQuestionIds.length} Question{field.linkedJobQuestionIds.length !== 1 ? 's' : ''}
-                                  </span>
-                                </>
-                              )}
-                              {field.arrayItems && field.arrayItems.length > 0 && (
-                                <>
-                                  <TableIcon className="h-3 w-3 text-blue-600" />
-                                  <span className="text-[9px] text-blue-600">
-                                    {field.arrayItems.length} Column{field.arrayItems.length !== 1 ? 's' : ''}
-                                  </span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        </div>
+                // Resolve field options for dropdowns
+                const mIds = field.linkedMasterFields || field.masterFieldIds || [];
+                let fieldOptions: { label: string; value: string }[] = [];
+                let persistenceSource = null;
+                if (mIds.length > 0) {
+                  const firstMasterId = mIds[0];
+                  const masterField = jobFieldsRecord[String(firstMasterId)];
+                  if (masterField?.sources?.length) {
+                    persistenceSource = masterField.sources.find((s: any) => !s.is_computed && s.table && s.path) || masterField.sources[0];
+                  }
+                  const opts = masterField?.options;
+                  if (Array.isArray(opts)) {
+                    fieldOptions = opts.map((o: any) => typeof o === 'string' ? { label: o, value: o } : o);
+                  }
+                }
+                const isDropdown = fieldOptions.length > 0;
+                const hasMultipleSources = mIds.length > 1;
 
-                        <div className="flex items-center gap-1">
-                          {isDocument && field.linkedKycDocuments && (
-                            <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">
-                              {field.documentLogic === 'merge' ? 'Merge All' : 'Fallback'}
-                            </Badge>
-                          )}
-                          {field.extractionMode && (
-                            <Badge variant="outline" className="text-[9px] bg-slate-50 text-slate-600">
-                              {field.extractionMode === 'latest' ? 'Latest' : field.extractionMode === 'all' ? 'All Entries' : field.extractionMode}
-                            </Badge>
-                          )}
-                        </div>
+                return (
+                  <TableCell key={`field-cell-${field.variableName}-${colIdx}`} className="border p-3 align-middle text-center">
+                    {isEditingThis ? (
+                      <div className="flex items-center gap-1 justify-center max-w-[200px] mx-auto">
+                        {isDropdown ? (
+                          <SearchableSelect
+                            value={editFieldValue}
+                            onValueChange={(val) => setEditFieldValue(val)}
+                            options={fieldOptions}
+                            placeholder="Select..."
+                            buttonClassName="h-7 text-xs border-blue-300 w-full bg-white"
+                          />
+                        ) : (
+                          <Input
+                            value={editFieldValue}
+                            onChange={(e) => setEditFieldValue(e.target.value)}
+                            className="h-7 text-xs"
+                            disabled={isSavingFieldEdit}
+                            autoFocus
+                            onKeyDown={(e) => { if (e.key === 'Enter') saveFieldEdit(); if (e.key === 'Escape') cancelFieldEdit(); }}
+                          />
+                        )}
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-green-600" disabled={isSavingFieldEdit} onClick={() => saveFieldEdit(isDropdown, fieldOptions)} title="Save"><Check className="h-3.5 w-3.5" /></Button>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-500" disabled={isSavingFieldEdit} onClick={cancelFieldEdit} title="Cancel"><X className="h-3.5 w-3.5" /></Button>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              <div className="border-t border-blue-200 pt-2 mt-2 pl-8">
-                <div className="text-[10px] text-slate-500 italic">
-                  Note: These fields are synced from the linked automation. Edit the automation to modify field configuration.
-                </div>
-              </div>
-            </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 justify-center group/value">
+                        {isDocument ? (
+                          <div className="flex flex-col items-center gap-1">
+                            {field.linkedKycDocuments && field.linkedKycDocuments.map((docId: string) => {
+                              const docMetadata = documentMetadataCache.get(docId);
+                              if (!docMetadata) return null;
+                              const docs = getDocumentsByType(docId, col.task, col.type, col.id);
+                              return (
+                                <div key={docId} className="flex items-center gap-1">
+                                  <span className="text-[10px] text-slate-500 max-w-[100px] truncate">{docMetadata.display_name}:</span>
+                                  {docs.length > 0 ? (
+                                    <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 border-green-200">Available</Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-[10px] bg-red-50 text-red-700 border-red-200">Missing</Badge>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : hasMultipleSources ? (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <div className={cn(
+                                "text-sm h-8 flex items-center px-2.5 rounded-md cursor-pointer border border-transparent transition-all",
+                                isMissing ? "text-red-500 font-medium hover:bg-red-50" : "text-slate-800 hover:bg-slate-100"
+                              )}>
+                                <span className="truncate">{isMissing ? 'Missing Value' : cleanFieldValueStr(displayValue) || '-'}</span>
+                                <ChevronDown className="h-4 w-4 ml-auto text-slate-400 shrink-0" />
+                              </div>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-80 p-0 shadow-lg border-slate-200 rounded-lg overflow-hidden" align="end">
+                              <div className="p-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                                <span className="text-xs font-medium text-slate-600">Linked Sources</span>
+                                <span className="text-xs text-slate-500">Priority Logic</span>
+                              </div>
+                              <div className="p-1.5 space-y-1 bg-white">
+                                {mIds.map((mid: string, idx: number) => {
+                                  const mDef = jobFieldsRecord[String(mid)];
+                                  const source = mDef?.sources?.[0];
+                                  const sourceVal = targetEntityId ? getFieldValueImpl(String(mid), String(targetEntityId), idx, 'latest', false, buildTableFieldCtxForColumn(automationId, webdata, col)) : 'N/A';
+                                  return (
+                                    <div key={`m-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-md border border-transparent group transition-all">
+                                      <div className="flex flex-col min-w-0">
+                                        <span className="text-xs font-medium text-slate-500 mb-0.5">Source {idx + 1}</span>
+                                        <span className="text-sm text-slate-800 truncate">{mDef?.label || mid}</span>
+                                        <span className="text-xs text-slate-400 truncate mt-0.5">{isValidValue(sourceVal) ? sourceVal : 'Empty'}</span>
+                                      </div>
+                                      {source && (
+                                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-blue-600 hover:bg-blue-50 rounded-md"
+                                          onClick={() => startFieldEdit(automationId, field, col.groupIndex, String(targetEntityId), isValidValue(sourceVal) ? sourceVal : '', col.id)}>
+                                          <Pencil className="h-3.5 w-3.5" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        ) : (
+                          <span className={cn(
+                            "text-sm h-8 flex items-center px-2.5 rounded-md transition-colors relative group",
+                            persistenceSource ? "cursor-pointer border border-transparent hover:bg-slate-100" : "cursor-default",
+                            isMissing ? "text-red-500 font-medium" : "text-slate-800"
+                          )}
+                          onClick={() => {
+                            if (!persistenceSource || !isEditableField || !targetEntityId) return;
+                            startFieldEdit(automationId, field, col.groupIndex, String(targetEntityId), displayValue, col.id);
+                          }}
+                          >
+                            <span className="truncate pr-6">{isMissing ? 'Missing Value' : cleanFieldValueStr(displayValue) || '-'}</span>
+                            {persistenceSource && isEditableField && <Pencil className="h-3.5 w-3.5 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 top-1/2 -translate-y-1/2" />}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </TableCell>
+                );
+              })}
+            </TableRow>
           );
-        })}
-      </div>
-    );
+        });
+      }
+    });
+
+    return rows;
   };
 
   const renderRequirementRows = (requirementsList: any[]) => {
@@ -2632,13 +2873,7 @@ return (
                         </span>
                       </TableCell>
                     </TableRow>
-                    {expandedSections.webdata && (
-                      <TableRow>
-                        <TableCell colSpan={totalColumns} className="p-0 border-b-0">
-                          {renderWebDataConfiguration()}
-                        </TableCell>
-                      </TableRow>
-                    )}
+                    {expandedSections.webdata && renderWebDataRows()}
                   </>
                 )}
 

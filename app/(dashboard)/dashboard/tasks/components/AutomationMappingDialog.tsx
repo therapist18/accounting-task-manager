@@ -20,7 +20,8 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types";
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { isValidValue, ETA_SCREENSHOT_DOCUMENT_ID, cleanFieldValue, formatDateValue, updateJsonValue, parseJsonValue } from '../utils/AutomationMappingDialog';
+import { isValidValue, ETA_SCREENSHOT_DOCUMENT_ID, cleanFieldValue, updateJsonValue } from '../utils/AutomationMappingDialog';
+import { resolveTargetEntityIdImpl, resolveVariableValueImpl, getFieldValueImpl, getArrayFieldDataImpl, fetchSourceDataImpl, type FieldResolutionContext } from '../utils/fieldResolution';
 import { AutomationMappingDialogUI } from './AutomationMappingDialogUI';
 
 interface AutomationMappingDialogProps {
@@ -281,38 +282,9 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
     return 'principal';
   }, [currentIndividualId, relationshipData]);
 
-  const resolveTargetEntityId = useCallback((field: any) => {
-    const types = field.entityTypes || [];
-    if (types.includes('dependant')) {
-      if (field.dependantRelationships && field.dependantRelationships.length > 0) {
-        const dep = relationshipData?.dependants?.find((d: any) =>
-          field.dependantRelationships.includes(d.relationship?.toLowerCase())
-        );
-        if (dep?.id) return dep.id;
-      } else {
-        const dep = relationshipData?.dependants?.[0];
-        if (dep?.id) return dep.id;
-      }
-    }
-    if (types.includes('sponsor') && relationshipData?.sponsor?.id) {
-      return relationshipData.sponsor.id;
-    }
-    if (types.includes('director') && relationshipData?.directors?.[0]?.id) {
-      return relationshipData.directors[0].id;
-    }
-    if (types.includes('understudy') && relationshipData?.understudy?.id) {
-      return relationshipData.understudy.id;
-    }
-    if (types.includes('principal')) {
-      const pid = relationshipData?.principal?.id || currentIndividualId;
-      if (pid) return pid;
-    }
-    if (types.includes('company')) {
-      const companyId = relationshipData?.company?.id || task?.company_id;
-      if (companyId) return companyId;
-    }
-    return undefined;
-  }, [relationshipData, currentIndividualId, task]);
+  const resolveTargetEntityId = useCallback((field: any) =>
+    resolveTargetEntityIdImpl(field, { relationshipData, currentIndividualId, task } as FieldResolutionContext),
+    [relationshipData, currentIndividualId, task]);
 
   const getEntityNameAndId = useCallback((entityType?: string, entityId?: string) => {
     const targetId = entityId;
@@ -364,104 +336,19 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
       : (task?.applicant_details?.id || '');
   }, [getPrimaryEntityType, getEntityNameAndId, task]);
 
-  const resolveEntityIdsForArray = (field: any, relationshipData: any) => {
-    const types = field.entityTypes || [];
-    const collectedIds = new Set<string>();
-    types.forEach(type => {
-      const t = type.toLowerCase();
-      if (t === 'principal') {
-        const pid = relationshipData?.principal?.id || currentIndividualId;
-        if (pid) collectedIds.add(String(pid));
-      }
-      if (t === 'dependant') {
-        if (field.dependantRelationships && field.dependantRelationships.length > 0) {
-          relationshipData?.dependants?.forEach((d: any) => {
-            if (field.dependantRelationships.includes(d.relationship?.toLowerCase())) {
-              collectedIds.add(String(d.id));
-            }
-          });
-        } else {
-          relationshipData?.dependants?.forEach((d: any) => collectedIds.add(String(d.id)));
-        }
-      }
-      if (t === 'sponsor' && relationshipData?.sponsor?.id) {
-        collectedIds.add(String(relationshipData.sponsor.id));
-      }
-      if (t === 'understudy' && relationshipData?.understudy?.id) {
-        collectedIds.add(String(relationshipData.understudy.id));
-      }
-      if (t === 'director') {
-        relationshipData?.directors?.forEach((d: any) => collectedIds.add(String(d.id)));
-      }
-      if (t === 'company') {
-        const cid = relationshipData?.company?.id || task?.company_id;
-        if (cid) collectedIds.add(String(cid));
-      }
-    });
-    return Array.from(collectedIds);
-  };
-
   const toggleArrayFieldExpansion = (fieldVariableName: string) => setExpandedArrayFields(prev => { const newSet = new Set(prev); if (newSet.has(fieldVariableName)) newSet.delete(fieldVariableName); else newSet.add(fieldVariableName); return newSet; });
   const toggleSourceFieldExpansion = (fieldId: string) => setExpandedSourceFields(prev => { const newSet = new Set(prev); if (newSet.has(fieldId)) newSet.delete(fieldId); else newSet.add(fieldId); return newSet; });
 
-  const resolveVariableValue = useCallback((fieldDef: any, targetEntityId: string) => {
-    if (fieldDef.defaultValue && fieldDef.defaultValue !== 'Missing' && fieldDef.defaultValue !== '') {
-      return fieldDef.defaultValue;
-    }
-    const logic = fieldDef.sourceLogic || 'priority';
-    const masterIds = fieldDef.linkedMasterFields || [];
-    const questionIds = fieldDef.linkedJobQuestionIds || [];
-    const extractionMode = fieldDef.extractionMode || 'latest';
-    const collectedValues: string[] = [];
-    for (const mid of masterIds) {
-      const val = getFieldValue(String(mid), String(targetEntityId), 0, extractionMode);
-      if (isValidValue(val)) {
-        if (logic === 'priority') return val;
-        collectedValues.push(val);
-      }
-    }
-    const taskRecord = sourceData['tm_tasks']?.[String(taskId)];
-    const answers = taskRecord?.job_specific_answers || {};
-    for (const qId of questionIds) {
-      const answer = answers[String(qId)] ?? answers[Number(qId)];
-      if (isValidValue(answer)) {
-        const cleanAnswer = cleanFieldValue(answer);
-        if (logic === 'priority') return cleanAnswer;
-        collectedValues.push(cleanAnswer);
-      }
-    }
-    if (logic === 'all' && collectedValues.length > 0) {
-      return collectedValues.join(' ');
-    }
-    if (fieldDef.default_value && fieldDef.default_value !== 'Missing') return fieldDef.default_value;
-    return "Missing";
-  }, [sourceData, jobFields, masterFieldComputedValues, taskId]);
+  const buildFieldResolutionContext = useCallback((): FieldResolutionContext => ({
+    sourceData, jobFields, webData, selectedAutomationId, masterFieldComputedValues,
+    relationshipData, taskId, currentIndividualId, task, isLoading, isLoadingData
+  }), [sourceData, jobFields, webData, selectedAutomationId, masterFieldComputedValues, relationshipData, taskId, currentIndividualId, task, isLoading, isLoadingData]);
 
-  const getArrayFieldData = (field: any) => {
-    const entityIds = resolveEntityIdsForArray(field, relationshipData);
-    const arrayData = [];
+  const resolveVariableValue = useCallback((fieldDef: any, targetEntityId: string) =>
+    resolveVariableValueImpl(fieldDef, targetEntityId, buildFieldResolutionContext()),
+    [buildFieldResolutionContext]);
 
-    entityIds.forEach((entityId, index) => {
-      const rowValues: any = {};
-
-      field.arrayItems?.forEach((col: any) => {
-        // Use the same resolution logic for array columns
-        const val = resolveVariableValue(col, String(entityId));
-
-        let finalVal = val;
-        if (col.type === 'date' && isValidValue(val)) {
-          finalVal = formatDateValue(val, col.dateFormat);
-        }
-
-        rowValues[col.variableName] = cleanFieldValue(finalVal);
-      });
-
-      if (Object.keys(rowValues).length > 0) {
-        arrayData.push({ ...rowValues, entityId, index });
-      }
-    });
-    return arrayData;
-  };
+  const getArrayFieldData = (field: any) => getArrayFieldDataImpl(field, buildFieldResolutionContext());
 
   const getMasterFieldDisplayName = (masterFieldId: string | number, itemName?: string) => {
     if (itemName) return itemName;
@@ -482,172 +369,18 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
     isFetchingRef.current = true;
     setIsLoadingData(true);
     try {
-      const standardFetchQueue = new Map<string, { table: string, ids: Set<string>, linkingVariable: string }>();
-      const addToQueue = (table: string, linkingVar: string, id: string) => { const queueKey = `${table}: ${linkingVar}`; if (!standardFetchQueue.has(queueKey)) { standardFetchQueue.set(queueKey, { table, ids: new Set(), linkingVariable: linkingVar }); } standardFetchQueue.get(queueKey)!.ids.add(id); };
-      const computedRequirements = { individualIds: new Set<string>(), documentIds: new Set<string>() };
-      const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
-      const fieldsToProcess = activeAutomation?.fields || [];
-      const computedMasterFields: any[] = [];
-      fieldsToProcess.forEach((field: any) => {
-        const questionIds = field.linkedJobQuestionIds || [];
-        if (questionIds.length > 0) { if (taskId) addToQueue('tm_tasks', 'id', String(taskId)); return; }
-        const isArray = field.fieldType === 'array';
-        const cols = isArray ? (field.arrayItems || []) : [{ linkedMasterFieldId: field.linkedMasterFields?.[0] || field.masterFieldIds?.[0] }];
-        let entityIds: string[] = [];
-        if (isArray) { entityIds = resolveEntityIdsForArray(field, relationshipData); } else { const targetId = resolveTargetEntityId(field); if (targetId) entityIds = [String(targetId)]; }
-        cols.forEach((col: any) => {
-          const fieldIds = col.linkedMasterFields || (col.linkedMasterFieldId ? [col.linkedMasterFieldId] : []);
-          const mid = fieldIds[0] || field.linkedMasterFields?.[0] || field.masterFieldIds?.[0];
-          if (!mid) return;
-          const jobField = jobFields[mid];
-          if (!jobField) return;
-          const computedSource = jobField.sources?.find((s: any) => s.is_computed === true);
-          if (computedSource) {
-            const extractionMode = col.extractionMode || field.extractionMode || 'latest';
-            (computedSource.document_id || []).forEach((did: string) => computedRequirements.documentIds.add(did));
-            entityIds.forEach(id => { computedRequirements.individualIds.add(String(id)); computedMasterFields.push({ field: jobField, entityId: String(id), extractionMode, computedSource }); });
-          }
-          jobField.sources?.forEach((source: any) => {
-            if (source.is_computed) return;
-            if (!source.table) return;
-            const linkingVar = source.linking_variable || 'id';
-            if (source.table === 'tm_tasks' && (!source.linking_variable || source.linking_variable === 'id')) { if (taskId) addToQueue(source.table, linkingVar, String(taskId)); }
-            else { entityIds.forEach(id => { addToQueue(source.table, linkingVar, String(id)); }); }
-          });
-        });
+      const { sourceData: newSourceData, masterFieldComputedValues: newComputedValues } = await fetchSourceDataImpl({
+        selectedAutomationId, webData, jobFields, relationshipData, taskId, currentIndividualId, task
       });
-      const newSourceData: Record<string, Record<string, any>> = {};
-      const documentCache = { documents: [], docTypes: [] };
-      const fetchPromises = [];
-      for (const [queueKey, { table, ids, linkingVariable }] of standardFetchQueue.entries()) {
-        const idArray = Array.from(ids);
-        if (idArray.length === 0) continue;
-        fetchPromises.push(supabase.from(table).select('*').in(linkingVariable, idArray).then(({ data, error }) => { if (!error && data) { if (!newSourceData[table]) newSourceData[table] = {}; data.forEach(record => { const recordKey = String(record[linkingVariable]); newSourceData[table][recordKey] = record; if (table === 'tm_tasks' && record.id) { newSourceData[table][String(record.id)] = record; } }); if (table === 'acc_portal_directors_documents') { documentCache.documents.push(...data); } } }));
-      }
-      await Promise.all(fetchPromises);
-      const neededDocTypes = Array.from(computedRequirements.documentIds);
-      if (neededDocTypes.length > 0) {
-        const remainingPeople = Array.from(computedRequirements.individualIds);
-        await Promise.all([
-          supabase.from('acc_portal_kyc').select('*').in('id', neededDocTypes).then(({ data }) => { if (data) documentCache.docTypes = data; }),
-          supabase.from('acc_portal_directors_documents').select('*').in('director_id', remainingPeople).in('document_id', neededDocTypes).neq('status', 'deleted').then(({ data }) => { if (data) documentCache.documents.push(...data); })
-        ]);
-      }
-      if (computedMasterFields.length > 0) {
-        const newComputedValues: Record<string, any> = {};
-        for (const item of computedMasterFields) {
-          const { field, entityId, extractionMode, computedSource } = item;
-          let functionToCall = computedSource.computed_function || 'extractFieldFromLatestDocument';
-          if (functionToCall === 'getLatestDocument' && computedSource.path) { functionToCall = 'extractFieldFromLatestDocument'; }
-          const val = await executeComputedField(functionToCall, entityId, computedSource.document_id || [], computedSource.path, extractionMode, documentCache, computedSource.computed_config);
-          newComputedValues[`${field.id}_${entityId}_${extractionMode}`] = val;
-        }
+      if (newComputedValues !== null) {
         setMasterFieldComputedValues(newComputedValues);
       }
       setSourceData(newSourceData);
     } catch (error) { console.error("Fetch Error:", error); } finally { isFetchingRef.current = false; setIsLoadingData(false); }
-  }, [jobFields, selectedAutomationId, webData, resolveTargetEntityId, relationshipData, isOpen, taskId]);
+  }, [jobFields, selectedAutomationId, webData, resolveTargetEntityId, relationshipData, isOpen, taskId, currentIndividualId, task]);
 
-  const getSourceValue = (table: string, path: string, entityId: string, extractionMode?: 'latest' | 'all') => {
-    const tableData = sourceData[table];
-    if (!tableData) return "Missing";
-    const record = tableData[entityId];
-    if (!record) return "Missing";
-    const val = parseJsonValue(record, path, extractionMode);
-    return val !== undefined && val !== null ? String(val) : "Missing";
-  };
-
-  const getFieldValue = (fieldIdOrVariable: string, entityId: string, sourceIdx: number = 0, extractionMode: string = 'latest', preserveArray: boolean = false) => {
-    const activeAuto = webData.find(w => w.automationId === selectedAutomationId);
-    const fieldDef = activeAuto?.fields?.find(f => f.variableName === fieldIdOrVariable || String(f.id) === String(fieldIdOrVariable));
-
-    const jobQuestionIds = fieldDef?.linkedJobQuestionIds || [];
-
-    if (jobQuestionIds.length > 0) {
-      const taskRecord = sourceData['tm_tasks']?.[String(taskId)];
-      if (!taskRecord) return isLoadingData ? "Loading Task Data..." : "Missing Task Data";
-
-      const answers = taskRecord.job_specific_answers || {};
-
-      // Iterate through all linked IDs and return the first valid answer found
-      for (const qId of jobQuestionIds) {
-        const answer = answers[String(qId)] ?? answers[Number(qId)];
-        if (answer !== undefined && answer !== null && String(answer).trim() !== "") {
-          return String(answer);
-        }
-      }
-      return "Missing";
-    }
-
-    const field = jobFields[fieldIdOrVariable];
-    if (!field) return isLoading ? "Loading Config..." : "Missing Config";
-
-    const sortedSources = field.sources?.sort((a: any, b: any) => (a.priority || 999) - (b.priority || 999)) || [];
-
-    for (let i = 0; i < sortedSources.length; i++) {
-      const source = sortedSources[i];
-      if (!source) continue;
-
-      if (source.is_computed) {
-        const key = `${field.id}_${entityId}_${extractionMode}`;
-        const val = masterFieldComputedValues[key];
-
-        if (val === undefined) return isLoadingData ? "Computing..." : "Computing...";
-        if (typeof val === 'string' && !val.startsWith('{')) {
-          // CRITICAL: Strict validation of error strings to ensure fallback
-          const isErrorString = val === 'Document Not Found' || val === 'Missing Document' ||
-            val === 'No Document Specified' || val === 'Field Not Found' ||
-            val === 'Number Not Found' || val === 'Missing' || val === 'No Source';
-          if (!isErrorString) return val;
-          // If it is an error string, fall through to continue loop
-        } else {
-          // Valid object or array
-          let parsedVal = val;
-          if (typeof val === 'string' && val.startsWith('{')) { try { parsedVal = JSON.parse(val); } catch (e) { } }
-          if (typeof parsedVal === 'object' && parsedVal !== null && source.path) {
-            const pathMatch = source.path.match(/['"]([\w_]+)['"]$/);
-            const fieldName = pathMatch ? pathMatch[1] : null;
-            if (fieldName && parsedVal[fieldName]) return String(parsedVal[fieldName]);
-          }
-          const isValidValue = val !== null && val !== undefined && !((Array.isArray(val) && val.length === 0) || val === '');
-          if (isValidValue) {
-            if (typeof parsedVal === 'object' && parsedVal !== null) { return parsedVal.en || parsedVal.name || parsedVal.title || String(Object.values(parsedVal)[0]); }
-            return String(val);
-          }
-        }
-        continue;
-      }
-
-      let lookupId = String(entityId);
-      if (source.table === 'tm_tasks' && (!source.linking_variable || source.linking_variable === 'id')) lookupId = String(taskId);
-      const value = getSourceValue(source.table, source.path, lookupId, extractionMode as 'latest' | 'all');
-      if (value !== null && value !== undefined && value !== '' && value !== 'Missing') return value;
-    }
-
-    // Check for default value if all sources returned "Missing"
-    if (fieldDef?.default_value) {
-      return fieldDef.default_value;
-    }
-
-    // Handle image properties - return structured object for image fields with dimensions and alignment
-    if (fieldDef?.fieldType === 'image') {
-      const imageProps = {
-        url: "Missing",
-        width: fieldDef.image_width || 'auto',
-        height: fieldDef.image_height || 'auto',
-        alignment: fieldDef.image_alignment || 'left'
-      };
-
-      // If we have a default value, try to parse it as image URL
-      if (fieldDef.default_value && fieldDef.default_value !== "Missing") {
-        imageProps.url = fieldDef.default_value;
-      }
-
-      return JSON.stringify(imageProps);
-    }
-
-    return "Missing";
-  };
+  const getFieldValue = (fieldIdOrVariable: string, entityId: string, sourceIdx: number = 0, extractionMode: string = 'latest', preserveArray: boolean = false) =>
+    getFieldValueImpl(fieldIdOrVariable, entityId, sourceIdx, extractionMode, preserveArray, buildFieldResolutionContext());
 
   const fetchDocumentFiles = useCallback(async () => {
     if (!isOpen || !selectedAutomationId || !webData.length || isLoadingDocuments) return;

@@ -90,6 +90,7 @@ interface WebDataField {
   fieldType: string;
   entityType: string;
   masterFieldIds?: string[];
+  is_client_requirement?: boolean;
 }
 
 interface JobQuestion {
@@ -126,6 +127,7 @@ interface ApiRequirement {
   category?: 'general' | 'processing' | 'issuance' | 'reference'
   webdata?: WebDataField[]
   inherit_from_parent?: boolean
+  is_client_requirement?: boolean
 }
 
 interface RequirementTableEntry extends ApiRequirement {
@@ -156,6 +158,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const [banks, setBanks] = useState<any[]>([]);
   const [selectedBank, setSelectedBank] = useState<any | null>(null);
   const [disabledInheritedReqs, setDisabledInheritedReqs] = useState<Set<string>>(new Set());
+  const [allAutomations, setAllAutomations] = useState<{ id: string; name: string; webdata: WebDataField[]; is_active?: boolean }[]>([]);
+  const [expandedAutomationConfig, setExpandedAutomationConfig] = useState<Set<string>>(new Set());
   const sidebarPanelRef = useRef(null);
 
   // Add the programmatic toggle handler
@@ -200,14 +204,16 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [kycRes, mfRes, banksRes] = await Promise.all([
+        const [kycRes, mfRes, banksRes, automationsRes] = await Promise.all([
           supabase.from('acc_portal_kyc').select('id, name, display_name').order('name'),
           supabase.from('tm_job_fields').select('id, label'),
-          supabase.from('banks').select('id, bank_name').order('bank_name')
+          supabase.from('banks').select('id, bank_name').order('bank_name'),
+          supabase.from('tm_automations').select('id, name, webdata, is_active').order('name')
         ])
         setKycDocuments(kycRes.data || [])
         setMasterFields(mfRes.data || [])
         setBanks(banksRes.data || [])
+        setAllAutomations(automationsRes.data || [])
       } catch (error) { console.error(error) }
     }
     fetchData()
@@ -404,7 +410,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         : { type: 'subdepartment', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, subdepartmentName: currentSubdept.name, jobLevel: { department_id: currentDept.id, subdepartment_id: currentSubdept.id, class_id: null, subclass_id: null } }
 
     return (
-      <div className="space-y-8">
+      <div className="space-y-8 max-h-[calc(100vh-100px)] overflow-auto">
         {/* Bank Selector for BANKS Department */}
         {String(activeDept) === "14" && (
           <Card className="bg-blue-50 border-blue-200">
@@ -547,6 +553,13 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           <div className="flex items-center gap-2 mb-4 font-semibold">Job Specific Questions</div>
           {renderQuestions(questions, targetContext)}
         </section>
+
+        <section className="pt-8 border-t">
+          <div className="flex items-center gap-2 mb-4 font-semibold">
+            <Database className="h-4 w-4 text-blue-600" /> Web Data Configuration
+          </div>
+          {renderWebDataConfigurationSection(reqs)}
+        </section>
       </div>
     )
   }
@@ -573,6 +586,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 <TableHead className="border-r">Applies To</TableHead>
                 <TableHead className="border-r">Linked Column</TableHead>
                 <TableHead className="border-r">Configuration</TableHead>
+                <TableHead className="w-16 text-center border-r">Client Req.</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -636,6 +650,14 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                             </span>
                           ) : <span className="text-slate-400">-</span>}
                         </TableCell>
+                        <TableCell className="border-r text-center">
+                          <Checkbox
+                            checked={!!q.is_client_requirement}
+                            disabled={isSubmitting}
+                            onCheckedChange={(checked) => handleToggleQuestionClientRequirement(q, context, !!checked)}
+                            className="mx-auto"
+                          />
+                        </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
                             <Button
@@ -681,6 +703,145 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     )
   }
 
+  // --- RENDER WEB DATA CONFIGURATION HELPER (Filtered for current job level requirements) ---
+  const renderWebDataConfigurationSection = (currentReqs: RequirementTableEntry[]) => {
+    // Only show automations that are linked in the current job level's requirements
+    const activeAutomationIds = new Set(
+      currentReqs.map(r => r.automationId || r.web_automation?.automationId).filter(Boolean)
+    );
+    const jobLevelAutomations = allAutomations.filter(a => activeAutomationIds.has(a.id));
+
+    return (
+      <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
+        <div className="overflow-auto max-h-[600px]">
+          <Table>
+            <TableHeader className="bg-slate-50 sticky top-0 z-10">
+              <TableRow>
+                <TableHead className="w-12 text-center border-r">#</TableHead>
+                <TableHead className="min-w-[200px] border-r">Automation</TableHead>
+                <TableHead className="border-r">Status</TableHead>
+                <TableHead className="text-right">Fields</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {jobLevelAutomations.length > 0 ? (
+                jobLevelAutomations.map((automation, idx) => {
+                  const isExpanded = expandedAutomationConfig.has(automation.id);
+                  const fields = automation.webdata || [];
+                  return (
+                    <React.Fragment key={automation.id}>
+                      <TableRow className={cn("hover:bg-slate-50/50 cursor-pointer", isExpanded && "bg-slate-50 border-b-0")} onClick={() => toggleAutomationConfigRow(automation.id)}>
+                        <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">{idx + 1}</TableCell>
+                        <TableCell className="border-r">
+                          <div className="flex items-center gap-2 font-medium">
+                            {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
+                            <Zap className="h-4 w-4 text-blue-600" />
+                            {automation.name || 'Unnamed Automation'}
+                          </div>
+                        </TableCell>
+                        <TableCell className="border-r">
+                          {automation.is_active === false ? (
+                            <Badge variant="outline" className="bg-slate-100 text-slate-500">Inactive</Badge>
+                          ) : (
+                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Active</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Badge variant="secondary">{fields.length} Field{fields.length !== 1 ? 's' : ''}</Badge>
+                        </TableCell>
+                      </TableRow>
+                      {isExpanded && fields.length > 0 && (
+                        <TableRow className="bg-slate-50 hover:bg-slate-50">
+                          <TableCell colSpan={4} className="p-0 border-b border-t shadow-inner">
+                            <div className="p-4 pl-12">
+                              <div className="bg-white border rounded-lg overflow-hidden">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow className="bg-slate-100/50 hover:bg-slate-100/50">
+                                      <TableHead className="h-8 text-xs font-bold">Variable Name</TableHead>
+                                      <TableHead className="h-8 text-xs font-bold">Label</TableHead>
+                                      <TableHead className="h-8 text-xs font-bold">Type</TableHead>
+                                      <TableHead className="h-8 text-xs font-bold">Entity</TableHead>
+                                      <TableHead className="h-8 text-xs font-bold">Mapped Sources</TableHead>
+                                      <TableHead className="h-8 text-xs font-bold text-center">Client Requirement</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {fields.map((field: any, fieldIndex: number) => {
+                                      const nestedFields = field.arrayFields || field.subFields || field.items || [];
+                                      const hasNested = field.fieldType === 'array' && nestedFields.length > 0;
+                                      return (
+                                        <React.Fragment key={fieldIndex}>
+                                          <TableRow className="hover:bg-slate-50/50">
+                                            <TableCell className="py-2 text-xs font-mono text-blue-600">{field.variableName}</TableCell>
+                                            <TableCell className="py-2 text-xs font-medium">{field.efnsDisplayName || field.name}</TableCell>
+                                            <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{field.fieldType}</Badge></TableCell>
+                                            <TableCell className="py-2 text-xs capitalize text-slate-500">{Array.isArray(field.entityTypes) ? field.entityTypes.join(', ') : (field.entityType || '-')}</TableCell>
+                                            <TableCell className="py-2 text-xs text-slate-400">
+                                              {field.fieldType === 'document'
+                                                ? `Document: ${kycDocuments.find(d => d.id === field.documentId)?.display_name || 'Unknown'}`
+                                                : field.linkedMasterFields?.length
+                                                  ? `${field.linkedMasterFields.length} linked field(s)`
+                                                  : "Manual / None"}
+                                            </TableCell>
+                                            <TableCell className="py-2 text-center">
+                                              <Checkbox
+                                                checked={!!field.is_client_requirement}
+                                                onCheckedChange={(checked) => handleToggleWebdataFieldClientRequirement(automation.id, fieldIndex, !!checked)}
+                                                className="mx-auto"
+                                              />
+                                            </TableCell>
+                                          </TableRow>
+                                          {hasNested && nestedFields.map((subField: any, subIdx: number) => (
+                                            <TableRow key={`sub-${fieldIndex}-${subIdx}`} className="hover:bg-slate-50/50 bg-slate-50/80">
+                                              <TableCell className="py-2 text-xs font-mono text-blue-600">
+                                                <div className="flex items-center gap-2 pl-4">
+                                                  <span className="text-slate-300">↳</span>
+                                                  {subField.variableName}
+                                                </div>
+                                              </TableCell>
+                                              <TableCell className="py-2 text-xs font-medium">{subField.efnsDisplayName || subField.name}</TableCell>
+                                              <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{subField.fieldType}</Badge></TableCell>
+                                              <TableCell className="py-2 text-xs capitalize text-slate-500">{Array.isArray(subField.entityTypes) ? subField.entityTypes.join(', ') : (subField.entityType || '-')}</TableCell>
+                                              <TableCell className="py-2 text-xs text-slate-400">
+                                                {subField.fieldType === 'document'
+                                                  ? `Document: ${kycDocuments.find(d => d.id === subField.documentId)?.display_name || 'Unknown'}`
+                                                  : subField.linkedMasterFields?.length
+                                                    ? `${subField.linkedMasterFields.length} linked field(s)`
+                                                    : "Manual / None"}
+                                              </TableCell>
+                                              <TableCell className="py-2 text-center">
+                                                <span className="text-xs text-slate-400">-</span>
+                                              </TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </React.Fragment>
+                                      )
+                                    })}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </React.Fragment>
+                  )
+                })
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
+                    No automation types linked to the current job level.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+    )
+  }
+
   const renderRequirements = (requirements: RequirementTableEntry[], context: EditingContext) => {
     return (
       <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
@@ -698,6 +859,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 <TableHead className="border-r">Web Data</TableHead>
                 <TableHead className="border-r">Automation</TableHead>
                 <TableHead className="w-16 text-center border-r">Apply</TableHead>
+                <TableHead className="w-16 text-center border-r">Client Req.</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -769,6 +931,14 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                             <span className="text-xs text-slate-400">-</span>
                           )}
                         </TableCell>
+                        <TableCell className="border-r text-center">
+                          <Checkbox
+                            checked={!!req.is_client_requirement}
+                            disabled={isSubmitting}
+                            onCheckedChange={(checked) => handleToggleClientRequirement(req, context, !!checked)}
+                            className="mx-auto"
+                          />
+                        </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
                             <Button
@@ -816,7 +986,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                       {/* EXPANDED WEB DATA ROW */}
                       {isExpanded && hasWebData && (
                         <TableRow className="bg-slate-50 hover:bg-slate-50">
-                          <TableCell colSpan={11} className="p-0 border-b border-t shadow-inner">
+                          <TableCell colSpan={12} className="p-0 border-b border-t shadow-inner">
                             <div className="p-4 pl-12">
                               <div className="flex items-center gap-2 mb-3 text-blue-600">
                                 <Database className="h-4 w-4" />
@@ -834,21 +1004,47 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
-                                    {req.webdata.map((field, i) => (
-                                      <TableRow key={i} className="hover:bg-slate-50/50">
-                                        <TableCell className="py-2 text-xs font-mono text-blue-600">{field.variableName}</TableCell>
-                                        <TableCell className="py-2 text-xs font-medium">{field.efnsDisplayName || field.name}</TableCell>
-                                        <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{field.fieldType}</Badge></TableCell>
-                                        <TableCell className="py-2 text-xs capitalize text-slate-500">{field.entityType}</TableCell>
-                                        <TableCell className="py-2 text-xs text-slate-400">
-                                          {field.fieldType === 'document'
-                                            ? `Document: ${kycDocuments.find(d => d.id === field.documentId)?.display_name || 'Unknown'}`
-                                            : field.linkedMasterFields?.length
-                                              ? field.linkedMasterFields.map(m => m.label).join(", ")
-                                              : "Manual / None"}
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
+                                    {req.webdata.map((field, i) => {
+                                      const nestedFields = field.arrayFields || field.subFields || field.items || [];
+                                      const hasNested = field.fieldType === 'array' && nestedFields.length > 0;
+                                      return (
+                                        <React.Fragment key={i}>
+                                          <TableRow className="hover:bg-slate-50/50">
+                                            <TableCell className="py-2 text-xs font-mono text-blue-600">{field.variableName}</TableCell>
+                                            <TableCell className="py-2 text-xs font-medium">{field.efnsDisplayName || field.name}</TableCell>
+                                            <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{field.fieldType}</Badge></TableCell>
+                                            <TableCell className="py-2 text-xs capitalize text-slate-500">{field.entityType}</TableCell>
+                                            <TableCell className="py-2 text-xs text-slate-400">
+                                              {field.fieldType === 'document'
+                                                ? `Document: ${kycDocuments.find(d => d.id === field.documentId)?.display_name || 'Unknown'}`
+                                                : field.linkedMasterFields?.length
+                                                  ? field.linkedMasterFields.map(m => m.label).join(", ")
+                                                  : "Manual / None"}
+                                            </TableCell>
+                                          </TableRow>
+                                          {hasNested && nestedFields.map((subField: any, subIdx: number) => (
+                                            <TableRow key={`sub-${i}-${subIdx}`} className="hover:bg-slate-50/50 bg-slate-50/80">
+                                              <TableCell className="py-2 text-xs font-mono text-blue-600">
+                                                <div className="flex items-center gap-2 pl-4">
+                                                  <span className="text-slate-300">↳</span>
+                                                  {subField.variableName}
+                                                </div>
+                                              </TableCell>
+                                              <TableCell className="py-2 text-xs font-medium">{subField.efnsDisplayName || subField.name}</TableCell>
+                                              <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{subField.fieldType}</Badge></TableCell>
+                                              <TableCell className="py-2 text-xs capitalize text-slate-500">{subField.entityType}</TableCell>
+                                              <TableCell className="py-2 text-xs text-slate-400">
+                                                {subField.fieldType === 'document'
+                                                  ? `Document: ${kycDocuments.find(d => d.id === subField.documentId)?.display_name || 'Unknown'}`
+                                                  : subField.linkedMasterFields?.length
+                                                    ? subField.linkedMasterFields.map((m: any) => m.label).join(", ")
+                                                    : "Manual / None"}
+                                              </TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </React.Fragment>
+                                      )
+                                    })}
                                   </TableBody>
                                 </Table>
                               </div>
@@ -861,7 +1057,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
+                  <TableCell colSpan={12} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
                     No requirements found in this section.
                   </TableCell>
                 </TableRow>
@@ -1009,19 +1205,20 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     }
   };
 
-  const handleSaveRequirement = async (updatedRequirement: any) => {
-    if (!editingContext) return;
+  const handleSaveRequirement = async (updatedRequirement: any, contextOverride?: EditingContext) => {
+    const context = contextOverride || editingContext;
+    if (!context) return;
     try {
       setIsSubmitting(true);
       const { data: existing, error: fetchError } = await supabase
         .from('tm_class_requirements')
         .select('*')
         .eq('job_level', JSON.stringify({
-          department_id: Number(editingContext.departmentId),
-          subdepartment_id: Number(editingContext.subdepartmentId),
-          class_id: editingContext.classId ? Number(editingContext.classId) : null,
-          subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
-          level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
+          department_id: Number(context.departmentId),
+          subdepartment_id: Number(context.subdepartmentId),
+          class_id: context.classId ? Number(context.classId) : null,
+          subclass_id: context.subclassId ? Number(context.subclassId) : null,
+          level: context.type === 'subdepartment' ? 2 : context.type === 'class' ? 3 : 4
         }))
         .maybeSingle();
       if (fetchError) throw fetchError;
@@ -1048,6 +1245,74 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       toast({ title: "Error", description: "Failed to update requirement", variant: "destructive" });
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleToggleClientRequirement = async (req: RequirementTableEntry, context: EditingContext, checked: boolean) => {
+    await handleSaveRequirement({ ...req, is_client_requirement: checked }, context);
+  };
+
+  const handleToggleQuestionClientRequirement = async (question: JobQuestion, context: EditingContext, checked: boolean) => {
+    try {
+      setIsSubmitting(true);
+      const jobLevel = {
+        department_id: Number(context.departmentId),
+        subdepartment_id: Number(context.subdepartmentId),
+        class_id: context.classId ? Number(context.classId) : null,
+        subclass_id: context.subclassId ? Number(context.subclassId) : null,
+        level: context.type === 'subdepartment' ? 2 : context.type === 'class' ? 3 : 4
+      };
+      const { data: existing } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .eq('job_level', JSON.stringify(jobLevel))
+        .maybeSingle();
+
+      if (!existing) return;
+
+      const updatedQuestions = (existing.job_specific_questions || []).map((q: any) =>
+        q.id === question.id ? { ...q, is_client_requirement: checked } : q
+      );
+
+      const { error } = await supabase
+        .from('tm_class_requirements')
+        .update({ job_specific_questions: updatedQuestions, updated_at: new Date().toISOString() })
+        .eq('id', existing.id);
+
+      if (error) throw error;
+      await refreshDepartments();
+      toast({ title: "Success", description: "Question requirement status updated" });
+    } catch (error) {
+      console.error(error);
+      toast({ title: "Error", description: "Failed to update question", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const toggleAutomationConfigRow = (automationId: string) => {
+    setExpandedAutomationConfig(prev => {
+      const next = new Set(prev);
+      if (next.has(automationId)) next.delete(automationId); else next.add(automationId);
+      return next;
+    });
+  };
+
+  const handleToggleWebdataFieldClientRequirement = async (automationId: string, fieldIndex: number, checked: boolean) => {
+    const automation = allAutomations.find(a => a.id === automationId);
+    if (!automation) return;
+    const updatedWebdata = automation.webdata.map((f, i) => i === fieldIndex ? { ...f, is_client_requirement: checked } : f);
+    try {
+      const { error } = await supabase
+        .from('tm_automations')
+        .update({ webdata: updatedWebdata, updated_at: new Date().toISOString() })
+        .eq('id', automationId);
+      if (error) throw error;
+      setAllAutomations(prev => prev.map(a => a.id === automationId ? { ...a, webdata: updatedWebdata } : a));
+      toast({ title: "Success", description: "Field updated" });
+    } catch (error) {
+      console.error(error);
+      toast({ title: "Error", description: "Failed to update field", variant: "destructive" });
     }
   };
 
@@ -1152,7 +1417,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   };
 
   return (
-    <div className="h-screen w-full overflow-hidden bg-background">
+    <div className="w-full overflow-auto bg-background">
       <ResizablePanelGroup direction="horizontal">
         {/* SIDEBAR PANEL */}
         <ResizablePanel
@@ -1189,7 +1454,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
 
         {/* MAIN CONTENT PANEL */}
         <ResizablePanel defaultSize={80}>
-          <main className="h-full flex flex-col overflow-hidden">
+          <main className="h-full flex flex-col overflow-auto">
             <div className="h-full overflow-auto p-4 space-y-4">
               <header className="flex items-center justify-between"><div><h2 className="text-3xl font-bold tracking-tight">Requirement Logic Manager</h2></div></header>
               {!activeDept ? <Card className="p-20 text-center"><FileText className="mx-auto h-12 w-12 text-slate-300 mb-4" /><p>Select a department to manage logic.</p></Card> : renderMainContent()}
