@@ -47,6 +47,7 @@ interface EditableStageCellProps {
   onFetchData?: () => Promise<void>;
   officers?: any[]
   onOfficerChange?: (taskId: string, officerId: string | null) => Promise<void>
+  readOnly?: boolean
 }
 
 // Cache for document fields to avoid repeated API calls
@@ -104,7 +105,8 @@ export default function EditableStageCell({
   getKycFields,
   onFetchData,
   officers = [],
-  onOfficerChange
+  onOfficerChange,
+  readOnly = false
 }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
@@ -308,7 +310,7 @@ export default function EditableStageCell({
   };
 
   const handleSave = useCallback(async (isSkipped = false, skipReason = '', valueOverride?: string) => {
-    if (!onSave) return;
+    if (!onSave || readOnly) return;
     setIsLoading(true);
 
     try {
@@ -341,7 +343,7 @@ export default function EditableStageCell({
   }, [editValue, onSave, stage?.id, task?.id, linkedDocument, selectedSkipReason, previewDocuments, currentPreviewIndex]);
 
   const handleUnskip = async () => {
-    if (!onSave) return;
+    if (!onSave || readOnly) return;
     setIsLoading(true);
     try {
       const resetData = {
@@ -360,7 +362,7 @@ export default function EditableStageCell({
   };
 
   const handleDeleteDocument = useCallback(async (documentToDelete: any) => {
-    if (!documentToDelete) return;
+    if (!documentToDelete || readOnly) return;
 
     setIsLoading(true);
     try {
@@ -554,6 +556,66 @@ export default function EditableStageCell({
     const stageData = task.stages?.[stage.id];
     const stageStatus = stageData?.status;
     const isSkipped = stageStatus === 'skipped';
+
+    // In readOnly mode, show read-only display without edit capabilities
+    if (readOnly) {
+      if (isSkipped) {
+        const skippedAt = stageData?.skippedAt;
+        const reason = stageData?.reason || 'No reason provided';
+        let formattedSkippedDate = 'N/A';
+        if (skippedAt) {
+          const d = parseDate(skippedAt);
+          if (d) formattedSkippedDate = format(d, 'dd/MM/yyyy');
+        }
+        return (
+          <div className="flex items-center gap-1.5 min-w-0">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-1 text-xs text-amber-600 font-medium cursor-help bg-transparent border-0 p-0 truncate">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">Skipped</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="bg-amber-50 text-amber-900 border-amber-200">
+                  <div className="text-xs text-left space-y-1">
+                    <p><span className="font-semibold">Reason:</span> {reason}</p>
+                    <p><span className="font-semibold">Date:</span> {formattedSkippedDate}</p>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        );
+      }
+
+      const isExplicitlyCompleted = stageStatus === 'completed';
+      const isLegacyCompleted = !stageStatus && (!!value || stageData?.documentsUploaded === true);
+
+      if ((isExplicitlyCompleted || isLegacyCompleted) && stageDate && stageDate !== 'NaN/NaN/NaN') {
+        const textColorClass = "text-emerald-600";
+        return (
+          <div className={`flex items-center gap-1 font-semibold text-xs ${textColorClass} truncate`}>
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate" title={formatDateDisplay(stageDate)}>{formatDateDisplay(stageDate)}</span>
+          </div>
+        );
+      }
+
+      if (timeStatus && !requiresUpload && !hasLinkedDocument) {
+        const textColorClass = timeStatus.isOverdue ? "text-red-600" : "text-blue-600";
+        const icon = timeStatus.isOverdue ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> : <Timer className="h-3.5 w-3.5 shrink-0" />;
+        return (
+          <div className="flex items-center gap-1">
+            <div className={`flex items-center gap-1 font-medium text-[11px] ${textColorClass} cursor-default truncate`}>
+              {icon}<span className="truncate">{timeStatus.formattedElapsed} elapsed</span>
+            </div>
+          </div>
+        );
+      }
+
+      return <span className="text-sm text-gray-500 italic">...</span>;
+    }
 
     if (isSkipped) {
       const skippedAt = stageData?.skippedAt;
@@ -778,11 +840,73 @@ export default function EditableStageCell({
   const renderActionsContent = (isCompact = false) => {
     if (!isStageApplicable) return null;
 
+    const btnSizeClass = isCompact ? "h-6 w-6" : "h-7 w-7";
+    const iconSizeClass = isCompact ? "h-16 w-16" : "h-16 w-16";
+
+    // In readOnly mode, only show view button
+    if (readOnly) {
+      const viewBtn = linkedDocument && (
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button variant="ghost" size="icon" className={cn("text-green-600 hover:bg-green-50", btnSizeClass)} title="View document details" onClick={handleViewDocument}>
+              <Eye className={iconSizeClass} />
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
+            <DialogHeader className="p-4 border-b">
+              <DialogTitle className="text-lg">
+                <div className="flex items-center justify-between">
+                  <div>{stage?.name && <span>{stage.name}: </span>}{task?.name}{task?.client_name && ` - ${task.client_name}`}</div>
+                  <div className="text-sm font-normal text-muted-foreground">{previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''}</div>
+                </div>
+              </DialogTitle>
+            </DialogHeader>
+            <div className="flex-1 overflow-auto p-4">
+              {previewDocuments.length > 0 ? (
+                previewDocuments.map((doc) => (
+                  <div key={doc.documentId} className="border rounded-lg overflow-hidden mb-4">
+                    <div className="p-4 bg-gray-50 border-b">
+                      <h3 className="font-medium">{doc.documentName || 'Document'} <span className="text-muted-foreground text-sm font-normal ml-2">(Uploaded: {doc.created_at ? formatDateDisplay(doc.created_at) : 'N/A'})</span></h3>
+                    </div>
+                    <div className="p-4">
+                      <ExtractionPreview documentId={doc.documentId} documentName={doc.documentName} extractedData={doc.extractedData || {}} fields={doc.fields || []} fileUrl={doc.fileUrl} fileName={doc.fileName} onSave={handlePreviewSave} onDelete={handleDeleteDocument} expanded={true} showSaveButton={false} readOnly={true} type={doc.type} file={doc.file} onDataChange={(fieldName, value) => handlePreviewDataChange(doc.documentId, fieldName, value)} />
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="h-full flex items-center justify-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /><p className="ml-4 text-muted-foreground">Loading documents...</p>
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t flex justify-end">
+              <Button variant="default" onClick={() => setIsPreviewOpen(false)}>Close</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      );
+
+      if (isCompact) {
+        return (
+          <div className="flex items-center gap-0.5 shrink-0 bg-slate-50/50 rounded p-0.5 border border-slate-100">
+            {viewBtn}
+          </div>
+        );
+      }
+
+      return (
+        <div className="grid grid-cols-4 items-center justify-items-center w-full">
+          <div className="flex items-center justify-center w-8 h-8">{viewBtn}</div>
+          <div className="flex items-center justify-center w-8 h-8"></div>
+          <div className="flex items-center justify-center w-8 h-8"></div>
+          <div className="flex items-center justify-center w-8 h-8"></div>
+        </div>
+      );
+    }
+
     const showAutomation = !!currentAutomationConfig && !hasLinkedDocument;
     const showSkip = !isStageCompleted;
     const hasMoreActions = showAutomation || showSkip;
-    const btnSizeClass = isCompact ? "h-6 w-6" : "h-7 w-7";
-    const iconSizeClass = isCompact ? "h-16 w-16" : "h-16 w-16";
 
     let officerContent: React.ReactNode = null;
     if (onOfficerChange && officers.length > 0 && stage.follow_up?.toLowerCase() === 'officer') {

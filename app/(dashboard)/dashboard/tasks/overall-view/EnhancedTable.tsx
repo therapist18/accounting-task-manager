@@ -219,7 +219,28 @@ const MemoizedTableRow = React.memo(({
   setTaskToDelete,
   processedDocuments,
   kycDocuments,
-  renderCellContent
+  renderCellContent,
+  onEditTask,
+  setEditingTask,
+  setEditDialogOpen,
+  readOnly
+}: {
+  row: any;
+  rowIndex: number;
+  paginatedHeaderStructure: any[];
+  expandedSections: Set<string>;
+  toggleSectionExpansion: (id: string) => void;
+  toggleStageExpansion: (taskId: string, stageId: string) => void;
+  toggleDocumentExpansion: (taskId: string, documentId: string) => void;
+  onDeleteTask?: (task: any) => void;
+  setTaskToDelete: (task: any) => void;
+  processedDocuments: Map<string, any[]>;
+  kycDocuments: Map<string, any>;
+  renderCellContent: (content: any, item: any, header: any) => React.ReactNode;
+  onEditTask?: (task: any) => void;
+  setEditingTask: (task: any) => void;
+  setEditDialogOpen: (open: boolean) => void;
+  readOnly?: boolean;
 }) => {
   const rowBg = row.isSubSubRow ? 'bg-slate-100/50' : row.isSubRow ? 'bg-slate-50/60' : 'bg-white';
   const hoverBg = 'hover:bg-blue-50/50';
@@ -259,9 +280,9 @@ const MemoizedTableRow = React.memo(({
         <div className="flex items-center gap-2 justify-between">
           <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }} className="flex items-center gap-2">
             <span className={row.type === 'stage' ? 'font-semibold' : ''}>{safeRender(row.label)}</span>
-            {row.type === 'principal' && row.task?.id && (
+            {row.type === 'principal' && row.task?.id && !readOnly && (
               <div className="flex items-center gap-1">
-                {(onEditTask || true) && (
+                {onEditTask && (
                   <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); setEditingTask(row.task); setEditDialogOpen(true); }}>
                     <Edit className="h-3.5 w-3.5" />
                   </Button>
@@ -339,6 +360,7 @@ interface EnhancedTableProps {
   allDocuments?: any[];
   kycDocuments?: Map<string, any>;
   enhancedTasksData?: Map<string, any>;
+  readOnly?: boolean;
 }
 
 export const EnhancedTable: React.FC<EnhancedTableProps> = ({
@@ -366,6 +388,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   allDocuments = [],
   kycDocuments = new Map(),
   enhancedTasksData = new Map(),
+  readOnly = false,
 }) => {
   const didLogRef = useRef(false);
   const getCellContentWithCancel = useCallback((task: any, headerId: string) => {
@@ -488,17 +511,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
     setCurrentPage(1); 
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
-        <Loader2 className="h-12 w-12 animate-spin text-blue-600" />
-        <p className="mt-4 font-semibold text-slate-700">Loading...</p>
-        <p className="text-sm text-slate-500">Please wait while we fetch the data.</p>
-      </div>
-    );
-  }
-
-  if (!tasks.length) {
+  if (!tasks.length && !loading) {
     return (
       <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
         <FileText className="h-12 w-12 text-slate-400" />
@@ -619,16 +632,16 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
             ))}
           </TableHeader>
           <TableBody className="divide-y divide-slate-200">
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={paginatedHeaderStructure.length * 2 + 2} className="h-32 text-center">
-                  <div className="flex justify-center items-center gap-2 text-slate-600"><Loader2 className="h-5 w-5 animate-spin" />Loading...</div>
-                </TableCell>
-              </TableRow>
-            ) : error ? (
+            {error ? (
               <TableRow>
                 <TableCell colSpan={paginatedHeaderStructure.length * 2 + 2} className="h-32 text-center text-red-600">
                   <div className="flex justify-center items-center gap-2"><AlertTriangle className="h-5 w-5" />{error}</div>
+                </TableCell>
+              </TableRow>
+            ) : loading && filteredTableRows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={paginatedHeaderStructure.length * 2 + 2} className="h-32 text-center">
+                  <div className="flex justify-center items-center gap-2 text-slate-600"><Loader2 className="h-5 w-5 animate-spin" />Loading...</div>
                 </TableCell>
               </TableRow>
             ) : (
@@ -647,6 +660,10 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
                   processedDocuments={processedDocuments}
                   kycDocuments={kycDocuments}
                   renderCellContent={renderCellContent}
+                  onEditTask={onEditTask}
+                  setEditingTask={setEditingTask}
+                  setEditDialogOpen={setEditDialogOpen}
+                  readOnly={readOnly}
                 />
               ))
             )}

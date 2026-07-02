@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { FileText, Plus, Minus, Loader2, AlertTriangle, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
+import { FileText, Plus, Minus, Loader2, AlertTriangle, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 import { AutomationMappingDialog } from "../components/AutomationMappingDialog"
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
 import { cn } from "@/lib/utils"
@@ -43,10 +43,11 @@ interface StandardTableProps {
   toggleDependantsExpansion: (taskId: string) => void
   renderCellContent: (row: any, task: any, columnType?: 'date' | 'actions' | 'combined') => React.ReactNode
   officers?: any[]
+  readOnly?: boolean
 }
 
-const COL_WIDTH = "w-[180px] min-w-[180px] max-w-[180px]";
-const ACTION_WIDTH = "w-[150px] min-w-[150px] max-w-[150px]";
+const DEFAULT_COL_WIDTH = 180;
+const ACTION_WIDTH = 150;
 
 export const StandardTable: React.FC<StandardTableProps> = ({
   tasks, tableType, ENHANCED_TABLE_HEADERS_IMMIGRATION, stages,
@@ -55,7 +56,8 @@ export const StandardTable: React.FC<StandardTableProps> = ({
   sortConfig, dataLoading = {}, error,
   getCellContent, getSortedTasks, getDocumentForTaskStage, requestSort,
   onTaskAction, getKycFields, toggleStageExpansion,
-  toggleDocumentExpansion, toggleDependantsExpansion, renderCellContent
+  toggleDocumentExpansion, toggleDependantsExpansion, renderCellContent,
+  readOnly = false
 }) => {
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
   const [selectedRequirement, setSelectedRequirement] = useState<any>(null);
@@ -167,7 +169,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
       if (col.type === 'case') {
         let hasValue = false;
         const v = t[col.header.id];
-        
+
         if (col.header.id === 'applicant_name') hasValue = !!(t.applicant_name || t.applicant_details?.name || t.full_name);
         else if (col.header.id === 'company_name') hasValue = !!(t.company_name || t.company?.name || t.company_id);
         else if (col.header.id === 'job_description') hasValue = !!t.job_description;
@@ -176,7 +178,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
         else if (col.header.id === 'nationality') hasValue = !!(t.nationality || t.applicant_details?.nationality);
         else if (col.header.id === 'passport_number') hasValue = !!(t.passport_number || t.applicant_details?.passport_number);
         else hasValue = v !== null && v !== undefined && v !== '';
-        
+
         if (hasValue) completed++;
       }
       else if (col.type === 'stage') {
@@ -209,9 +211,15 @@ export const StandardTable: React.FC<StandardTableProps> = ({
     }, 0);
   }, [expandedStages, expandedDocuments, documentFields]);
 
+  // Column 0 is sticky at left-0; column 1's sticky offset must match column 0's rendered width.
+  const secondCaseColLeftPx = useMemo(
+    () => visibleCaseDetailHeaders[0]?.width || DEFAULT_COL_WIDTH,
+    [visibleCaseDetailHeaders]
+  );
+
   const getStickyClasses = (idx: number) => {
     if (idx === 0) return "sticky left-0 z-30 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]";
-    if (idx === 1) return "sticky left-[180px] z-30 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]";
+    if (idx === 1) return "sticky z-30 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]";
     return "";
   };
 
@@ -234,43 +242,54 @@ export const StandardTable: React.FC<StandardTableProps> = ({
           <TableHeader className="sticky top-0 z-40 bg-blue-700">
             {/* ROW 1: Case Details & Stages */}
             <TableRow className="hover:bg-transparent border-0">
-              {visibleCaseDetailHeaders.map((header, idx) => (
-                <TableHead
-                  key={header.id}
-                  rowSpan={3}
-                  className={cn("border-r border-b border-white/30 text-center px-4 py-2.5 bg-[#376bae]", COL_WIDTH, getStickyClasses(idx))}
-                >
-                  <div className="flex items-center justify-between gap-2 overflow-hidden">
-                    <span className="text-[11px] font-semibold text-white uppercase tracking-wider truncate" title={header.label}>{header.label}</span>
-                    {header.sortable && (
+              {visibleCaseDetailHeaders.map((header, idx) => {
+                const w = header.width || DEFAULT_COL_WIDTH;
+                return (
+                  <TableHead
+                    key={header.id}
+                    rowSpan={3}
+                    className={cn("border-r border-b border-white/30 text-center px-4 py-2.5 bg-[#376bae]", getStickyClasses(idx))}
+                    style={{
+                      width: w, minWidth: w, maxWidth: w,
+                      ...(idx === 1 ? { left: secondCaseColLeftPx } : {})
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-2 overflow-hidden">
+                      <span className="text-[11px] font-semibold text-white uppercase tracking-wider truncate" title={header.label}>{header.label}</span>
                       <button
                         onClick={() => requestSort(header.id)}
-                        className="shrink-0 rounded bg-slate-600 hover:bg-slate-500 text-white p-0.5 transition-all"
+                        className="shrink-0 rounded hover:bg-white/20 text-white p-0.5 transition-all ml-1"
                         title="Sort"
                       >
                         {sortConfig?.key === header.id
-                          ? (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)
-                          : <ChevronUp size={12} className="opacity-50" />
+                          ? (sortConfig.direction === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)
+                          : <ArrowUpDown size={11} className="opacity-50 hover:opacity-100" />
                         }
                       </button>
-                    )}
-                  </div>
-                </TableHead>
-              ))}
+                    </div>
+                  </TableHead>
+                );
+              })}
 
               {visibleStages.map(stage => (
-                <TableHead key={stage.id} colSpan={getStageColSpan(stage)} rowSpan={getStageRowSpan(stage)} className={cn("border-r border-b border-white/30 text-center px-2 py-2.5 bg-[#376bae]", !expandedStages.has(stage.id.toString()) && COL_WIDTH)}>
+                <TableHead
+                  key={stage.id}
+                  colSpan={getStageColSpan(stage)}
+                  rowSpan={getStageRowSpan(stage)}
+                  className={cn("border-r border-b border-white/30 text-center px-2 py-2.5 bg-[#376bae]")}
+                  style={!expandedStages.has(stage.id.toString()) ? { width: DEFAULT_COL_WIDTH, minWidth: DEFAULT_COL_WIDTH, maxWidth: DEFAULT_COL_WIDTH } : {}}
+                >
                   <div className="flex items-center justify-center gap-2">
                     <span className="text-[11px] font-semibold text-white uppercase tracking-wider truncate" title={stage.name}>{stage.name}</span>
                     <div className="flex items-center gap-1 shrink-0">
-                      <button onClick={() => requestSort(`stage_${stage.id}`)} className="shrink-0 rounded bg-slate-600 hover:bg-slate-500 text-white p-0.5 transition-all" title="Sort by Stage">
+                      <button onClick={() => requestSort(`stage_${stage.id}`)} className="text-white" title="Sort by Stage">
                         {sortConfig?.key === `stage_${stage.id}`
-                          ? (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)
-                          : <ChevronUp size={12} className="opacity-50" />
+                          ? (sortConfig.direction === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)
+                          : <ArrowUpDown size={11} className="opacity-50 hover:opacity-100" />
                         }
                       </button>
                       {stage.documents?.length > 0 && (
-                        <button onClick={() => toggleStageExpansion(stage.id.toString())} className="shrink-0 rounded bg-slate-600 hover:bg-slate-500 text-white p-0.5 transition-all">
+                        <button onClick={() => toggleStageExpansion(stage.id.toString())} className="text-white">
                           {expandedStages.has(stage.id.toString()) ? <Minus size={12} /> : <Plus size={12} />}
                         </button>
                       )}
@@ -278,7 +297,11 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                   </div>
                 </TableHead>
               ))}
-              <TableHead rowSpan={3} className={cn("border-b border-white/30 text-center px-4 py-2.5 bg-[#376bae] sticky right-0 z-30 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]", ACTION_WIDTH)}>
+              <TableHead
+                rowSpan={3}
+                className="border-b border-white/30 text-center px-4 py-2.5 bg-[#376bae] sticky right-0 z-30 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]"
+                style={{ width: ACTION_WIDTH, minWidth: ACTION_WIDTH, maxWidth: ACTION_WIDTH }}
+              >
                 <span className="text-xs font-semibold text-white uppercase tracking-wider">Actions</span>
               </TableHead>
             </TableRow>
@@ -293,7 +316,13 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                   const isExpanded = expandedDocuments.has(doc.id.toString());
 
                   return (
-                    <TableHead key={`doc-${doc.id}`} rowSpan={isExpanded ? 1 : 2} colSpan={isExpanded ? 1 + (documentFields.get(doc.id.toString())?.length || 0) : 1} className={cn("text-center px-3 py-2 border-r border-b border-white/30 bg-[#376bae]", COL_WIDTH)}>
+                    <TableHead
+                      key={`doc-${doc.id}`}
+                      rowSpan={isExpanded ? 1 : 2}
+                      colSpan={isExpanded ? 1 + (documentFields.get(doc.id.toString())?.length || 0) : 1}
+                      className="text-center px-3 py-2 border-r border-b border-white/30 bg-[#376bae]"
+                      style={!isExpanded ? { width: DEFAULT_COL_WIDTH, minWidth: DEFAULT_COL_WIDTH, maxWidth: DEFAULT_COL_WIDTH } : {}}
+                    >
                       <div className="flex items-center justify-center gap-2">
                         <span className="text-[11px] font-semibold text-white uppercase tracking-wider truncate" title={docDisplayName}>{docDisplayName}</span>
                         {doc.kycId && (
@@ -317,13 +346,21 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                   const fields = documentFields.get(doc.id.toString()) || [];
 
                   const docActionHeader = (
-                    <TableHead key={`doc-action-${doc.id}`} className={cn("text-center px-3 py-2 border-r border-b border-white/30 bg-[#376bae]", COL_WIDTH)}>
+                    <TableHead
+                      key={`doc-action-${doc.id}`}
+                      className="text-center px-3 py-2 border-r border-b border-white/30 bg-[#376bae]"
+                      style={{ width: DEFAULT_COL_WIDTH, minWidth: DEFAULT_COL_WIDTH, maxWidth: DEFAULT_COL_WIDTH }}
+                    >
                       <span className="text-[10px] font-semibold text-white uppercase tracking-wider">Status</span>
                     </TableHead>
                   );
 
                   const fieldHeaders = fields.map(field => (
-                    <TableHead key={`field-${field.id}`} className={cn("text-center px-3 py-2 border-r border-b border-white/30 bg-[#376bae]", COL_WIDTH)}>
+                    <TableHead
+                      key={`field-${field.id}`}
+                      className="text-center px-3 py-2 border-r border-b border-white/30 bg-[#376bae]"
+                      style={{ width: DEFAULT_COL_WIDTH, minWidth: DEFAULT_COL_WIDTH, maxWidth: DEFAULT_COL_WIDTH }}
+                    >
                       <span className="text-[10px] font-semibold text-white uppercase tracking-wider truncate" title={field.fieldName}>{field.fieldName}</span>
                     </TableHead>
                   ));
@@ -331,29 +368,43 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                 });
               })}
             </TableRow>
-          </TableHeader>
 
-          <TableBody>
             {/* --- STATS ROWS --- */}
+            {/* By placing them in TableHeader, they naturally flow below the main headers and stick together natively */}
             {!dataLoading.tasks && taskRows.length > 0 && [
               { label: 'Total', bg: 'bg-slate-100', text: 'text-slate-800' },
               { label: 'Completed', bg: 'bg-emerald-50', text: 'text-emerald-800' },
               { label: 'Missing', bg: 'bg-rose-50', text: 'text-rose-800' }
             ].map((stat) => (
-              <TableRow key={stat.label} className={cn(stat.bg, "font-bold")}>
+              <TableRow key={stat.label} className="border-0 hover:bg-transparent shadow-sm">
                 {flatColumns.map((col, idx) => {
                   const s = getColStats(col);
                   const val = stat.label === 'Total' ? s.total : stat.label === 'Completed' ? s.completed : s.missing;
+                  const colWidth = col.type === 'case' ? (col.header.width || DEFAULT_COL_WIDTH) : (col.type === 'actions' ? ACTION_WIDTH : DEFAULT_COL_WIDTH);
 
                   return (
-                    <TableCell key={col.id} className={cn("text-center py-2 px-2 border-r border-b border-slate-200 text-xs", stat.text, col.type === 'actions' && "sticky right-0 z-20 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]", idx < 2 && getStickyClasses(idx))}>
+                    <TableHead
+                      key={col.id}
+                      className={cn(
+                        "text-center py-2 px-2 border-r border-b border-slate-200 text-xs font-bold",
+                        stat.bg, stat.text,
+                        col.type === 'actions' && "sticky right-0 z-30 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]",
+                        idx < 2 && getStickyClasses(idx)
+                      )}
+                      style={{
+                        width: colWidth, minWidth: colWidth, maxWidth: colWidth,
+                        ...(idx === 1 ? { left: secondCaseColLeftPx } : {})
+                      }}
+                    >
                       {val}
-                    </TableCell>
+                    </TableHead>
                   );
                 })}
               </TableRow>
             ))}
+          </TableHeader>
 
+          <TableBody>
             {/* --- DATA ROWS --- */}
             {dataLoading.tasks ? (
               <TableRow><TableCell colSpan={100} className="h-48 text-center"><Loader2 className="h-8 w-8 animate-spin mx-auto text-[#376bae]" /></TableCell></TableRow>
@@ -362,7 +413,8 @@ export const StandardTable: React.FC<StandardTableProps> = ({
             ) : (
               taskRows.map((row, rowIndex) => (
                 <TableRow key={row.key} className={cn("group border-0 transition-colors", row.type === 'dependant' ? "bg-orange-50/40" : (rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/50"), "hover:bg-blue-50/50")}>
-                  {flatColumns.map(col => {
+                  {flatColumns.map((col, idx) => {
+                    const colWidth = col.type === 'case' ? (col.header.width || DEFAULT_COL_WIDTH) : (col.type === 'actions' ? ACTION_WIDTH : DEFAULT_COL_WIDTH);
 
                     // --- CASE DETAILS ---
                     if (col.type === 'case') {
@@ -371,7 +423,6 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                       if (row.type === 'principal') {
                         content = <div className="truncate w-full text-sm">{getCellContent(row.task, col.header.id)}</div>;
 
-                        // Add Expand Dependants button strictly to the very first column if it applies
                         if (col.idx === 0 && taskDependants.get(row.task.id.toString())?.length > 0) {
                           content = (
                             <div className="flex items-center justify-between w-full">
@@ -389,7 +440,14 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                       }
 
                       return (
-                        <TableCell key={`${row.key}-${col.id}`} className={cn("px-4 py-2.5 border-r border-b border-slate-200", COL_WIDTH, col.idx < 2 ? getStickyClasses(col.idx).replace('z-30', 'z-20') : "", col.idx < 2 && (row.type === 'dependant' ? "bg-orange-50/90" : (rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/90")))}>
+                        <TableCell
+                          key={`${row.key}-${col.id}`}
+                          className={cn("px-4 py-2.5 border-r border-b border-slate-200", col.idx < 2 ? getStickyClasses(col.idx).replace('z-30', 'z-20') : "", col.idx < 2 && (row.type === 'dependant' ? "bg-orange-50/90" : (rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/90")))}
+                          style={{
+                            width: colWidth, minWidth: colWidth, maxWidth: colWidth,
+                            ...(col.idx === 1 ? { left: secondCaseColLeftPx } : {})
+                          }}
+                        >
                           {content}
                         </TableCell>
                       );
@@ -397,13 +455,21 @@ export const StandardTable: React.FC<StandardTableProps> = ({
 
                     // --- DEPENDANT BLANK CELLS ---
                     if (row.type === 'dependant') {
-                      return <TableCell key={`${row.key}-${col.id}`} className={cn("text-center px-4 py-2.5 border-r border-b border-slate-200 text-slate-400 text-xs", col.type === 'actions' ? ACTION_WIDTH : COL_WIDTH, col.type === 'actions' && "sticky right-0 bg-orange-50/90 z-20 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.05)]")}>-</TableCell>;
+                      return (
+                        <TableCell
+                          key={`${row.key}-${col.id}`}
+                          className={cn("text-center px-4 py-2.5 border-r border-b border-slate-200 text-slate-400 text-xs", col.type === 'actions' && "sticky right-0 bg-orange-50/90 z-20 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.05)]")}
+                          style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}
+                        >
+                          -
+                        </TableCell>
+                      );
                     }
 
                     // --- STAGE ---
                     if (col.type === 'stage') {
                       return (
-                        <TableCell key={`${row.key}-${col.id}`} className={cn("text-center px-2 py-2 border-r border-b border-slate-200", COL_WIDTH)}>
+                        <TableCell key={`${row.key}-${col.id}`} className="text-center px-2 py-2 border-r border-b border-slate-200" style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}>
                           {renderCellContent({ type: 'stage', stage: col.stage }, row.task, 'combined')}
                         </TableCell>
                       );
@@ -423,7 +489,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                         }
                       };
                       return (
-                        <TableCell key={`${row.key}-${col.id}`} className={cn("text-center px-3 py-2.5 border-r border-b border-slate-200 bg-slate-50/30", COL_WIDTH)}>
+                        <TableCell key={`${row.key}-${col.id}`} className="text-center px-3 py-2.5 border-r border-b border-slate-200 bg-slate-50/30" style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}>
                           {renderCellContent(mockDocRow, row.task, 'date')}
                         </TableCell>
                       );
@@ -439,7 +505,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                         }
                       };
                       return (
-                        <TableCell key={`${row.key}-${col.id}`} className={cn("text-center px-3 py-2.5 border-r border-b border-slate-200", COL_WIDTH)}>
+                        <TableCell key={`${row.key}-${col.id}`} className="text-center px-3 py-2.5 border-r border-b border-slate-200" style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}>
                           {renderCellContent(mockFieldRow, row.task, 'date')}
                         </TableCell>
                       );
@@ -448,7 +514,11 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                     // --- ACTIONS ---
                     if (col.type === 'actions') {
                       return (
-                        <TableCell key={`${row.key}-${col.id}`} className={cn("text-center px-4 py-2.5 border-b border-slate-200 sticky right-0 z-20 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]", ACTION_WIDTH, rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/90")}>
+                        <TableCell
+                          key={`${row.key}-${col.id}`}
+                          className={cn("text-center px-4 py-2.5 border-b border-slate-200 sticky right-0 z-20 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]", rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/90")}
+                          style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}
+                        >
                           {renderCellContent({ type: 'actions' }, row.task, 'actions')}
                         </TableCell>
                       );

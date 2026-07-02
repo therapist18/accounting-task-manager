@@ -118,6 +118,7 @@ export function RequirementsTable({
   const [selectedAutomationData, setSelectedAutomationData] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [automationWebdataMap, setAutomationWebdataMap] = useState<Record<string, { name: string; webdata: any[] }>>({});
   const [groupToDelete, setGroupToDelete] = useState<any>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -475,6 +476,39 @@ export function RequirementsTable({
     loadData();
     return () => { isMounted = false; };
   }, [filteredTasks]);
+
+  // Fetch automation webdata for linked automations
+  useEffect(() => {
+    const fetchAutomationWebdata = async () => {
+      const automationIds = new Set<string>();
+      Object.values(taskClassRequirements).forEach((cr: any) => {
+        const reqs = cr?.requirements || [];
+        reqs.forEach((req: any) => {
+          if (req.web_automation?.automationId) {
+            automationIds.add(req.web_automation.automationId);
+          }
+        });
+      });
+      if (automationIds.size === 0) return;
+      try {
+        const { data, error } = await supabase
+          .from('tm_automations')
+          .select('id, name, webdata')
+          .in('id', Array.from(automationIds));
+        if (error) throw error;
+        const map: Record<string, { name: string; webdata: any[] }> = {};
+        (data || []).forEach(auto => {
+          if (auto.webdata && auto.webdata.length > 0) {
+            map[auto.id] = { name: auto.name || 'Unknown', webdata: auto.webdata };
+          }
+        });
+        setAutomationWebdataMap(map);
+      } catch (err) {
+        console.error('Error fetching automation webdata:', err);
+      }
+    };
+    fetchAutomationWebdata();
+  }, [taskClassRequirements]);
 
   const hasReferencesColumn = useMemo(() => filteredTasks.some(task => REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.id) || REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.parent_id)), [filteredTasks]);
 
@@ -1209,6 +1243,8 @@ export function RequirementsTable({
               refreshDocuments={refreshDocuments}
               handleDeleteDocument={handleDeleteDocument}
               jobLevel={currentClassRequirements[0]?.job_level}
+              automationWebdataMap={automationWebdataMap}
+              classRequirements={currentClassRequirements}
             />
           </div>
         </div>

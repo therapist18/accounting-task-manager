@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, ChevronDown, ChevronRight, Users2, User, Building2, Zap, FileType, UploadCloud, Eye, Calendar, CheckCircle2, XCircle, AlertCircle, Heart, HeartPulse } from "lucide-react"
+import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, ChevronDown, ChevronRight, Users2, User, Building2, Zap, FileType, UploadCloud, Eye, Calendar, CheckCircle2, XCircle, AlertCircle, Heart, HeartPulse, Database, Paperclip, FunctionSquare, TableIcon, HelpCircle } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import * as XLSX from 'xlsx'
@@ -113,14 +113,16 @@ const getFileUrl = (filePath: string) => {
   return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`;
 };
 
-export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, onSaveDocument, onSave, toggleDocumentExpansion, renderDocumentStatus, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, documentTemplates, allIndividualDocuments, allCompanyDocuments, searchQuery = "", refreshDocuments, jobLevel, }: any) {
+export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, onSaveDocument, onSave, toggleDocumentExpansion, renderDocumentStatus, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, documentTemplates, allIndividualDocuments, allCompanyDocuments, searchQuery = "", refreshDocuments, jobLevel, automationWebdataMap = {} }: any) {
   const [expandedSections, setExpandedSections] = useState({
     company: true,
     individual: true,
     letters: true,
+    webdata: true,
   });
   const [expandedDependants, setExpandedDependants] = useState<Set<number>>(new Set());
   const [expandedCompositeRequirements, setExpandedCompositeRequirements] = useState<Set<string>>(new Set());
+  const [expandedArrayFields, setExpandedArrayFields] = useState<Set<string>>(new Set());
 
   const toggleDependants = (groupIndex: number) => {
     setExpandedDependants(prev => {
@@ -141,6 +143,18 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         newSet.delete(requirementId);
       } else {
         newSet.add(requirementId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleArrayFieldExpansion = (fieldKey: string) => {
+    setExpandedArrayFields(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(fieldKey)) {
+        newSet.delete(fieldKey);
+      } else {
+        newSet.add(fieldKey);
       }
       return newSet;
     });
@@ -1860,6 +1874,164 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     return null;
   }, [allCompanyDocuments, allIndividualDocuments]);
 
+  const renderWebDataConfiguration = () => {
+    if (!automationWebdataMap || Object.keys(automationWebdataMap).length === 0) return null;
+
+    return (
+      <div className="space-y-4 p-4 bg-blue-50/30 rounded-lg border border-blue-200">
+        <div className="flex items-center justify-between border-b pb-3">
+          <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+            <Database className="h-4 w-4 text-blue-600" /> Automation Fields
+          </h3>
+          <Badge variant="outline" className="bg-white">{Object.keys(automationWebdataMap).length} Automation{Object.keys(automationWebdataMap).length !== 1 ? 's' : ''}</Badge>
+        </div>
+        {Object.entries(automationWebdataMap).map(([automationId, { name: automationName, webdata }], index) => {
+          const hasMultipleFields = webdata.length > 1;
+          const isExpanded = expandedArrayFields.has(`automation-${index}`);
+
+          return (
+            <div key={automationId} className="space-y-2">
+              <div
+                className={
+                  "flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all " +
+                  "bg-white border border-blue-200 hover:bg-blue-50/50 shadow-sm "
+                }
+                onClick={() => toggleArrayFieldExpansion(`automation-${index}`)}
+              >
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                    {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                  </Button>
+                    <Database className="h-4 w-4 text-blue-600" />
+                    <span className="font-medium text-blue-700 truncate max-w-[200px]">
+                      {automationName}
+                    </span>
+                  <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">
+                    {webdata.length} Field{webdata.length !== 1 ? 's' : ''}
+                  </Badge>
+                </div>
+              </div>
+
+              {isExpanded && webdata && webdata.length > 0 && (
+                <div className="pl-8 pr-4 space-y-2">
+                  {webdata.map((field, fieldIndex) => {
+                    const isDocument = field.fieldType === 'document';
+                    const isComputed = field.fieldType === 'computed';
+                    const isArray = field.fieldType === 'array';
+                    const hasSources = (field.linkedMasterFields?.length || 0) + (field.linkedJobQuestionIds?.length || 0) + (field.linkedKycDocuments?.length || 0) + (field.arrayItems?.length || 0) > 0;
+
+                    return (
+                      <div
+                        key={fieldIndex}
+                        className={
+                          "flex items-center justify-between p-2 rounded-md border " +
+                          "bg-white hover:bg-blue-50/30 transition-colors"
+                        }
+                      >
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="flex items-center gap-1 text-slate-500 w-6">
+                            <span className="text-xs font-mono text-blue-600">#{fieldIndex + 1}</span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {isDocument && (
+                              <Paperclip className="h-3.5 w-3.5 text-amber-600" />
+                            )}
+                            {isComputed && (
+                              <FunctionSquare className="h-3.5 w-3.5 text-purple-600" />
+                            )}
+                            {isArray && (
+                              <TableIcon className="h-3.5 w-3.5 text-blue-600" />
+                            )}
+                            {!hasSources && !isDocument && !isComputed && !isArray && (
+                              <HelpCircle className="h-3.5 w-3.5 text-slate-400" />
+                            )}
+                          </div>
+
+                          <div className="flex-1 min-w-0 ml-2">
+                            <div className="text-xs font-medium text-slate-700 truncate">
+                              {field.efnsDisplayName || field.name || field.variableName}
+                            </div>
+                            <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
+                              <span className="bg-slate-100 px-1.5 py-0.5 rounded text-[9px]">
+                                {field.fieldType}
+                              </span>
+                              {Array.isArray(field.entityTypes) && field.entityTypes.map((et: string) => (
+                                <span key={et} className="bg-slate-200 px-1 py-0.5 rounded text-[9px] capitalize">
+                                  {et}
+                                </span>
+                              ))}
+                              {field.entityType && !Array.isArray(field.entityTypes) && (
+                                <span className="bg-slate-200 px-1 py-0.5 rounded text-[9px] capitalize">
+                                  {field.entityType}
+                                </span>
+                              )}
+                              {isDocument && field.linkedKycDocuments && (
+                                <>
+                                  <Paperclip className="h-3 w-3 text-amber-600" />
+                                  <span className="text-[9px] text-amber-600">
+                                    {field.linkedKycDocuments.length} Document{field.linkedKycDocuments.length !== 1 ? 's' : ''}
+                                  </span>
+                                </>
+                              )}
+                              {field.linkedMasterFields && field.linkedMasterFields.length > 0 && (
+                                <>
+                                  <Database className="h-3 w-3 text-blue-600" />
+                                  <span className="text-[9px] text-blue-600">
+                                    {field.linkedMasterFields.length} Field{field.linkedMasterFields.length !== 1 ? 's' : ''}
+                                  </span>
+                                </>
+                              )}
+                              {field.linkedJobQuestionIds && field.linkedJobQuestionIds.length > 0 && (
+                                <>
+                                  <HelpCircle className="h-3 w-3 text-purple-600" />
+                                  <span className="text-[9px] text-purple-600">
+                                    {field.linkedJobQuestionIds.length} Question{field.linkedJobQuestionIds.length !== 1 ? 's' : ''}
+                                  </span>
+                                </>
+                              )}
+                              {field.arrayItems && field.arrayItems.length > 0 && (
+                                <>
+                                  <TableIcon className="h-3 w-3 text-blue-600" />
+                                  <span className="text-[9px] text-blue-600">
+                                    {field.arrayItems.length} Column{field.arrayItems.length !== 1 ? 's' : ''}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          {isDocument && field.linkedKycDocuments && (
+                            <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">
+                              {field.documentLogic === 'merge' ? 'Merge All' : 'Fallback'}
+                            </Badge>
+                          )}
+                          {field.extractionMode && (
+                            <Badge variant="outline" className="text-[9px] bg-slate-50 text-slate-600">
+                              {field.extractionMode === 'latest' ? 'Latest' : field.extractionMode === 'all' ? 'All Entries' : field.extractionMode}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="border-t border-blue-200 pt-2 mt-2 pl-8">
+                <div className="text-[10px] text-slate-500 italic">
+                  Note: These fields are synced from the linked automation. Edit the automation to modify field configuration.
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const renderRequirementRows = (requirementsList: any[]) => {
     return requirementsList.map((reqItem, reqIndex) => {
       const requirementId = reqItem.uniqueId || reqItem.id;
@@ -1927,94 +2099,70 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
               const isApplicable = checkApplicability(col.type, reqItem);
               const groupRelationshipData = relationshipData[col.groupIndex];
 
-              if (!isApplicable) {
-                return (
-                  <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-3 align-middle bg-slate-50/30">
-                    <span className="inline-flex items-center justify-center px-2.5 py-1 text-sm text-slate-400 font-medium italic shadow-sm">
-                      N/A
-                    </span>
-                  </TableCell>
-                );
-              }
+            if (!isApplicable) {
+              return (
+                <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-3 align-middle bg-slate-50/30">
+                  <span className="inline-flex items-center justify-center px-2.5 py-1 text-sm text-slate-400 font-medium italic shadow-sm">
+                    N/A
+                  </span>
+                </TableCell>
+              );
+            }
 
-              if (isComposite) {
-                const cacheKey = `${col.task.id}-${reqItem.id || reqItem.uniqueId}-${col.type}-${col.id}`;
-                const compositeStatus = compositeStatusCache.get(cacheKey);
-                const statusToDisplay = compositeStatus || getCompositeRequirementStatus(reqItem, col.task, col.type, col.id);
-
-                return (
-                  <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-3 align-middle">
-                    <div className="flex items-center justify-between w-full">
-                      {statusToDisplay ? (
-                        <div className="flex items-center gap-2 w-full">
-                          {statusToDisplay.latestStatus ? (
-                            <>
-                              {renderStatusBadge(statusToDisplay.latestStatus)}
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 w-full max-w-[120px] bg-white text-blue-600 border-blue-200 hover:bg-blue-50 shadow-sm flex items-center justify-center gap-1.5"
-                                onClick={() => {
-                                  const latestDocId = reqItem.document_ids?.find((docId: string) => {
-                                    const docs = isCompanyType(col.type)
-                                      ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === docId)
-                                      : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === docId);
-                                    return docs && docs.length > 0;
-                                  });
-                                  if (latestDocId) {
-                                    const docs = isCompanyType(col.type)
-                                      ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === latestDocId)
-                                      : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === latestDocId);
-                                    if (docs && docs.length > 0) {
-                                      setPreviewingDocuments(docs);
-                                      setShowPreviewModal(true);
-                                    }
-                                  }
-                                }}
-                                title="Preview Latest Document"
-                              >
-                                <Eye className="h-3.5 w-3.5" />
-                                <span className="text-sm font-bold uppercase tracking-wider">View Docs</span>
-                              </Button>
-                            </>
-                          ) : (
-                            <Badge variant="outline" className={`text-sm uppercase font-bold px-2.5 py-1 shadow-sm ${statusToDisplay.type === 'missing' ? 'border-amber-200 text-amber-600 bg-amber-50' :
-                              statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'border-red-200 text-red-600 bg-red-50' :
-                                'border-amber-200 text-amber-600 bg-amber-50'
-                              }`}>
-                              {statusToDisplay.type === 'missing' ? 'Missing' :
-                                statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'Invalid' :
-                                  'No Status'}
-                            </Badge>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" title="Checking status..." />
-                      )}
-
-                      {reqItem.hasTemplate && (
-                        <Button
-                          variant="default"
-                          size="sm"
-                          className="h-7 w-full max-w-[120px] bg-indigo-50 text-indigo-600 hover:bg-indigo-100 hover:text-indigo-700 border border-indigo-200 shadow-sm flex items-center justify-center gap-1.5"
-                          onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
-                          disabled={isPreparingTemplate}
-                        >
-                          {isPreparingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-                          <span className="text-sm font-bold uppercase tracking-wider">Generate</span>
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                );
-              }
+            if (isComposite) {
+              const cacheKey = `${col.task.id}-${reqItem.id || reqItem.uniqueId}-${col.type}-${col.id}`;
+              const compositeStatus = compositeStatusCache.get(cacheKey);
+              const statusToDisplay = compositeStatus || getCompositeRequirementStatus(reqItem, col.task, col.type, col.id);
 
               return (
                 <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-3 align-middle">
-                  <div className="flex items-center justify-center gap-2.5 w-full">
-                    <div className="flex items-center justify-center w-full min-h-[32px]">
-                      {renderDocumentStatus(col.task, reqItem, col.type, col.id, groupRelationshipData)}
-                    </div>
+                  <div className="flex items-center justify-between w-full">
+                    {statusToDisplay ? (
+                      <div className="flex items-center gap-2 w-full">
+                        {statusToDisplay.latestStatus ? (
+                          <>
+                            {renderStatusBadge(statusToDisplay.latestStatus)}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 w-full max-w-[120px] bg-white text-blue-600 border-blue-200 hover:bg-blue-50 shadow-sm flex items-center justify-center gap-1.5"
+                              onClick={() => {
+                                const latestDocId = reqItem.document_ids?.find((docId: string) => {
+                                  const docs = isCompanyType(col.type)
+                                    ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === docId)
+                                    : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === docId);
+                                  return docs && docs.length > 0;
+                                });
+                                if (latestDocId) {
+                                  const docs = isCompanyType(col.type)
+                                    ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === latestDocId)
+                                    : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === latestDocId);
+                                  if (docs && docs.length > 0) {
+                                    setPreviewingDocuments(docs);
+                                    setShowPreviewModal(true);
+                                  }
+                                }
+                              }}
+                              title="Preview Latest Document"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              <span className="text-sm font-bold uppercase tracking-wider">View Docs</span>
+                            </Button>
+                          </>
+                        ) : (
+                          <Badge variant="outline" className={`text-sm uppercase font-bold px-2.5 py-1 shadow-sm ${statusToDisplay.type === 'missing' ? 'border-amber-200 text-amber-600 bg-amber-50' :
+                            statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'border-red-200 text-red-600 bg-red-50' :
+                              'border-amber-200 text-amber-600 bg-amber-50'
+                            }`}>
+                            {statusToDisplay.type === 'missing' ? 'Missing' :
+                              statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'Invalid' :
+                                'No Status'}
+                          </Badge>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" title="Checking status..." />
+                    )}
 
                     {reqItem.hasTemplate && (
                       <Button
@@ -2031,493 +2179,546 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                   </div>
                 </TableCell>
               );
-            })}
-          </TableRow>
-
-          {/* Expanded view for composite requirements */}
-          {isComposite && isCompositeExpanded && reqItem.document_ids?.map((docId: string, docIdx: number) => {
-            const docMetadata = documentMetadataCache.get(docId);
-            if (!docMetadata) return null;
+            }
 
             return (
-              <TableRow key={`${requirementId}-doctype-${docIdx}`} className="bg-blue-50/30">
-                <TableCell className="sticky left-0 border-r text-center text-sm text-gray-400 bg-blue-50/30">
-                  {reqIndex + 1}.{docIdx + 1}
-                </TableCell>
-                <TableCell className="sticky left-16 bg-blue-50/50 border-r pl-8">
-                  <span className="flex items-center gap-2">
-                    <FileText className="h-3 w-3 text-blue-600" />
-                    <span className="text-sm text-slate-700 font-medium">
-                      {docMetadata.display_name || docMetadata.name}
-                    </span>
+              <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-3 align-middle">
+                <div className="flex items-center justify-center gap-2.5 w-full">
+                  <div className="flex items-center justify-center w-full min-h-[32px]">
+                    {renderDocumentStatus(col.task, reqItem, col.type, col.id, groupRelationshipData)}
+                  </div>
+
+                  {reqItem.hasTemplate && (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="h-7 w-full max-w-[120px] bg-indigo-50 text-indigo-600 hover:bg-indigo-100 hover:text-indigo-700 border border-indigo-200 shadow-sm flex items-center justify-center gap-1.5"
+                      onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
+                      disabled={isPreparingTemplate}
+                    >
+                      {isPreparingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                      <span className="text-sm font-bold uppercase tracking-wider">Generate</span>
+                    </Button>
+                  )}
+                </div>
+              </TableCell>
+            );
+          })
+        }
+          </TableRow >
+
+    {/* Expanded view for composite requirements */ }
+  {
+    isComposite && isCompositeExpanded && reqItem.document_ids?.map((docId: string, docIdx: number) => {
+      const docMetadata = documentMetadataCache.get(docId);
+      if (!docMetadata) return null;
+
+      return (
+        <TableRow key={`${requirementId}-doctype-${docIdx}`} className="bg-blue-50/30">
+          <TableCell className="sticky left-0 border-r text-center text-sm text-gray-400 bg-blue-50/30">
+            {reqIndex + 1}.{docIdx + 1}
+          </TableCell>
+          <TableCell className="sticky left-16 bg-blue-50/50 border-r pl-8">
+            <span className="flex items-center gap-2">
+              <FileText className="h-3 w-3 text-blue-600" />
+              <span className="text-sm text-slate-700 font-medium">
+                {docMetadata.display_name || docMetadata.name}
+              </span>
+            </span>
+          </TableCell>
+          {columnDefinitions.map((col, colIdx) => {
+            const isApplicable = checkApplicability(col.type, reqItem);
+            if (!isApplicable) {
+              return (
+                <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-3 align-middle">
+                  <span className="inline-flex items-center justify-center px-2 py-1 rounded border border-slate-100 bg-slate-50 text-sm text-gray-300 italic">
+                    -
                   </span>
                 </TableCell>
-                {columnDefinitions.map((col, colIdx) => {
-                  const isApplicable = checkApplicability(col.type, reqItem);
-                  if (!isApplicable) {
-                    return (
-                      <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-3 align-middle">
-                        <span className="inline-flex items-center justify-center px-2 py-1 rounded border border-slate-100 bg-slate-50 text-sm text-gray-300 italic">
-                          -
-                        </span>
-                      </TableCell>
-                    );
-                  }
+              );
+            }
 
-                  const docs = getDocumentsByType(docId, col.task, col.type, col.id);
+            const docs = getDocumentsByType(docId, col.task, col.type, col.id);
 
-                  return (
-                    <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-3 align-middle">
-                      <div className="flex items-center justify-center gap-2.5 w-full">
-                        {docs.length > 0 ? (
-                          <>
-                            {(() => {
-                              const personId = isCompanyType(col.type) ? col.task.company_id :
-                                isIndividualType(col.type) ? col.task.individual_id :
-                                  col.id;
-                              const statusKey = `${col.task.id}-${docId}-${col.type}-${personId}`;
-                              if (!documentStatusCache.has(statusKey)) {
-                                const latestDoc = docs.reduce((prev, curr) => (new Date(curr.created_at) > new Date(prev.created_at)) ? curr : prev);
-                                getDocumentStatus(col.task, docId, col.type, personId, latestDoc);
-                                return <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" title="Checking status..." />;
-                              }
-                              const status = documentStatusCache.get(statusKey);
-                              return status ? renderStatusBadge(status) : null;
-                            })()}
+            return (
+              <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-3 align-middle">
+                <div className="flex items-center justify-center gap-2.5 w-full">
+                  {docs.length > 0 ? (
+                    <>
+                      {(() => {
+                        const personId = isCompanyType(col.type) ? col.task.company_id :
+                          isIndividualType(col.type) ? col.task.individual_id :
+                            col.id;
+                        const statusKey = `${col.task.id}-${docId}-${col.type}-${personId}`;
+                        if (!documentStatusCache.has(statusKey)) {
+                          const latestDoc = docs.reduce((prev, curr) => (new Date(curr.created_at) > new Date(prev.created_at)) ? curr : prev);
+                          getDocumentStatus(col.task, docId, col.type, personId, latestDoc);
+                          return <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" title="Checking status..." />;
+                        }
+                        const status = documentStatusCache.get(statusKey);
+                        return status ? renderStatusBadge(status) : null;
+                      })()}
 
-                            <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-md shadow-sm">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 w-9 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded"
-                                onClick={() => handleViewDocuments(docs, docMetadata, col, requirementId)}
-                                title={`View ${docs.length} document(s)`}
-                              >
-                                <Eye className="h-4 w-4" />
-                                {docs.length > 1 && <span className="text-sm font-bold ml-1">{docs.length}</span>}
-                              </Button>
-                              <div className="w-[1px] h-4 bg-slate-200" />
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 w-9 p-0 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
-                                onClick={(e) => {
-                                  e.stopPropagation();
+                      <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-md shadow-sm">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-9 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded"
+                          onClick={() => handleViewDocuments(docs, docMetadata, col, requirementId)}
+                          title={`View ${docs.length} document(s)`}
+                        >
+                          <Eye className="h-4 w-4" />
+                          {docs.length > 1 && <span className="text-sm font-bold ml-1">{docs.length}</span>}
+                        </Button>
+                        <div className="w-[1px] h-4 bg-slate-200" />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-9 p-0 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
+                          onClick={(e) => {
+                            e.stopPropagation();
 
-                                  console.log('DEBUG: Composite Sub-Doc Upload Clicked', {
-                                    parentRequirement: reqItem.name,
-                                    targetDocMetadata: docMetadata,
-                                    docId: docId
-                                  });
+                            console.log('DEBUG: Composite Sub-Doc Upload Clicked', {
+                              parentRequirement: reqItem.name,
+                              targetDocMetadata: docMetadata,
+                              docId: docId
+                            });
 
-                                  let personName = col.label;
-                                  if (!personName || personName === 'Unknown Person') {
-                                    personName = individualNames[col.task?.individual_id] ||
-                                      individualNames[col.task?.applicant_details?.id] ||
-                                      col.task?.applicant_details?.name ||
-                                      'Individual';
-                                  }
+                            let personName = col.label;
+                            if (!personName || personName === 'Unknown Person') {
+                              personName = individualNames[col.task?.individual_id] ||
+                                individualNames[col.task?.applicant_details?.id] ||
+                                col.task?.applicant_details?.name ||
+                                'Individual';
+                            }
 
-                                  setSelectedDocForUpload({
-                                    doc: docMetadata,
-                                    fields: docMetadata?.fields || [],
-                                    person: {
-                                      full_name: personName,
-                                      id: col.id,
-                                      type: isCompanyType(col.type) ? 'company' : 'individual'
-                                    },
-                                    task: col.task,
-                                    columnType: col.type,
-                                    columnId: col.id
-                                  });
-                                  setShowUploadModal(true);
-                                }}
-                                title={`Upload additional ${docMetadata?.display_name || 'Document'}`}
-                              >
-                                <UploadCloud className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <Badge variant="outline" className="text-sm uppercase font-bold px-2.5 py-1 border-amber-200 text-amber-600 bg-amber-50 shadow-sm">
-                              Missing
-                            </Badge>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 w-full max-w-[100px] text-amber-600 border-amber-200 hover:bg-amber-50 shadow-sm flex items-center justify-center gap-1.5"
-                              onClick={(e) => {
-                                e.stopPropagation();
-
-                                console.log('DEBUG: Composite Sub-Doc Upload Clicked', {
-                                  parentRequirement: reqItem.name,
-                                  targetDocMetadata: docMetadata,
-                                  docId: docId
-                                });
-
-                                let personName = col.label;
-                                if (!personName || personName === 'Unknown Person') {
-                                  personName = individualNames[col.task?.individual_id] ||
-                                    individualNames[col.task?.applicant_details?.id] ||
-                                    col.task?.applicant_details?.name ||
-                                    'Individual';
-                                }
-
-                                setSelectedDocForUpload({
-                                  doc: docMetadata,
-                                  fields: docMetadata?.fields || [],
-                                  person: {
-                                    full_name: personName,
-                                    id: col.id,
-                                    type: isCompanyType(col.type) ? 'company' : 'individual'
-                                  },
-                                  task: col.task,
-                                  columnType: col.type,
-                                  columnId: col.id
-                                });
-                                setShowUploadModal(true);
-                              }}
-                              title={`Upload ${docMetadata?.display_name || 'Document'}`}
-                            >
-                              <UploadCloud className="h-3.5 w-3.5" />
-                              <span className="text-sm font-bold uppercase tracking-wider">Upload</span>
-                            </Button>
-                          </>
-                        )}
+                            setSelectedDocForUpload({
+                              doc: docMetadata,
+                              fields: docMetadata?.fields || [],
+                              person: {
+                                full_name: personName,
+                                id: col.id,
+                                type: isCompanyType(col.type) ? 'company' : 'individual'
+                              },
+                              task: col.task,
+                              columnType: col.type,
+                              columnId: col.id
+                            });
+                            setShowUploadModal(true);
+                          }}
+                          title={`Upload additional ${docMetadata?.display_name || 'Document'}`}
+                        >
+                          <UploadCloud className="h-4 w-4" />
+                        </Button>
                       </div>
-                    </TableCell>
-                  );
-                })}
-              </TableRow>
+                    </>
+                  ) : (
+                    <>
+                      <Badge variant="outline" className="text-sm uppercase font-bold px-2.5 py-1 border-amber-200 text-amber-600 bg-amber-50 shadow-sm">
+                        Missing
+                      </Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 w-full max-w-[100px] text-amber-600 border-amber-200 hover:bg-amber-50 shadow-sm flex items-center justify-center gap-1.5"
+                        onClick={(e) => {
+                          e.stopPropagation();
+
+                          console.log('DEBUG: Composite Sub-Doc Upload Clicked', {
+                            parentRequirement: reqItem.name,
+                            targetDocMetadata: docMetadata,
+                            docId: docId
+                          });
+
+                          let personName = col.label;
+                          if (!personName || personName === 'Unknown Person') {
+                            personName = individualNames[col.task?.individual_id] ||
+                              individualNames[col.task?.applicant_details?.id] ||
+                              col.task?.applicant_details?.name ||
+                              'Individual';
+                          }
+
+                          setSelectedDocForUpload({
+                            doc: docMetadata,
+                            fields: docMetadata?.fields || [],
+                            person: {
+                              full_name: personName,
+                              id: col.id,
+                              type: isCompanyType(col.type) ? 'company' : 'individual'
+                            },
+                            task: col.task,
+                            columnType: col.type,
+                            columnId: col.id
+                          });
+                          setShowUploadModal(true);
+                        }}
+                        title={`Upload ${docMetadata?.display_name || 'Document'}`}
+                      >
+                        <UploadCloud className="h-3.5 w-3.5" />
+                        <span className="text-sm font-bold uppercase tracking-wider">Upload</span>
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </TableCell>
             );
           })}
+        </TableRow>
+      );
+    })
+  }
 
-          {/* Expanded Field Data Rows */}
-          {!isComposite && isExpanded && fieldsToRender.map((field, fIdx) => (
-            <TableRow key={`${requirementId}-field-${field.id}`} className={`${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
-              <TableCell className={`sticky left-0 border-r text-center text-sm text-gray-400 ${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
-                {reqIndex + 1}.{fIdx + 1}
-              </TableCell>
-              <TableCell className="sticky left-16 bg-slate-50 border-r pl-8 text-sm text-slate-500 italic">
-                {field.name}
-              </TableCell>
-              {columnDefinitions.map((col, colIdx) => {
-                const isApplicable = checkApplicability(col.type, reqItem);
-                const docData = isApplicable ? getDocumentDataForPreview(col.task, reqItem, col.type, col.id) : null;
+  {/* Expanded Field Data Rows */ }
+  {
+    !isComposite && isExpanded && fieldsToRender.map((field, fIdx) => (
+      <TableRow key={`${requirementId}-field-${field.id}`} className={`${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
+        <TableCell className={`sticky left-0 border-r text-center text-sm text-gray-400 ${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
+          {reqIndex + 1}.{fIdx + 1}
+        </TableCell>
+        <TableCell className="sticky left-16 bg-slate-50 border-r pl-8 text-sm text-slate-500 italic">
+          {field.name}
+        </TableCell>
+        {columnDefinitions.map((col, colIdx) => {
+          const isApplicable = checkApplicability(col.type, reqItem);
+          const docData = isApplicable ? getDocumentDataForPreview(col.task, reqItem, col.type, col.id) : null;
+          return (
+            <TableCell key={`${field.id}-val-${colIdx}`} className="text-center border p-1 text-sm text-slate-600">
+              {isApplicable ? (() => {
+                const val = docData?.extracted_details?.[field.name];
+                if (val === null || val === undefined) return '-';
+                if (typeof val === 'object') return JSON.stringify(val);
+                return String(val);
+              })() : '-'}
+            </TableCell>
+          );
+        })}
+      </TableRow>
+    ))
+  }
+        </React.Fragment >
+      );
+});
+  };
+
+return (
+  <div className="space-y-4">
+    {/* MODALS */}
+    <UploadModal
+      isOpen={showUploadModal}
+      onClose={() => setShowUploadModal(false)}
+      onUpload={handleUploadSubmit}
+      onSuccess={handleDocumentUploadSuccess}
+      documentName={selectedDocForUpload?.doc?.name || selectedDocForUpload?.doc?.display_name || selectedDocForUpload?.doc?.main_category || selectedDocForUpload?.doc?.sub_category || selectedDocForUpload?.doc?.id || 'Document'}
+      documentFields={selectedDocForUpload?.fields}
+      entityName={selectedDocForUpload?.person?.full_name}
+      entityId={selectedDocForUpload?.person?.id || selectedDocForUpload?.person?.director_id || selectedDocForUpload?.task?.principal_id || selectedDocForUpload?.task?.director_id || selectedDocForUpload?.task?.individual_id}
+      selectedDoc={selectedDocForUpload?.doc}
+      selectedMember={selectedDocForUpload?.person}
+      isAllKepUpload={selectedDocForUpload?.isAllKepUpload}
+      permitClassOptions={PERMIT_CLASS_OPTIONS}
+      allDocumentTypes={documentTypes}
+      mainTab={mainTab}
+      isPassportUpload={selectedDocForUpload?.isPassportUpload}
+      selectedDocumentId={selectedDocForUpload?.doc?.id}
+      dropdowns={selectedDocForUpload?.dropdowns || []}
+      targetTable={selectedDocForUpload?.person?.type === 'company' ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents'}
+      idFieldName={selectedDocForUpload?.person?.type === 'company' ? 'company_id' : 'director_id'}
+      documentIdFieldName='document_id'
+      isCompanyUpload={selectedDocForUpload?.person?.type === 'company'}
+      onBeforeUpload={async (recordData) => {
+        if (selectedDocForUpload?.onBeforeUpload) {
+          return selectedDocForUpload.onBeforeUpload(recordData);
+        }
+        return null;
+      }}
+    />
+
+    <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
+      <DialogContent className="max-w-[95vw] w-full max-h-[95vh] flex p-0 overflow-hidden bg-slate-50">
+        {showPreviewModal && previewingDocuments && (
+          <>
+            <DialogHeader className="p-4 border-b bg-white shrink-0">
+              <div className="flex items-center justify-between">
+                <div>
+                  <DialogTitle className="text-xl">
+                    <div className="flex items-center p-2">
+                      <div className="bg-white p-2 rounded-lg border shadow-sm">
+                        <FileText className="h-5 w-5 text-blue-600" />
+                      </div>
+                      <div className="flex">
+                        <p className="text-xl font-bold text-slate-800 line-clamp-1">{previewingDocuments?.document_display_name || 'Document'}</p>
+                      </div>
+                    </div>
+                  </DialogTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Target: {previewingDocuments?.person_full_name || 'Unknown'}
+                  </p>
+                </div>
+
+                <div className="text-sm font-medium bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-100">
+                  {previewingDocuments?.documents?.length || 0} File(s)
+                </div>
+              </div>
+              <DialogDescription className="sr-only">
+                Document extraction and verification interface.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="flex-1 overflow-y-auto">
+              <div className="space-y-10 mx-auto">
+                {previewingDocuments?.documents?.map((doc, index) => {
+                  const docId = doc.id || `doc-${index}`;
+
+                  return (
+                    <div key={docId} className="p-0 lg:p-4">
+                      <ExtractionPreview
+                        key={docId}
+                        documentName={previewingDocuments?.document_display_name || 'Document'}
+                        extractedData={doc.edited_details || doc.extracted_details || {}}
+                        fields={previewingDocuments?.document_fields || []}
+                        fileUrl={getFileUrl(doc.file_path)}
+                        fileName={doc.file_name || 'document.pdf'}
+                        expanded={true}
+                        showSaveButton={false}
+                        onDelete={() => handleDeleteDocument?.(doc)}
+                        onSave={(data) => handleSaveEditedDocument(doc, data)}
+                        onRetryExtraction={(retryData) => handleInternalRetryExtraction(doc, retryData)}
+                        onDataChange={(fieldName, value) => {
+                          handlePreviewDataChange(docId, fieldName, value);
+                        }}
+                        documentTypes={documentTypes}
+                        type={doc.director_id ? 'individual' : 'company'}
+                        file={doc}
+                        extractionStatus={doc.extraction_status || 'success'}
+                        supabase={supabase}
+                        onDialogClose={() => {
+                          // Close the preview dialog
+                          setShowPreviewModal(false);
+                          // Also collapse the document expansion if needed
+                          if (previewingDocuments?.requirementId && toggleDocumentExpansion) {
+                            toggleDocumentExpansion(previewingDocuments.requirementId);
+                          }
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="p-4 border-t bg-white flex justify-end shrink-0">
+              <Button variant="outline" onClick={() => setShowPreviewModal(false)} className="w-24">
+                Close
+              </Button>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+
+    <div className="rounded-md border bg-white shadow-sm overflow-hidden">
+      <div className="overflow-x-auto overflow-y-auto max-h-[75vh]">
+        <Table className="border-separate border-spacing-0">
+          <TableHeader className="sticky top-0 z-20">
+            <TableRow className="h-20 bg-blue-600">
+              <TableHead className="sticky left-0 bg-blue-700 text-white w-16 border-r border-blue-500 text-center z-30 font-bold">#</TableHead>
+              <TableHead className="sticky left-16 bg-blue-700 text-white w-[300px] border-r border-blue-500 z-30 font-bold">Requirement Mapping</TableHead>
+              {columnDefinitions.map((col, idx) => {
+                const config = getEntityTypeConfig(col.type);
+                const { bgColor, Icon } = config;
+
                 return (
-                  <TableCell key={`${field.id}-val-${colIdx}`} className="text-center border p-1 text-sm text-slate-600">
-                    {isApplicable ? (() => {
-                      const val = docData?.extracted_details?.[field.name];
-                      if (val === null || val === undefined) return '-';
-                      if (typeof val === 'object') return JSON.stringify(val);
-                      return String(val);
-                    })() : '-'}
-                  </TableCell>
+                  <TableHead
+                    key={`header-${idx}`}
+                    className={`${bgColor} text-white border-r border-white/10 min-w-[180px] p-2 text-center transition-colors`}
+                  >
+                    <span className="flex items-center gap-1">
+                      <Icon className="h-4 w-4 opacity-70 mb-1" />
+                      <span className="text-sm font-bold uppercase line-clamp-1 px-1">
+                        {col.label}
+                      </span>
+                      <span className="flex justify-between items-center gap-2">
+                        {col.roles && col.roles.length > 1 ? (
+                          <div className="flex gap-1">
+                            {col.roles.map((role, roleIdx) => (
+                              <span key={roleIdx} className="text-[8px] bg-black/30 text-white rounded px-1 py-0.5 font-medium tracking-wider">
+                                {role.toUpperCase()}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs bg-black/20 rounded px-1.5 py-0.5 font-medium tracking-wider">
+                            {col.subLabel}
+                          </span>
+                        )}
+                        {col.role && (
+                          <span className="text-[8px] bg-blue-900/20 text-white rounded px-1.5 py-0.5 font-medium tracking-wider">
+                            {Array.isArray(col.role) ? col.role.join(', ') : col.role}
+                          </span>
+                        )}
+                        {isPrincipalType(col.type) && (() => {
+                          const dependants = filteredGroupedTasks[col.groupIndex]?.tasks?.[0]?.participants_details?.filter(p =>
+                            p.type === 'individual' && (
+                              Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant'
+                            )
+                          ) || [];
+                          if (dependants.length > 0) {
+                            const isExpanded = expandedDependants.has(col.groupIndex);
+                            return (
+                              <span className="flex items-center gap-1">
+                                {!isExpanded && (
+                                  <span className="text-sm bg-amber-500 text-white rounded-full px-2.5 py-0.5 font-bold">
+                                    {dependants.length}
+                                  </span>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => toggleDependants(col.groupIndex)}
+                                  className="h-6 w-6 p-0 rounded-full bg-white/10 hover:bg-white/20 text-white border border-white/20"
+                                  title={`${isExpanded ? 'Hide' : 'Show'} ${dependants.length} dependant(s)`}
+                                >
+                                  {isExpanded ? (
+                                    <ChevronDown className="h-3 w-3" />
+                                  ) : (
+                                    <ChevronRight className="h-3 w-3" />
+                                  )}
+                                </Button>
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </span>
+                    </span>
+                  </TableHead>
                 );
               })}
             </TableRow>
-          ))}
-        </React.Fragment>
-      );
-    });
-  };
+          </TableHeader>
 
-  return (
-    <div className="space-y-4">
-      {/* MODALS */}
-      <UploadModal
-        isOpen={showUploadModal}
-        onClose={() => setShowUploadModal(false)}
-        onUpload={handleUploadSubmit}
-        onSuccess={handleDocumentUploadSuccess}
-        documentName={selectedDocForUpload?.doc?.name || selectedDocForUpload?.doc?.display_name || selectedDocForUpload?.doc?.main_category || selectedDocForUpload?.doc?.sub_category || selectedDocForUpload?.doc?.id || 'Document'}
-        documentFields={selectedDocForUpload?.fields}
-        entityName={selectedDocForUpload?.person?.full_name}
-        entityId={selectedDocForUpload?.person?.id || selectedDocForUpload?.person?.director_id || selectedDocForUpload?.task?.principal_id || selectedDocForUpload?.task?.director_id || selectedDocForUpload?.task?.individual_id}
-        selectedDoc={selectedDocForUpload?.doc}
-        selectedMember={selectedDocForUpload?.person}
-        isAllKepUpload={selectedDocForUpload?.isAllKepUpload}
-        permitClassOptions={PERMIT_CLASS_OPTIONS}
-        allDocumentTypes={documentTypes}
-        mainTab={mainTab}
-        isPassportUpload={selectedDocForUpload?.isPassportUpload}
-        selectedDocumentId={selectedDocForUpload?.doc?.id}
-        dropdowns={selectedDocForUpload?.dropdowns || []}
-        targetTable={selectedDocForUpload?.person?.type === 'company' ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents'}
-        idFieldName={selectedDocForUpload?.person?.type === 'company' ? 'company_id' : 'director_id'}
-        documentIdFieldName='document_id'
-        isCompanyUpload={selectedDocForUpload?.person?.type === 'company'}
-        onBeforeUpload={async (recordData) => {
-          if (selectedDocForUpload?.onBeforeUpload) {
-            return selectedDocForUpload.onBeforeUpload(recordData);
-          }
-          return null;
-        }}
-      />
-
-      <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
-        <DialogContent className="max-w-[95vw] w-full max-h-[95vh] flex p-0 overflow-hidden bg-slate-50">
-          {showPreviewModal && previewingDocuments && (
-            <>
-              <DialogHeader className="p-4 border-b bg-white shrink-0">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <DialogTitle className="text-xl">
-                      <div className="flex items-center p-2">
-                        <div className="bg-white p-2 rounded-lg border shadow-sm">
-                          <FileText className="h-5 w-5 text-blue-600" />
-                        </div>
-                        <div className="flex">
-                          <p className="text-xl font-bold text-slate-800 line-clamp-1">{previewingDocuments?.document_display_name || 'Document'}</p>
-                        </div>
-                      </div>
-                    </DialogTitle>
-                    <p className="text-sm text-muted-foreground">
-                      Target: {previewingDocuments?.person_full_name || 'Unknown'}
-                    </p>
-                  </div>
-
-                  <div className="text-sm font-medium bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-100">
-                    {previewingDocuments?.documents?.length || 0} File(s)
-                  </div>
-                </div>
-                <DialogDescription className="sr-only">
-                  Document extraction and verification interface.
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="flex-1 overflow-y-auto">
-                <div className="space-y-10 mx-auto">
-                  {previewingDocuments?.documents?.map((doc, index) => {
-                    const docId = doc.id || `doc-${index}`;
-
-                    return (
-                      <div key={docId} className="p-0 lg:p-4">
-                        <ExtractionPreview
-                          key={docId}
-                          documentName={previewingDocuments?.document_display_name || 'Document'}
-                          extractedData={doc.edited_details || doc.extracted_details || {}}
-                          fields={previewingDocuments?.document_fields || []}
-                          fileUrl={getFileUrl(doc.file_path)}
-                          fileName={doc.file_name || 'document.pdf'}
-                          expanded={true}
-                          showSaveButton={false}
-                          onDelete={() => handleDeleteDocument?.(doc)}
-                          onSave={(data) => handleSaveEditedDocument(doc, data)}
-                          onRetryExtraction={(retryData) => handleInternalRetryExtraction(doc, retryData)}
-                          onDataChange={(fieldName, value) => {
-                            handlePreviewDataChange(docId, fieldName, value);
-                          }}
-                          documentTypes={documentTypes}
-                          type={doc.director_id ? 'individual' : 'company'}
-                          file={doc}
-                          extractionStatus={doc.extraction_status || 'success'}
-                          supabase={supabase}
-                          onDialogClose={() => {
-                            // Close the preview dialog
-                            setShowPreviewModal(false);
-                            // Also collapse the document expansion if needed
-                            if (previewingDocuments?.requirementId && toggleDocumentExpansion) {
-                              toggleDocumentExpansion(previewingDocuments.requirementId);
-                            }
-                          }}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="p-4 border-t bg-white flex justify-end shrink-0">
-                <Button variant="outline" onClick={() => setShowPreviewModal(false)} className="w-24">
-                  Close
-                </Button>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <div className="rounded-md border bg-white shadow-sm overflow-hidden">
-        <div className="overflow-x-auto overflow-y-auto max-h-[75vh]">
-          <Table className="border-separate border-spacing-0">
-            <TableHeader className="sticky top-0 z-20">
-              <TableRow className="h-20 bg-blue-600">
-                <TableHead className="sticky left-0 bg-blue-700 text-white w-16 border-r border-blue-500 text-center z-30 font-bold">#</TableHead>
-                <TableHead className="sticky left-16 bg-blue-700 text-white w-[300px] border-r border-blue-500 z-30 font-bold">Requirement Mapping</TableHead>
-                {columnDefinitions.map((col, idx) => {
-                  const config = getEntityTypeConfig(col.type);
-                  const { bgColor, Icon } = config;
-
-                  return (
-                    <TableHead
-                      key={`header-${idx}`}
-                      className={`${bgColor} text-white border-r border-white/10 min-w-[180px] p-2 text-center transition-colors`}
-                    >
-                      <span className="flex items-center gap-1">
-                        <Icon className="h-4 w-4 opacity-70 mb-1" />
-                        <span className="text-sm font-bold uppercase line-clamp-1 px-1">
-                          {col.label}
+          <TableBody>
+            {loading ? (
+              <TableRow><TableCell colSpan={totalColumns} className="h-32 text-center"><Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" /></TableCell></TableRow>
+            ) : (
+              <>
+                {/* General Section */}
+                {groupedRequirements.general.length > 0 && (
+                  <>
+                    <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('general')}>
+                      <TableCell colSpan={totalColumns} className="py-3 px-4">
+                        <span className="flex items-center gap-3">
+                          {expandedSections.general ? <Minus className="h-4 w-4 text-slate-500" /> : <Plus className="h-4 w-4 text-slate-500" />}
+                          <span className="h-6 w-1 bg-blue-600 rounded-full" />
+                          <span className="font-bold text-slate-700 uppercase text-xs tracking-wider">General Requirements ({groupedRequirements.general.length})</span>
                         </span>
-                        <span className="flex justify-between items-center gap-2">
-                          {col.roles && col.roles.length > 1 ? (
-                            <div className="flex gap-1">
-                              {col.roles.map((role, roleIdx) => (
-                                <span key={roleIdx} className="text-[8px] bg-black/30 text-white rounded px-1 py-0.5 font-medium tracking-wider">
-                                  {role.toUpperCase()}
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-xs bg-black/20 rounded px-1.5 py-0.5 font-medium tracking-wider">
-                              {col.subLabel}
-                            </span>
-                          )}
-                          {col.role && (
-                            <span className="text-[8px] bg-blue-900/20 text-white rounded px-1.5 py-0.5 font-medium tracking-wider">
-                              {Array.isArray(col.role) ? col.role.join(', ') : col.role}
-                            </span>
-                          )}
-                          {isPrincipalType(col.type) && (() => {
-                            const dependants = filteredGroupedTasks[col.groupIndex]?.tasks?.[0]?.participants_details?.filter(p =>
-                              p.type === 'individual' && (
-                                Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant'
-                              )
-                            ) || [];
-                            if (dependants.length > 0) {
-                              const isExpanded = expandedDependants.has(col.groupIndex);
-                              return (
-                                <span className="flex items-center gap-1">
-                                  {!isExpanded && (
-                                    <span className="text-sm bg-amber-500 text-white rounded-full px-2.5 py-0.5 font-bold">
-                                      {dependants.length}
-                                    </span>
-                                  )}
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => toggleDependants(col.groupIndex)}
-                                    className="h-6 w-6 p-0 rounded-full bg-white/10 hover:bg-white/20 text-white border border-white/20"
-                                    title={`${isExpanded ? 'Hide' : 'Show'} ${dependants.length} dependant(s)`}
-                                  >
-                                    {isExpanded ? (
-                                      <ChevronDown className="h-3 w-3" />
-                                    ) : (
-                                      <ChevronRight className="h-3 w-3" />
-                                    )}
-                                  </Button>
-                                </span>
-                              );
-                            }
-                            return null;
-                          })()}
+                      </TableCell>
+                    </TableRow>
+                    {expandedSections.general && renderRequirementRows(groupedRequirements.general)}
+                  </>
+                )}
+
+                {/* Web Data Configuration Section */}
+                {automationWebdataMap && Object.keys(automationWebdataMap).length > 0 && (
+                  <>
+                    <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('webdata')}>
+                      <TableCell colSpan={totalColumns} className="py-3 px-4">
+                        <span className="flex items-center gap-3">
+                          {expandedSections.webdata ? <Minus className="h-4 w-4 text-slate-500" /> : <Plus className="h-4 w-4 text-slate-500" />}
+                          <span className="h-6 w-1 bg-blue-600 rounded-full" />
+                          <span className="font-bold text-slate-700 uppercase text-xs tracking-wider">
+                            Web Data Configuration ({Object.keys(automationWebdataMap).length} Automation{Object.keys(automationWebdataMap).length !== 1 ? 's' : ''})
+                          </span>
                         </span>
-                      </span>
-                    </TableHead>
-                  );
-                })}
-              </TableRow>
-            </TableHeader>
-
-            <TableBody>
-              {loading ? (
-                <TableRow><TableCell colSpan={totalColumns} className="h-32 text-center"><Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" /></TableCell></TableRow>
-              ) : (
-                <>
-                  {/* General Section */}
-                  {groupedRequirements.general.length > 0 && (
-                    <>
-                      <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('general')}>
-                        <TableCell colSpan={totalColumns} className="py-3 px-4">
-                          <span className="flex items-center gap-3">
-                            {expandedSections.general ? <Minus className="h-4 w-4 text-slate-500" /> : <Plus className="h-4 w-4 text-slate-500" />}
-                            <span className="h-6 w-1 bg-blue-600 rounded-full" />
-                            <span className="font-bold text-slate-700 uppercase text-xs tracking-wider">General Requirements ({groupedRequirements.general.length})</span>
-                          </span>
+                      </TableCell>
+                    </TableRow>
+                    {expandedSections.webdata && (
+                      <TableRow>
+                        <TableCell colSpan={totalColumns} className="p-0 border-b-0">
+                          {renderWebDataConfiguration()}
                         </TableCell>
                       </TableRow>
-                      {expandedSections.general && renderRequirementRows(groupedRequirements.general)}
-                    </>
-                  )}
+                    )}
+                  </>
+                )}
 
-                  {/* Processing Section */}
-                  {groupedRequirements.processing.length > 0 && (
-                    <>
-                      <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('processing')}>
-                        <TableCell colSpan={totalColumns} className="py-3 px-4">
-                          <span className="flex items-center gap-3">
-                            {expandedSections.processing ? <Minus className="h-4 w-4 text-slate-500" /> : <Plus className="h-4 w-4 text-slate-500" />}
-                            <span className="h-6 w-1 bg-amber-500 rounded-full" />
-                            <span className="font-bold text-slate-700 uppercase text-xs tracking-wider">Processing Requirements ({groupedRequirements.processing.length})</span>
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                      {expandedSections.processing && renderRequirementRows(groupedRequirements.processing)}
-                    </>
-                  )}
+                {/* Processing Section */}
+                {groupedRequirements.processing.length > 0 && (
+                  <>
+                    <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('processing')}>
+                      <TableCell colSpan={totalColumns} className="py-3 px-4">
+                        <span className="flex items-center gap-3">
+                          {expandedSections.processing ? <Minus className="h-4 w-4 text-slate-500" /> : <Plus className="h-4 w-4 text-slate-500" />}
+                          <span className="h-6 w-1 bg-amber-500 rounded-full" />
+                          <span className="font-bold text-slate-700 uppercase text-xs tracking-wider">Processing Requirements ({groupedRequirements.processing.length})</span>
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                    {expandedSections.processing && renderRequirementRows(groupedRequirements.processing)}
+                  </>
+                )}
 
-                  {/* Issuance Section */}
-                  {groupedRequirements.issuance.length > 0 && (
-                    <>
-                      <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('issuance')}>
-                        <TableCell colSpan={totalColumns} className="py-3 px-4">
-                          <span className="flex items-center gap-3">
-                            {expandedSections.issuance ? <Minus className="h-4 w-4 text-slate-500" /> : <Plus className="h-4 w-4 text-slate-500" />}
-                            <span className="h-6 w-1 bg-emerald-500 rounded-full" />
-                            <span className="font-bold text-slate-700 uppercase text-xs tracking-wider">Issuance Requirements ({groupedRequirements.issuance.length})</span>
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                      {expandedSections.issuance && renderRequirementRows(groupedRequirements.issuance)}
-                    </>
-                  )}
+                {/* Issuance Section */}
+                {groupedRequirements.issuance.length > 0 && (
+                  <>
+                    <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('issuance')}>
+                      <TableCell colSpan={totalColumns} className="py-3 px-4">
+                        <span className="flex items-center gap-3">
+                          {expandedSections.issuance ? <Minus className="h-4 w-4 text-slate-500" /> : <Plus className="h-4 w-4 text-slate-500" />}
+                          <span className="h-6 w-1 bg-emerald-500 rounded-full" />
+                          <span className="font-bold text-slate-700 uppercase text-xs tracking-wider">Issuance Requirements ({groupedRequirements.issuance.length})</span>
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                    {expandedSections.issuance && renderRequirementRows(groupedRequirements.issuance)}
+                  </>
+                )}
 
-                  {/* Other Section */}
-                  {groupedRequirements.other.length > 0 && (
-                    <>
-                      <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('other')}>
-                        <TableCell colSpan={totalColumns} className="py-3 px-4">
-                          <span className="flex items-center gap-3">
-                            {expandedSections.other ? <Minus className="h-4 w-4 text-slate-500" /> : <Plus className="h-4 w-4 text-slate-500" />}
-                            <span className="h-6 w-1 bg-slate-400 rounded-full" />
-                            <span className="font-bold text-slate-700 uppercase text-xs tracking-wider">Other Requirements ({groupedRequirements.other.length})</span>
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                      {expandedSections.other && renderRequirementRows(groupedRequirements.other)}
-                    </>
-                  )}
-                </>
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                {/* Other Section */}
+                {groupedRequirements.other.length > 0 && (
+                  <>
+                    <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('other')}>
+                      <TableCell colSpan={totalColumns} className="py-3 px-4">
+                        <span className="flex items-center gap-3">
+                          {expandedSections.other ? <Minus className="h-4 w-4 text-slate-500" /> : <Plus className="h-4 w-4 text-slate-500" />}
+                          <span className="h-6 w-1 bg-slate-400 rounded-full" />
+                          <span className="font-bold text-slate-700 uppercase text-xs tracking-wider">Other Requirements ({groupedRequirements.other.length})</span>
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                    {expandedSections.other && renderRequirementRows(groupedRequirements.other)}
+                  </>
+                )}
+              </>
+            )}
+          </TableBody>
+        </Table>
       </div>
+    </div>
 
-      {showTemplateGenerator && selectedLetterInfo && (
-        <TemplateGenerationDialog
-          isOpen={showTemplateGenerator}
-          onClose={() => setShowTemplateGenerator(false)}
-          template={selectedLetterInfo.template}
-          availableTemplates={selectedLetterInfo.availableTemplates}
-          documentName={selectedLetterInfo.document.display_name}
-          onSave={handleSaveGeneratedLetter}
-          masterFields={selectedLetterInfo.masterFields}
-          entityIdMap={selectedLetterInfo.entityIdMap}
-          sourceDataCache={selectedLetterInfo.sourceDataCache}
-          extractedData={selectedLetterInfo.extractedData}
-          personData={selectedLetterInfo.personData}
-          companyData={selectedLetterInfo.companyData}
-          relationshipData={selectedLetterInfo.relationshipData}
-          task={selectedLetterInfo.task}
-          onDraftDiscarded={refreshDocumentData}
-          jobLevel={jobLevel}
-          activeEntityType={selectedLetterInfo.activeEntityType}
-          activeEntityId={selectedLetterInfo.activeEntityId}
-          refreshDocuments={refreshDocuments}
-        />
-      )}
-    </div >
-  );
+    {showTemplateGenerator && selectedLetterInfo && (
+      <TemplateGenerationDialog
+        isOpen={showTemplateGenerator}
+        onClose={() => setShowTemplateGenerator(false)}
+        template={selectedLetterInfo.template}
+        availableTemplates={selectedLetterInfo.availableTemplates}
+        documentName={selectedLetterInfo.document.display_name}
+        onSave={handleSaveGeneratedLetter}
+        masterFields={selectedLetterInfo.masterFields}
+        entityIdMap={selectedLetterInfo.entityIdMap}
+        sourceDataCache={selectedLetterInfo.sourceDataCache}
+        extractedData={selectedLetterInfo.extractedData}
+        personData={selectedLetterInfo.personData}
+        companyData={selectedLetterInfo.companyData}
+        relationshipData={selectedLetterInfo.relationshipData}
+        task={selectedLetterInfo.task}
+        onDraftDiscarded={refreshDocumentData}
+        jobLevel={jobLevel}
+        activeEntityType={selectedLetterInfo.activeEntityType}
+        activeEntityId={selectedLetterInfo.activeEntityId}
+        refreshDocuments={refreshDocuments}
+      />
+    )}
+  </div >
+);
 }

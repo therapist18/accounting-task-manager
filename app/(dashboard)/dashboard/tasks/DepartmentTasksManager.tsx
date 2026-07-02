@@ -29,7 +29,7 @@ import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKyc
 import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog';
 import { StandardTable } from './overall-view/StandardTable';
 import { EnhancedTable } from './overall-view/EnhancedTable';
-import { ENHANCED_TABLE_HEADERS_IMMIGRATION, STATS_HEADERS, calculateAge, getEnhancedImmigrationStatus, getCurrentStageStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, getCellContent as utilGetCellContent, sortTasks, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, filterTasksBySearch, ENHANCED_TABLE_HEADERS, isDocumentApplicable, fetchAndEnhanceIndividuals, getRawCellValue, enhanceTasksWithIndividualData } from './overall-view/tableUtils';
+import { ENHANCED_TABLE_HEADERS_IMMIGRATION, STATS_HEADERS, calculateAge, getEnhancedImmigrationStatus, getCurrentStageStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, getCellContent as utilGetCellContent, sortTasks, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, filterTasksBySearch, ENHANCED_TABLE_HEADERS, isDocumentApplicable, fetchAndEnhanceIndividuals, getRawCellValue, enhanceTasksWithIndividualData, STAGE_PRIORITY } from './overall-view/tableUtils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { OtherDialog } from "./components/OtherDialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
@@ -86,6 +86,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [isAllExpanded, setIsAllExpanded] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [stageDialogKey, setStageDialogKey] = useState(0);
+  const [isReadOnly, setIsReadOnly] = useState(false);
   const realtimeSubscriptionRef = useRef<any>(null);
 
   useEffect(() => {
@@ -2409,12 +2410,12 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         stages={stages}
         task={task}
         value={cellValue}
-        onSave={enhancedHandleStageStatusSave}
-        onDocumentUpload={handleStageDocumentUpload}
+        onSave={isReadOnly ? undefined : enhancedHandleStageStatusSave}
+        onDocumentUpload={isReadOnly ? undefined : handleStageDocumentUpload}
         onShowDocuments={handleViewDocument}
         requiresUpload={requiresUpload}
         departments={departments}
-        onAutomationClick={(e) => handleAutomationClick(e, row.stage, task.id)}
+        onAutomationClick={isReadOnly ? undefined : (e) => handleAutomationClick(e, row.stage, task.id)}
         getKycFields={getKycFields}
         linkedDocuments={linkedDocs}
         renderMode={renderMode}
@@ -2422,7 +2423,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         clientName={task.client_name || task.clientName}
         onFetchData={() => loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true)}
         officers={realOfficers}
-        onOfficerChange={updateTaskOfficer}
+        onOfficerChange={isReadOnly ? undefined : updateTaskOfficer}
+        readOnly={isReadOnly}
       />
     );
   };
@@ -2462,6 +2464,22 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   };
 
   const renderActionButtons = (row: any, task: any) => {
+    if (isReadOnly) {
+      return (
+        <div className="flex items-center justify-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => { setLinkingTask(task); setIsLinkDialogOpen(true); }}
+            className="h-8 w-8 text-blue-600 hover:bg-blue-100"
+            title="View linked documents"
+          >
+            <LinkIcon className="h-4 w-4" />
+          </Button>
+        </div>
+      );
+    }
+
     return (
       <div className="flex items-center justify-center gap-1">
         <Button
@@ -2646,9 +2664,20 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     }
   }, [generateEnhancedTableRows, toast]);
 
+  const getSortValueForTask = useCallback((task: any, key: string): string | number | null => {
+    if (key.startsWith('stage_')) {
+      const stageId = key.replace('stage_', '');
+      const stageData = task.stages?.[stageId];
+      if (!stageData) return -1;
+      const status = stageData.status || 'pending';
+      return STAGE_PRIORITY[status] ?? 0;
+    }
+    return null;
+  }, []);
+
   const getSortedTasks = useCallback((tasksToRender: UtilTask[]) => {
-    return sortTasks(tasksToRender, sortConfig, companies)
-  }, [sortConfig, companies])
+    return sortTasks(tasksToRender, sortConfig, companies, getSortValueForTask)
+  }, [sortConfig, companies, getSortValueForTask])
 
   const getCellContentWrapper = useCallback((task: any, headerId: string) => {
     return utilGetCellContent(
@@ -3280,20 +3309,36 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
           </div>
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          className={cn(
-            "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
-            !areTabsVisible
-              ? "bg-slate-100 border-slate-300 text-slate-700"
-              : "border-slate-200 text-slate-600 hover:bg-slate-50"
-          )}
-          onClick={() => setAreTabsVisible(!areTabsVisible)}
-        >
-          {areTabsVisible ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelLeftOpen className="h-3.5 w-3.5" />}
-          {areTabsVisible ? 'Hide Navigation' : 'Show Navigation'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant={isReadOnly ? "outline" : "default"}
+            size="sm"
+            className={cn(
+              "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+              isReadOnly
+                ? "border-slate-200 text-slate-600 hover:bg-slate-50"
+                : "bg-custom-blue text-white shadow-sm"
+            )}
+            onClick={() => setIsReadOnly(!isReadOnly)}
+          >
+            {isReadOnly ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            {isReadOnly ? 'Read Only' : 'Edit Mode'}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(
+              "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+              !areTabsVisible
+                ? "bg-slate-100 border-slate-300 text-slate-700"
+                : "border-slate-200 text-slate-600 hover:bg-slate-50"
+            )}
+            onClick={() => setAreTabsVisible(!areTabsVisible)}
+          >
+            {areTabsVisible ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelLeftOpen className="h-3.5 w-3.5" />}
+            {areTabsVisible ? 'Hide Navigation' : 'Show Navigation'}
+          </Button>
+        </div>
       </div>
 
       {/* Department Tabs - Pill-style */}
@@ -3605,6 +3650,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                 toggleDocumentExpansion={toggleDocumentExpansion}
                 getTaskHierarchy={getTaskHierarchy}
                 getStaffName={getStaffName}
+                readOnly={isReadOnly}
                 onDocumentPreview={async (doc) => {
                   setPreviewDocument(doc);
                   if (doc.document_id) {
@@ -3701,6 +3747,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                 getKycFields={getKycFields}
                 toggleStageExpansion={toggleStageExpansion}
                 toggleDocumentExpansion={toggleDocumentExpansion}
+                readOnly={isReadOnly}
               />
             )}
           </div>

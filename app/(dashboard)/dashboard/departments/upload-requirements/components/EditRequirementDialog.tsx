@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command"
 import { Badge } from "@/components/ui/badge"
-import { FileText, Zap, Users, Check, ChevronsUpDown, Search, Eraser, Trash2, Loader2, Database, X, Settings2, Calculator } from "lucide-react"
+import { FileText, Zap, Users, Check, ChevronsUpDown, Search, Eraser, Trash2, Loader2, Database, X, Settings2, Calculator, Paperclip, Table as TableIcon, FunctionSquare, HelpCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "@/lib/hooks/use-toast"
 import supabase from "@/lib/supabase/client"
@@ -81,11 +81,36 @@ export function EditRequirementDialog({
   const [templates, setTemplates] = useState<any[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
+  const [masterFields, setMasterFields] = useState<any[]>([])
   const [automationTypes, setAutomationTypes] = useState<any[]>([])
   const [loadingKycDocs, setLoadingKycDocs] = useState(false)
+  const [automationWebdata, setAutomationWebdata] = useState<any[]>([])
 
   // Table data hook for fetching available tables
   const { tables, loadingTables } = useTableData()
+
+  // Fetch automation webdata when automationId changes
+  useEffect(() => {
+    const fetchAutomationWebdata = async () => {
+      if (!formData.automationId) {
+        setAutomationWebdata([]);
+        return;
+      }
+      try {
+        const { data, error } = await supabase
+          .from('tm_automations')
+          .select('webdata')
+          .eq('id', formData.automationId)
+          .single();
+        if (error) throw error;
+        setAutomationWebdata(data?.webdata || []);
+      } catch (err) {
+        console.error('Error fetching automation webdata:', err);
+        setAutomationWebdata([]);
+      }
+    };
+    fetchAutomationWebdata();
+  }, [formData.automationId]);
 
   useEffect(() => {
     if (requirement && isOpen) {
@@ -176,8 +201,12 @@ export function EditRequirementDialog({
   const fetchKycDocuments = async () => {
     try {
       setLoadingKycDocs(true)
-      const { data } = await supabase.from('acc_portal_kyc').select('id, name, display_name').order('name')
-      setKycDocuments(data || [])
+      const [kycRes, mfRes] = await Promise.all([
+        supabase.from('acc_portal_kyc').select('id, name, display_name').order('name'),
+        supabase.from('tm_job_fields').select('id, field_key, label, type').order('label')
+      ])
+      setKycDocuments(kycRes.data || [])
+      setMasterFields(mfRes.data || [])
     } finally {
       setLoadingKycDocs(false)
     }
@@ -363,7 +392,7 @@ export function EditRequirementDialog({
             <div className="px-6 bg-white border-b">
               <TabsList className="bg-transparent gap-6 h-12 p-0">
                 <TabsTrigger value="general" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 border-primary rounded-none h-full px-0">General Settings</TabsTrigger>
-                <TabsTrigger value="webdata" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 border-primary rounded-none h-full px-0">Web Data Mapping ({formData.webdata?.length || 0})</TabsTrigger>
+                <TabsTrigger value="webdata" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 border-primary rounded-none h-full px-0">Web Data Mapping ({automationWebdata.length > 0 ? automationWebdata.length : formData.webdata?.length || 0})</TabsTrigger>
               </TabsList>
             </div>
 
@@ -737,42 +766,175 @@ export function EditRequirementDialog({
             </TabsContent>
 
             <TabsContent value="webdata" className="flex-1 overflow-y-auto m-0 p-6 bg-slate-50">
-              {formData.webdata && formData.webdata.length > 0 ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2"><Database className="h-4 w-4 text-blue-600" /> Configured Fields</h3>
-                    <Badge variant="outline" className="bg-white">{formData.webdata.length} fields</Badge>
+              {(() => {
+                const displayWebdata = automationWebdata.length > 0 ? automationWebdata : (formData.webdata || []);
+                const hasAutomationWebdata = automationWebdata.length > 0;
+
+                if (displayWebdata.length > 0) {
+                  return (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                          <Database className="h-4 w-4 text-blue-600" /> Configured Fields
+                          {hasAutomationWebdata && (
+                            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px]">
+                              Linked from Automation
+                            </Badge>
+                          )}
+                        </h3>
+                        <Badge variant="outline" className="bg-white">{displayWebdata.length} fields</Badge>
+                      </div>
+                      <div className="border rounded-lg bg-white overflow-hidden shadow-sm">
+                        <Table>
+                          <TableHeader className="bg-slate-100">
+                            <TableRow>
+                              <TableHead className="h-9 w-12 text-center">#</TableHead>
+                              <TableHead className="h-9">Target Key</TableHead>
+                              <TableHead className="h-9">Display Label</TableHead>
+                              <TableHead className="h-9">Type</TableHead>
+                              <TableHead className="h-9">Entities</TableHead>
+                              <TableHead className="h-9">Source Configuration</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {displayWebdata.map((field: any, idx: number) => {
+                              const isDocument = field.fieldType === 'document';
+                              const isComputed = field.fieldType === 'computed';
+                              const isArray = field.fieldType === 'array';
+                              const totalSources = (field.linkedMasterFields?.length || 0) + (field.linkedJobQuestionIds?.length || 0);
+
+                              return (
+                                <TableRow key={idx} className={cn(
+                                  "border-b border-slate-100",
+                                  isDocument ? "bg-amber-50/30" : isComputed ? "bg-purple-50/30" : ""
+                                )}>
+                                  <TableCell className="text-center text-sm text-slate-500 border-r border-slate-100">{idx + 1}</TableCell>
+                                  <TableCell className="p-3 border-r border-slate-100">
+                                    <span className="text-sm font-medium font-mono text-blue-600">{field.variableName}</span>
+                                  </TableCell>
+                                  <TableCell className="p-3 border-r border-slate-100">
+                                    <span className="text-sm text-slate-700">{field.efnsDisplayName || field.name}</span>
+                                  </TableCell>
+                                  <TableCell className="p-3 border-r border-slate-100">
+                                    <div className="flex items-center gap-2">
+                                      <Badge variant="outline" className="capitalize text-[10px]">{field.fieldType}</Badge>
+                                      {field.fieldType === 'date' && (
+                                        <Badge variant="secondary" className="text-[9px] bg-blue-50 text-blue-700">{field.dateFormat || 'iso'}</Badge>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="p-3 border-r border-slate-100">
+                                    <div className="flex flex-wrap gap-1">
+                                      {(Array.isArray(field.entityTypes) ? field.entityTypes : (field.entityType ? [field.entityType] : [])).map((et: string) => (
+                                        <Badge key={et} variant="secondary" className="capitalize text-[10px] bg-slate-100">{et}</Badge>
+                                      ))}
+                                      {Array.isArray(field.entityTypes) && field.entityTypes.includes('dependant') && (
+                                        <span className="text-[9px] text-slate-400 ml-1">
+                                          {(field.dependantRelationships?.length || 0) > 0 ? `(${field.dependantRelationships.length} rels)` : '(All)'}
+                                        </span>
+                                      )}
+                                      {Array.isArray(field.entityTypes) && field.entityTypes.includes('director') && field.directorType && (
+                                        <span className="text-[9px] text-slate-400 ml-1">({field.directorType})</span>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="p-3 border-r border-slate-100">
+                                    {totalSources > 0 && field.linkedJobQuestionIds?.length > 0 ? (
+                                      <div className="flex items-center gap-2">
+                                        <HelpCircle className="h-3.5 w-3.5 text-purple-600" />
+                                        <span className="text-sm font-medium text-purple-700 truncate max-w-[200px]">
+                                          {field.linkedJobQuestionIds.length} Job Question{field.linkedJobQuestionIds.length !== 1 ? 's' : ''}
+                                        </span>
+                                        {isDocument && field.linkedKycDocuments?.length > 0 && (
+                                          <Badge variant="outline" className="text-[9px] bg-green-50 text-green-600 border-green-200 ml-auto">
+                                            Requirement
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    ) : isDocument ? (
+                                      <div className="flex flex-col justify-center gap-1">
+                                        <div className="flex items-center gap-2 text-amber-700">
+                                          <Paperclip className="h-3.5 w-3.5" />
+                                          <span className="text-sm font-medium truncate">
+                                            {(field.linkedKycDocuments || []).length > 0
+                                              ? `${(field.linkedKycDocuments || []).length} Document Type${(field.linkedKycDocuments || []).length !== 1 ? 's' : ''}`
+                                              : field.kycDocumentId
+                                                ? '1 Document Type'
+                                                : "No Documents Linked"}
+                                          </span>
+                                        </div>
+                                        {(field.linkedKycDocuments || []).length > 0 && (
+                                          <div className="flex items-center gap-2 pl-5">
+                                            <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">
+                                              {field.documentLogic === 'merge' ? 'Merge All' : 'Fallback (First Found)'}
+                                            </Badge>
+                                            {field.documentCount && (
+                                              <Badge variant="outline" className="text-[9px] bg-blue-50 text-blue-700 border-blue-200">
+                                                {field.documentCount} Required
+                                              </Badge>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : isComputed ? (
+                                      <div className="flex items-center gap-2">
+                                        <FunctionSquare className="h-3.5 w-3.5 text-purple-600" />
+                                        <span className="text-sm text-purple-700 truncate max-w-[200px]">{field.computedFunction || 'No function'}</span>
+                                        <Badge variant="outline" className="text-[9px] bg-purple-50 text-purple-600 ml-auto">
+                                          {field.computedDocuments?.length || 0} Docs
+                                        </Badge>
+                                      </div>
+                                    ) : isArray ? (
+                                      <div className="flex items-center gap-2">
+                                        <TableIcon className="h-3.5 w-3.5 text-blue-600" />
+                                        <span className="text-sm text-slate-600">{field.arrayItems?.length || 0} columns mapped</span>
+                                      </div>
+                                    ) : totalSources > 0 ? (
+                                      <div className="flex items-center flex-wrap gap-1.5">
+                                        {(field.linkedMasterFields || []).length > 0 && field.linkedMasterFields.map((fieldId: number) => {
+                                          const mf = masterFields.find((f: any) => f.id === fieldId);
+                                          return (
+                                            <Badge key={fieldId} variant="outline" className="text-[10px] bg-white text-slate-700">
+                                              {mf?.label || `Field #${fieldId}`}
+                                            </Badge>
+                                          );
+                                        })}
+                                        {field.linkedJobQuestionIds?.length > 0 && (
+                                          <Badge variant="outline" className="text-[10px] bg-purple-50 text-purple-600 border-purple-200">
+                                            {field.linkedJobQuestionIds.length} Job Q
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-xs text-slate-400 italic">No fields mapped</span>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                      {hasAutomationWebdata && (
+                        <p className="text-[11px] text-slate-500 italic">
+                          Fields synced from the linked automation. Edit the automation to modify field configuration.
+                        </p>
+                      )}
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-2">
+                    <Database className="h-10 w-10 opacity-20" />
+                    <p className="text-sm font-medium">No Web Data Configured</p>
+                    <p className="text-xs max-w-[200px] text-center opacity-70">This requirement does not have any web form data fields attached.</p>
+                    {!formData.automationId && (
+                      <p className="text-[10px] text-slate-400 mt-2">Link a Web Form Automation to auto-populate fields.</p>
+                    )}
                   </div>
-                  <div className="border rounded-lg bg-white overflow-hidden shadow-sm">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-slate-100/50">
-                          <TableHead className="h-9">Variable ID</TableHead>
-                          <TableHead className="h-9">Display Name</TableHead>
-                          <TableHead className="h-9">Type</TableHead>
-                          <TableHead className="h-9">Entity</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {formData.webdata.map((field: any, idx: number) => (
-                          <TableRow key={idx}>
-                            <TableCell className="font-mono text-xs text-blue-600">{field.variableName}</TableCell>
-                            <TableCell className="text-xs font-medium">{field.efnsDisplayName || field.name}</TableCell>
-                            <TableCell><Badge variant="secondary" className="text-[10px]">{field.fieldType}</Badge></TableCell>
-                            <TableCell className="text-xs capitalize text-slate-500">{field.entityType}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-2">
-                  <Database className="h-10 w-10 opacity-20" />
-                  <p className="text-sm font-medium">No Web Data Configured</p>
-                  <p className="text-xs max-w-[200px] text-center opacity-70">This requirement does not have any web form data fields attached.</p>
-                </div>
-              )}
+                );
+              })()}
             </TabsContent>
           </Tabs>
         </div>

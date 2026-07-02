@@ -9,14 +9,6 @@ import React, { useMemo, useCallback, useEffect, useState } from "react";
 import supabase from '@/lib/supabase/client';
 import { parseDate, DATE_FORMATS, DATE_FIELDS, findDatesInObject } from '@/app/generic-functions/dateUtils';
 
-// Types
-interface TableHeader {
-  id: string;
-  label: string;
-  default: boolean;
-  width?: string;
-}
-
 interface StatusInfo {
   status: string;
   date: Date | null;
@@ -42,48 +34,52 @@ export interface TimeStatus {
   formattedOverdue: string;
 }
 
-// Constants
+export interface TableHeader {
+  id: string;
+  label: string;
+  default: boolean;
+  width?: number; // <--- Change this from string to number
+}
 
 export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
-  { id: 'id', label: 'Task Reference', default: true, width: 'w-20' },
-  { id: 'applicant_name', label: 'Applicant Full Name', default: true, width: 'w-44' },
-  { id: 'company_name', label: 'Company Name', default: true, width: 'w-48' },
-  { id: 'company_prefix', label: 'Company Prefix', default: false, width: 'w-28' },
-  { id: 'sub_department', label: 'Sub Department', default: true, width: 'w-28' }, // New column
-  { id: 'job_level', label: 'Class', default: true, width: 'w-28' },
-  { id: 'renewal_status', label: 'Renewal/New', default: true, width: 'w-28' },
-  { id: 'passport_number', label: 'Passport Number', default: false, width: 'w-28' },
-  { id: 'duration', label: 'Duration', default: false, width: 'w-28' },
-  { id: 'immigration_document_type', label: 'Current Immigration Document Type', default: false, width: 'w-48' },
-  { id: 'immigration_expiry_date', label: 'Current Immigration Expiry Date', default: false, width: 'w-40' },
-  { id: 'immigration_days_to_go', label: 'Days Remaining', default: false, width: 'w-28' }, // New Column
-  // { id: 'immigration_status', label: 'Current Immigration Status', default: true, width: 'w-48' },
-  { id: 'current_stage_name', label: 'Current Stage Name', default: true, width: 'w-42' },
-  { id: 'current_stage_status_value', label: 'Current Stage Status', default: true, width: 'w-42' },
-  { id: 'current_stage_follow_up', label: 'Current Stage Follow-up', default: false, width: 'w-28' },
-  { id: 'job_description', label: 'Job Description', default: false, width: 'w-32' },
-  { id: 'nationality', label: 'Nationality', default: false, width: 'w-32' },
-  { id: 'full_name', label: 'Full Name', default: false, width: 'w-32' },
-  { id: 'age', label: 'Age', default: false, width: 'w-20' },
-  { id: 'task_manager', label: 'Task Manager', default: false, width: 'w-32' },
-  { id: 'task_assistant', label: 'Task Assistant', default: false, width: 'w-32' },
-  { id: 'r_number', label: 'R Number', default: false, width: 'w-28' },
-  { id: 'cancellation_reason', label: 'Cancellation Reason', default: true, width: 'w-48' },
-  { id: 'cancellation_date', label: 'Cancellation Date', default: false, width: 'w-40' },
-  { id: 'cancelled_by', label: 'Cancelled By', default: false, width: 'w-32' },
+  { id: 'id', label: 'ID', default: true, width: 48 }, // was 'w-12'
+  { id: 'applicant_name', label: 'Applicant Full Name', default: true, width: 150 }, // was 'w-44'
+  { id: 'company_name', label: 'Company Name', default: false, width: 150 }, // was 'w-48'
+  { id: 'company_prefix', label: 'Company Prefix', default: true, width: 112 }, // was 'w-28'
+  { id: 'sub_department', label: 'Sub Department', default: true, width: 100 }, // was 'w-28'
+  { id: 'job_level', label: 'Class', default: true, width: 100 }, // was 'w-28'
+  { id: 'renewal_status', label: 'Renewal/New', default: true, width: 100 }, // was 'w-28'
+  { id: 'passport_number', label: 'Passport Number', default: false, width: 112 }, // was 'w-28'
+  { id: 'duration', label: 'Duration', default: false, width: 112 }, // was 'w-28'
+  { id: 'immigration_document_type', label: 'Current Immigration Document Type', default: false, width: 192 }, // was 'w-48'
+  { id: 'immigration_expiry_date', label: 'Current Immigration Expiry Date', default: false, width: 160 }, // was 'w-40'
+  { id: 'immigration_days_to_go', label: 'Days Remaining', default: false, width: 112 }, // was 'w-28'
+  { id: 'current_stage_name', label: 'Current Stage Name', default: true, width: 168 }, // was 'w-42'
+  { id: 'current_stage_status_value', label: 'Current Stage Status', default: true, width: 168 }, // was 'w-42'
+  { id: 'current_stage_follow_up', label: 'Current Stage Follow-up', default: false, width: 112 }, // was 'w-28'
+  { id: 'job_description', label: 'Job Description', default: false, width: 128 }, // was 'w-32'
+  { id: 'nationality', label: 'Nationality', default: false, width: 128 }, // was 'w-32'
+  { id: 'full_name', label: 'Full Name', default: false, width: 128 }, // was 'w-32'
+  { id: 'age', label: 'Age', default: false, width: 80 }, // was 'w-20'
+  { id: 'task_manager', label: 'Task Manager', default: false, width: 128 }, // was 'w-32'
+  { id: 'task_assistant', label: 'Task Assistant', default: false, width: 128 }, // was 'w-32'
+  { id: 'r_number', label: 'R Number', default: false, width: 112 }, // was 'w-28'
+  { id: 'cancellation_reason', label: 'Cancellation Reason', default: true, width: 192 }, // was 'w-48'
+  { id: 'cancellation_date', label: 'Cancellation Date', default: false, width: 160 }, // was 'w-40'
+  { id: 'cancelled_by', label: 'Cancelled By', default: false, width: 128 }, // was 'w-32'
 ];
 
 export const ENHANCED_TABLE_HEADERS: TableHeader[] = [
-  { id: 'id', label: 'Task Reference', default: true, width: 'w-20' },
-  { id: 'applicant_name', label: 'Applicant Full Name', default: true, width: 'w-48' },
-  { id: 'job_description', label: 'Job Description', default: true, width: 'w-32' },
-  { id: 'job_level', label: 'Job Level', default: true, width: 'w-32' },
-  { id: 'renewal_new', label: 'Renewal/New', default: false, width: 'w-28' },
-  { id: 'task_manager', label: 'Task Manager', default: false, width: 'w-32' },
-  { id: 'task_assistant', label: 'Task Assistant', default: false, width: 'w-32' },
-  { id: 'cancellation_reason', label: 'Cancellation Reason', default: true, width: 'w-48' },
-  { id: 'cancellation_date', label: 'Cancellation Date', default: true, width: 'w-40' },
-  { id: 'cancelled_by', label: 'Cancelled By', default: true, width: 'w-32' },
+  { id: 'id', label: 'Task Reference', default: true, width: 80 }, // was 'w-20'
+  { id: 'applicant_name', label: 'Applicant Full Name', default: true, width: 192 }, // was 'w-48'
+  { id: 'job_description', label: 'Job Description', default: true, width: 128 }, // was 'w-32'
+  { id: 'job_level', label: 'Job Level', default: true, width: 128 }, // was 'w-32'
+  { id: 'renewal_new', label: 'Renewal/New', default: false, width: 112 }, // was 'w-28'
+  { id: 'task_manager', label: 'Task Manager', default: false, width: 128 }, // was 'w-32'
+  { id: 'task_assistant', label: 'Task Assistant', default: false, width: 128 }, // was 'w-32'
+  { id: 'cancellation_reason', label: 'Cancellation Reason', default: true, width: 192 }, // was 'w-48'
+  { id: 'cancellation_date', label: 'Cancellation Date', default: true, width: 160 }, // was 'w-40'
+  { id: 'cancelled_by', label: 'Cancelled By', default: true, width: 128 }, // was 'w-32'
 ];
 
 export const STATS_HEADERS = [
@@ -1103,15 +1099,30 @@ export const getRawCellValue = (
   return valueMap[headerId] || task[headerId]?.toString() || 'N/A';
 };
 
+export const STAGE_PRIORITY: Record<string, number> = {
+  pending: 0,
+  new: 0,
+  enquiry: 0,
+  in_progress: 1,
+  write_up_completed: 2,
+  endorsed: 3,
+  skipped: -1,
+};
+
 export const sortTasks = (
   tasks: any[],
   sortConfig: { key: string; direction: 'asc' | 'desc' } | null,
-  companies: Map<number, any>
+  companies: Map<number, any>,
+  getCustomSortValue?: (task: any, key: string) => string | number | null
 ): any[] => {
   if (!sortConfig) return [...tasks];
 
   return [...tasks].sort((a, b) => {
     const getSortValue = (task: any, key: string) => {
+      if (getCustomSortValue) {
+        const custom = getCustomSortValue(task, key);
+        if (custom !== null && custom !== undefined) return custom;
+      }
       switch (key) {
         case 'applicant_name': return task.applicant_name?.toLowerCase() || '';
         case 'company_name': {
@@ -1127,10 +1138,12 @@ export const sortTasks = (
     const valueB = getSortValue(b, sortConfig.key);
 
     if (valueA === valueB) return 0;
-    if (!valueA) return 1;
-    if (!valueB) return -1;
+    if (!valueA && valueA !== 0) return 1;
+    if (!valueB && valueB !== 0) return -1;
 
-    const comparison = valueA.localeCompare(valueB);
+    const comparison = typeof valueA === 'number' && typeof valueB === 'number'
+      ? valueA - valueB
+      : String(valueA).localeCompare(String(valueB));
     return sortConfig.direction === 'asc' ? comparison : -comparison;
   });
 };
