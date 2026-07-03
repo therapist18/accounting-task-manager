@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw, Trash2, Zap, Settings, Users } from "lucide-react"
+import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw, Trash2, Zap, Settings, Users, Link2, ArrowDownCircle } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { supabase } from "@/lib/supabase/client"
 import { AddStageDialog } from "./components/add-stage-dialog"
@@ -2541,7 +2541,26 @@ export default function Stages() {
                       )}
                     >
                       <div className="flex justify-between">
-                        <span className="font-semibold text-slate-800">{stage.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-slate-800">{stage.name}</span>
+                          {stage.stageInputType && stage.stageInputType !== 'document' && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-blue-50 text-blue-700 border-blue-200">
+                              {stage.stageInputType}
+                            </Badge>
+                          )}
+                          {stage.linkedMasterFieldIds && stage.linkedMasterFieldIds.length > 0 && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-green-50 text-green-700 border-green-200">
+                              <Link2 className="h-2.5 w-2.5 mr-0.5" />
+                              {stage.linkedMasterFieldIds.length} linked
+                            </Badge>
+                          )}
+                          {stage.dependencies && stage.dependencies.length > 0 && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-amber-50 text-amber-700 border-amber-200">
+                              <ArrowDownCircle className="h-2.5 w-2.5 mr-0.5" />
+                              {stage.dependencies.length} dep
+                            </Badge>
+                          )}
+                        </div>
                         <div>  {stage.documents && stage.documents.length > 0 && (
                           <Popover>
                             <PopoverTrigger asChild>

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, X, Clock, User, FileText, Info, Edit, MessageSquare, Star, Trash2, Check, Zap, Webhook, Layers, LayoutGrid } from "lucide-react"
+import { Plus, X, Clock, User, FileText, Info, Edit, MessageSquare, Star, Trash2, Check, Zap, Webhook, Layers, LayoutGrid, Link2, Unlink, ChevronDown, ArrowDownCircle, Database, Settings } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
@@ -115,6 +115,9 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
   const [loadingKycDocs, setLoadingKycDocs] = useState(false);
   const [automationTypes, setAutomationTypes] = useState<any[]>([]);
   const [loadingAutomations, setLoadingAutomations] = useState(false);
+  const [allMasterFields, setAllMasterFields] = useState<any[]>([]);
+  const [loadingMasterFields, setLoadingMasterFields] = useState(false);
+  const [allStages, setAllStages] = useState<any[]>([]);
 
   const getTargetDepartmentName = useCallback(() => {
     return departmentName || stage?.department || "Applications";
@@ -136,6 +139,8 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
       fetchEntities();
       fetchKYCDocuments(targetDepartment);
       fetchAutomationTypes();
+      fetchMasterFields();
+      fetchAllStages();
     } else {
       setFormData(null);
     }
@@ -184,6 +189,41 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
       });
     } finally {
       setLoadingAutomations(false);
+    }
+  };
+
+  const fetchMasterFields = async () => {
+    setLoadingMasterFields(true);
+    try {
+      const { data, error } = await supabase
+        .from('tm_job_fields')
+        .select('id, label, field_key, type, is_required')
+        .order('label');
+      if (error) throw error;
+      setAllMasterFields(data || []);
+    } catch (error) {
+      console.error('Error fetching master fields:', error);
+      toast({ title: 'Error', description: 'Failed to load master fields', variant: 'destructive' });
+    } finally {
+      setLoadingMasterFields(false);
+    }
+  };
+
+  const fetchAllStages = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('tm_departments')
+        .select('id, name, stages');
+      if (error) throw error;
+      const stages: any[] = [];
+      (data || []).forEach((dept: any) => {
+        (dept.stages || []).forEach((stage: any) => {
+          stages.push({ ...stage, departmentName: dept.name });
+        });
+      });
+      setAllStages(stages);
+    } catch (error) {
+      console.error('Error fetching stages:', error);
     }
   };
 
@@ -464,6 +504,103 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
     });
   };
 
+  const linkMasterField = (field: any) => {
+    setFormData(prev => {
+      if (!prev) return null;
+      const exists = (prev.linkedMasterFieldIds || []).includes(field.id.toString());
+      if (exists) return prev;
+      return {
+        ...prev,
+        linkedMasterFieldIds: [...(prev.linkedMasterFieldIds || []), field.id.toString()],
+        linkedMasterFields: [...(prev.linkedMasterFields || []), {
+          masterFieldId: field.id.toString(),
+          masterFieldLabel: field.label,
+          fieldKey: field.field_key,
+          fieldType: field.type
+        }]
+      };
+    });
+  };
+
+  const unlinkMasterField = (fieldId: string) => {
+    setFormData(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        linkedMasterFieldIds: (prev.linkedMasterFieldIds || []).filter(id => id !== fieldId),
+        linkedMasterFields: (prev.linkedMasterFields || []).filter(f => f.masterFieldId !== fieldId)
+      };
+    });
+  };
+
+  const addDependency = (stageId: string) => {
+    setFormData(prev => {
+      if (!prev) return null;
+      const exists = (prev.dependencies || []).some(d => d.stageId === stageId);
+      if (exists) return prev;
+      const depStage = allStages.find(s => s.id === stageId);
+      return {
+        ...prev,
+        dependencies: [...(prev.dependencies || []), {
+          stageId,
+          stageName: depStage?.name || 'Unknown Stage',
+          dependencyType: 'visible_when_completed'
+        }]
+      };
+    });
+  };
+
+  const updateDependency = (stageId: string, updates: Partial<any>) => {
+    setFormData(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        dependencies: (prev.dependencies || []).map(dep =>
+          dep.stageId === stageId ? { ...dep, ...updates } : dep
+        )
+      };
+    });
+  };
+
+  const removeDependency = (stageId: string) => {
+    setFormData(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        dependencies: (prev.dependencies || []).filter(dep => dep.stageId !== stageId)
+      };
+    });
+  };
+
+  const addDropdownOption = () => {
+    setFormData(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        dropdownOptions: [...(prev.dropdownOptions || []), '']
+      };
+    });
+  };
+
+  const updateDropdownOption = (index: number, value: string) => {
+    setFormData(prev => {
+      if (!prev) return null;
+      const options = [...(prev.dropdownOptions || [])];
+      options[index] = value;
+      return { ...prev, dropdownOptions: options };
+    });
+  };
+
+  const removeDropdownOption = (index: number) => {
+    setFormData(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        dropdownOptions: (prev.dropdownOptions || []).filter((_, i) => i !== index)
+      };
+    });
+  };
+
   if (!formData || !stage) {
     return null;
   }
@@ -482,11 +619,38 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto p-6">
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-2 bg-slate-200/70 p-1">
+          {(() => {
+            const hasLinkedDocuments = formData.documents && formData.documents.length > 0;
+            const isInputConfigDisabled = hasLinkedDocuments;
+            return (
+          <Tabs value={isInputConfigDisabled && activeTab === 'input-config' ? 'general' : activeTab} onValueChange={(val) => {
+            if (val === 'input-config' && isInputConfigDisabled) return;
+            setActiveTab(val);
+          }}>
+            <TabsList className="grid w-full grid-cols-3 bg-slate-200/70 p-1">
               <TabsTrigger value="general" className="data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm flex items-center gap-2">
                 <Info className="h-4 w-4" />
                 General & Timing
+              </TabsTrigger>
+              <TabsTrigger
+                value="input-config"
+                className={`data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm flex items-center gap-2 ${isInputConfigDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={isInputConfigDisabled}
+              >
+                <Settings className="h-4 w-4" />
+                Input Type
+                {isInputConfigDisabled && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="text-[10px] text-muted-foreground ml-1">(Doc linked)</span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p className="text-xs">Unlink documents first to change input type</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
               </TabsTrigger>
               <TabsTrigger value="documents" className="data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm flex items-center gap-2">
                 <FileText className="h-4 w-4" />
@@ -591,6 +755,197 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                   )}
                 </SectionWrapper>
               </TabsContent>
+              <TabsContent value="input-config" className="mt-6 space-y-6">
+                <SectionWrapper title="Stage Input Type" icon={<Settings />}>
+                  <p className="text-sm text-muted-foreground -mt-2">Define what type of input this stage expects from the user. Choose between document upload, text fields, dropdowns, or other input types.</p>
+                  <FormField label="Input Type" description="Select the primary input type for this stage.">
+                    <SearchableSelect
+                      value={formData.stageInputType || 'document'}
+                      onValueChange={(value) => setFormData(prev => prev ? { ...prev, stageInputType: value as any } : null)}
+                      options={[
+                        { value: 'document', label: 'Document (Upload & Extraction)' },
+                        { value: 'text', label: 'Text Input' },
+                        { value: 'textarea', label: 'Multi-line Text' },
+                        { value: 'number', label: 'Number Input' },
+                        { value: 'date', label: 'Date Picker' },
+                        { value: 'datetime', label: 'Date & Time Picker' },
+                        { value: 'dropdown', label: 'Dropdown (Single Select)' },
+                        { value: 'multiselect', label: 'Multi-Select' },
+                        { value: 'checkbox', label: 'Checkbox (Yes/No)' },
+                        { value: 'file', label: 'File Upload Only' },
+                        { value: 'url', label: 'URL Input' },
+                        { value: 'email', label: 'Email Input' },
+                        { value: 'phone', label: 'Phone Number' }
+                      ]}
+                      placeholder="Select input type"
+                    />
+                  </FormField>
+
+                  {(formData.stageInputType === 'text' || formData.stageInputType === 'textarea' || formData.stageInputType === 'number' || formData.stageInputType === 'url' || formData.stageInputType === 'email' || formData.stageInputType === 'phone' || formData.stageInputType === 'date' || formData.stageInputType === 'datetime') && (
+                    <FormField label="Default Value" description="Pre-filled value for this field (optional).">
+                      <Input
+                        value={formData.defaultValue || ''}
+                        onChange={(e) => setFormData(prev => prev ? { ...prev, defaultValue: e.target.value } : null)}
+                        placeholder="Enter default value..."
+                        type={formData.stageInputType === 'number' ? 'number' : formData.stageInputType === 'date' ? 'date' : formData.stageInputType === 'datetime' ? 'datetime-local' : 'text'}
+                      />
+                    </FormField>
+                  )}
+
+                  {(formData.stageInputType === 'dropdown' || formData.stageInputType === 'multiselect') && (
+                    <div className="space-y-4">
+                      <FormField label="Dropdown Options" description="Define the available options for this field.">
+                        <div className="space-y-2">
+                          {(formData.dropdownOptions || []).map((option, index) => (
+                            <div key={index} className="flex items-center gap-2">
+                              <Input
+                                value={option}
+                                onChange={(e) => updateDropdownOption(index, e.target.value)}
+                                placeholder={`Option ${index + 1}`}
+                                className="flex-1"
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => removeDropdownOption(index)}
+                                disabled={(formData.dropdownOptions || []).length <= 1}
+                                className="hover:text-destructive"
+                              >
+                                <X className="h-4 w-4 text-red-500" />
+                              </Button>
+                            </div>
+                          ))}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={addDropdownOption}
+                            className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                          >
+                            <Plus className="h-4 w-4 mr-2" /> Add Option
+                          </Button>
+                        </div>
+                      </FormField>
+                    </div>
+                  )}
+                </SectionWrapper>
+
+                <SectionWrapper title="Master Field Linking" icon={<Link2 />}>
+                  <p className="text-sm text-muted-foreground -mt-2">Link this stage to master fields from the job fields database. This enables automatic data resolution from existing data sources.</p>
+                  <FormField label="Linked Master Fields" description="Select master fields to link this stage to.">
+                    <div className="space-y-3">
+                      <SearchableSelect
+                        value=""
+                        onValueChange={(value) => {
+                          if (value && value !== 'none') {
+                            const field = allMasterFields.find(f => f.id.toString() === value);
+                            if (field) linkMasterField(field);
+                          }
+                        }}
+                        options={[
+                          { value: 'none', label: '-- Select a master field to link --' },
+                          ...allMasterFields
+                            .filter(f => !(formData.linkedMasterFieldIds || []).includes(f.id.toString()))
+                            .map(f => ({ value: f.id.toString(), label: `${f.label} (${f.type || 'text'})` }))
+                        ]}
+                        placeholder={loadingMasterFields ? "Loading master fields..." : "Choose a master field"}
+                        disabled={loadingMasterFields}
+                      />
+                      {(formData.linkedMasterFields || []).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {(formData.linkedMasterFields || []).map((field) => (
+                            <Badge
+                              key={field.masterFieldId}
+                              variant="secondary"
+                              className="flex items-center gap-1 text-xs bg-blue-100 text-blue-800 hover:bg-blue-200"
+                            >
+                              <Link2 className="h-3 w-3" />
+                              {field.masterFieldLabel || field.fieldKey || field.masterFieldId}
+                              <Badge variant="outline" className="text-[10px] ml-1 bg-white">{field.fieldType || 'text'}</Badge>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-4 w-4 ml-1 p-0 hover:bg-destructive hover:text-destructive-foreground rounded-full"
+                                onClick={() => unlinkMasterField(field.masterFieldId)}
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      {(formData.linkedMasterFields || []).length === 0 && !loadingMasterFields && (
+                        <p className="text-xs text-muted-foreground italic">No master fields linked. Select a field above to link it.</p>
+                      )}
+                    </div>
+                  </FormField>
+                </SectionWrapper>
+
+                <SectionWrapper title="Stage Dependencies" icon={<ArrowDownCircle />}>
+                  <p className="text-sm text-muted-foreground -mt-2">Define whether this stage depends on other stages for visibility or execution order.</p>
+                  <FormField label="Depends On" description="Select stages that must be completed before this one becomes visible.">
+                    <div className="space-y-3">
+                      <SearchableSelect
+                        value=""
+                        onValueChange={(value) => {
+                          if (value && value !== 'none') {
+                            addDependency(value);
+                          }
+                        }}
+                        options={[
+                          { value: 'none', label: '-- Add a dependency --' },
+                          ...allStages
+                            .filter(s => {
+                              const currentDeptName = getTargetDepartmentName();
+                              return s.id !== stage?.id
+                                && !(formData.dependencies || []).some(d => d.stageId === s.id)
+                                && (!currentDeptName || s.departmentName === currentDeptName);
+                            })
+                            .map(s => ({ value: s.id, label: s.name }))
+                        ]}
+                        placeholder="Choose a stage to depend on"
+                      />
+                      {(formData.dependencies || []).length > 0 && (
+                        <div className="space-y-2">
+                          {(formData.dependencies || []).map((dep) => (
+                            <div key={dep.stageId} className="flex items-center gap-3 p-3 border rounded-lg bg-slate-50">
+                              <ArrowDownCircle className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <span className="text-sm font-medium text-gray-800 truncate block">{dep.stageName || 'Unknown Stage'}</span>
+                              </div>
+                              <SearchableSelect
+                                value={dep.dependencyType}
+                                onValueChange={(value) => updateDependency(dep.stageId, { dependencyType: value })}
+                                options={[
+                                  { value: 'visible_when_completed', label: 'Visible when completed' },
+                                  { value: 'visible_when_started', label: 'Visible when started' },
+                                  { value: 'always_visible', label: 'Always visible (marked)' },
+                                  { value: 'sequential', label: 'Sequential (must complete first)' }
+                                ]}
+                                className="w-48"
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                onClick={() => removeDependency(dep.stageId)}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(formData.dependencies || []).length === 0 && (
+                        <p className="text-xs text-muted-foreground italic">No dependencies configured. This stage will be independently visible.</p>
+                      )}
+                    </div>
+                  </FormField>
+                </SectionWrapper>
+              </TabsContent>
               <TabsContent value="documents" className="mt-6 space-y-6">
                 <SectionWrapper title="Stage Documents" icon={<FileText />} actionButton={
                   <div className="flex gap-2">
@@ -616,6 +971,8 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
               </TabsContent>
             </form>
           </Tabs>
+          );
+          })()}
         </div>
 
         <DialogFooter className="p-4 bg-white border-t sticky z-10">

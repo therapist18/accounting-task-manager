@@ -1,11 +1,47 @@
 // @ts-nocheck
 import supabase from '@/lib/supabase/client'
+
+export type StageInputType =
+    | 'document'    // Linked to a document (current behavior)
+    | 'text'        // Free text input
+    | 'textarea'    // Multi-line text input
+    | 'number'      // Numeric input
+    | 'date'        // Date picker
+    | 'datetime'    // Date + time picker
+    | 'dropdown'    // Single-select dropdown
+    | 'multiselect' // Multi-select dropdown
+    | 'checkbox'    // Boolean checkbox
+    | 'file'        // File upload only (no extraction)
+    | 'url'         // URL input
+    | 'email'       // Email input
+    | 'phone'       // Phone number input
+
+export type StageDependencyType =
+    | 'visible_when_completed'   // Show this stage only when dependency is completed
+    | 'visible_when_started'     // Show this stage only when dependency has started
+    | 'always_visible'           // Always show but mark dependency
+    | 'sequential'               // Enforce sequential completion
+
+export interface StageDependency {
+    stageId: string
+    stageName?: string
+    dependencyType: StageDependencyType
+}
+
+export interface StageMasterFieldLink {
+    masterFieldId: string
+    masterFieldLabel?: string
+    fieldKey?: string
+    fieldType?: string
+}
+
 export type DocumentExtraction = {
     id: string
     fieldName: string
-    fieldType: 'text' | 'date' | 'number' | 'boolean' | 'file'
+    fieldType: 'text' | 'date' | 'number' | 'boolean' | 'file' | 'dropdown' | 'multiselect' | 'url' | 'email' | 'phone' | 'textarea'
     isRequired: boolean
     description?: string
+    options?: string[]  // For dropdown/multiselect types
     extractionRules?: {
         format?: string
         validation?: string
@@ -20,7 +56,7 @@ export interface StageDocument {
     description?: string
     isRequired: boolean
     documentType: 'upload' | 'extraction' | 'both'
-    inputType?: 'file' | 'message' | 'both'
+    inputType?: 'file' | 'message' | 'both' | StageInputType
     extractionSpecs?: DocumentExtraction[]
     isSpecial?: boolean
     entityType?: 'subdept' | 'class' | 'subclass'
@@ -38,6 +74,21 @@ export interface StageDocument {
     kycId?: string
     linkedKycDocument?: string
     docType?: 'form' | 'normal_doc'
+    // New: Input type configuration for the stage itself
+    stageInputType?: StageInputType
+    // New: Master field linking (like automation mapping dialog pattern)
+    linkedMasterFieldIds?: string[]
+    linkedMasterFields?: StageMasterFieldLink[]
+    // New: For dropdown/multiselect input types
+    dropdownOptions?: string[]
+    dropdownPlaceholder?: string
+    // New: Default value for the field
+    defaultValue?: string
+    // New: Validation rules
+    validationPattern?: string
+    validationMessage?: string
+    // New: Whether this field is editable after submission
+    isEditableAfterSubmission?: boolean
 }
 
 export interface EntityOption {
@@ -64,6 +115,14 @@ export interface NewStage {
     isSpecial: boolean
     timeConfigs: TimeConfig[]
     documents: StageDocument[] // Updated to use the enhanced StageDocument interface
+    // New: Stage input type configuration
+    stageInputType?: StageInputType
+    linkedMasterFieldIds?: string[]
+    linkedMasterFields?: StageMasterFieldLink[]
+    dropdownOptions?: string[]
+    defaultValue?: string
+    // New: Stage dependencies
+    dependencies?: StageDependency[]
 }
 
 // Update Stage interface if needed
@@ -78,6 +137,14 @@ export interface Stage {
     isSpecial?: boolean
     timeConfigs?: TimeConfig[]
     documents?: StageDocument[] // Updated to use the enhanced StageDocument interface
+    // New: Stage input type configuration
+    stageInputType?: StageInputType
+    linkedMasterFieldIds?: string[]
+    linkedMasterFields?: StageMasterFieldLink[]
+    dropdownOptions?: string[]
+    defaultValue?: string
+    // New: Stage dependencies
+    dependencies?: StageDependency[]
     allocations?: {
         [key: string]: {
             applicable: boolean

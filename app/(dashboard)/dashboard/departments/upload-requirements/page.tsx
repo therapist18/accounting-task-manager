@@ -410,7 +410,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         : { type: 'subdepartment', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, subdepartmentName: currentSubdept.name, jobLevel: { department_id: currentDept.id, subdepartment_id: currentSubdept.id, class_id: null, subclass_id: null } }
 
     return (
-      <div className="space-y-8 max-h-[calc(100vh-100px)] overflow-auto">
+      <div className="space-y-8">
         {/* Bank Selector for BANKS Department */}
         {String(activeDept) === "14" && (
           <Card className="bg-blue-50 border-blue-200">
@@ -558,7 +558,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           <div className="flex items-center gap-2 mb-4 font-semibold">
             <Database className="h-4 w-4 text-blue-600" /> Web Data Configuration
           </div>
-          {renderWebDataConfigurationSection(reqs)}
+          {renderWebDataConfigurationSection()}
         </section>
       </div>
     )
@@ -703,14 +703,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     )
   }
 
-  // --- RENDER WEB DATA CONFIGURATION HELPER (Filtered for current job level requirements) ---
-  const renderWebDataConfigurationSection = (currentReqs: RequirementTableEntry[]) => {
-    // Only show automations that are linked in the current job level's requirements
-    const activeAutomationIds = new Set(
-      currentReqs.map(r => r.automationId || r.web_automation?.automationId).filter(Boolean)
-    );
-    const jobLevelAutomations = allAutomations.filter(a => activeAutomationIds.has(a.id));
-
+  // --- RENDER WEB DATA CONFIGURATION HELPER (all automation types, not job-class-scoped) ---
+  const renderWebDataConfigurationSection = () => {
     return (
       <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
         <div className="overflow-auto max-h-[600px]">
@@ -724,8 +718,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               </TableRow>
             </TableHeader>
             <TableBody>
-              {jobLevelAutomations.length > 0 ? (
-                jobLevelAutomations.map((automation, idx) => {
+              {allAutomations.length > 0 ? (
+                allAutomations.map((automation, idx) => {
                   const isExpanded = expandedAutomationConfig.has(automation.id);
                   const fields = automation.webdata || [];
                   return (
@@ -767,57 +761,28 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
-                                    {fields.map((field: any, fieldIndex: number) => {
-                                      const nestedFields = field.arrayFields || field.subFields || field.items || [];
-                                      const hasNested = field.fieldType === 'array' && nestedFields.length > 0;
-                                      return (
-                                        <React.Fragment key={fieldIndex}>
-                                          <TableRow className="hover:bg-slate-50/50">
-                                            <TableCell className="py-2 text-xs font-mono text-blue-600">{field.variableName}</TableCell>
-                                            <TableCell className="py-2 text-xs font-medium">{field.efnsDisplayName || field.name}</TableCell>
-                                            <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{field.fieldType}</Badge></TableCell>
-                                            <TableCell className="py-2 text-xs capitalize text-slate-500">{Array.isArray(field.entityTypes) ? field.entityTypes.join(', ') : (field.entityType || '-')}</TableCell>
-                                            <TableCell className="py-2 text-xs text-slate-400">
-                                              {field.fieldType === 'document'
-                                                ? `Document: ${kycDocuments.find(d => d.id === field.documentId)?.display_name || 'Unknown'}`
-                                                : field.linkedMasterFields?.length
-                                                  ? `${field.linkedMasterFields.length} linked field(s)`
-                                                  : "Manual / None"}
-                                            </TableCell>
-                                            <TableCell className="py-2 text-center">
-                                              <Checkbox
-                                                checked={!!field.is_client_requirement}
-                                                onCheckedChange={(checked) => handleToggleWebdataFieldClientRequirement(automation.id, fieldIndex, !!checked)}
-                                                className="mx-auto"
-                                              />
-                                            </TableCell>
-                                          </TableRow>
-                                          {hasNested && nestedFields.map((subField: any, subIdx: number) => (
-                                            <TableRow key={`sub-${fieldIndex}-${subIdx}`} className="hover:bg-slate-50/50 bg-slate-50/80">
-                                              <TableCell className="py-2 text-xs font-mono text-blue-600">
-                                                <div className="flex items-center gap-2 pl-4">
-                                                  <span className="text-slate-300">↳</span>
-                                                  {subField.variableName}
-                                                </div>
-                                              </TableCell>
-                                              <TableCell className="py-2 text-xs font-medium">{subField.efnsDisplayName || subField.name}</TableCell>
-                                              <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{subField.fieldType}</Badge></TableCell>
-                                              <TableCell className="py-2 text-xs capitalize text-slate-500">{Array.isArray(subField.entityTypes) ? subField.entityTypes.join(', ') : (subField.entityType || '-')}</TableCell>
-                                              <TableCell className="py-2 text-xs text-slate-400">
-                                                {subField.fieldType === 'document'
-                                                  ? `Document: ${kycDocuments.find(d => d.id === subField.documentId)?.display_name || 'Unknown'}`
-                                                  : subField.linkedMasterFields?.length
-                                                    ? `${subField.linkedMasterFields.length} linked field(s)`
-                                                    : "Manual / None"}
-                                              </TableCell>
-                                              <TableCell className="py-2 text-center">
-                                                <span className="text-xs text-slate-400">-</span>
-                                              </TableCell>
-                                            </TableRow>
-                                          ))}
-                                        </React.Fragment>
-                                      )
-                                    })}
+                                    {fields.map((field: any, fieldIndex: number) => (
+                                      <TableRow key={fieldIndex} className="hover:bg-slate-50/50">
+                                        <TableCell className="py-2 text-xs font-mono text-blue-600">{field.variableName}</TableCell>
+                                        <TableCell className="py-2 text-xs font-medium">{field.efnsDisplayName || field.name}</TableCell>
+                                        <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{field.fieldType}</Badge></TableCell>
+                                        <TableCell className="py-2 text-xs capitalize text-slate-500">{Array.isArray(field.entityTypes) ? field.entityTypes.join(', ') : (field.entityType || '-')}</TableCell>
+                                        <TableCell className="py-2 text-xs text-slate-400">
+                                          {field.fieldType === 'document'
+                                            ? `Document: ${kycDocuments.find(d => d.id === field.documentId)?.display_name || 'Unknown'}`
+                                            : field.linkedMasterFields?.length
+                                              ? `${field.linkedMasterFields.length} linked field(s)`
+                                              : "Manual / None"}
+                                        </TableCell>
+                                        <TableCell className="py-2 text-center">
+                                          <Checkbox
+                                            checked={!!field.is_client_requirement}
+                                            onCheckedChange={(checked) => handleToggleWebdataFieldClientRequirement(automation.id, fieldIndex, !!checked)}
+                                            className="mx-auto"
+                                          />
+                                        </TableCell>
+                                      </TableRow>
+                                    ))}
                                   </TableBody>
                                 </Table>
                               </div>
@@ -831,7 +796,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               ) : (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
-                    No automation types linked to the current job level.
+                    No automation types found.
                   </TableCell>
                 </TableRow>
               )}
@@ -1004,47 +969,21 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
-                                    {req.webdata.map((field, i) => {
-                                      const nestedFields = field.arrayFields || field.subFields || field.items || [];
-                                      const hasNested = field.fieldType === 'array' && nestedFields.length > 0;
-                                      return (
-                                        <React.Fragment key={i}>
-                                          <TableRow className="hover:bg-slate-50/50">
-                                            <TableCell className="py-2 text-xs font-mono text-blue-600">{field.variableName}</TableCell>
-                                            <TableCell className="py-2 text-xs font-medium">{field.efnsDisplayName || field.name}</TableCell>
-                                            <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{field.fieldType}</Badge></TableCell>
-                                            <TableCell className="py-2 text-xs capitalize text-slate-500">{field.entityType}</TableCell>
-                                            <TableCell className="py-2 text-xs text-slate-400">
-                                              {field.fieldType === 'document'
-                                                ? `Document: ${kycDocuments.find(d => d.id === field.documentId)?.display_name || 'Unknown'}`
-                                                : field.linkedMasterFields?.length
-                                                  ? field.linkedMasterFields.map(m => m.label).join(", ")
-                                                  : "Manual / None"}
-                                            </TableCell>
-                                          </TableRow>
-                                          {hasNested && nestedFields.map((subField: any, subIdx: number) => (
-                                            <TableRow key={`sub-${i}-${subIdx}`} className="hover:bg-slate-50/50 bg-slate-50/80">
-                                              <TableCell className="py-2 text-xs font-mono text-blue-600">
-                                                <div className="flex items-center gap-2 pl-4">
-                                                  <span className="text-slate-300">↳</span>
-                                                  {subField.variableName}
-                                                </div>
-                                              </TableCell>
-                                              <TableCell className="py-2 text-xs font-medium">{subField.efnsDisplayName || subField.name}</TableCell>
-                                              <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{subField.fieldType}</Badge></TableCell>
-                                              <TableCell className="py-2 text-xs capitalize text-slate-500">{subField.entityType}</TableCell>
-                                              <TableCell className="py-2 text-xs text-slate-400">
-                                                {subField.fieldType === 'document'
-                                                  ? `Document: ${kycDocuments.find(d => d.id === subField.documentId)?.display_name || 'Unknown'}`
-                                                  : subField.linkedMasterFields?.length
-                                                    ? subField.linkedMasterFields.map((m: any) => m.label).join(", ")
-                                                    : "Manual / None"}
-                                              </TableCell>
-                                            </TableRow>
-                                          ))}
-                                        </React.Fragment>
-                                      )
-                                    })}
+                                    {req.webdata.map((field, i) => (
+                                      <TableRow key={i} className="hover:bg-slate-50/50">
+                                        <TableCell className="py-2 text-xs font-mono text-blue-600">{field.variableName}</TableCell>
+                                        <TableCell className="py-2 text-xs font-medium">{field.efnsDisplayName || field.name}</TableCell>
+                                        <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{field.fieldType}</Badge></TableCell>
+                                        <TableCell className="py-2 text-xs capitalize text-slate-500">{field.entityType}</TableCell>
+                                        <TableCell className="py-2 text-xs text-slate-400">
+                                          {field.fieldType === 'document'
+                                            ? `Document: ${kycDocuments.find(d => d.id === field.documentId)?.display_name || 'Unknown'}`
+                                            : field.linkedMasterFields?.length
+                                              ? field.linkedMasterFields.map(m => m.label).join(", ")
+                                              : "Manual / None"}
+                                        </TableCell>
+                                      </TableRow>
+                                    ))}
                                   </TableBody>
                                 </Table>
                               </div>
@@ -1417,7 +1356,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   };
 
   return (
-    <div className="w-full overflow-auto bg-background">
+    <div className="h-screen w-full overflow-hidden bg-background">
       <ResizablePanelGroup direction="horizontal">
         {/* SIDEBAR PANEL */}
         <ResizablePanel
@@ -1454,7 +1393,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
 
         {/* MAIN CONTENT PANEL */}
         <ResizablePanel defaultSize={80}>
-          <main className="h-full flex flex-col overflow-auto">
+          <main className="h-full flex flex-col overflow-hidden">
             <div className="h-full overflow-auto p-4 space-y-4">
               <header className="flex items-center justify-between"><div><h2 className="text-3xl font-bold tracking-tight">Requirement Logic Manager</h2></div></header>
               {!activeDept ? <Card className="p-20 text-center"><FileText className="mx-auto h-12 w-12 text-slate-300 mb-4" /><p>Select a department to manage logic.</p></Card> : renderMainContent()}

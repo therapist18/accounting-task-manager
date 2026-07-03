@@ -13,7 +13,8 @@ import {
 import {
   Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap,
   Loader2, SkipForward, Clock3, MoreHorizontal, CheckCircle2,
-  Timer, AlertCircle, User, UserPlus
+  Timer, AlertCircle, User, UserPlus, List, Link2, Type, Hash,
+  Globe, Mail, Phone, AlignLeft, FileText as FileTextIcon
 } from "lucide-react"
 import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
@@ -123,6 +124,8 @@ export default function EditableStageCell({
   const [documentFields, setDocumentFields] = useState<any[]>([]);
   const [isLoadingFields, setIsLoadingFields] = useState(false);
   const [isOfficerSelectOpen, setIsOfficerSelectOpen] = useState(false);
+  const [customInputValue, setCustomInputValue] = useState('');
+  const [customMultiSelectValues, setCustomMultiSelectValues] = useState<string[]>([]);
 
   const currentAutomationConfig = useMemo(() => {
     const jl = task?.job_level;
@@ -342,6 +345,36 @@ export default function EditableStageCell({
     }
   }, [editValue, onSave, stage?.id, task?.id, linkedDocument, selectedSkipReason, previewDocuments, currentPreviewIndex]);
 
+  const handleCustomInputSave = useCallback(async (valueOverride?: string) => {
+    if (!onSave || readOnly) return;
+    setIsLoading(true);
+    try {
+      const finalValue = valueOverride || customInputValue;
+      await onSave(stage.id, task.id, finalValue, {});
+      setIsEditing(false);
+      if (onFetchData) await onFetchData();
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to save.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [customInputValue, onSave, stage?.id, task?.id, onFetchData]);
+
+  const handleMultiSelectSave = useCallback(async () => {
+    if (!onSave || readOnly) return;
+    setIsLoading(true);
+    try {
+      const finalValue = customMultiSelectValues.join(', ');
+      await onSave(stage.id, task.id, finalValue, {});
+      setIsEditing(false);
+      if (onFetchData) await onFetchData();
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to save.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [customMultiSelectValues, onSave, stage?.id, task?.id, onFetchData]);
+
   const handleUnskip = async () => {
     if (!onSave || readOnly) return;
     setIsLoading(true);
@@ -551,6 +584,230 @@ export default function EditableStageCell({
     } finally { setIsLoading(false); }
   };
 
+  const getInputTypeIcon = (inputType: string) => {
+    switch (inputType) {
+      case 'text': return <Type className="h-3 w-3" />;
+      case 'textarea': return <AlignLeft className="h-3 w-3" />;
+      case 'number': return <Hash className="h-3 w-3" />;
+      case 'date': return <Calendar className="h-3 w-3" />;
+      case 'datetime': return <Clock className="h-3 w-3" />;
+      case 'dropdown': return <List className="h-3 w-3" />;
+      case 'multiselect': return <List className="h-3 w-3" />;
+      case 'checkbox': return <Check className="h-3 w-3" />;
+      case 'url': return <Globe className="h-3 w-3" />;
+      case 'email': return <Mail className="h-3 w-3" />;
+      case 'phone': return <Phone className="h-3 w-3" />;
+      default: return <Type className="h-3 w-3" />;
+    }
+  };
+
+  const getInputTypeLabel = (inputType: string) => {
+    switch (inputType) {
+      case 'text': return 'Add Text';
+      case 'textarea': return 'Add Text';
+      case 'number': return 'Add Number';
+      case 'date': return 'Add Date';
+      case 'datetime': return 'Add Date';
+      case 'dropdown': return 'Select';
+      case 'multiselect': return 'Select';
+      case 'checkbox': return 'Check';
+      case 'url': return 'Add URL';
+      case 'email': return 'Add Email';
+      case 'phone': return 'Add Phone';
+      default: return 'Add Value';
+    }
+  };
+
+  const renderCustomInputEditor = (inputType: string, isCompact: boolean, currentValue: string) => {
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' && inputType !== 'textarea') {
+        e.preventDefault();
+        handleCustomInputSave();
+      }
+      if (e.key === 'Escape') {
+        setIsEditing(false);
+        setCustomInputValue(currentValue);
+      }
+    };
+
+    const btnClass = isCompact ? "h-6" : "h-7";
+
+    switch (inputType) {
+      case 'text':
+      case 'url':
+      case 'email':
+      case 'phone':
+        return (
+          <div className="flex items-center gap-1 w-full relative z-10">
+            <input
+              type={inputType === 'url' ? 'url' : inputType === 'email' ? 'email' : inputType === 'phone' ? 'tel' : 'text'}
+              value={customInputValue}
+              onChange={(e) => setCustomInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              placeholder={inputType === 'url' ? 'https://...' : inputType === 'email' ? 'email@...' : inputType === 'phone' ? '+1234567890' : 'Enter value...'}
+              className={cn("flex-1 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500", btnClass)}
+            />
+            <Button size="sm" variant="ghost" className={cn("p-0 text-emerald-600 hover:text-emerald-700 w-6", btnClass)} onClick={() => handleCustomInputSave()} disabled={isLoading}><Check className="h-3.5 w-3.5" /></Button>
+            <Button size="sm" variant="ghost" className={cn("p-0 text-red-500 hover:text-red-700 w-6", btnClass)} onClick={() => { setIsEditing(false); setCustomInputValue(currentValue); }} disabled={isLoading}><X className="h-3.5 w-3.5" /></Button>
+          </div>
+        );
+
+      case 'textarea':
+        return (
+          <div className="flex flex-col gap-1 w-full relative z-10">
+            <textarea
+              value={customInputValue}
+              onChange={(e) => setCustomInputValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') { setIsEditing(false); setCustomInputValue(currentValue); } }}
+              autoFocus
+              rows={3}
+              placeholder="Enter text..."
+              className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+            />
+            <div className="flex items-center gap-1 justify-end">
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-emerald-600 hover:text-emerald-700" onClick={() => handleCustomInputSave()} disabled={isLoading}><Check className="h-3 w-3 mr-1" />Save</Button>
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-red-500 hover:text-red-700" onClick={() => { setIsEditing(false); setCustomInputValue(currentValue); }} disabled={isLoading}><X className="h-3 w-3 mr-1" />Cancel</Button>
+            </div>
+          </div>
+        );
+
+      case 'number':
+        return (
+          <div className="flex items-center gap-1 w-full relative z-10">
+            <input
+              type="number"
+              value={customInputValue}
+              onChange={(e) => setCustomInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              placeholder="0"
+              className={cn("flex-1 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500", btnClass)}
+            />
+            <Button size="sm" variant="ghost" className={cn("p-0 text-emerald-600 hover:text-emerald-700 w-6", btnClass)} onClick={() => handleCustomInputSave()} disabled={isLoading}><Check className="h-3.5 w-3.5" /></Button>
+            <Button size="sm" variant="ghost" className={cn("p-0 text-red-500 hover:text-red-700 w-6", btnClass)} onClick={() => { setIsEditing(false); setCustomInputValue(currentValue); }} disabled={isLoading}><X className="h-3.5 w-3.5" /></Button>
+          </div>
+        );
+
+      case 'date':
+        return (
+          <div className="flex items-center gap-1 w-full relative z-10">
+            <input
+              type="date"
+              value={customInputValue || ''}
+              onChange={(e) => setCustomInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              className={cn("flex-1 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500", btnClass)}
+            />
+            <Button size="sm" variant="ghost" className={cn("p-0 text-emerald-600 hover:text-emerald-700 w-6", btnClass)} onClick={() => handleCustomInputSave()} disabled={isLoading}><Check className="h-3.5 w-3.5" /></Button>
+            <Button size="sm" variant="ghost" className={cn("p-0 text-red-500 hover:text-red-700 w-6", btnClass)} onClick={() => { setIsEditing(false); setCustomInputValue(currentValue); }} disabled={isLoading}><X className="h-3.5 w-3.5" /></Button>
+          </div>
+        );
+
+      case 'datetime':
+        return (
+          <div className="flex items-center gap-1 w-full relative z-10">
+            <input
+              type="datetime-local"
+              value={customInputValue || ''}
+              onChange={(e) => setCustomInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              className={cn("flex-1 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500", btnClass)}
+            />
+            <Button size="sm" variant="ghost" className={cn("p-0 text-emerald-600 hover:text-emerald-700 w-6", btnClass)} onClick={() => handleCustomInputSave()} disabled={isLoading}><Check className="h-3.5 w-3.5" /></Button>
+            <Button size="sm" variant="ghost" className={cn("p-0 text-red-500 hover:text-red-700 w-6", btnClass)} onClick={() => { setIsEditing(false); setCustomInputValue(currentValue); }} disabled={isLoading}><X className="h-3.5 w-3.5" /></Button>
+          </div>
+        );
+
+      case 'dropdown':
+        return (
+          <div className="flex items-center gap-1 w-full relative z-10">
+            <select
+              value={customInputValue}
+              onChange={(e) => { setCustomInputValue(e.target.value); }}
+              autoFocus
+              className={cn("flex-1 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500", btnClass)}
+            >
+              <option value="">-- Select --</option>
+              {(stage.dropdownOptions || []).map((opt: string) => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
+            <Button size="sm" variant="ghost" className={cn("p-0 text-emerald-600 hover:text-emerald-700 w-6", btnClass)} onClick={() => handleCustomInputSave()} disabled={isLoading}><Check className="h-3.5 w-3.5" /></Button>
+            <Button size="sm" variant="ghost" className={cn("p-0 text-red-500 hover:text-red-700 w-6", btnClass)} onClick={() => { setIsEditing(false); setCustomInputValue(currentValue); }} disabled={isLoading}><X className="h-3.5 w-3.5" /></Button>
+          </div>
+        );
+
+      case 'multiselect':
+        return (
+          <div className="flex flex-col gap-1 w-full relative z-10">
+            <div className="flex flex-wrap gap-1 p-1 border rounded-md bg-background min-h-[28px]">
+              {(stage.dropdownOptions || []).map((opt: string) => {
+                const isSelected = customMultiSelectValues.includes(opt);
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => {
+                      setCustomMultiSelectValues(prev =>
+                        isSelected ? prev.filter(v => v !== opt) : [...prev, opt]
+                      );
+                    }}
+                    className={cn("text-[10px] px-1.5 py-0.5 rounded border", isSelected ? "bg-blue-100 text-blue-700 border-blue-300" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50")}
+                  >
+                    {isSelected && <Check className="h-2.5 w-2.5 mr-0.5 inline" />}
+                    {opt}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-1 justify-end">
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-emerald-600 hover:text-emerald-700" onClick={() => handleMultiSelectSave()} disabled={isLoading}><Check className="h-3 w-3 mr-1" />Save</Button>
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-red-500 hover:text-red-700" onClick={() => { setIsEditing(false); setCustomMultiSelectValues(currentValue ? currentValue.split(', ') : []); }} disabled={isLoading}><X className="h-3 w-3 mr-1" />Cancel</Button>
+            </div>
+          </div>
+        );
+
+      case 'checkbox':
+        return (
+          <div className="flex items-center gap-2 w-full relative z-10">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={customInputValue === 'true' || customInputValue === 'Yes'}
+                onChange={(e) => setCustomInputValue(e.target.checked ? 'Yes' : 'No')}
+                className="rounded border-gray-300"
+              />
+              <span className="text-xs">{customInputValue === 'true' || customInputValue === 'Yes' ? 'Yes' : 'No'}</span>
+            </label>
+            <div className="flex items-center gap-1 ml-auto">
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-emerald-600 hover:text-emerald-700" onClick={() => handleCustomInputSave()} disabled={isLoading}><Check className="h-3 w-3" /></Button>
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-red-500 hover:text-red-700" onClick={() => { setIsEditing(false); setCustomInputValue(currentValue); }} disabled={isLoading}><X className="h-3 w-3" /></Button>
+            </div>
+          </div>
+        );
+
+      default:
+        return (
+          <div className="flex items-center gap-1 w-full relative z-10">
+            <input
+              type="text"
+              value={customInputValue}
+              onChange={(e) => setCustomInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              placeholder="Enter value..."
+              className={cn("flex-1 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500", btnClass)}
+            />
+            <Button size="sm" variant="ghost" className={cn("p-0 text-emerald-600 hover:text-emerald-700 w-6", btnClass)} onClick={() => handleCustomInputSave()} disabled={isLoading}><Check className="h-3.5 w-3.5" /></Button>
+            <Button size="sm" variant="ghost" className={cn("p-0 text-red-500 hover:text-red-700 w-6", btnClass)} onClick={() => { setIsEditing(false); setCustomInputValue(currentValue); }} disabled={isLoading}><X className="h-3.5 w-3.5" /></Button>
+          </div>
+        );
+    }
+  };
+
   const renderDateContent = (isCompact = false) => {
     if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
     const stageData = task.stages?.[stage.id];
@@ -654,6 +911,57 @@ export default function EditableStageCell({
 
     const isExplicitlyCompleted = stageStatus === 'completed';
     const isLegacyCompleted = !stageStatus && (!!value || stageData?.documentsUploaded === true);
+
+    // Handle custom input types (non-document, non-date)
+    const inputType = stage.stageInputType;
+    const isCustomInputType = inputType && inputType !== 'document' && inputType !== 'file' && !requiresUpload;
+    const currentValue = value || stageData?.value || '';
+
+    if (isCustomInputType && !isSkipped) {
+      // Completed state for custom input types
+      if ((isExplicitlyCompleted || isLegacyCompleted) && !isEditing) {
+        return (
+          <div className="flex items-center gap-1 min-w-0">
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+            <span className="text-xs font-semibold text-emerald-600 truncate" title={currentValue || 'Completed'}>
+              {currentValue || 'Completed'}
+            </span>
+            {!readOnly && (
+              <Button variant="ghost" size="sm" className="h-5 px-1 text-[10px] text-blue-600 hover:bg-blue-50 shrink-0" onClick={(e) => { e.stopPropagation(); setIsEditing(true); setCustomInputValue(currentValue); if (inputType === 'multiselect') setCustomMultiSelectValues(currentValue ? currentValue.split(', ') : []); }}>
+                Edit
+              </Button>
+            )}
+          </div>
+        );
+      }
+
+      // In progress / not started - show input or button
+      if (isEditing) {
+        return renderCustomInputEditor(inputType, isCompact, currentValue);
+      }
+
+      // Show input type icon and value or action button
+      const inputIcon = getInputTypeIcon(inputType);
+      if (currentValue) {
+        return (
+          <div className="flex items-center gap-1 min-w-0">
+            <span className="text-xs text-slate-600 truncate" title={currentValue}>{currentValue}</span>
+            {!readOnly && (
+              <Button variant="ghost" size="sm" className="h-5 px-1 text-[10px] text-blue-600 hover:bg-blue-50 shrink-0" onClick={(e) => { e.stopPropagation(); setIsEditing(true); setCustomInputValue(currentValue); if (inputType === 'multiselect') setCustomMultiSelectValues(currentValue ? currentValue.split(', ') : []); }}>
+                {inputIcon}
+              </Button>
+            )}
+          </div>
+        );
+      }
+
+      // No value yet - show add button
+      return (
+        <Button variant="ghost" size="sm" className={cn("text-gray-600 border border-dashed border-gray-300 hover:border-gray-400 shrink-0", isCompact ? "h-6 px-2 text-[10px]" : "h-7 px-3 text-xs")} onClick={() => { setIsEditing(true); setCustomInputValue(currentValue); if (inputType === 'multiselect') setCustomMultiSelectValues(currentValue ? currentValue.split(', ') : []); }}>
+          {inputIcon} <span className="ml-1">{getInputTypeLabel(inputType)}</span>
+        </Button>
+      );
+    }
     
     if (isExplicitlyCompleted && (!stageDate || stageDate === 'NaN/NaN/NaN') && !requiresUpload && !isEditing) {
       return (
