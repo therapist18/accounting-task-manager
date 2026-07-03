@@ -601,6 +601,8 @@ export default function CVGeneratorPage() {
   const [isSavingPhoto, setIsSavingPhoto] = useState(false);
   const [showSaveCvPrompt, setShowSaveCvPrompt] = useState(false);
   const [isSavingCv, setIsSavingCv] = useState(false);
+  const [applicantId, setApplicantId] = useState<string | null>(null);
+  const [linkedIndividualId, setLinkedIndividualId] = useState<number | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [registryFormData, setRegistryFormData] = useState({
@@ -778,6 +780,204 @@ export default function CVGeneratorPage() {
     }
   }, []);
 
+  // Read applicantId from URL params and fetch CV data from Supabase
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const applicantIdParam = params.get('applicantId');
+
+    // Also check legacy sessionStorage fallback
+    const raw = sessionStorage.getItem('cv_builder_prefill');
+
+    if (applicantIdParam) {
+      setApplicantId(applicantIdParam);
+
+      // Fetch the CV record from Supabase
+      (async () => {
+        try {
+          const { data: record, error } = await supabase
+            .from('job_applicant_cvs')
+            .select('*')
+            .eq('applicant_id', applicantIdParam)
+            .single();
+
+          if (error || !record) {
+            toast.error('Could not load applicant CV data.');
+            return;
+          }
+
+          if (record.individual_id) setLinkedIndividualId(record.individual_id);
+
+          const ed = record.extracted_details || {};
+
+          const prefilledData = {
+            personalInfo: {
+              fullName: record.full_name || ed['Full Name'] || ed.full_name || "",
+              title: record.position_applied || ed['Position Applied'] || ed.position_applied || "",
+              email: record.email || ed['Email'] || ed.email || "",
+              phone: record.phone_number || ed['Phone Number'] || ed.phone_number || "",
+              location: ed['Location'] || ed.address || "",
+              github: ed['GitHub'] || ed.github || "",
+              linkedin: ed['LinkedIn'] || ed.linkedin || "",
+              photoUrl: ""
+            },
+            personalDetails: {
+              dateOfBirth: record.date_of_birth || ed['Date of Birth'] || ed.date_of_birth || "",
+              nationality: ed['Nationality'] || ed.nationality || "",
+              maritalStatus: ed['Marital Status'] || ed.marital_status || "",
+              residence: ed['Residence'] || ed.residence || "",
+              kenyaStatus: ed['Kenya Status'] || ed.kenya_status || "",
+              nairobiRes: ed['Nairobi Res'] || ed.nairobi_res || "",
+              drivingExperience: ed['Driving License'] || ed.driving_license || ""
+            },
+            summary: ed['Professional Summary'] || ed['Summary'] || ed.summary || "",
+            skills: Array.isArray(ed['Skills'] || ed.skills)
+              ? (ed['Skills'] || ed.skills).map((s: any) => ({
+                  category: s.category || "",
+                  items: Array.isArray(s.items) ? s.items.join(", ") : String(s.items || "")
+                }))
+              : [],
+            experience: Array.isArray(ed['Work Experience'] || ed.experience)
+              ? (ed['Work Experience'] || ed.experience).map((exp: any) => ({
+                  company: exp.company || exp.Company || "",
+                  location: exp.location || exp.Location || "",
+                  role: exp.role || exp.position || exp.Position || exp.Role || "",
+                  startDate: exp.startDate || exp['Start Date'] || exp.start_date || "",
+                  endDate: exp.endDate || exp['End Date'] || exp.end_date || "",
+                  companyDesc: exp.companyDesc || exp.description || "",
+                  responsibilities: Array.isArray(exp.responsibilities) ? exp.responsibilities : []
+                }))
+              : [],
+            education: Array.isArray(ed['Education'] || ed.education)
+              ? (ed['Education'] || ed.education).map((edu: any) => ({
+                  degree: edu.degree || edu.Degree || "",
+                  institution: edu.institution || edu.Institution || "",
+                  year: edu.year || edu.Year || edu.endDate || "",
+                  details: edu.details || edu.description || ""
+                }))
+              : [],
+            internships: Array.isArray(ed['Internships'] || ed.internships) ? ed['Internships'] || ed.internships : [],
+            projects: Array.isArray(ed['Projects'] || ed.projects) ? ed['Projects'] || ed.projects : [],
+            references: Array.isArray(ed['Referees'] || ed.references || ed.referees)
+              ? (ed['Referees'] || ed.references || ed.referees).map((ref: any) => ({
+                  name: ref.name || ref.Name || "",
+                  title: ref.title || ref.Title || ref.position || "",
+                  company: ref.company || ref.Company || "",
+                  address: ref.address || ref.Address || "",
+                  contact: ref.contact || ref.Contact || ref.phone || ref.email || ""
+                }))
+              : [],
+            languages: Array.isArray(ed['Languages'] || ed.languages)
+              ? (ed['Languages'] || ed.languages).map((l: any) => ({
+                  language: l.language || l.Language || "",
+                  proficiency: l.proficiency || l.Proficiency || ""
+                }))
+              : [],
+            certifications: Array.isArray(ed['Professional Qualifications'] || ed.certifications)
+              ? (ed['Professional Qualifications'] || ed.certifications).map((c: any) => ({
+                  name: c.name || c.Name || c.qualification || "",
+                  issuer: c.issuer || c.Issuer || c.institution || "",
+                  date: c.date || c.Date || c.year || "",
+                  url: c.url || ""
+                }))
+              : [],
+            achievements: Array.isArray(ed['Achievements'] || ed.achievements) ? ed['Achievements'] || ed.achievements : [],
+            additionalInfo: Array.isArray(ed['Additional Info'] || ed.additionalInfo) ? ed['Additional Info'] || ed.additionalInfo : [],
+            declaration: ed['Declaration'] || ed.declaration || "",
+            verifiedBadge: false
+          };
+
+          // Clear localStorage to prevent stale data from interfering
+          try { localStorage.removeItem('cv_generator_cvData'); } catch {}
+
+          // Check for existing draft at cv-builder/{applicant_id}/draft.json
+          try {
+            const { data: draftBlob, error: draftError } = await supabase.storage
+              .from('kyc-documents')
+              .download(`cv-builder/${applicantIdParam}/draft.json`);
+
+            if (!draftError && draftBlob) {
+              const draftText = await draftBlob.text();
+              const draft = JSON.parse(draftText);
+              toast(`Found existing draft "${draft.name}". Loading draft data instead.`, { icon: '📋' });
+              if (draft.data) setCvData(draft.data);
+              if (draft.cvSettings) setCvSettings(draft.cvSettings);
+              if (draft.selectedLayout) setSelectedLayout(draft.selectedLayout);
+            } else {
+              // No draft found, use prefilled data from extraction
+              setCvData(prefilledData);
+              toast.success('CV pre-filled from applicant data. You can now edit and build the CV.');
+            }
+          } catch {
+            // Draft check failed, use prefilled data
+            setCvData(prefilledData);
+            toast.success('CV pre-filled from applicant data. You can now edit and build the CV.');
+          }
+
+          setWorkflowStep('review-edit');
+          setActiveSection('contact');
+          setShowSaveCvPrompt(true);
+
+          // Clean URL params
+          window.history.replaceState({}, '', window.location.pathname);
+        } catch (e) {
+          toast.error('Failed to load applicant data.');
+        }
+      })();
+    } else if (raw) {
+      // Legacy sessionStorage fallback (same-origin only)
+      try {
+        const prefill = JSON.parse(raw);
+        sessionStorage.removeItem('cv_builder_prefill');
+        if (prefill.applicant_id) setApplicantId(prefill.applicant_id);
+        if (prefill.individual_id) setLinkedIndividualId(prefill.individual_id);
+
+        const prefilledData = {
+          personalInfo: {
+            fullName: prefill.personalInfo?.fullName || "",
+            title: prefill.personalInfo?.title || "",
+            email: prefill.personalInfo?.email || "",
+            phone: prefill.personalInfo?.phone || "",
+            location: prefill.personalInfo?.location || "",
+            github: prefill.personalInfo?.github || "",
+            linkedin: prefill.personalInfo?.linkedin || "",
+            photoUrl: prefill.personalInfo?.photoUrl || ""
+          },
+          personalDetails: {
+            dateOfBirth: prefill.personalDetails?.dateOfBirth || "",
+            nationality: prefill.personalDetails?.nationality || "",
+            maritalStatus: prefill.personalDetails?.maritalStatus || "",
+            residence: prefill.personalDetails?.residence || "",
+            kenyaStatus: prefill.personalDetails?.kenyaStatus || "",
+            nairobiRes: prefill.personalDetails?.nairobiRes || "",
+            drivingExperience: prefill.personalDetails?.drivingExperience || ""
+          },
+          summary: prefill.summary || "",
+          skills: Array.isArray(prefill.skills) ? prefill.skills.map((s: any) => ({
+            category: s.category || "", items: Array.isArray(s.items) ? s.items.join(", ") : String(s.items || "")
+          })) : [],
+          experience: Array.isArray(prefill.experience) ? prefill.experience : [],
+          education: Array.isArray(prefill.education) ? prefill.education : [],
+          internships: Array.isArray(prefill.internships) ? prefill.internships : [],
+          projects: Array.isArray(prefill.projects) ? prefill.projects : [],
+          references: Array.isArray(prefill.references) ? prefill.references : [],
+          languages: Array.isArray(prefill.languages) ? prefill.languages : [],
+          certifications: Array.isArray(prefill.certifications) ? prefill.certifications : [],
+          achievements: Array.isArray(prefill.achievements) ? prefill.achievements : [],
+          additionalInfo: Array.isArray(prefill.additionalInfo) ? prefill.additionalInfo : [],
+          declaration: prefill.declaration || "",
+          verifiedBadge: false
+        };
+        try { localStorage.removeItem('cv_generator_cvData'); } catch {}
+        setCvData(prefilledData);
+        setWorkflowStep('review-edit');
+        setActiveSection('contact');
+        setShowSaveCvPrompt(true);
+        toast.success('CV pre-filled from applicant data.');
+      } catch (e) { console.error('[CV Builder] SessionStorage parse error:', e); }
+    }
+  }, []);
+
   const handleMergeUpdates = () => {
     const diffs = getCVDiffs(cvData, clientSubmission);
     const updatedData = JSON.parse(JSON.stringify(cvData));
@@ -900,7 +1100,14 @@ export default function CVGeneratorPage() {
     try {
       const payload = JSON.stringify(newDraft);
       const blob = new Blob([payload], { type: 'application/json' });
-      await supabase.storage.from('kyc-documents').upload(`cv-drafts/${id}/draft.json`, blob, { upsert: true });
+
+      if (applicantId) {
+        // Save to cv-builder/{applicant_id}/draft.json
+        await supabase.storage.from('kyc-documents').upload(`cv-builder/${applicantId}/draft.json`, blob, { upsert: true });
+      } else {
+        // Fallback to cv-drafts/{id}/draft.json for portal drafts / standalone use
+        await supabase.storage.from('kyc-documents').upload(`cv-drafts/${id}/draft.json`, blob, { upsert: true });
+      }
     } catch (e) {
       console.warn('Draft storage save failed:', e);
     }
@@ -910,13 +1117,30 @@ export default function CVGeneratorPage() {
 
   const loadDraft = async (draft: any) => {
     try {
-      const { data, error } = await supabase.storage.from('kyc-documents').download(`cv-drafts/${draft.id}/draft.json`);
-      if (!error && data) {
-        const text = await data.text();
-        const stored = JSON.parse(text);
-        if (stored.data) setCvData(stored.data);
-        if (stored.cvSettings) setCvSettings(stored.cvSettings);
-        if (stored.selectedLayout) setSelectedLayout(stored.selectedLayout);
+      // Try cv-builder path first (for applicant-linked drafts)
+      let draftData = null;
+      if (applicantId) {
+        const { data: builderBlob, error: builderError } = await supabase.storage
+          .from('kyc-documents').download(`cv-builder/${applicantId}/draft.json`);
+        if (!builderError && builderBlob) {
+          const text = await builderBlob.text();
+          draftData = JSON.parse(text);
+        }
+      }
+      // Fallback to cv-drafts path (for standalone/portal drafts)
+      if (!draftData) {
+        const { data, error } = await supabase.storage
+          .from('kyc-documents').download(`cv-drafts/${draft.id}/draft.json`);
+        if (!error && data) {
+          const text = await data.text();
+          draftData = JSON.parse(text);
+        }
+      }
+
+      if (draftData) {
+        if (draftData.data) setCvData(draftData.data);
+        if (draftData.cvSettings) setCvSettings(draftData.cvSettings);
+        if (draftData.selectedLayout) setSelectedLayout(draftData.selectedLayout);
       } else if (draft.data) {
         setCvData(draft.data);
         if (draft.cvSettings) setCvSettings(draft.cvSettings);
@@ -933,7 +1157,11 @@ export default function CVGeneratorPage() {
   const deleteDraft = async (id: string) => {
     setCvDrafts(prev => prev.filter(d => d.id !== id));
     try {
+      // Try both paths
       await supabase.storage.from('kyc-documents').remove([`cv-drafts/${id}/draft.json`]);
+      if (applicantId) {
+        await supabase.storage.from('kyc-documents').remove([`cv-builder/${applicantId}/draft.json`]);
+      }
     } catch { /* ignore */ }
   };
 
@@ -1413,26 +1641,63 @@ export default function CVGeneratorPage() {
   };
 
   const savePhotoToRegistry = async () => {
-    if (!pendingPhotoFile || !selectedIndividual) return;
+    if (!pendingPhotoFile) return;
+    if (!selectedIndividual && !applicantId) return;
     setIsSavingPhoto(true);
     try {
       const ext = pendingPhotoFile.name.split('.').pop() || 'jpg';
-      const filePath = `individual-documents/${selectedIndividual.id}/${CLEAR_PHOTO_ID}/photo_${Date.now()}.${ext}`;
-      const { error: uploadError } = await supabase.storage
-        .from('kyc-documents')
-        .upload(filePath, pendingPhotoFile, { upsert: true, contentType: pendingPhotoFile.type });
-      if (uploadError) throw uploadError;
-      await supabase.from('acc_portal_directors_documents').insert({
-        director_id: selectedIndividual.id,
-        document_id: CLEAR_PHOTO_ID,
-        file_path: filePath,
-        status: 'active',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
-      toast.success('Photo saved to registry');
-      setShowSavePhotoPrompt(false);
-      setIndividualPhoto(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`);
+
+      // Determine the effective individual ID (client) for acc_portal_directors_documents
+      const effectiveIndividualId = selectedIndividual?.id || linkedIndividualId;
+
+      if (selectedIndividual) {
+        // Path A: User manually selected a client in the builder
+        const filePath = `individual-documents/${selectedIndividual.id}/${CLEAR_PHOTO_ID}/photo_${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('kyc-documents')
+          .upload(filePath, pendingPhotoFile, { upsert: true, contentType: pendingPhotoFile.type });
+        if (uploadError) throw uploadError;
+        await supabase.from('acc_portal_directors_documents').upsert({
+          director_id: selectedIndividual.id,
+          document_id: CLEAR_PHOTO_ID,
+          file_path: filePath,
+          status: 'active',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'director_id,file_path' });
+        toast.success('Photo saved to client record');
+        setShowSavePhotoPrompt(false);
+        setIndividualPhoto(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`);
+      } else if (applicantId) {
+        // Path B: User came from registry via applicantId
+        // 1. Always save to cv-builder storage
+        const builderPath = `cv-builder/${applicantId}/photo.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('kyc-documents')
+          .upload(builderPath, pendingPhotoFile, { upsert: true, contentType: pendingPhotoFile.type });
+        if (uploadError) throw uploadError;
+
+        // 2. If this is a linked client, also save to acc_portal_directors_documents
+        if (effectiveIndividualId) {
+          const registryPath = `individual-documents/${effectiveIndividualId}/${CLEAR_PHOTO_ID}/photo_${Date.now()}.${ext}`;
+          await supabase.storage
+            .from('kyc-documents')
+            .upload(registryPath, pendingPhotoFile, { upsert: true, contentType: pendingPhotoFile.type });
+          await supabase.from('acc_portal_directors_documents').upsert({
+            director_id: effectiveIndividualId,
+            document_id: CLEAR_PHOTO_ID,
+            file_path: registryPath,
+            status: 'active',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'director_id,file_path' });
+          toast.success('Photo saved to client record and builder storage');
+        } else {
+          toast.success('Photo saved to builder storage');
+        }
+        setShowSavePhotoPrompt(false);
+        setIndividualPhoto(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${builderPath}`);
+      }
     } catch (err: any) {
       toast.error(`Failed to save photo: ${err.message}`);
     } finally {
@@ -1441,26 +1706,63 @@ export default function CVGeneratorPage() {
   };
 
   const saveCVToDb = async () => {
-    if (!selectedIndividual) return;
+    if (!selectedIndividual && !applicantId) return;
     setIsSavingCv(true);
     try {
       const cvJson = JSON.stringify(cvData, null, 2);
       const blob = new Blob([cvJson], { type: 'application/json' });
-      const ext = 'json';
-      const filePath = `individual-documents/${selectedIndividual.id}/${CV_DOCUMENT_ID}/cv_${Date.now()}.${ext}`;
-      const { error: uploadError } = await supabase.storage
-        .from('kyc-documents')
-        .upload(filePath, blob, { upsert: true, contentType: 'application/json' });
-      if (uploadError) throw uploadError;
-      await supabase.from('acc_portal_directors_documents').insert({
-        director_id: selectedIndividual.id,
-        document_id: CV_DOCUMENT_ID,
-        file_path: filePath,
-        status: 'active',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
-      toast.success('CV saved to database successfully');
+
+      // Path A: Save to client's acc_portal_directors_documents (if selectedIndividual)
+      if (selectedIndividual) {
+        const filePath = `individual-documents/${selectedIndividual.id}/${CV_DOCUMENT_ID}/cv_${Date.now()}.json`;
+        const { error: uploadError } = await supabase.storage
+          .from('kyc-documents')
+          .upload(filePath, blob, { upsert: true, contentType: 'application/json' });
+        if (uploadError) throw uploadError;
+        await supabase.from('acc_portal_directors_documents').upsert({
+          director_id: selectedIndividual.id,
+          document_id: CV_DOCUMENT_ID,
+          file_path: filePath,
+          status: 'active',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'director_id,file_path' });
+      }
+
+      // Path B: Save to cv-builder storage + update bcl_cv_snapshot (if applicantId)
+      if (applicantId) {
+        // 1. Store backup at cv-builder/{applicant_id}/built-cv.json
+        const builderPath = `cv-builder/${applicantId}/built-cv.json`;
+        const { error: uploadError } = await supabase.storage
+          .from('kyc-documents')
+          .upload(builderPath, blob, { upsert: true });
+        if (uploadError) throw uploadError;
+
+        // 2. Update bcl_cv_snapshot in job_applicant_cvs
+        const { error: snapshotError } = await supabase
+          .from('job_applicant_cvs')
+          .update({ bcl_cv_snapshot: cvData, updated_at: new Date().toISOString() })
+          .eq('applicant_id', applicantId);
+        if (snapshotError) throw snapshotError;
+
+        // 3. If linked client, also save to acc_portal_directors_documents
+        if (linkedIndividualId) {
+          const registryPath = `individual-documents/${linkedIndividualId}/${CV_DOCUMENT_ID}/cv_${Date.now()}.json`;
+          await supabase.storage
+            .from('kyc-documents')
+            .upload(registryPath, blob, { upsert: true });
+          await supabase.from('acc_portal_directors_documents').upsert({
+            director_id: linkedIndividualId,
+            document_id: CV_DOCUMENT_ID,
+            file_path: registryPath,
+            status: 'active',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'director_id,file_path' });
+        }
+      }
+
+      toast.success(selectedIndividual ? 'CV saved to client record successfully' : 'BCL Vouched CV saved successfully');
       setShowSaveCvPrompt(false);
     } catch (err: any) {
       toast.error(`Failed to save CV: ${err.message}`);
@@ -2990,6 +3292,15 @@ export default function CVGeneratorPage() {
           ))}
         </div>
         <div className="flex items-center gap-1.5">
+          {(selectedIndividual || applicantId) && (
+            <Button size="sm" onClick={saveCVToDb} disabled={isSavingCv} className="text-xs h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white">
+              {isSavingCv ? (
+                <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
+              ) : (
+                <><Database className="h-3.5 w-3.5" /> {selectedIndividual ? 'Save to Client' : 'Save BCL CV'}</>
+              )}
+            </Button>
+          )}
           <Button size="sm" variant="outline" onClick={() => { setDraftNameInput(`CV - ${cvData.personalInfo?.fullName || 'Draft'} - ${new Date().toLocaleDateString()}`); setShowSaveDraftModal(true); setSavingDraftForPortal(false); }} className="text-xs h-8 gap-1.5 border-slate-200">
             <Save className="h-3.5 w-3.5" /> Save Draft
           </Button>
@@ -3263,9 +3574,32 @@ export default function CVGeneratorPage() {
                         ) : (
                           <div className="h-10 w-10 rounded-lg bg-slate-100 flex items-center justify-center"><User className="h-4 w-4 text-slate-400" /></div>
                         )}
-                        <Input type="file" accept="image/*" className="text-xs h-8" onChange={(e) => {
+                        <Input type="file" accept="image/*" className="text-xs h-8" onChange={async (e) => {
                           const file = e.target.files?.[0];
-                          if (file) { const url = URL.createObjectURL(file); handlePersonalInfoChange("photoUrl", url); }
+                          if (!file) return;
+                          // Set preview immediately
+                          const url = URL.createObjectURL(file);
+                          handlePersonalInfoChange("photoUrl", url);
+                          // Save to storage if we have an applicantId
+                          if (applicantId) {
+                            try {
+                              const ext = file.name.split('.').pop() || 'jpg';
+                              const filePath = `cv-builder/${applicantId}/photo.${ext}`;
+                              await supabase.storage.from('kyc-documents').upload(filePath, file, { upsert: true, contentType: file.type });
+                              const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`;
+                              handlePersonalInfoChange("photoUrl", publicUrl);
+                              // Also save to acc_portal_directors_documents if linked client
+                              if (linkedIndividualId) {
+                                const registryPath = `individual-documents/${linkedIndividualId}/${CLEAR_PHOTO_ID}/photo_${Date.now()}.${ext}`;
+                                await supabase.storage.from('kyc-documents').upload(registryPath, file, { upsert: true, contentType: file.type });
+                                await supabase.from('acc_portal_directors_documents').upsert({
+                                  director_id: linkedIndividualId, document_id: CLEAR_PHOTO_ID,
+                                  file_path: registryPath, status: 'active',
+                                  created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+                                }, { onConflict: 'director_id,file_path' });
+                              }
+                            } catch (err) { console.warn('Photo save failed:', err); }
+                          }
                         }} />
                       </div>
                     </div>

@@ -160,6 +160,9 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const [disabledInheritedReqs, setDisabledInheritedReqs] = useState<Set<string>>(new Set());
   const [allAutomations, setAllAutomations] = useState<{ id: string; name: string; webdata: WebDataField[]; is_active?: boolean }[]>([]);
   const [expandedAutomationConfig, setExpandedAutomationConfig] = useState<Set<string>>(new Set());
+  const [pendingQuestionClientReqs, setPendingQuestionClientReqs] = useState<Record<string, boolean>>({});
+  const [pendingRequirementClientReqs, setPendingRequirementClientReqs] = useState<Record<string, boolean>>({});
+  const [pendingWebdataClientReqs, setPendingWebdataClientReqs] = useState<Record<string, Record<number, { value: boolean; arrayItems?: Record<number, boolean> }>>>({});
   const sidebarPanelRef = useRef(null);
 
   // Add the programmatic toggle handler
@@ -200,6 +203,27 @@ export default function UploadRequirements({ departments: initialDepartments }: 
 
   // --- 2. DESTUCTURE FOR DIALOGS (Solves 'is not defined' error) ---
   const { currentDept, currentSubdept, currentClass, currentSubclass, reqs, questions } = activeSelection
+
+  // Filter automations to only those linked to the current job level's requirements
+  const jobLevelAutomations = useMemo(() => {
+    const automationIds = new Set<string>()
+    // Collect automation IDs from individual requirements
+    reqs.forEach((req: any) => {
+      if (req.web_automation?.automationId) {
+        automationIds.add(req.web_automation.automationId)
+      }
+    })
+    // Also check class-level web_automation array
+    const classRecord = currentSubclass || currentClass
+    if (classRecord?.web_automation && Array.isArray(classRecord.web_automation)) {
+      classRecord.web_automation.forEach((auto: any) => {
+        if (auto.automationId) automationIds.add(auto.automationId)
+      })
+    }
+    // Filter allAutomations to only linked ones
+    if (automationIds.size === 0) return []
+    return allAutomations.filter(a => automationIds.has(a.id))
+  }, [reqs, currentClass, currentSubclass, allAutomations])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -516,7 +540,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           </Button>
         </div>
 
-        {String(activeDept) === "1" ? (
+       <div className="max-h-[calc(100vh-200px)] overflow-y-auto">
+         {String(activeDept) === "1" ? (
           <div className="space-y-12">
             <section>
               <div className="flex items-center gap-2 mb-4 font-semibold">General Requirements</div>
@@ -560,6 +585,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           </div>
           {renderWebDataConfigurationSection()}
         </section>
+       </div>
       </div>
     )
   }
@@ -586,7 +612,25 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 <TableHead className="border-r">Applies To</TableHead>
                 <TableHead className="border-r">Linked Column</TableHead>
                 <TableHead className="border-r">Configuration</TableHead>
-                <TableHead className="w-16 text-center border-r">Client Req.</TableHead>
+                <TableHead className="w-16 text-center border-r">
+                  {(() => {
+                    const total = questions.length;
+                    const checked = questions.filter(q => q.id in pendingQuestionClientReqs ? pendingQuestionClientReqs[q.id] : !!q.is_client_requirement).length;
+                    const allChecked = total > 0 && checked === total;
+                    const someChecked = total > 0 && checked > 0 && checked < total;
+                    return (
+                      <div className="flex flex-col items-center gap-0.5">
+                        <span className="text-[10px] font-normal leading-none">Client Req.</span>
+                        <Checkbox
+                          checked={allChecked}
+                          ref={(el) => { if (el) el.dataset.state = someChecked ? 'indeterminate' : (allChecked ? 'checked' : 'unchecked'); }}
+                          onCheckedChange={(c) => handleToggleAllQuestionsClientRequirement(!!c)}
+                          className="mx-auto"
+                        />
+                      </div>
+                    );
+                  })()}
+                </TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -652,7 +696,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         </TableCell>
                         <TableCell className="border-r text-center">
                           <Checkbox
-                            checked={!!q.is_client_requirement}
+                            checked={q.id in pendingQuestionClientReqs ? pendingQuestionClientReqs[q.id] : !!q.is_client_requirement}
                             disabled={isSubmitting}
                             onCheckedChange={(checked) => handleToggleQuestionClientRequirement(q, context, !!checked)}
                             className="mx-auto"
@@ -703,7 +747,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     )
   }
 
-  // --- RENDER WEB DATA CONFIGURATION HELPER (all automation types, not job-class-scoped) ---
+  // --- RENDER WEB DATA CONFIGURATION HELPER (job-level-scoped automations) ---
   const renderWebDataConfigurationSection = () => {
     return (
       <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
@@ -718,8 +762,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               </TableRow>
             </TableHeader>
             <TableBody>
-              {allAutomations.length > 0 ? (
-                allAutomations.map((automation, idx) => {
+              {jobLevelAutomations.length > 0 ? (
+                jobLevelAutomations.map((automation, idx) => {
                   const isExpanded = expandedAutomationConfig.has(automation.id);
                   const fields = automation.webdata || [];
                   return (
@@ -757,32 +801,109 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                                       <TableHead className="h-8 text-xs font-bold">Type</TableHead>
                                       <TableHead className="h-8 text-xs font-bold">Entity</TableHead>
                                       <TableHead className="h-8 text-xs font-bold">Mapped Sources</TableHead>
-                                      <TableHead className="h-8 text-xs font-bold text-center">Client Requirement</TableHead>
+                                      <TableHead className="h-8 text-xs font-bold text-center">
+                                        {(() => {
+                                          const total = fields.length;
+                                          const checked = fields.filter((f, i) => {
+                                            const autoUpdate = pendingWebdataClientReqs[automation.id];
+                                            const fieldUpdate = autoUpdate?.[i];
+                                            if (fieldUpdate) return fieldUpdate.value;
+                                            return f.is_client_requirement || (f.arrayItems || []).length > 0 && f.arrayItems.every(item => item.is_client_requirement);
+                                          }).length;
+                                          const allChecked = total > 0 && checked === total;
+                                          const someChecked = total > 0 && checked > 0 && checked < total;
+                                          return (
+                                            <div className="flex flex-col items-center gap-0.5">
+                                              <span className="text-[10px] font-normal leading-none">Client Requirement</span>
+                                              <Checkbox
+                                                checked={allChecked}
+                                                ref={(el) => { if (el) el.dataset.state = someChecked ? 'indeterminate' : (allChecked ? 'checked' : 'unchecked'); }}
+                                                onCheckedChange={(c) => handleToggleAllWebdataFieldsClientRequirement(automation.id, !!c)}
+                                                className="mx-auto"
+                                              />
+                                            </div>
+                                          );
+                                        })()}
+                                      </TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
-                                    {fields.map((field: any, fieldIndex: number) => (
-                                      <TableRow key={fieldIndex} className="hover:bg-slate-50/50">
-                                        <TableCell className="py-2 text-xs font-mono text-blue-600">{field.variableName}</TableCell>
-                                        <TableCell className="py-2 text-xs font-medium">{field.efnsDisplayName || field.name}</TableCell>
-                                        <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{field.fieldType}</Badge></TableCell>
-                                        <TableCell className="py-2 text-xs capitalize text-slate-500">{Array.isArray(field.entityTypes) ? field.entityTypes.join(', ') : (field.entityType || '-')}</TableCell>
-                                        <TableCell className="py-2 text-xs text-slate-400">
-                                          {field.fieldType === 'document'
-                                            ? `Document: ${kycDocuments.find(d => d.id === field.documentId)?.display_name || 'Unknown'}`
-                                            : field.linkedMasterFields?.length
-                                              ? `${field.linkedMasterFields.length} linked field(s)`
-                                              : "Manual / None"}
-                                        </TableCell>
-                                        <TableCell className="py-2 text-center">
-                                          <Checkbox
-                                            checked={!!field.is_client_requirement}
-                                            onCheckedChange={(checked) => handleToggleWebdataFieldClientRequirement(automation.id, fieldIndex, !!checked)}
-                                            className="mx-auto"
-                                          />
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
+                                    {fields.map((field: any, fieldIndex: number) => {
+                                      const isArray = field.fieldType === 'array';
+                                      const arrayItems = isArray ? (field.arrayItems || []) : [];
+                                      const isFieldExpanded = expandedWebDataRows.has(`${automation.id}-${field.variableName}`);
+                                      return (
+                                        <React.Fragment key={fieldIndex}>
+                                          <TableRow className={cn("hover:bg-slate-50/50", isArray && "cursor-pointer")} onClick={isArray ? () => {
+                                            const key = `${automation.id}-${field.variableName}`;
+                                            setExpandedWebDataRows(prev => {
+                                              const next = new Set(prev);
+                                              if (next.has(key)) next.delete(key); else next.add(key);
+                                              return next;
+                                            });
+                                          } : undefined}>
+                                            <TableCell className="py-2 text-xs font-mono text-blue-600">
+                                              <div className="flex items-center gap-1.5">
+                                                {isArray && (isFieldExpanded ? <ChevronDown className="h-3 w-3 text-slate-400" /> : <ChevronRight className="h-3 w-3 text-slate-400" />)}
+                                                {field.variableName}
+                                              </div>
+                                            </TableCell>
+                                            <TableCell className="py-2 text-xs font-medium">{field.efnsDisplayName || field.name}</TableCell>
+                                            <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{field.fieldType}</Badge></TableCell>
+                                            <TableCell className="py-2 text-xs capitalize text-slate-500">{Array.isArray(field.entityTypes) ? field.entityTypes.join(', ') : (field.entityType || '-')}</TableCell>
+                                            <TableCell className="py-2 text-xs text-slate-400">
+                                              {field.fieldType === 'document'
+                                                ? `Document: ${kycDocuments.find(d => d.id === field.documentId)?.display_name || 'Unknown'}`
+                                                : field.linkedMasterFields?.length
+                                                  ? `${field.linkedMasterFields.length} linked field(s)`
+                                                  : "Manual / None"}
+                                            </TableCell>
+                                            <TableCell className="py-2 text-center">
+                                              <Checkbox
+                                                checked={(() => {
+                                                  const autoUpdate = pendingWebdataClientReqs[automation.id];
+                                                  const fieldUpdate = autoUpdate?.[fieldIndex];
+                                                  return fieldUpdate ? fieldUpdate.value : !!field.is_client_requirement;
+                                                })()}
+                                                onCheckedChange={(checked) => handleToggleWebdataFieldClientRequirement(automation.id, fieldIndex, !!checked)}
+                                                className="mx-auto"
+                                              />
+                                            </TableCell>
+                                          </TableRow>
+                                          {isArray && isFieldExpanded && arrayItems.map((item: any, itemIdx: number) => (
+                                            <TableRow key={`${fieldIndex}-item-${itemIdx}`} className="bg-blue-50/30 hover:bg-blue-50/50">
+                                              <TableCell className="py-1.5 pl-8 text-[10px] font-mono text-blue-400">
+                                                {field.variableName}[{itemIdx}]
+                                              </TableCell>
+                                              <TableCell className="py-1.5 text-[10px] font-medium text-slate-600">
+                                                <div className="flex items-center gap-1.5 pl-2">
+                                                  <span className="w-1 h-1 bg-blue-400 rounded-full" />
+                                                  {item.displayName || item.efnsDisplayName || item.variableName}
+                                                </div>
+                                              </TableCell>
+                                              <TableCell className="py-1.5 text-[10px]"><Badge variant="outline" className="text-[9px] h-4 bg-slate-50">{item.fieldType || 'text'}</Badge></TableCell>
+                                              <TableCell className="py-1.5 text-[10px] capitalize text-slate-400">{Array.isArray(item.entityTypes) ? item.entityTypes.join(', ') : (item.entityType || '-')}</TableCell>
+                                              <TableCell className="py-1.5 text-[10px] text-slate-400">
+                                                {item.linkedMasterFields?.length ? `${item.linkedMasterFields.length} linked field(s)` : "Manual / None"}
+                                              </TableCell>
+                                              <TableCell className="py-1.5 text-center">
+                                                <Checkbox
+                                                  checked={(() => {
+                                                    const autoUpdate = pendingWebdataClientReqs[automation.id];
+                                                    const fieldUpdate = autoUpdate?.[fieldIndex];
+                                                    return fieldUpdate?.arrayItems?.[itemIndex] !== undefined
+                                                      ? fieldUpdate.arrayItems[itemIndex]
+                                                      : !!item.is_client_requirement;
+                                                  })()}
+                                                  onCheckedChange={(checked) => handleToggleWebdataFieldArrayItemClientRequirement(automation.id, fieldIndex, itemIndex, !!checked)}
+                                                  className="mx-auto"
+                                                />
+                                              </TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </React.Fragment>
+                                      );
+                                    })}
                                   </TableBody>
                                 </Table>
                               </div>
@@ -796,7 +917,10 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               ) : (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
-                    No automation types found.
+                    {reqs.length > 0
+                      ? "No automations linked to this job level's requirements."
+                      : "Select a class/subclass to view linked automations."
+                    }
                   </TableCell>
                 </TableRow>
               )}
@@ -824,7 +948,25 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 <TableHead className="border-r">Web Data</TableHead>
                 <TableHead className="border-r">Automation</TableHead>
                 <TableHead className="w-16 text-center border-r">Apply</TableHead>
-                <TableHead className="w-16 text-center border-r">Client Req.</TableHead>
+                <TableHead className="w-16 text-center border-r">
+                  {(() => {
+                    const total = requirements.length;
+                    const checked = requirements.filter(r => (r.id || '') in pendingRequirementClientReqs ? pendingRequirementClientReqs[r.id || ''] : !!r.is_client_requirement).length;
+                    const allChecked = total > 0 && checked === total;
+                    const someChecked = total > 0 && checked > 0 && checked < total;
+                    return (
+                      <div className="flex flex-col items-center gap-0.5">
+                        <span className="text-[10px] font-normal leading-none">Client Req.</span>
+                        <Checkbox
+                          checked={allChecked}
+                          ref={(el) => { if (el) el.dataset.state = someChecked ? 'indeterminate' : (allChecked ? 'checked' : 'unchecked'); }}
+                          onCheckedChange={(c) => handleToggleAllRequirementsClientRequirement(!!c)}
+                          className="mx-auto"
+                        />
+                      </div>
+                    );
+                  })()}
+                </TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -898,7 +1040,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         </TableCell>
                         <TableCell className="border-r text-center">
                           <Checkbox
-                            checked={!!req.is_client_requirement}
+                            checked={(req.id || '') in pendingRequirementClientReqs ? pendingRequirementClientReqs[req.id || ''] : !!req.is_client_requirement}
                             disabled={isSubmitting}
                             onCheckedChange={(checked) => handleToggleClientRequirement(req, context, !!checked)}
                             className="mx-auto"
@@ -1188,45 +1330,11 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   };
 
   const handleToggleClientRequirement = async (req: RequirementTableEntry, context: EditingContext, checked: boolean) => {
-    await handleSaveRequirement({ ...req, is_client_requirement: checked }, context);
+    setPendingRequirementClientReqs(prev => ({ ...prev, [req.id || '']: checked }));
   };
 
   const handleToggleQuestionClientRequirement = async (question: JobQuestion, context: EditingContext, checked: boolean) => {
-    try {
-      setIsSubmitting(true);
-      const jobLevel = {
-        department_id: Number(context.departmentId),
-        subdepartment_id: Number(context.subdepartmentId),
-        class_id: context.classId ? Number(context.classId) : null,
-        subclass_id: context.subclassId ? Number(context.subclassId) : null,
-        level: context.type === 'subdepartment' ? 2 : context.type === 'class' ? 3 : 4
-      };
-      const { data: existing } = await supabase
-        .from('tm_class_requirements')
-        .select('*')
-        .eq('job_level', JSON.stringify(jobLevel))
-        .maybeSingle();
-
-      if (!existing) return;
-
-      const updatedQuestions = (existing.job_specific_questions || []).map((q: any) =>
-        q.id === question.id ? { ...q, is_client_requirement: checked } : q
-      );
-
-      const { error } = await supabase
-        .from('tm_class_requirements')
-        .update({ job_specific_questions: updatedQuestions, updated_at: new Date().toISOString() })
-        .eq('id', existing.id);
-
-      if (error) throw error;
-      await refreshDepartments();
-      toast({ title: "Success", description: "Question requirement status updated" });
-    } catch (error) {
-      console.error(error);
-      toast({ title: "Error", description: "Failed to update question", variant: "destructive" });
-    } finally {
-      setIsSubmitting(false);
-    }
+    setPendingQuestionClientReqs(prev => ({ ...prev, [question.id]: checked }));
   };
 
   const toggleAutomationConfigRow = (automationId: string) => {
@@ -1238,20 +1346,147 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   };
 
   const handleToggleWebdataFieldClientRequirement = async (automationId: string, fieldIndex: number, checked: boolean) => {
+    setPendingWebdataClientReqs(prev => {
+      const auto = prev[automationId] || {};
+      const existing = auto[fieldIndex] || { value: false, arrayItems: {} };
+      return { ...prev, [automationId]: { ...auto, [fieldIndex]: { ...existing, value: checked } } };
+    });
+  };
+
+  const handleToggleWebdataFieldArrayItemClientRequirement = async (automationId: string, fieldIndex: number, itemIndex: number, checked: boolean) => {
+    setPendingWebdataClientReqs(prev => {
+      const auto = prev[automationId] || {};
+      const existing = auto[fieldIndex] || { value: false, arrayItems: {} };
+      return { ...prev, [automationId]: { ...auto, [fieldIndex]: { ...existing, arrayItems: { ...(existing.arrayItems || {}), [itemIndex]: checked } } } };
+    });
+  };
+
+  // --- Select All / Deselect All Handlers (local state only) ---
+  const handleToggleAllQuestionsClientRequirement = async (checked: boolean) => {
+    const updates: Record<string, boolean> = {};
+    questions.forEach(q => { updates[q.id] = checked; });
+    setPendingQuestionClientReqs(updates);
+  };
+
+  const handleToggleAllRequirementsClientRequirement = async (checked: boolean) => {
+    const updates: Record<string, boolean> = {};
+    requirements.forEach(r => { updates[r.id || ''] = checked; });
+    setPendingRequirementClientReqs(updates);
+  };
+
+  const handleToggleAllWebdataFieldsClientRequirement = async (automationId: string, checked: boolean) => {
     const automation = allAutomations.find(a => a.id === automationId);
     if (!automation) return;
-    const updatedWebdata = automation.webdata.map((f, i) => i === fieldIndex ? { ...f, is_client_requirement: checked } : f);
+    const fieldsUpdate: Record<number, { value: boolean; arrayItems?: Record<number, boolean> }> = {};
+    automation.webdata.forEach((f, i) => {
+      if (f.fieldType === 'array' && f.arrayItems) {
+        const itemsUpdate: Record<number, boolean> = {};
+        f.arrayItems.forEach((_, j) => { itemsUpdate[j] = checked; });
+        fieldsUpdate[i] = { value: checked, arrayItems: itemsUpdate };
+      } else {
+        fieldsUpdate[i] = { value: checked };
+      }
+    });
+    setPendingWebdataClientReqs(prev => ({ ...prev, [automationId]: fieldsUpdate }));
+  };
+
+  // --- Batch Submit for Client Requirements ---
+  const hasPendingClientReqs = useMemo(() => {
+    return Object.keys(pendingQuestionClientReqs).length > 0
+      || Object.keys(pendingRequirementClientReqs).length > 0
+      || Object.keys(pendingWebdataClientReqs).length > 0;
+  }, [pendingQuestionClientReqs, pendingRequirementClientReqs, pendingWebdataClientReqs]);
+
+  const handleSubmitClientReqs = async () => {
+    if (!editingContext) return;
     try {
-      const { error } = await supabase
-        .from('tm_automations')
-        .update({ webdata: updatedWebdata, updated_at: new Date().toISOString() })
-        .eq('id', automationId);
-      if (error) throw error;
-      setAllAutomations(prev => prev.map(a => a.id === automationId ? { ...a, webdata: updatedWebdata } : a));
-      toast({ title: "Success", description: "Field updated" });
+      setIsSubmitting(true);
+      const jobLevel = {
+        department_id: Number(editingContext.departmentId),
+        subdepartment_id: Number(editingContext.subdepartmentId),
+        class_id: editingContext.classId ? Number(editingContext.classId) : null,
+        subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
+        level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
+      };
+
+      // 1. Save questions and requirements to tm_class_requirements
+      const { data: existing, error: fetchError } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .eq('job_level', JSON.stringify(jobLevel))
+        .maybeSingle();
+      if (fetchError) throw fetchError;
+
+      if (existing) {
+        const updatePayload: any = { updated_at: new Date().toISOString() };
+
+        // Questions
+        if (Object.keys(pendingQuestionClientReqs).length > 0) {
+          const updatedQuestions = (existing.job_specific_questions || []).map((q: any) => {
+            if (q.id in pendingQuestionClientReqs) {
+              return { ...q, is_client_requirement: pendingQuestionClientReqs[q.id] };
+            }
+            return q;
+          });
+          updatePayload.job_specific_questions = updatedQuestions;
+        }
+
+        // Requirements
+        if (Object.keys(pendingRequirementClientReqs).length > 0) {
+          const updatedReqs = (existing.requirements || []).map((r: any) => {
+            const key = r.id || '';
+            if (key in pendingRequirementClientReqs) {
+              return { ...r, is_client_requirement: pendingRequirementClientReqs[key] };
+            }
+            return r;
+          });
+          updatePayload.requirements = updatedReqs;
+        }
+
+        const { error: updateError } = await supabase
+          .from('tm_class_requirements')
+          .update(updatePayload)
+          .eq('id', existing.id);
+        if (updateError) throw updateError;
+      }
+
+      // 2. Save webdata field changes to tm_automations
+      for (const [automationId, fieldsUpdate] of Object.entries(pendingWebdataClientReqs)) {
+        const automation = allAutomations.find(a => a.id === automationId);
+        if (!automation) continue;
+        const updatedWebdata = automation.webdata.map((f, i) => {
+          const fieldUpdate = fieldsUpdate[i];
+          if (!fieldUpdate) return f;
+          if (f.fieldType === 'array' && f.arrayItems && fieldUpdate.arrayItems) {
+            const updatedItems = f.arrayItems.map((item, j) => {
+              if (j in fieldUpdate.arrayItems!) {
+                return { ...item, is_client_requirement: fieldUpdate.arrayItems![j] };
+              }
+              return item;
+            });
+            return { ...f, is_client_requirement: fieldUpdate.value, arrayItems: updatedItems };
+          }
+          return { ...f, is_client_requirement: fieldUpdate.value };
+        });
+        const { error } = await supabase
+          .from('tm_automations')
+          .update({ webdata: updatedWebdata, updated_at: new Date().toISOString() })
+          .eq('id', automationId);
+        if (error) throw error;
+        setAllAutomations(prev => prev.map(a => a.id === automationId ? { ...a, webdata: updatedWebdata } : a));
+      }
+
+      // 3. Clear pending state and refresh
+      setPendingQuestionClientReqs({});
+      setPendingRequirementClientReqs({});
+      setPendingWebdataClientReqs({});
+      await refreshDepartments();
+      toast({ title: "Success", description: "Client requirements updated successfully" });
     } catch (error) {
       console.error(error);
-      toast({ title: "Error", description: "Failed to update field", variant: "destructive" });
+      toast({ title: "Error", description: "Failed to update client requirements", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -1394,9 +1629,64 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         {/* MAIN CONTENT PANEL */}
         <ResizablePanel defaultSize={80}>
           <main className="h-full flex flex-col overflow-hidden">
-            <div className="h-full overflow-auto p-4 space-y-4">
+            <div className="h-full overflow-auto p-4 pb-20 space-y-4">
               <header className="flex items-center justify-between"><div><h2 className="text-3xl font-bold tracking-tight">Requirement Logic Manager</h2></div></header>
               {!activeDept ? <Card className="p-20 text-center"><FileText className="mx-auto h-12 w-12 text-slate-300 mb-4" /><p>Select a department to manage logic.</p></Card> : renderMainContent()}
+
+              {/* Floating Submit Bar for Client Requirement Changes */}
+              {hasPendingClientReqs && (
+                <div className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t shadow-lg">
+                  <div className="flex items-center justify-between px-6 py-3 max-w-screen-2xl mx-auto">
+                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                      <AlertTriangle className="h-4 w-4 text-amber-500" />
+                      <span>
+                        You have unsaved client requirement changes
+                        {Object.keys(pendingQuestionClientReqs).length > 0 && (
+                          <span className="ml-1 text-slate-400">({Object.keys(pendingQuestionClientReqs).length} question{Object.keys(pendingQuestionClientReqs).length !== 1 ? 's' : ''})</span>
+                        )}
+                        {Object.keys(pendingRequirementClientReqs).length > 0 && (
+                          <span className="ml-1 text-slate-400">({Object.keys(pendingRequirementClientReqs).length} requirement{Object.keys(pendingRequirementClientReqs).length !== 1 ? 's' : ''})</span>
+                        )}
+                        {Object.keys(pendingWebdataClientReqs).length > 0 && (
+                          <span className="ml-1 text-slate-400">({Object.keys(pendingWebdataClientReqs).length} automation{Object.keys(pendingWebdataClientReqs).length !== 1 ? 's' : ''})</span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setPendingQuestionClientReqs({});
+                          setPendingRequirementClientReqs({});
+                          setPendingWebdataClientReqs({});
+                        }}
+                      >
+                        <X className="h-4 w-4 mr-1" />
+                        Discard
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={handleSubmitClientReqs}
+                        disabled={isSubmitting}
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
+                      >
+                        {isSubmitting ? (
+                          <span className="flex items-center gap-1">
+                            <span className="h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            Saving...
+                          </span>
+                        ) : (
+                          <>
+                            <Check className="h-4 w-4 mr-1" />
+                            Submit Changes
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <AddRequirementsDialog isOpen={isAddDialogOpen} onOpenChange={setIsAddDialogOpen} onSubmit={handleAddRequirements} isSubmitting={isSubmitting} context={addContext} />
               <EditRequirementDialog isOpen={isEditDialogOpen} onOpenChange={setIsEditDialogOpen} requirement={editingRequirement} onSave={handleSaveRequirement} isSubmitting={isSubmitting} context={editingContext} />

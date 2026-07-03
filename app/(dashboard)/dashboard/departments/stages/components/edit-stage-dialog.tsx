@@ -21,6 +21,7 @@ import supabase from "@/lib/supabase/client"
 import type { Stage, TimeConfig, StageDocument, DocumentExtraction, EntityOption } from "../types"
 import { createKYCDocument, updateKYCDocument } from "../kycDocuments"
 import { toast } from "@/lib/hooks/use-toast"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 type Stage = any; type TimeConfig = any; type StageDocument = any; type DocumentExtraction = any; type EntityOption = any;
 

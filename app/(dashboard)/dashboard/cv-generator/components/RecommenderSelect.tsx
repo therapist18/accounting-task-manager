@@ -2,7 +2,6 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { supabase } from "@/lib/supabase";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +10,7 @@ import { toast } from "sonner";
 import { Search, Plus, Loader2, X, User, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CreatableCombobox, type ComboOption } from "./CreatableCombobox";
+import supabase from "@/lib/supabase/client";
 
 export interface Recommender {
   id: string;
