@@ -11,6 +11,7 @@ import { toast } from "sonner"
 import { CheckCircle2, XCircle, AlertCircle, FileText, Database, HelpCircle, Check, X, Loader2 } from "lucide-react"
 import supabase from "@/lib/supabase/client"
 import { resolveTargetEntityIdImpl, resolveVariableValueImpl } from "../../tasks/utils/fieldResolution"
+import { updateJsonValue } from "../../tasks/utils/AutomationMappingDialog"
 
 interface ReviewSubmissionDialogProps {
   isOpen: boolean
@@ -22,6 +23,7 @@ interface ReviewSubmissionDialogProps {
   allIndividualDocuments: Record<string, any[]>
   fieldSourceDataCache: Record<string, Record<string, any>>
   fieldMasterComputedCache: Record<string, any>
+  jobFieldsRecord?: Record<string, any>
   onRefresh?: () => void
 }
 
@@ -35,6 +37,7 @@ export function ReviewSubmissionDialog({
   allIndividualDocuments,
   fieldSourceDataCache,
   fieldMasterComputedCache,
+  jobFieldsRecord = {},
   onRefresh
 }: ReviewSubmissionDialogProps) {
   const [isApplying, setIsApplying] = useState(false)
@@ -50,6 +53,7 @@ export function ReviewSubmissionDialog({
       fileName: data.file_name || data.fileName || 'Document',
       filePath: data.file_path || data.filePath,
       extractedDetails: data.extracted_details || data.extractedDetails || {},
+      entityType: data.entity_type || data.entityType,
       status: data.status || 'draft',
       submittedAt: data.submitted_at || data.submittedAt,
     }))
@@ -109,7 +113,7 @@ export function ReviewSubmissionDialog({
           const companyId = task.company_id || task.participants_details?.find((p: any) => p.type === 'company')?.id
           const individualId = task.individual_id || task.applicant_details?.id
 
-          const isCompanyDoc = !!companyId && !individualId
+          const isCompanyDoc = doc.entityType === 'company' || (!!companyId && !individualId)
           const targetTable = isCompanyDoc ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents'
           const idField = isCompanyDoc ? 'company_id' : 'director_id'
           const entityId = isCompanyDoc ? companyId : individualId
@@ -160,19 +164,24 @@ export function ReviewSubmissionDialog({
           const fieldDef = auto?.webdata?.find((f: any) => f.variableName === variableName)
           if (!fieldDef) continue
 
-          const linkedMasterFieldId = fieldDef.linkedMasterFields?.[0]
+          const linkedMasterFieldId = fieldDef.linkedMasterFields?.[0] || fieldDef.masterFieldIds?.[0] || fieldDef.linkedMasterFieldId
           if (!linkedMasterFieldId) continue
 
           // Find the job field definition to get the source table/path
-          const { data: masterField } = await supabase.from('tm_job_fields').select('sources').eq('id', linkedMasterFieldId).single()
+          let masterField = jobFieldsRecord[String(linkedMasterFieldId)]
+          if (!masterField) {
+            const { data } = await supabase.from('tm_job_fields').select('*').eq('id', linkedMasterFieldId).single()
+            masterField = data
+          }
           if (!masterField?.sources?.length) continue
 
-          const source = masterField.sources[0]
+          const source = masterField.sources.find((s: any) => !s.is_computed && s.table && s.path) || masterField.sources[0]
           if (!source?.table || !source?.path) continue
 
           // Determine entity ID for the record
           let entityId = task.individual_id || task.applicant_details?.id
-          if (fieldDef.entityTypes?.includes('company')) {
+          const entityTypes = fieldDef.entityTypes || (fieldDef.entityType ? [fieldDef.entityType] : [])
+          if (entityTypes.includes('company')) {
             entityId = task.company_id || task.participants_details?.find((p: any) => p.type === 'company')?.id
           }
 
@@ -182,26 +191,22 @@ export function ReviewSubmissionDialog({
           let query = supabase.from(source.table).select('*')
           if (source.table === 'tm_tasks') {
             query = query.eq('id', task.id)
+          } else if (source.linking_variable) {
+            query = query.eq(source.linking_variable, entityId)
           } else {
             query = query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`)
           }
           const { data: existing } = await query.maybeSingle()
 
           if (existing) {
-            // Update the field value using the path
-            const pathParts = source.path.replace(/->>|->/g, '.').split('.')
-            let updateData = { ...existing }
-            let current = updateData
-            for (let i = 0; i < pathParts.length - 1; i++) {
-              if (!current[pathParts[i]]) current[pathParts[i]] = {}
-              current = current[pathParts[i]]
-            }
-            current[pathParts[pathParts.length - 1]] = field.value
+            const updateData = updateJsonValue(existing, source.path, field.value)
 
             const queryField = source.table === 'tm_tasks' ? 'id' :
+              source.linking_variable ? source.linking_variable :
               existing.director_id ? 'director_id' :
               existing.company_id ? 'company_id' : 'id'
             const recordPK = source.table === 'tm_tasks' ? task.id :
+              source.linking_variable ? entityId :
               existing.director_id || existing.company_id || existing.id
 
             const { error } = await supabase.from(source.table)

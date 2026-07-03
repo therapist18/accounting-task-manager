@@ -125,6 +125,7 @@ export function RequirementsTable({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [fieldSourceDataCache, setFieldSourceDataCache] = useState<Record<string, Record<string, any>>>({});
   const [fieldMasterComputedCache, setFieldMasterComputedCache] = useState<Record<string, any>>({});
+  const [jobFieldsRecord, setJobFieldsRecord] = useState<Record<string, any>>({});
   const [isSendRequirementsOpen, setIsSendRequirementsOpen] = useState(false);
   const [isReviewSubmissionOpen, setIsReviewSubmissionOpen] = useState(false);
 
@@ -503,12 +504,32 @@ export function RequirementsTable({
           .in('id', Array.from(automationIds));
         if (error) throw error;
         const map: Record<string, { name: string; webdata: any[] }> = {};
+        const linkedFieldIds = new Set<string>();
         (data || []).forEach(auto => {
           if (auto.webdata && auto.webdata.length > 0) {
             map[auto.id] = { name: auto.name || 'Unknown', webdata: auto.webdata };
+            auto.webdata.forEach((field: any) => {
+              (field.linkedMasterFields || field.masterFieldIds || []).forEach((id: any) => linkedFieldIds.add(String(id)));
+              (field.arrayItems || []).forEach((item: any) => {
+                (item.linkedMasterFields || item.masterFieldIds || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : [])).forEach((id: any) => linkedFieldIds.add(String(id)));
+              });
+            });
           }
         });
         setAutomationWebdataMap(map);
+        if (linkedFieldIds.size > 0) {
+          const { data: fields, error: fieldsError } = await supabase
+            .from('tm_job_fields')
+            .select('*')
+            .in('id', Array.from(linkedFieldIds));
+          if (fieldsError) throw fieldsError;
+          setJobFieldsRecord((fields || []).reduce((acc: Record<string, any>, field: any) => {
+            acc[String(field.id)] = field;
+            return acc;
+          }, {}));
+        } else {
+          setJobFieldsRecord({});
+        }
       } catch (err) {
         console.error('Error fetching automation webdata:', err);
       }
@@ -1414,7 +1435,7 @@ export function RequirementsTable({
         allIndividualDocuments={allIndividualDocuments}
         fieldSourceDataCache={fieldSourceDataCache}
         fieldMasterComputedCache={fieldMasterComputedCache}
-        jobFieldsRecord={documents.reduce((acc, d) => ({ ...acc, [d.id]: d }), {})}
+        jobFieldsRecord={jobFieldsRecord}
         relationshipData={filteredGroupedTasks.map(g => {
           const task = g.tasks[0];
           const participants = task?.participants_details || [];
@@ -1437,6 +1458,7 @@ export function RequirementsTable({
         allIndividualDocuments={allIndividualDocuments}
         fieldSourceDataCache={fieldSourceDataCache}
         fieldMasterComputedCache={fieldMasterComputedCache}
+        jobFieldsRecord={jobFieldsRecord}
         onRefresh={refreshDocuments}
       />
 

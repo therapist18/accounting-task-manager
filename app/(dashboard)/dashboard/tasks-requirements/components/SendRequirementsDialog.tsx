@@ -89,6 +89,23 @@ export function SendRequirementsDialog({
                   })
                 }
               }
+              if (field.fieldType === 'array' && Array.isArray(field.arrayItems)) {
+                field.arrayItems.forEach((item: any, itemIndex: number) => {
+                  if (!item.is_client_requirement) return
+                  const variableName = `${field.variableName}.${item.variableName || item.name || itemIndex}`
+                  if (!fields.some(f => f.variableName === variableName && f.groupIndex === groupIndex)) {
+                    fields.push({
+                      ...item,
+                      parentVariableName: field.variableName,
+                      variableName,
+                      automationId: req.web_automation.automationId,
+                      automationName: auto.name,
+                      task,
+                      groupIndex
+                    })
+                  }
+                })
+              }
             })
           }
         }

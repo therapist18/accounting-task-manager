@@ -124,6 +124,10 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     company: true,
     individual: true,
     letters: true,
+    general: true,
+    processing: true,
+    issuance: true,
+    other: true,
     webdata: true,
   });
   const [expandedDependants, setExpandedDependants] = useState<Set<number>>(new Set());
@@ -1327,7 +1331,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     const { table, path, entityId } = editingFieldCell;
     let valueToSave = editFieldValue;
     if (isDropdown && dropdownOptions && dropdownOptions.length > 0) {
-      const selectedOption = dropdownOptions.find(opt => opt.value === editValue || opt.label === editValue);
+      const selectedOption = dropdownOptions.find(opt => opt.value === editFieldValue || opt.label === editFieldValue);
       if (selectedOption) {
         valueToSave = selectedOption.label;
       }

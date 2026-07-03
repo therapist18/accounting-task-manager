@@ -891,11 +891,11 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                                                   checked={(() => {
                                                     const autoUpdate = pendingWebdataClientReqs[automation.id];
                                                     const fieldUpdate = autoUpdate?.[fieldIndex];
-                                                    return fieldUpdate?.arrayItems?.[itemIndex] !== undefined
-                                                      ? fieldUpdate.arrayItems[itemIndex]
+                                                    return fieldUpdate?.arrayItems?.[itemIdx] !== undefined
+                                                      ? fieldUpdate.arrayItems[itemIdx]
                                                       : !!item.is_client_requirement;
                                                   })()}
-                                                  onCheckedChange={(checked) => handleToggleWebdataFieldArrayItemClientRequirement(automation.id, fieldIndex, itemIndex, !!checked)}
+                                                  onCheckedChange={(checked) => handleToggleWebdataFieldArrayItemClientRequirement(automation.id, fieldIndex, itemIdx, !!checked)}
                                                   className="mx-auto"
                                                 />
                                               </TableCell>
