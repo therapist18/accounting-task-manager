@@ -1092,7 +1092,7 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
             <TableIcon className="h-4 w-4 text-white" />
           </span>
           <div>
-            <h3 className="text-base font-bold text-slate-900">{selectedReport?.name}</h3>
+            <h3 className="text-2xl font-bold text-slate-900">{selectedReport?.name}</h3>
             <p className="text-[11px] text-slate-500 mt-0.5">Read-only preview of report configuration</p>
           </div>
         </div>
@@ -1180,7 +1180,7 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
               <TableIcon className="h-5 w-5 text-white" />
             </span>
             <div>
-              <h2 className="text-sm font-semibold text-slate-900">Report Manager</h2>
+              <h2 className="text-2xl font-semibold text-slate-900">Report Manager</h2>
               <p className="text-[11px] text-slate-500">Configure and manage your saved report views</p>
             </div>
           </div>

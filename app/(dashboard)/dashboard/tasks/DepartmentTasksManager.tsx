@@ -3,7 +3,6 @@
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { unstable_batchedUpdates } from 'react-dom'
-
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Settings, Search, X, TableProperties, RotateCcw, Edit, AlertCircle, Plus, Minus, Download, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2, LinkIcon, RefreshCw, UserPlus, LayoutGrid, Settings2 } from "lucide-react"
@@ -25,7 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import * as XLSX from 'xlsx'
-import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchKycDocument, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document, fetchTasksDuplicate, fetchDocumentWorkflowLogs } from "./utils/taskManagerData"
+import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchKycDocument, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document, fetchTasksDuplicate, fetchDocumentWorkflowLogs, REQUIREMENTS_LOCK_STAGE_IDS, captureRequirementsDocumentsSnapshot } from "./utils/taskManagerData"
 import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog';
 import { StandardTable } from './overall-view/StandardTable';
 import { EnhancedTable } from './overall-view/EnhancedTable';
@@ -72,6 +71,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [visibleStats, setVisibleStats] = useState<Set<string>>(new Set(STATS_HEADERS.filter(h => h.default).map(h => h.id)))
   const [visibleStageIds, setVisibleStageIds] = useState<Set<string>>(new Set())
   const [showNAStages, setShowNAStages] = useState<boolean>(false);
+  const [showStats, setShowStats] = useState<boolean>(true);
   const [expandedDependants, setExpandedDependants] = useState<Set<string>>(new Set())
   const [kycDocuments, setKycDocuments] = useState<Map<string, KycDocument>>(new Map())
   const [allKycFields, setAllKycFields] = useState<Record<string, any[]>>({})
@@ -79,7 +79,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set())
   const [isDocumentPreviewOpen, setIsDocumentPreviewOpen] = useState(false);
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages', 'report_docs']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
   const [activeReport, setActiveReport] = useState<any | null>(null);
   const [areTabsVisible, setAreTabsVisible] = useState(true);
@@ -88,17 +88,14 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [stageDialogKey, setStageDialogKey] = useState(0);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const realtimeSubscriptionRef = useRef<any>(null);
-
+  const [reportDocDefaults, setReportDocDefaults] = useState<any[]>([]);
   useEffect(() => {
     if (initialSearchTerm) setGlobalSearchTerm(initialSearchTerm);
   }, [initialSearchTerm]);
-
   useEffect(() => {
     const headers = activeDepartmentTab === '1'
       ? ENHANCED_TABLE_HEADERS_IMMIGRATION
       : ENHANCED_TABLE_HEADERS;
-
-    // Filter headers based on whether cancelled tab is active
     const filteredHeaders = activeSubTab === 'cancelled'
       ? headers
       : headers.filter(h => h.id !== 'cancellation_reason');
@@ -113,8 +110,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [subdepartmentOfficers, setSubdepartmentOfficers] = useState<Array<{ id: string, name: string }>>([])
   const [subdepartmentManagers, setSubdepartmentManagers] = useState<Array<{ id: string, name: string }>>([])
   const [subdepartmentAssistants, setSubdepartmentAssistants] = useState<Array<{ id: string, name: string }>>([])
-
-  // Unified user data (same as EnquiryDialog)
   const [unifiedOfficers, setUnifiedOfficers] = useState<any[]>([])
   const [unifiedManagers, setUnifiedManagers] = useState<any[]>([])
   const [unifiedAssistants, setUnifiedAssistants] = useState<any[]>([])
@@ -138,7 +133,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     applicantAge: number | null;
     applicantClassId?: string;
     dependantClasses?: Map<string, string>;
-    bundle?: any; // Add bundle field
+    bundle?: any;
   } | null>(null);
   const [availableClasses, setAvailableClasses] = useState<any[]>([]);
   const [tableRows, setTableRows] = useState([]);
@@ -165,7 +160,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
 
   const isStageApplicableToTask = useCallback((stage: any, task: any, departments: any[]): boolean => {
     if (!task || !stage || !Array.isArray(departments) || departments.length === 0) {
-      return true; // Default to applicable if data is missing
+      return true;
     }
 
     try {
@@ -188,14 +183,13 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         return subdeptStage.applicable;
       }
 
-      return true; // Default to applicable if no override is found
+      return true;
     } catch (error) {
       console.error('Error in isStageApplicableToTask:', error);
       return true; // Failsafe
     }
   }, []);
 
-  // Add this useEffect near the top of your component, with other state declarations
   useEffect(() => {
     const loadKycData = async () => {
       try {
@@ -208,6 +202,70 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
 
     loadKycData();
   }, []);
+
+  useEffect(() => {
+    const fetchReportDocDefaults = async () => {
+      if (!activeDepartmentTab) { setReportDocDefaults([]); return; }
+      try {
+        const deptTasks = tasks.filter(t => String(t.department_id) === String(activeDepartmentTab));
+        const jobLevels = new Map<string, any>();
+        
+        deptTasks.forEach(task => {
+          const jl = task.job_level || {};
+          const key = JSON.stringify({
+            department_id: Number(jl.department_id || activeDepartmentTab),
+            subdepartment_id: jl.subdepartment_id || null,
+            class_id: jl.class_id || null,
+            subclass_id: jl.subclass_id || null
+          });
+          if (!jobLevels.has(key)) {
+            jobLevels.set(key, {
+              department_id: Number(jl.department_id || activeDepartmentTab),
+              subdepartment_id: jl.subdepartment_id || null,
+              class_id: jl.class_id || null,
+              subclass_id: jl.subclass_id || null,
+              level: jl.level || 1
+            });
+          }
+        });
+
+        if (jobLevels.size === 0) {
+          jobLevels.set('default', {
+            department_id: Number(activeDepartmentTab),
+            subdepartment_id: null,
+            class_id: null,
+            subclass_id: null,
+            level: 1
+          });
+        }
+
+        const allDefaults: any[] = [];
+        for (const [_, jobLevel] of jobLevels) {
+          const { data, error } = await supabase
+            .from('tm_class_requirements')
+            .select('report_doc_defaults')
+            .eq('job_level', JSON.stringify(jobLevel))
+            .maybeSingle();
+          if (!error && data?.report_doc_defaults) {
+            allDefaults.push(...data.report_doc_defaults);
+          }
+        }
+
+        const uniqueDefaults = Array.from(
+          new Map(allDefaults
+            .filter((d: any) => d.isVisible !== false)
+            .map((d: any) => [d.documentId, d]))
+          .values()
+        ).sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+
+        setReportDocDefaults(uniqueDefaults);
+      } catch (err) {
+        console.error('Error fetching report doc defaults:', err);
+        setReportDocDefaults([]);
+      }
+    };
+    fetchReportDocDefaults();
+  }, [activeDepartmentTab, activeSubdepartmentTab, tasks]);
 
   useEffect(() => {
     const enhanceTaskData = async () => {
@@ -240,7 +298,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       return unifiedAssistant.full_name || unifiedAssistant.name || unifiedAssistant.displayName || `Assistant ${userId}`;
     }
 
-    // Fallback to subdepartment staff arrays (numeric IDs)
     const officer = subdepartmentOfficers.find(o => o.id === userIdStr);
     if (officer) return officer.name;
 
@@ -250,7 +307,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     const assistant = subdepartmentAssistants.find(a => a.id === userIdStr);
     if (assistant) return assistant.name;
 
-    // Final fallback to tmUsers Map
     const user = tmUsers.get(parseInt(userIdStr));
     return user?.name || `User ${userId}`;
   }, [tmUsers, subdepartmentOfficers, subdepartmentManagers, subdepartmentAssistants, unifiedOfficers, unifiedManagers, unifiedAssistants]);
@@ -304,7 +360,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     return linkedDocs;
   }, [allDocuments]);
 
-  // Helper function to fetch officers using unified user assignment service
   const fetchOfficersFromApi = useCallback(async () => {
     try {
       const unifiedUserData = await userService.getAllUserData({ payrollAccess: true }, departments);
@@ -335,13 +390,11 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     const subdepartment = department.tm_subdepartments?.find(s => s.id.toString() === subdepartmentId);
     if (!subdepartment) return { officers: [], managers: [], assistants: [] };
 
-    // Create a mock department structure for inheritance logic
     const departmentForInheritance = {
       ...department,
-      officers_history: [] // Departments don't have officers_history in the current schema
+      officers_history: []
     };
 
-    // Use new userService for staff assignments
     const subdepartmentUsers = userService.getSubdepartmentUsers(
       realOfficers.map(o => ({
         id: o.id,
@@ -359,7 +412,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       subdepartment.id.toString()
     );
 
-    // Find the real officer from cached scanner_users
     let activeOfficers = [];
     if (subdepartmentUsers.officers.length > 0 && realOfficers && realOfficers.length > 0) {
       const inheritedOfficer = subdepartmentUsers.officers[0];
@@ -426,12 +478,10 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     }
   }, [departments])
 
-  // Cache for tasks data to avoid re-fetching
   const tasksCacheRef = useRef<Map<string, { tasks: UtilTask[], stages: any[], timestamp: number }>>(new Map())
   const tableRowsCacheRef = useRef<Map<string, { rows: any[], timestamp: number }>>(new Map())
-  const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+  const CACHE_DURATION = 5 * 60 * 1000
 
-  // Function to clear cache for specific department/subdepartment
   const clearTasksCache = useCallback((departmentId?: string, subdepartmentId?: string) => {
     const cacheKey = `${departmentId || 'all'}-${subdepartmentId || 'all'}`;
     tasksCacheRef.current.delete(cacheKey);
@@ -1677,6 +1727,14 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
 
       if (error) throw error;
 
+      // 7b. Snapshot Processing/Issuance requirement documents when their gating stage completes
+      if (!isSkipped) {
+        const normalizedStageId = stageId.toLowerCase();
+        if (normalizedStageId === REQUIREMENTS_LOCK_STAGE_IDS.PROCESSING || normalizedStageId === REQUIREMENTS_LOCK_STAGE_IDS.ISSUANCE) {
+          await captureRequirementsDocumentsSnapshot({ ...task, stages: updatedStages }, normalizedStageId);
+        }
+      }
+
       // 8. Update local state directly
       setTasks(prevTasks => prevTasks.map(t =>
         t.id.toString() === taskId.toString()
@@ -1894,6 +1952,25 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
             }
           }
         }
+      }
+    }
+
+    // Report Docs Section
+    if (reportDocDefaults && reportDocDefaults.length > 0) {
+      rows.push({ key: 'section_header_report_docs', type: 'section_header', label: `Report Documents (${reportDocDefaults.length})`, id: 'report_docs', icon: FileText });
+
+      if (expandedSections.has('report_docs')) {
+        reportDocDefaults.forEach((doc, idx) => {
+          rows.push({
+            key: `report_doc_${doc.id}`,
+            label: doc.documentName || 'Unknown Document',
+            type: 'report_doc',
+            reportDoc: doc,
+            stageOrder: doc.order + 1,
+            isSubRow: false,
+            getValue: () => doc
+          });
+        });
       }
     }
 
@@ -3524,6 +3601,16 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
             {showNAStages ? 'Hide N/A' : 'Show N/A'}
           </Button>
 
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
+            onClick={() => setShowStats(!showStats)}
+          >
+            {showStats ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            {showStats ? 'Hide Stats' : 'Show Stats'}
+          </Button>
+
           <Popover>
             <PopoverTrigger asChild>
               <Button
@@ -3651,6 +3738,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                 getTaskHierarchy={getTaskHierarchy}
                 getStaffName={getStaffName}
                 readOnly={isReadOnly}
+                reportDocDefaults={reportDocDefaults}
                 onDocumentPreview={async (doc) => {
                   setPreviewDocument(doc);
                   if (doc.document_id) {
@@ -3748,6 +3836,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                 toggleStageExpansion={toggleStageExpansion}
                 toggleDocumentExpansion={toggleDocumentExpansion}
                 readOnly={isReadOnly}
+                showStats={showStats}
+                reportDocDefaults={reportDocDefaults}
               />
             )}
           </div>

@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, ChevronDown, ChevronRight, Users2, User, Building2, Zap, FileType, UploadCloud, Eye, Calendar, CheckCircle2, XCircle, AlertCircle, Heart, HeartPulse, Database, Paperclip, FunctionSquare, TableIcon, HelpCircle, Check, X, Pencil } from "lucide-react"
+import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, ChevronDown, ChevronRight, Users2, User, Building2, Zap, FileType, UploadCloud, Eye, Calendar, CheckCircle2, XCircle, AlertCircle, Heart, HeartPulse, Database, Paperclip, FunctionSquare, TableIcon, HelpCircle, Check, X, Pencil, Lock } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import * as XLSX from 'xlsx'
@@ -20,6 +20,7 @@ import {
   getLatestDocumentExpiryDate,
   type DocumentCache
 } from "../tasks/utils/automationComputedFunctions"
+import { REQUIREMENTS_LOCK_STAGE_IDS } from "../tasks/utils/taskManagerData"
 let htmlDocx: any = null;
 import('html-docx-js/dist/html-docx')
   .then(module => {
@@ -63,6 +64,24 @@ const getEntityTypeConfig = (type: string) => {
 const isCompanyType = (type: string) => type === 'company';
 const isIndividualType = (type: string) => ['principal', 'director', 'understudy'].includes(type);
 const isPrincipalType = (type: string) => type === 'principal';
+
+// A task's Processing Requirements lock once Pro. Upload Screenshot is completed,
+// and stay locked unless Deferred (Depends) is also completed. Issuance Requirements
+// lock permanently once Issuance Upload Screenshot is completed.
+const getRequirementsLockState = (task: any) => {
+  const stages = task?.stages || {};
+  const isCompleted = (stageId: string) => stages[stageId]?.status === 'completed';
+  return {
+    processingLocked: isCompleted(REQUIREMENTS_LOCK_STAGE_IDS.PROCESSING) && !isCompleted(REQUIREMENTS_LOCK_STAGE_IDS.DEFERRED),
+    issuanceLocked: isCompleted(REQUIREMENTS_LOCK_STAGE_IDS.ISSUANCE),
+  };
+};
+
+const isRequirementSectionLocked = (task: any, lockCategory?: 'processing' | 'issuance') => {
+  if (!lockCategory) return false;
+  const { processingLocked, issuanceLocked } = getRequirementsLockState(task);
+  return lockCategory === 'processing' ? processingLocked : issuanceLocked;
+};
 
 const generateDocxBlobFromHtml = async (html: string) => {
   if (!htmlDocx) {
@@ -129,6 +148,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     issuance: true,
     other: true,
     webdata: true,
+    reportDocs: true,
   });
   const [expandedDependants, setExpandedDependants] = useState<Set<number>>(new Set());
   const [expandedCompositeRequirements, setExpandedCompositeRequirements] = useState<Set<string>>(new Set());
@@ -478,6 +498,32 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   }, [organizedRequirements, searchQuery]);
 
   const classDocsAndFields = useMemo(() => { return classRequirements?.[0]?.documents_and_fields || []; }, [classRequirements]);
+
+  // Report Documents render the actual documents locked in when Processing/Issuance
+  // Requirements were completed, rather than querying "current" documents live —
+  // this reflects the exact documents used to fulfil the task application.
+  const allTasksInView = useMemo(() => {
+    return (filteredGroupedTasks || []).flatMap((group: any) => group.tasks || []);
+  }, [filteredGroupedTasks]);
+
+  const getReportDocSnapshotEntry = useCallback((documentTypeId: string) => {
+    for (const task of allTasksInView) {
+      const snapshot = [
+        ...(task.processing_requirements_documents || []),
+        ...(task.issuance_requirements_documents || [])
+      ];
+      const entry = snapshot.find((s: any) => s.documentTypeId === documentTypeId);
+      if (entry) return { task, entry };
+    }
+    return null;
+  }, [allTasksInView]);
+
+  const getReportDocRecords = useCallback((task: any, entry: any) => {
+    const pool = entry.sourceTable === 'acc_portal_kyc_uploads'
+      ? (allCompanyDocuments[entry.entityId] || [])
+      : (allIndividualDocuments[entry.entityId] || []);
+    return pool.filter((d: any) => (entry.documentRecordIds || []).includes(d.id));
+  }, [allCompanyDocuments, allIndividualDocuments]);
 
   const checkApplicability = (colType: string, requirement: any, colRoles?: string[]) => {
     if (!requirement) return false;
@@ -854,6 +900,10 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         Object.values(organizedRequirements.documents).forEach((list: any) => extractIds(list));
       }
 
+      (classRequirements?.[0]?.report_doc_defaults || []).forEach((d: any) => {
+        if (d.documentId && UUID_REGEX.test(d.documentId)) allDocIds.add(d.documentId);
+      });
+
       if (allDocIds.size === 0) return;
 
       try {
@@ -875,7 +925,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     };
 
     fetchDocumentMetadata();
-  }, [organizedRequirements]);
+  }, [organizedRequirements, classRequirements]);
 
   const fetchDocumentTemplates = async (documentId: string, task: any) => {
     try {
@@ -1382,7 +1432,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     }
   }, [editingFieldCell, editFieldValue, fieldSourceDataCache, refreshDocuments]);
 
-  const handleViewDocuments = (documents: any[], docInfo: any, column: any, requirementId?: string) => {
+  const handleViewDocuments = (documents: any[], docInfo: any, column: any, requirementId?: string, locked?: boolean) => {
     if (!documents || documents.length === 0) return;
 
     const previewData = {
@@ -1397,7 +1447,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       document_display_name: docInfo?.display_name || 'Document',
       person_full_name: column?.label || '',
       document_fields: docInfo?.fields || [],
-      requirementId: requirementId // Store the requirement ID for closing
+      requirementId: requirementId, // Store the requirement ID for closing
+      locked: !!locked
     };
 
     setPreviewingDocuments(previewData);
@@ -2277,7 +2328,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     return rows;
   };
 
-  const renderRequirementRows = (requirementsList: any[]) => {
+  const renderRequirementRows = (requirementsList: any[], lockCategory?: 'processing' | 'issuance') => {
     return requirementsList.map((reqItem, reqIndex) => {
       const requirementId = reqItem.uniqueId || reqItem.id;
       const isExpanded = expandedDocuments.has(requirementId);
@@ -2343,6 +2394,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             {columnDefinitions.map((col, colIdx) => {
               const isApplicable = checkApplicability(col.type, reqItem);
               const groupRelationshipData = relationshipData[col.groupIndex];
+              const isLocked = isRequirementSectionLocked(col.task, lockCategory);
 
             if (!isApplicable) {
               return (
@@ -2409,7 +2461,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                       <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" title="Checking status..." />
                     )}
 
-                    {reqItem.hasTemplate && (
+                    {reqItem.hasTemplate && !isLocked && (
                       <Button
                         variant="default"
                         size="sm"
@@ -2421,6 +2473,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                         <span className="text-sm font-bold uppercase tracking-wider">Generate</span>
                       </Button>
                     )}
+                    {isLocked && (
+                      <span title="Locked — stage completed" className="text-slate-400">
+                        <Lock className="h-3.5 w-3.5" />
+                      </span>
+                    )}
                   </div>
                 </TableCell>
               );
@@ -2430,10 +2487,15 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
               <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-3 align-middle">
                 <div className="flex items-center justify-center gap-2.5 w-full">
                   <div className="flex items-center justify-center w-full min-h-[32px]">
-                    {renderDocumentStatus(col.task, reqItem, col.type, col.id, groupRelationshipData)}
+                    {renderDocumentStatus(col.task, reqItem, col.type, col.id, groupRelationshipData, isLocked)}
+                    {isLocked && (
+                      <span title="Locked — stage completed" className="ml-1 text-slate-400">
+                        <Lock className="h-3.5 w-3.5" />
+                      </span>
+                    )}
                   </div>
 
-                  {reqItem.hasTemplate && (
+                  {reqItem.hasTemplate && !isLocked && (
                     <Button
                       variant="default"
                       size="sm"
@@ -2484,6 +2546,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             }
 
             const docs = getDocumentsByType(docId, col.task, col.type, col.id);
+            const isLocked = isRequirementSectionLocked(col.task, lockCategory);
 
             return (
               <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-3 align-middle">
@@ -2509,52 +2572,61 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                           variant="ghost"
                           size="sm"
                           className="h-6 w-9 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded"
-                          onClick={() => handleViewDocuments(docs, docMetadata, col, requirementId)}
+                          onClick={() => handleViewDocuments(docs, docMetadata, col, requirementId, isLocked)}
                           title={`View ${docs.length} document(s)`}
                         >
                           <Eye className="h-4 w-4" />
                           {docs.length > 1 && <span className="text-sm font-bold ml-1">{docs.length}</span>}
                         </Button>
-                        <div className="w-[1px] h-4 bg-slate-200" />
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-9 p-0 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
-                          onClick={(e) => {
-                            e.stopPropagation();
+                        {!isLocked && (
+                          <>
+                            <div className="w-[1px] h-4 bg-slate-200" />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-9 p-0 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
+                              onClick={(e) => {
+                                e.stopPropagation();
 
-                            console.log('DEBUG: Composite Sub-Doc Upload Clicked', {
-                              parentRequirement: reqItem.name,
-                              targetDocMetadata: docMetadata,
-                              docId: docId
-                            });
+                                console.log('DEBUG: Composite Sub-Doc Upload Clicked', {
+                                  parentRequirement: reqItem.name,
+                                  targetDocMetadata: docMetadata,
+                                  docId: docId
+                                });
 
-                            let personName = col.label;
-                            if (!personName || personName === 'Unknown Person') {
-                              personName = individualNames[col.task?.individual_id] ||
-                                individualNames[col.task?.applicant_details?.id] ||
-                                col.task?.applicant_details?.name ||
-                                'Individual';
-                            }
+                                let personName = col.label;
+                                if (!personName || personName === 'Unknown Person') {
+                                  personName = individualNames[col.task?.individual_id] ||
+                                    individualNames[col.task?.applicant_details?.id] ||
+                                    col.task?.applicant_details?.name ||
+                                    'Individual';
+                                }
 
-                            setSelectedDocForUpload({
-                              doc: docMetadata,
-                              fields: docMetadata?.fields || [],
-                              person: {
-                                full_name: personName,
-                                id: col.id,
-                                type: isCompanyType(col.type) ? 'company' : 'individual'
-                              },
-                              task: col.task,
-                              columnType: col.type,
-                              columnId: col.id
-                            });
-                            setShowUploadModal(true);
-                          }}
-                          title={`Upload additional ${docMetadata?.display_name || 'Document'}`}
-                        >
-                          <UploadCloud className="h-4 w-4" />
-                        </Button>
+                                setSelectedDocForUpload({
+                                  doc: docMetadata,
+                                  fields: docMetadata?.fields || [],
+                                  person: {
+                                    full_name: personName,
+                                    id: col.id,
+                                    type: isCompanyType(col.type) ? 'company' : 'individual'
+                                  },
+                                  task: col.task,
+                                  columnType: col.type,
+                                  columnId: col.id
+                                });
+                                setShowUploadModal(true);
+                              }}
+                              title={`Upload additional ${docMetadata?.display_name || 'Document'}`}
+                            >
+                              <UploadCloud className="h-4 w-4" />
+                            </Button>
+                          </>
+                        )}
+                        {isLocked && (
+                          <span title="Locked — stage completed" className="px-1 text-slate-400">
+                            <Lock className="h-4 w-4" />
+                          </span>
+                        )}
                       </div>
                     </>
                   ) : (
@@ -2562,6 +2634,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                       <Badge variant="outline" className="text-sm uppercase font-bold px-2.5 py-1 border-amber-200 text-amber-600 bg-amber-50 shadow-sm">
                         Missing
                       </Badge>
+                      {!isLocked && (
                       <Button
                         variant="outline"
                         size="sm"
@@ -2602,6 +2675,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                         <UploadCloud className="h-3.5 w-3.5" />
                         <span className="text-sm font-bold uppercase tracking-wider">Upload</span>
                       </Button>
+                      )}
                     </>
                   )}
                 </div>
@@ -2700,8 +2774,15 @@ return (
                   </p>
                 </div>
 
-                <div className="text-sm font-medium bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-100">
-                  {previewingDocuments?.documents?.length || 0} File(s)
+                <div className="flex items-center gap-2">
+                  {previewingDocuments?.locked && (
+                    <Badge variant="outline" className="text-[10px] uppercase font-bold border-slate-300 text-slate-500 bg-slate-100">
+                      Locked
+                    </Badge>
+                  )}
+                  <div className="text-sm font-medium bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-100">
+                    {previewingDocuments?.documents?.length || 0} File(s)
+                  </div>
                 </div>
               </div>
               <DialogDescription className="sr-only">
@@ -2713,6 +2794,7 @@ return (
               <div className="space-y-10 mx-auto">
                 {previewingDocuments?.documents?.map((doc, index) => {
                   const docId = doc.id || `doc-${index}`;
+                  const locked = !!previewingDocuments?.locked;
 
                   return (
                     <div key={docId} className="p-0 lg:p-4">
@@ -2725,10 +2807,10 @@ return (
                         fileName={doc.file_name || 'document.pdf'}
                         expanded={true}
                         showSaveButton={false}
-                        onDelete={() => handleDeleteDocument?.(doc)}
-                        onSave={(data) => handleSaveEditedDocument(doc, data)}
-                        onRetryExtraction={(retryData) => handleInternalRetryExtraction(doc, retryData)}
-                        onDataChange={(fieldName, value) => {
+                        onDelete={locked ? undefined : () => handleDeleteDocument?.(doc)}
+                        onSave={locked ? undefined : (data) => handleSaveEditedDocument(doc, data)}
+                        onRetryExtraction={locked ? undefined : (retryData) => handleInternalRetryExtraction(doc, retryData)}
+                        onDataChange={locked ? undefined : (fieldName, value) => {
                           handlePreviewDataChange(docId, fieldName, value);
                         }}
                         documentTypes={documentTypes}
@@ -2893,7 +2975,7 @@ return (
                         </span>
                       </TableCell>
                     </TableRow>
-                    {expandedSections.processing && renderRequirementRows(groupedRequirements.processing)}
+                    {expandedSections.processing && renderRequirementRows(groupedRequirements.processing, 'processing')}
                   </>
                 )}
 
@@ -2909,7 +2991,7 @@ return (
                         </span>
                       </TableCell>
                     </TableRow>
-                    {expandedSections.issuance && renderRequirementRows(groupedRequirements.issuance)}
+                    {expandedSections.issuance && renderRequirementRows(groupedRequirements.issuance, 'issuance')}
                   </>
                 )}
 
@@ -2926,6 +3008,91 @@ return (
                       </TableCell>
                     </TableRow>
                     {expandedSections.other && renderRequirementRows(groupedRequirements.other)}
+                  </>
+                )}
+
+                {/* Report Docs Section */}
+                {classRequirements?.[0]?.report_doc_defaults && classRequirements[0].report_doc_defaults.length > 0 && (
+                  <>
+                    <TableRow className="bg-emerald-50 hover:bg-emerald-100 cursor-pointer border-l-4 border-l-emerald-500" onClick={() => setExpandedSections(prev => ({ ...prev, reportDocs: !prev.reportDocs }))}>
+                      <TableCell colSpan={totalColumns} className="py-3 px-4">
+                        <span className="flex items-center gap-3">
+                          {expandedSections.reportDocs ? <Minus className="h-4 w-4 text-emerald-600" /> : <Plus className="h-4 w-4 text-emerald-600" />}
+                          <span className="h-6 w-1 bg-emerald-500 rounded-full" />
+                          <span className="font-bold text-emerald-700 uppercase text-xs tracking-wider">Report Documents ({classRequirements[0].report_doc_defaults.length})</span>
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                    {expandedSections.reportDocs && (
+                      <>
+                        {['individual', 'company', 'application'].map(docType => {
+                          const docsOfType = classRequirements[0].report_doc_defaults
+                            .filter((d: any) => d.docType === docType)
+                            .sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+                          if (docsOfType.length === 0) return null;
+                          return (
+                            <React.Fragment key={docType}>
+                              <TableRow className="bg-emerald-50/50">
+                                <TableCell colSpan={totalColumns} className="py-2 px-4">
+                                  <span className="flex items-center gap-2">
+                                    <span className={cn("h-3 w-3 rounded-full", docType === 'individual' ? "bg-blue-500" : docType === 'company' ? "bg-purple-500" : "bg-emerald-500")} />
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                      {docType === 'individual' ? 'Individual Documents' : docType === 'company' ? 'Company Documents' : 'Application Documents'}
+                                    </span>
+                                  </span>
+                                </TableCell>
+                              </TableRow>
+                              {docsOfType.map((doc: any, idx: number) => {
+                                const match = getReportDocSnapshotEntry(doc.documentId);
+                                const records = match ? getReportDocRecords(match.task, match.entry) : [];
+                                const docMetadata = documentMetadataCache.get(doc.documentId);
+
+                                return (
+                                  <TableRow key={doc.id || idx} className="hover:bg-emerald-50/30 border-l-4 border-l-emerald-500">
+                                    <TableCell className="py-2 px-4 text-center font-mono text-xs text-slate-500">
+                                      {doc.order + 1}
+                                    </TableCell>
+                                    <TableCell colSpan={2} className="py-2 px-4">
+                                      <span className="flex items-center gap-2">
+                                        <FileText className="h-4 w-4 text-emerald-600" />
+                                        <span className="text-sm font-medium text-slate-800">{doc.documentName || 'Unknown Document'}</span>
+                                      </span>
+                                    </TableCell>
+                                    <TableCell colSpan={totalColumns - 3} className="py-2 px-4">
+                                      {records.length > 0 ? (
+                                        <div className="flex items-center justify-center gap-2">
+                                          <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">
+                                            Locked In
+                                          </Badge>
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-7 bg-white text-blue-600 border-blue-200 hover:bg-blue-50 shadow-sm flex items-center gap-1.5"
+                                            onClick={() => handleViewDocuments(records, docMetadata || { display_name: doc.documentName }, { label: '' }, undefined, true)}
+                                          >
+                                            <Eye className="h-3.5 w-3.5" />
+                                            <span className="text-xs font-bold uppercase tracking-wider">View</span>
+                                          </Button>
+                                        </div>
+                                      ) : (
+                                        <Badge variant="outline" className={cn(
+                                          "text-[10px]",
+                                          docType === 'individual' ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                          docType === 'company' ? "bg-purple-50 text-purple-700 border-purple-200" :
+                                          "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                        )}>
+                                          Not Available Yet
+                                        </Badge>
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </React.Fragment>
+                          );
+                        })}
+                      </>
+                    )}
                   </>
                 )}
               </>

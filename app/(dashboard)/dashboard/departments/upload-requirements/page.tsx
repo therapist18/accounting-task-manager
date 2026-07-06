@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import React, { useEffect, useState, useMemo, useRef, useCallback } from "react"
 import { cn } from "@/lib/utils"
-import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, Zap, FileType, Database, Code, HelpCircle, Folder, Split, Building2, ChevronsUpDown } from "lucide-react"
+import { Search, Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, Zap, FileType, Database, Code, HelpCircle, Folder, Split, Building2, ChevronsUpDown } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -27,11 +27,28 @@ import { AddRequirementsDialog } from "./components/AddRequirementsDialog"
 import { EditJobQuestionDialog } from "./components/EditJobQuestionDialog"
 import { COMPUTED_FUNCTIONS } from "@/lib/constants/computed-functions"
 import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types"
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup
-} from "@/components/ui/resizable"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+
+const HighlightText = ({ text, highlight }: { text?: string | null, highlight?: string }) => {
+  if (!text) return null;
+  if (!highlight || !highlight.trim()) return <>{text}</>;
+  const searchStr = highlight.trim();
+  const regex = new RegExp(`(${searchStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  const parts = text.split(regex);
+  return (
+    <>
+      {parts.map((part, i) =>
+        regex.test(part) ? (
+          <mark key={i} className="bg-yellow-200 text-slate-900 rounded px-0.5 font-medium">
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </>
+  );
+};
 
 interface Department {
   id: string | number
@@ -106,6 +123,15 @@ interface JobQuestion {
   linkedToColumn?: 'duration' | 'renewal_status' | null // Links question answer to direct task column
 }
 
+interface ReportDocDefault {
+  id: string
+  documentId: string
+  documentName?: string
+  docType: 'individual' | 'company' | 'application'
+  order: number
+  isVisible: boolean
+}
+
 interface ApiRequirement {
   id?: string
   name: string
@@ -142,6 +168,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const [activeSubclass, setActiveSubclass] = useState<Record<string, string>>({})
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
   const [expandedWebDataRows, setExpandedWebDataRows] = useState<Set<string>>(new Set())
+  const [searchQuery, setSearchQuery] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingRequirement, setEditingRequirement] = useState<ApiRequirement | null>(null)
@@ -163,9 +190,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const [pendingQuestionClientReqs, setPendingQuestionClientReqs] = useState<Record<string, boolean>>({});
   const [pendingRequirementClientReqs, setPendingRequirementClientReqs] = useState<Record<string, boolean>>({});
   const [pendingWebdataClientReqs, setPendingWebdataClientReqs] = useState<Record<string, Record<number, { value: boolean; arrayItems?: Record<number, boolean> }>>>({});
+  const [reportDocDefaults, setReportDocDefaults] = useState<ReportDocDefault[]>([]);
   const sidebarPanelRef = useRef(null);
-
-  // Add the programmatic toggle handler
   const handleSidebarToggle = useCallback(() => {
     const panel = sidebarPanelRef.current;
     if (panel) {
@@ -198,11 +224,13 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     const reqs = (currentSubclass ? currentSubclass.requirements : currentClass ? currentClass.requirements : currentSubdept.upload_requirements) || []
     const questions = (currentSubclass ? currentSubclass.job_specific_questions : currentClass ? currentClass.job_specific_questions : currentSubdept.job_specific_questions) || []
 
-    return { currentDept, currentSubdept, currentClass, currentSubclass, reqs, questions }
+    const reportDocDefaults = (currentSubclass ? currentSubclass.report_doc_defaults : currentClass ? currentClass.report_doc_defaults : currentSubdept.report_doc_defaults) || []
+
+    return { currentDept, currentSubdept, currentClass, currentSubclass, reqs, questions, reportDocDefaults }
   }, [departments, activeDept, activeSubdept, activeClass, activeSubclass])
 
-  // --- 2. DESTUCTURE FOR DIALOGS (Solves 'is not defined' error) ---
-  const { currentDept, currentSubdept, currentClass, currentSubclass, reqs, questions } = activeSelection
+  // --- 2. DESTUCTURE FOR DIALOGS ---
+  const { currentDept, currentSubdept, currentClass, currentSubclass, reqs, questions, reportDocDefaults: activeReportDocDefaults } = activeSelection
 
   // Filter automations to only those linked to the current job level's requirements
   const jobLevelAutomations = useMemo(() => {
@@ -330,7 +358,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
             ...subdept,
             classes: resolvedClasses,
             upload_requirements: await mapRequirementsData(subDeptRec),
-            job_specific_questions: subDeptRec?.job_specific_questions || []
+            job_specific_questions: subDeptRec?.job_specific_questions || [],
+            report_doc_defaults: subDeptRec?.report_doc_defaults || []
           }
         }))
         // IMPORTANT: Populate both tm_subdepartments AND subdepartments for sidebar compatibility
@@ -401,6 +430,32 @@ export default function UploadRequirements({ departments: initialDepartments }: 
 
   useEffect(() => { refreshDepartments() }, [])
 
+  useEffect(() => {
+    const fetchReportDocDefaults = async () => {
+      if (!currentDept || !currentSubdept) { setReportDocDefaults([]); return; }
+      try {
+        const jobLevel: any = {
+          department_id: Number(currentDept.id),
+          subdepartment_id: Number(currentSubdept.id),
+          class_id: currentClass ? Number(currentClass.id) : null,
+          subclass_id: currentSubclass ? Number(currentSubclass.id) : null,
+          level: currentSubclass ? 4 : currentClass ? 3 : 2
+        };
+        const { data, error } = await supabase
+          .from('tm_class_requirements')
+          .select('report_doc_defaults')
+          .eq('job_level', JSON.stringify(jobLevel))
+          .maybeSingle();
+        if (error) throw error;
+        setReportDocDefaults((data?.report_doc_defaults || []).sort((a: any, b: any) => (a.order || 0) - (b.order || 0)));
+      } catch (err) {
+        console.error('Error fetching report doc defaults:', err);
+        setReportDocDefaults([]);
+      }
+    };
+    fetchReportDocDefaults();
+  }, [currentDept, currentSubdept, currentClass, currentSubclass]);
+
   const handleDeptClick = (deptId: string) => setActiveDept(String(deptId))
   const handleSubdeptClick = (deptId: string, subdeptId: string) => {
     setActiveSubdept(prev => ({ ...prev, [String(deptId)]: String(subdeptId) }))
@@ -432,6 +487,43 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       : currentClass
         ? { type: 'class', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, classId: currentClass.id, subdepartmentName: currentSubdept.name, className: currentClass.name, jobLevel: { department_id: currentDept.id, subdepartment_id: currentSubdept.id, class_id: currentClass.id, subclass_id: null } }
         : { type: 'subdepartment', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, subdepartmentName: currentSubdept.name, jobLevel: { department_id: currentDept.id, subdepartment_id: currentSubdept.id, class_id: null, subclass_id: null } }
+
+    const query = searchQuery.toLowerCase().trim()
+
+    const filteredReqs = reqs.filter(r => {
+      if (!query) return true;
+      const matchName = r.name?.toLowerCase().includes(query)
+      const matchDesc = r.description?.toLowerCase().includes(query)
+      const matchType = r.type?.toLowerCase().includes(query)
+      const matchWebData = r.webdata?.some((wd: any) =>
+        wd.name?.toLowerCase().includes(query) ||
+        wd.variableName?.toLowerCase().includes(query) ||
+        wd.efnsDisplayName?.toLowerCase().includes(query)
+      )
+      return matchName || matchDesc || matchType || matchWebData;
+    })
+
+    const filteredQuestions = questions.filter(q => {
+      if (!query) return true;
+      return q.label?.toLowerCase().includes(query) ||
+             q.type?.toLowerCase().includes(query) ||
+             q.default_value?.toLowerCase().includes(query)
+    })
+
+    const filteredAutomations = jobLevelAutomations.filter(a => {
+      if (!query) return true;
+      if (a.name?.toLowerCase().includes(query)) return true;
+      return a.webdata?.some(wd =>
+        wd.name?.toLowerCase().includes(query) ||
+        wd.variableName?.toLowerCase().includes(query) ||
+        wd.efnsDisplayName?.toLowerCase().includes(query) ||
+        wd.arrayItems?.some((ai: any) =>
+           ai.variableName?.toLowerCase().includes(query) ||
+           ai.displayName?.toLowerCase().includes(query) ||
+           ai.efnsDisplayName?.toLowerCase().includes(query)
+        )
+      );
+    })
 
     return (
       <div className="space-y-8">
@@ -545,45 +637,52 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           <div className="space-y-12">
             <section>
               <div className="flex items-center gap-2 mb-4 font-semibold">General Requirements</div>
-              {reqs.filter(r => r.category === 'general').length > 0
-                ? renderRequirements(reqs.filter(r => r.category === 'general'), targetContext)
+              {filteredReqs.filter(r => r.category === 'general').length > 0
+                ? renderRequirements(filteredReqs.filter(r => r.category === 'general'), targetContext)
                 : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
               }
             </section>
             <section>
               <div className="flex items-center gap-2 mb-4 font-semibold">Processing Requirements</div>
-              {reqs.filter(r => r.category === 'processing' || !r.category).length > 0
-                ? renderRequirements(reqs.filter(r => r.category === 'processing' || !r.category), targetContext)
+              {filteredReqs.filter(r => r.category === 'processing' || !r.category).length > 0
+                ? renderRequirements(filteredReqs.filter(r => r.category === 'processing' || !r.category), targetContext)
                 : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
               }
             </section>
             <section>
               <div className="flex items-center gap-2 mb-4 font-semibold">Issuance Requirements</div>
-              {reqs.filter(r => r.category === 'issuance').length > 0
-                ? renderRequirements(reqs.filter(r => r.category === 'issuance'), targetContext)
+              {filteredReqs.filter(r => r.category === 'issuance').length > 0
+                ? renderRequirements(filteredReqs.filter(r => r.category === 'issuance'), targetContext)
                 : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
               }
             </section>
             <section>
               <div className="flex items-center gap-2 mb-4 font-semibold">Reference Requirements</div>
-              {reqs.filter(r => r.category === 'reference').length > 0
-                ? renderRequirements(reqs.filter(r => r.category === 'reference'), targetContext)
+              {filteredReqs.filter(r => r.category === 'reference').length > 0
+                ? renderRequirements(filteredReqs.filter(r => r.category === 'reference'), targetContext)
                 : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
               }
             </section>
           </div>
-        ) : renderRequirements(reqs, targetContext)}
+        ) : renderRequirements(filteredReqs, targetContext)}
 
         <section className="pt-8 border-t">
           <div className="flex items-center gap-2 mb-4 font-semibold">Job Specific Questions</div>
-          {renderQuestions(questions, targetContext)}
+          {renderQuestions(filteredQuestions, targetContext)}
         </section>
 
         <section className="pt-8 border-t">
           <div className="flex items-center gap-2 mb-4 font-semibold">
             <Database className="h-4 w-4 text-blue-600" /> Web Data Configuration
           </div>
-          {renderWebDataConfigurationSection()}
+          {renderWebDataConfigurationSection(filteredAutomations)}
+        </section>
+
+        <section className="pt-8 border-t">
+          <div className="flex items-center gap-2 mb-4 font-semibold">
+            <FileText className="h-4 w-4 text-emerald-600" /> Report Doc Default
+          </div>
+          {renderReportDocDefaults(targetContext)}
         </section>
        </div>
       </div>
@@ -591,8 +690,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   }
 
   // --- RENDER QUESTIONS HELPER ---
-  const renderQuestions = (questions: JobQuestion[], context: EditingContext) => {
-    const grouped = (questions || []).reduce((acc, q) => {
+  const renderQuestions = (questionsToRender: JobQuestion[], context: EditingContext) => {
+    const grouped = (questionsToRender || []).reduce((acc, q) => {
       const cat = q.category || "General / Uncategorized";
       if (!acc[cat]) acc[cat] = [];
       acc[cat].push(q);
@@ -614,8 +713,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 <TableHead className="border-r">Configuration</TableHead>
                 <TableHead className="w-16 text-center border-r">
                   {(() => {
-                    const total = questions.length;
-                    const checked = questions.filter(q => q.id in pendingQuestionClientReqs ? pendingQuestionClientReqs[q.id] : !!q.is_client_requirement).length;
+                    const total = questionsToRender.length;
+                    const checked = questionsToRender.filter(q => q.id in pendingQuestionClientReqs ? pendingQuestionClientReqs[q.id] : !!q.is_client_requirement).length;
                     const allChecked = total > 0 && checked === total;
                     const someChecked = total > 0 && checked > 0 && checked < total;
                     return (
@@ -624,7 +723,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         <Checkbox
                           checked={allChecked}
                           ref={(el) => { if (el) el.dataset.state = someChecked ? 'indeterminate' : (allChecked ? 'checked' : 'unchecked'); }}
-                          onCheckedChange={(c) => handleToggleAllQuestionsClientRequirement(!!c)}
+                          onCheckedChange={(c) => handleToggleAllQuestionsClientRequirement(!!c, questionsToRender)}
                           className="mx-auto"
                         />
                       </div>
@@ -635,23 +734,31 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               </TableRow>
             </TableHeader>
             <TableBody>
-              {Object.entries(grouped).map(([category, items]) => (
+              {Object.keys(grouped).length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
+                    No matching questions found.
+                  </TableCell>
+                </TableRow>
+              ) : Object.entries(grouped).map(([category, items]) => (
                 <React.Fragment key={category}>
-                  <TableRow className="bg-slate-50 border-y"><TableCell colSpan={9} className="py-2 px-4 font-bold text-xs uppercase text-slate-500">{category}</TableCell></TableRow>
+                  <TableRow className="bg-slate-50 border-y"><TableCell colSpan={10} className="py-2 px-4 font-bold text-xs uppercase text-slate-500">{category}</TableCell></TableRow>
                   {items.map((q, idx) => {
                     const linkedMasterField = q.linked_field_id
                       ? masterFields.find(mf => String(mf.id) === String(q.linked_field_id))
                       : null;
-                    const absoluteIndex = questions.findIndex(item => item.id === q.id);
+                    const absoluteIndex = activeSelection.questions.findIndex(item => item.id === q.id);
                     return (
                       <TableRow key={q.id} className="hover:bg-blue-50/30">
                         <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">{idx + 1}</TableCell>
-                        <TableCell className="border-r font-medium">{q.label}</TableCell>
+                        <TableCell className="border-r font-medium">
+                          <HighlightText text={q.label} highlight={searchQuery} />
+                        </TableCell>
                         <TableCell className="border-r"><Badge variant="outline" className="capitalize bg-slate-100">{q.type}</Badge></TableCell>
                         <TableCell className="border-r">
                           {q.default_value ? (
                             <span className="text-xs font-mono bg-slate-50 px-1.5 py-0.5 rounded border text-slate-600">
-                              {q.default_value}
+                              <HighlightText text={q.default_value} highlight={searchQuery} />
                             </span>
                           ) : (
                             <span className="text-[10px] text-slate-400 italic">None</span>
@@ -706,14 +813,14 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                           <div className="flex justify-end gap-1">
                             <Button
                               variant="ghost" size="icon" className="h-8 w-8 text-slate-400"
-                              disabled={absoluteIndex === 0 || isSubmitting}
+                              disabled={absoluteIndex <= 0 || isSubmitting}
                               onClick={() => handleMoveItem('question', absoluteIndex, 'up', context)}
                             >
                               <ArrowUp className="h-3.5 w-3.5" />
                             </Button>
                             <Button
                               variant="ghost" size="icon" className="h-8 w-8 text-slate-400"
-                              disabled={absoluteIndex === questions.length - 1 || isSubmitting}
+                              disabled={absoluteIndex === -1 || absoluteIndex === activeSelection.questions.length - 1 || isSubmitting}
                               onClick={() => handleMoveItem('question', absoluteIndex, 'down', context)}
                             >
                               <ArrowDown className="h-3.5 w-3.5" />
@@ -747,8 +854,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     )
   }
 
-  // --- RENDER WEB DATA CONFIGURATION HELPER (job-level-scoped automations) ---
-  const renderWebDataConfigurationSection = () => {
+  // --- RENDER WEB DATA CONFIGURATION HELPER ---
+  const renderWebDataConfigurationSection = (automationsToRender: any[]) => {
     return (
       <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
         <div className="overflow-auto max-h-[600px]">
@@ -762,10 +869,20 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               </TableRow>
             </TableHeader>
             <TableBody>
-              {jobLevelAutomations.length > 0 ? (
-                jobLevelAutomations.map((automation, idx) => {
-                  const isExpanded = expandedAutomationConfig.has(automation.id);
+              {automationsToRender.length > 0 ? (
+                automationsToRender.map((automation, idx) => {
                   const fields = automation.webdata || [];
+                  const isExpanded = expandedAutomationConfig.has(automation.id) || (!!searchQuery && fields.some((wd: any) =>
+                    wd.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    wd.variableName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    wd.efnsDisplayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    wd.arrayItems?.some((ai: any) =>
+                      ai.variableName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      ai.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      ai.efnsDisplayName?.toLowerCase().includes(searchQuery.toLowerCase())
+                    )
+                  ));
+
                   return (
                     <React.Fragment key={automation.id}>
                       <TableRow className={cn("hover:bg-slate-50/50 cursor-pointer", isExpanded && "bg-slate-50 border-b-0")} onClick={() => toggleAutomationConfigRow(automation.id)}>
@@ -774,7 +891,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                           <div className="flex items-center gap-2 font-medium">
                             {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
                             <Zap className="h-4 w-4 text-blue-600" />
-                            {automation.name || 'Unnamed Automation'}
+                            <HighlightText text={automation.name || 'Unnamed Automation'} highlight={searchQuery} />
                           </div>
                         </TableCell>
                         <TableCell className="border-r">
@@ -831,7 +948,13 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                                     {fields.map((field: any, fieldIndex: number) => {
                                       const isArray = field.fieldType === 'array';
                                       const arrayItems = isArray ? (field.arrayItems || []) : [];
-                                      const isFieldExpanded = expandedWebDataRows.has(`${automation.id}-${field.variableName}`);
+                                      const isFieldExpanded = expandedWebDataRows.has(`${automation.id}-${field.variableName}`) ||
+                                        (!!searchQuery && arrayItems.some((ai: any) =>
+                                          ai.variableName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                          ai.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                          ai.efnsDisplayName?.toLowerCase().includes(searchQuery.toLowerCase())
+                                        ));
+                                      
                                       return (
                                         <React.Fragment key={fieldIndex}>
                                           <TableRow className={cn("hover:bg-slate-50/50", isArray && "cursor-pointer")} onClick={isArray ? () => {
@@ -845,10 +968,12 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                                             <TableCell className="py-2 text-xs font-mono text-blue-600">
                                               <div className="flex items-center gap-1.5">
                                                 {isArray && (isFieldExpanded ? <ChevronDown className="h-3 w-3 text-slate-400" /> : <ChevronRight className="h-3 w-3 text-slate-400" />)}
-                                                {field.variableName}
+                                                <HighlightText text={field.variableName} highlight={searchQuery} />
                                               </div>
                                             </TableCell>
-                                            <TableCell className="py-2 text-xs font-medium">{field.efnsDisplayName || field.name}</TableCell>
+                                            <TableCell className="py-2 text-xs font-medium">
+                                              <HighlightText text={field.efnsDisplayName || field.name} highlight={searchQuery} />
+                                            </TableCell>
                                             <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{field.fieldType}</Badge></TableCell>
                                             <TableCell className="py-2 text-xs capitalize text-slate-500">{Array.isArray(field.entityTypes) ? field.entityTypes.join(', ') : (field.entityType || '-')}</TableCell>
                                             <TableCell className="py-2 text-xs text-slate-400">
@@ -873,12 +998,12 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                                           {isArray && isFieldExpanded && arrayItems.map((item: any, itemIdx: number) => (
                                             <TableRow key={`${fieldIndex}-item-${itemIdx}`} className="bg-blue-50/30 hover:bg-blue-50/50">
                                               <TableCell className="py-1.5 pl-8 text-[10px] font-mono text-blue-400">
-                                                {field.variableName}[{itemIdx}]
+                                                <HighlightText text={`${field.variableName}[${itemIdx}]`} highlight={searchQuery} />
                                               </TableCell>
                                               <TableCell className="py-1.5 text-[10px] font-medium text-slate-600">
                                                 <div className="flex items-center gap-1.5 pl-2">
                                                   <span className="w-1 h-1 bg-blue-400 rounded-full" />
-                                                  {item.displayName || item.efnsDisplayName || item.variableName}
+                                                  <HighlightText text={item.displayName || item.efnsDisplayName || item.variableName} highlight={searchQuery} />
                                                 </div>
                                               </TableCell>
                                               <TableCell className="py-1.5 text-[10px]"><Badge variant="outline" className="text-[9px] h-4 bg-slate-50">{item.fieldType || 'text'}</Badge></TableCell>
@@ -917,9 +1042,11 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               ) : (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
-                    {reqs.length > 0
-                      ? "No automations linked to this job level's requirements."
-                      : "Select a class/subclass to view linked automations."
+                    {searchQuery 
+                      ? "No matching automations found." 
+                      : reqs.length > 0
+                        ? "No automations linked to this job level's requirements."
+                        : "Select a class/subclass to view linked automations."
                     }
                   </TableCell>
                 </TableRow>
@@ -931,7 +1058,298 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     )
   }
 
-  const renderRequirements = (requirements: RequirementTableEntry[], context: EditingContext) => {
+  // --- RENDER REPORT DOC DEFAULTS HELPER ---
+  const classifyDocType = (doc: any): 'individual' | 'company' | 'application' => {
+    // Classification based on SettingsPage approach using category field
+    const category = (doc.category || '').toLowerCase()
+    if (category.includes('company') || category.includes('corporate')) return 'company'
+    if (category.includes('director') || category.includes('individual') || category.includes('personal')) return 'individual'
+    // Fallback to entity_types if category doesn't match
+    const entityTypes = doc.entity_types || []
+    if (entityTypes.includes('company')) return 'company'
+    if (entityTypes.length > 0) return 'individual'
+    return 'application'
+  }
+
+  const handleAddReportDoc = async (documentId: string) => {
+    if (!editingContext) return
+    try {
+      setIsSubmitting(true)
+      const { data: existing, error: fetchError } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .eq('job_level', JSON.stringify({
+          department_id: Number(editingContext.departmentId),
+          subdepartment_id: Number(editingContext.subdepartmentId),
+          class_id: editingContext.classId ? Number(editingContext.classId) : null,
+          subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
+          level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
+        }))
+        .maybeSingle()
+      if (fetchError) throw fetchError
+
+      const doc = kycDocuments.find(d => String(d.id) === String(documentId))
+      const docType = classifyDocType(doc)
+      const currentDefaults = existing?.report_doc_defaults || []
+      const newEntry: ReportDocDefault = {
+        id: (Date.now()).toString(),
+        documentId,
+        documentName: doc?.display_name || doc?.name || 'Unknown',
+        docType,
+        order: currentDefaults.length,
+        isVisible: true
+      }
+      const updatedDefaults = [...currentDefaults, newEntry]
+
+      if (existing) {
+        const { error: updateError } = await supabase
+          .from('tm_class_requirements')
+          .update({ report_doc_defaults: updatedDefaults, updated_at: new Date().toISOString() })
+          .eq('id', existing.id)
+        if (updateError) throw updateError
+      } else {
+        const { error: insertError } = await supabase
+          .from('tm_class_requirements')
+          .insert({
+            job_level: {
+              department_id: Number(editingContext.departmentId),
+              subdepartment_id: Number(editingContext.subdepartmentId),
+              class_id: editingContext.classId ? Number(editingContext.classId) : null,
+              subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
+              level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
+            },
+            report_doc_defaults: updatedDefaults,
+            created_at: new Date().toISOString()
+          })
+        if (insertError) throw insertError
+      }
+      await refreshDepartments()
+      toast({ title: "Success", description: "Report doc added" })
+    } catch (error) {
+      console.error(error)
+      toast({ title: "Error", description: "Failed to add report doc", variant: "destructive" })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleRemoveReportDoc = async (docId: string) => {
+    if (!editingContext) return
+    try {
+      setIsSubmitting(true)
+      const { data: existing, error: fetchError } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .eq('job_level', JSON.stringify({
+          department_id: Number(editingContext.departmentId),
+          subdepartment_id: Number(editingContext.subdepartmentId),
+          class_id: editingContext.classId ? Number(editingContext.classId) : null,
+          subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
+          level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
+        }))
+        .maybeSingle()
+      if (fetchError) throw fetchError
+      if (!existing) throw new Error('No record found')
+
+      const updatedDefaults = (existing.report_doc_defaults || [])
+        .filter((d: ReportDocDefault) => d.id !== docId)
+        .map((d: ReportDocDefault, i: number) => ({ ...d, order: i }))
+
+      const { error: updateError } = await supabase
+        .from('tm_class_requirements')
+        .update({ report_doc_defaults: updatedDefaults, updated_at: new Date().toISOString() })
+        .eq('id', existing.id)
+      if (updateError) throw updateError
+      await refreshDepartments()
+      toast({ title: "Success", description: "Report doc removed" })
+    } catch (error) {
+      console.error(error)
+      toast({ title: "Error", description: "Failed to remove report doc", variant: "destructive" })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleToggleReportDocVisibility = async (docId: string) => {
+    if (!editingContext) return
+    const updated = reportDocDefaults.map(d =>
+      d.id === docId ? { ...d, isVisible: !d.isVisible } : d
+    )
+    setReportDocDefaults(updated)
+    try {
+      const { data: existing } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .eq('job_level', JSON.stringify({
+          department_id: Number(editingContext.departmentId),
+          subdepartment_id: Number(editingContext.subdepartmentId),
+          class_id: editingContext.classId ? Number(editingContext.classId) : null,
+          subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
+          level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
+        }))
+        .maybeSingle()
+      if (existing) {
+        await supabase
+          .from('tm_class_requirements')
+          .update({ report_doc_defaults: updated, updated_at: new Date().toISOString() })
+          .eq('id', existing.id)
+      }
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  const handleMoveReportDoc = async (index: number, direction: 'up' | 'down') => {
+    if (!editingContext) return
+    const items = [...reportDocDefaults]
+    const targetIndex = direction === 'up' ? index - 1 : index + 1
+    if (targetIndex < 0 || targetIndex >= items.length) return
+    ;[items[index], items[targetIndex]] = [items[targetIndex], items[index]]
+    const reordered = items.map((d, i) => ({ ...d, order: i }))
+    setReportDocDefaults(reordered)
+    try {
+      const { data: existing } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .eq('job_level', JSON.stringify({
+          department_id: Number(editingContext.departmentId),
+          subdepartment_id: Number(editingContext.subdepartmentId),
+          class_id: editingContext.classId ? Number(editingContext.classId) : null,
+          subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
+          level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
+        }))
+        .maybeSingle()
+      if (existing) {
+        await supabase
+          .from('tm_class_requirements')
+          .update({ report_doc_defaults: reordered, updated_at: new Date().toISOString() })
+          .eq('id', existing.id)
+      }
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  const renderReportDocDefaults = (context: EditingContext) => {
+    const groupedDocs = {
+      individual: reportDocDefaults.filter(d => d.docType === 'individual').sort((a, b) => a.order - b.order),
+      company: reportDocDefaults.filter(d => d.docType === 'company').sort((a, b) => a.order - b.order),
+      application: reportDocDefaults.filter(d => d.docType === 'application').sort((a, b) => a.order - b.order)
+    }
+
+    const getDocTypeBadge = (docType: string) => {
+      switch (docType) {
+        case 'individual':
+          return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px]">Individual</Badge>
+        case 'company':
+          return <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 text-[10px]">Company</Badge>
+        case 'application':
+          return <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]">Application</Badge>
+        default:
+          return <Badge variant="outline" className="text-[10px]">Unknown</Badge>
+      }
+    }
+
+    return (
+      <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
+        <div className="overflow-auto max-h-[600px]">
+          <Table>
+            <TableHeader className="bg-slate-50 sticky top-0 z-10">
+              <TableRow>
+                <TableHead className="w-12 text-center border-r">#</TableHead>
+                <TableHead className="min-w-[200px] border-r">Document Name</TableHead>
+                <TableHead className="border-r">Doc Type</TableHead>
+                <TableHead className="border-r text-center">Ordering</TableHead>
+                <TableHead className="border-r text-center">Visible</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {reportDocDefaults.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
+                    No report documents configured. Add KYC documents to display by default in reports.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                Object.entries(groupedDocs).map(([groupKey, docs]) => (
+                  <React.Fragment key={groupKey}>
+                    {docs.length > 0 && (
+                      <TableRow className="bg-slate-100/80 border-y">
+                        <TableCell colSpan={6} className="py-2 px-4 font-bold text-xs uppercase text-slate-500">
+                          {groupKey === 'individual' ? 'Individual Documents' :
+                           groupKey === 'company' ? 'Company Documents' : 'Application Documents'}
+                          <span className="text-slate-400 font-normal ml-2">({docs.length})</span>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {docs.map((doc, idx) => (
+                      <TableRow key={doc.id} className="hover:bg-slate-50/50">
+                        <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">
+                          {doc.order + 1}
+                        </TableCell>
+                        <TableCell className="border-r font-medium text-sm">
+                          {doc.documentName || 'Unknown Document'}
+                        </TableCell>
+                        <TableCell className="border-r">{getDocTypeBadge(doc.docType)}</TableCell>
+                        <TableCell className="border-r text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <Button
+                              variant="ghost" size="icon" className="h-7 w-7 text-slate-400"
+                              disabled={doc.order <= 0 || isSubmitting}
+                              onClick={() => handleMoveReportDoc(reportDocDefaults.indexOf(doc), 'up')}
+                            >
+                              <ArrowUp className="h-3.5 w-3.5" />
+                            </Button>
+                            <span className="text-xs font-mono text-slate-500 w-6 text-center">{doc.order + 1}</span>
+                            <Button
+                              variant="ghost" size="icon" className="h-7 w-7 text-slate-400"
+                              disabled={doc.order >= reportDocDefaults.length - 1 || isSubmitting}
+                              onClick={() => handleMoveReportDoc(reportDocDefaults.indexOf(doc), 'down')}
+                            >
+                              <ArrowDown className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                        <TableCell className="border-r text-center">
+                          <Button
+                            variant="ghost" size="icon" className="h-7 w-7 mx-auto"
+                            onClick={() => handleToggleReportDocVisibility(doc.id)}
+                          >
+                            {doc.isVisible ? (
+                              <Eye className="h-4 w-4 text-emerald-600" />
+                            ) : (
+                              <EyeOff className="h-4 w-4 text-slate-400" />
+                            )}
+                          </Button>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500"
+                            onClick={() => handleRemoveReportDoc(doc.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </React.Fragment>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        {/* Info message - users should use the Add button to add report docs */}
+        <div className="p-3 border-t bg-slate-50/50">
+          <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
+            <FileText className="h-4 w-4 text-emerald-500" />
+            <span>Use the <strong className="text-emerald-600">+</strong> button above to add report documents via the Configuration Manager.</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const renderRequirements = (requirementsToRender: RequirementTableEntry[], context: EditingContext) => {
     return (
       <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
         <div className="overflow-auto max-h-[600px]">
@@ -950,8 +1368,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 <TableHead className="w-16 text-center border-r">Apply</TableHead>
                 <TableHead className="w-16 text-center border-r">
                   {(() => {
-                    const total = requirements.length;
-                    const checked = requirements.filter(r => (r.id || '') in pendingRequirementClientReqs ? pendingRequirementClientReqs[r.id || ''] : !!r.is_client_requirement).length;
+                    const total = requirementsToRender.length;
+                    const checked = requirementsToRender.filter(r => (r.id || '') in pendingRequirementClientReqs ? pendingRequirementClientReqs[r.id || ''] : !!r.is_client_requirement).length;
                     const allChecked = total > 0 && checked === total;
                     const someChecked = total > 0 && checked > 0 && checked < total;
                     return (
@@ -960,7 +1378,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         <Checkbox
                           checked={allChecked}
                           ref={(el) => { if (el) el.dataset.state = someChecked ? 'indeterminate' : (allChecked ? 'checked' : 'unchecked'); }}
-                          onCheckedChange={(c) => handleToggleAllRequirementsClientRequirement(!!c)}
+                          onCheckedChange={(c) => handleToggleAllRequirementsClientRequirement(!!c, requirementsToRender)}
                           className="mx-auto"
                         />
                       </div>
@@ -971,19 +1389,30 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               </TableRow>
             </TableHeader>
             <TableBody>
-              {requirements.length > 0 ? (
-                requirements.map((req, idx) => {
+              {requirementsToRender.length > 0 ? (
+                requirementsToRender.map((req, idx) => {
                   const hasWebData = req.webdata && req.webdata.length > 0;
-                  const isExpanded = expandedWebDataRows.has(req.id || `temp-${idx}`);
-                  const absoluteIndex = reqs.findIndex(item => item.id === req.id);
+                  const matchesSearch = searchQuery && req.webdata?.some((wd: any) =>
+                    wd.variableName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    wd.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    wd.efnsDisplayName?.toLowerCase().includes(searchQuery.toLowerCase())
+                  );
+                  const isExpanded = expandedWebDataRows.has(req.id || `temp-${idx}`) || !!matchesSearch;
+                  const absoluteIndex = activeSelection.reqs.findIndex(item => item.id === req.id);
 
                   return (
                     <React.Fragment key={req.id || idx}>
                       <TableRow className={cn("hover:bg-slate-50/50", isExpanded && "bg-slate-50 border-b-0")}>
                         <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">{idx + 1}</TableCell>
                         <TableCell className="border-r">
-                          <div className="font-medium">{req.name}</div>
-                          {req.description && <div className="text-xs text-muted-foreground line-clamp-1">{req.description}</div>}
+                          <div className="font-medium">
+                            <HighlightText text={req.name} highlight={searchQuery} />
+                          </div>
+                          {req.description && (
+                            <div className="text-xs text-muted-foreground line-clamp-1">
+                              <HighlightText text={req.description} highlight={searchQuery} />
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="border-r">{getTypeDisplay(req)}</TableCell>
                         <TableCell className="border-r">{getContextDisplay(req)}</TableCell>
@@ -1001,7 +1430,6 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         </TableCell>
                         <TableCell className="border-r">
                           {(() => {
-                            const hasWebData = req.webdata && req.webdata.length > 0;
                             return hasWebData ? (
                               <Badge
                                 variant={isExpanded ? "default" : "outline"}
@@ -1050,14 +1478,14 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                           <div className="flex justify-end gap-1">
                             <Button
                               variant="ghost" size="icon" className="h-8 w-8 text-slate-400"
-                              disabled={absoluteIndex === 0 || isSubmitting}
+                              disabled={absoluteIndex <= 0 || isSubmitting}
                               onClick={() => handleMoveItem('requirement', absoluteIndex, 'up', context)}
                             >
                               <ArrowUp className="h-3.5 w-3.5" />
                             </Button>
                             <Button
                               variant="ghost" size="icon" className="h-8 w-8 text-slate-400"
-                              disabled={absoluteIndex === reqs.length - 1 || isSubmitting}
+                              disabled={absoluteIndex === -1 || absoluteIndex === activeSelection.reqs.length - 1 || isSubmitting}
                               onClick={() => handleMoveItem('requirement', absoluteIndex, 'down', context)}
                             >
                               <ArrowDown className="h-3.5 w-3.5" />
@@ -1113,8 +1541,12 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                                   <TableBody>
                                     {req.webdata.map((field, i) => (
                                       <TableRow key={i} className="hover:bg-slate-50/50">
-                                        <TableCell className="py-2 text-xs font-mono text-blue-600">{field.variableName}</TableCell>
-                                        <TableCell className="py-2 text-xs font-medium">{field.efnsDisplayName || field.name}</TableCell>
+                                        <TableCell className="py-2 text-xs font-mono text-blue-600">
+                                          <HighlightText text={field.variableName} highlight={searchQuery} />
+                                        </TableCell>
+                                        <TableCell className="py-2 text-xs font-medium">
+                                          <HighlightText text={field.efnsDisplayName || field.name} highlight={searchQuery} />
+                                        </TableCell>
                                         <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{field.fieldType}</Badge></TableCell>
                                         <TableCell className="py-2 text-xs capitalize text-slate-500">{field.entityType}</TableCell>
                                         <TableCell className="py-2 text-xs text-slate-400">
@@ -1139,7 +1571,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               ) : (
                 <TableRow>
                   <TableCell colSpan={12} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
-                    No requirements found in this section.
+                    {searchQuery ? "No matching requirements found." : "No requirements found in this section."}
                   </TableCell>
                 </TableRow>
               )}
@@ -1264,6 +1696,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         const updateData: any = { updated_at: payload.updated_at };
         if (payload.requirements) updateData.requirements = payload.requirements;
         if (payload.job_specific_questions) updateData.job_specific_questions = payload.job_specific_questions;
+        if (payload.report_doc_defaults) updateData.report_doc_defaults = payload.report_doc_defaults;
 
         const { error: updateError } = await supabase
           .from('tm_class_requirements')
@@ -1362,15 +1795,15 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   };
 
   // --- Select All / Deselect All Handlers (local state only) ---
-  const handleToggleAllQuestionsClientRequirement = async (checked: boolean) => {
-    const updates: Record<string, boolean> = {};
-    questions.forEach(q => { updates[q.id] = checked; });
+  const handleToggleAllQuestionsClientRequirement = async (checked: boolean, list: JobQuestion[]) => {
+    const updates: Record<string, boolean> = { ...pendingQuestionClientReqs };
+    list.forEach(q => { updates[q.id] = checked; });
     setPendingQuestionClientReqs(updates);
   };
 
-  const handleToggleAllRequirementsClientRequirement = async (checked: boolean) => {
-    const updates: Record<string, boolean> = {};
-    requirements.forEach(r => { updates[r.id || ''] = checked; });
+  const handleToggleAllRequirementsClientRequirement = async (checked: boolean, list: RequirementTableEntry[]) => {
+    const updates: Record<string, boolean> = { ...pendingRequirementClientReqs };
+    list.forEach(r => { updates[r.id || ''] = checked; });
     setPendingRequirementClientReqs(updates);
   };
 
@@ -1630,7 +2063,23 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         <ResizablePanel defaultSize={80}>
           <main className="h-full flex flex-col overflow-hidden">
             <div className="h-full overflow-auto p-4 pb-20 space-y-4">
-              <header className="flex items-center justify-between"><div><h2 className="text-3xl font-bold tracking-tight">Requirement Logic Manager</h2></div></header>
+              <header className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-3xl font-bold tracking-tight">Requirement Logic Manager</h2>
+                </div>
+                {activeDept && (
+                  <div className="relative w-80">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="search"
+                      placeholder="Search all sections..."
+                      className="pl-9 bg-white"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                  </div>
+                )}
+              </header>
               {!activeDept ? <Card className="p-20 text-center"><FileText className="mx-auto h-12 w-12 text-slate-300 mb-4" /><p>Select a department to manage logic.</p></Card> : renderMainContent()}
 
               {/* Floating Submit Bar for Client Requirement Changes */}

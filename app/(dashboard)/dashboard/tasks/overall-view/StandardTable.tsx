@@ -44,6 +44,8 @@ interface StandardTableProps {
   renderCellContent: (row: any, task: any, columnType?: 'date' | 'actions' | 'combined') => React.ReactNode
   officers?: any[]
   readOnly?: boolean
+  showStats?: boolean
+  reportDocDefaults?: any[]
 }
 
 const DEFAULT_COL_WIDTH = 180;
@@ -56,8 +58,10 @@ export const StandardTable: React.FC<StandardTableProps> = ({
   sortConfig, dataLoading = {}, error,
   getCellContent, getSortedTasks, getDocumentForTaskStage, requestSort,
   onTaskAction, getKycFields, toggleStageExpansion,
-  toggleDocumentExpansion, toggleDependantsExpansion, renderCellContent,
-  readOnly = false
+  toggleDocumentExpansion, toggleDependantsExpansion,   renderCellContent,
+  readOnly = false,
+  showStats = true,
+  reportDocDefaults = []
 }) => {
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
   const [selectedRequirement, setSelectedRequirement] = useState<any>(null);
@@ -154,9 +158,27 @@ export const StandardTable: React.FC<StandardTableProps> = ({
         });
       }
     });
+
+    // Add Report Doc columns
+    if (reportDocDefaults && reportDocDefaults.length > 0) {
+      reportDocDefaults.forEach(doc => {
+        cols.push({ id: `report-doc-${doc.id}`, type: 'report_doc', reportDoc: doc });
+      });
+    }
+
     cols.push({ id: 'actions', type: 'actions' });
     return cols;
   }, [visibleCaseDetailHeaders, visibleStages, expandedStages, expandedDocuments, documentFields]);
+
+  // Track the boundaries of the "Stages" section for distinctive borders
+  const stageColsIndices = useMemo(() => {
+    return flatColumns
+      .map((c, i) => (['stage', 'document', 'field'].includes(c.type) ? i : -1))
+      .filter(i => i !== -1);
+  }, [flatColumns]);
+
+  const firstStageColIdx = stageColsIndices.length > 0 ? stageColsIndices[0] : -1;
+  const lastStageColIdx = stageColsIndices.length > 0 ? stageColsIndices[stageColsIndices.length - 1] : -1;
 
   // --- STATS CALCULATOR ---
   const getColStats = useCallback((col: any) => {
@@ -254,8 +276,8 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                       ...(idx === 1 ? { left: secondCaseColLeftPx } : {})
                     }}
                   >
-                    <div className="flex items-center justify-between gap-2 overflow-hidden">
-                      <span className="text-[11px] font-semibold text-white uppercase tracking-wider truncate" title={header.label}>{header.label}</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold text-white uppercase tracking-wider whitespace-normal break-words leading-snug text-left" title={header.label}>{header.label}</span>
                       <button
                         onClick={() => requestSort(header.id)}
                         className="shrink-0 rounded hover:bg-white/20 text-white p-0.5 transition-all ml-1"
@@ -271,16 +293,20 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                 );
               })}
 
-              {visibleStages.map(stage => (
+              {visibleStages.map((stage, i) => (
                 <TableHead
                   key={stage.id}
                   colSpan={getStageColSpan(stage)}
                   rowSpan={getStageRowSpan(stage)}
-                  className={cn("border-r border-b border-white/30 text-center px-2 py-2.5 bg-[#376bae]")}
+                  className={cn(
+                    "border-r border-b border-white/30 text-center px-2 py-2.5 bg-[#376bae]",
+                    i === 0 && "border-l-[3px] border-l-blue-400",
+                    i === visibleStages.length - 1 && "border-r-[3px] border-r-blue-400"
+                  )}
                   style={!expandedStages.has(stage.id.toString()) ? { width: DEFAULT_COL_WIDTH, minWidth: DEFAULT_COL_WIDTH, maxWidth: DEFAULT_COL_WIDTH } : {}}
                 >
                   <div className="flex items-center justify-center gap-2">
-                    <span className="text-[11px] font-semibold text-white uppercase tracking-wider truncate" title={stage.name}>{stage.name}</span>
+                    <span className="text-[11px] font-semibold text-white uppercase tracking-wider whitespace-normal break-words leading-snug" title={stage.name}>{stage.name}</span>
                     <div className="flex items-center gap-1 shrink-0">
                       <button onClick={() => requestSort(`stage_${stage.id}`)} className="text-white" title="Sort by Stage">
                         {sortConfig?.key === `stage_${stage.id}`
@@ -297,6 +323,21 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                   </div>
                 </TableHead>
               ))}
+
+              {/* Report Doc Default Columns */}
+              {reportDocDefaults && reportDocDefaults.length > 0 && (
+                <>
+                  <TableHead
+                    colSpan={reportDocDefaults.length}
+                    rowSpan={1}
+                    className="border-r border-b border-white/30 text-center px-2 py-2.5 bg-emerald-600 border-l-[3px] border-l-emerald-400"
+                    style={{ width: DEFAULT_COL_WIDTH * reportDocDefaults.length, minWidth: DEFAULT_COL_WIDTH * reportDocDefaults.length }}
+                  >
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-100">Report Documents</span>
+                  </TableHead>
+                </>
+              )}
+
               <TableHead
                 rowSpan={3}
                 className="border-b border-white/30 text-center px-4 py-2.5 bg-[#376bae] sticky right-0 z-30 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]"
@@ -308,23 +349,34 @@ export const StandardTable: React.FC<StandardTableProps> = ({
 
             {/* ROW 2: Documents */}
             <TableRow className="hover:bg-transparent border-0">
-              {visibleStages.flatMap(stage => {
+              {visibleStages.flatMap((stage, stageIdx) => {
                 if (!expandedStages.has(stage.id.toString()) || !stage.documents?.length) return [];
-                return stage.documents.map(doc => {
+                
+                const isFirstStage = stageIdx === 0;
+                const isLastStage = stageIdx === visibleStages.length - 1;
+
+                return stage.documents.map((doc, docIdx) => {
                   const kycData = kycDocuments.get(doc.kycId);
                   const docDisplayName = kycData?.display_name || kycData?.name || doc.display_name || doc.name || 'Document';
                   const isExpanded = expandedDocuments.has(doc.id.toString());
+                  
+                  const isFirstDoc = isFirstStage && docIdx === 0;
+                  const isLastDoc = isLastStage && docIdx === stage.documents.length - 1;
 
                   return (
                     <TableHead
                       key={`doc-${doc.id}`}
                       rowSpan={isExpanded ? 1 : 2}
                       colSpan={isExpanded ? 1 + (documentFields.get(doc.id.toString())?.length || 0) : 1}
-                      className="text-center px-3 py-2 border-r border-b border-white/30 bg-[#376bae]"
+                      className={cn(
+                        "text-center px-3 py-2 border-r border-b border-white/30 bg-[#376bae]",
+                        isFirstDoc && "border-l-[3px] border-l-blue-400",
+                        isLastDoc && "border-r-[3px] border-r-blue-400"
+                      )}
                       style={!isExpanded ? { width: DEFAULT_COL_WIDTH, minWidth: DEFAULT_COL_WIDTH, maxWidth: DEFAULT_COL_WIDTH } : {}}
                     >
                       <div className="flex items-center justify-center gap-2">
-                        <span className="text-[11px] font-semibold text-white uppercase tracking-wider truncate" title={docDisplayName}>{docDisplayName}</span>
+                        <span className="text-[11px] font-semibold text-white uppercase tracking-wider whitespace-normal break-words leading-snug" title={docDisplayName}>{docDisplayName}</span>
                         {doc.kycId && (
                           <button onClick={() => toggleDocumentExpansion(doc.id.toString())} className="shrink-0 rounded bg-slate-600 hover:bg-slate-500 text-white p-0.5">
                             {isExpanded ? <Minus size={10} /> : <Plus size={10} />}
@@ -339,39 +391,55 @@ export const StandardTable: React.FC<StandardTableProps> = ({
 
             {/* ROW 3: Fields */}
             <TableRow className="hover:bg-transparent border-0">
-              {visibleStages.flatMap(stage => {
+              {visibleStages.flatMap((stage, stageIdx) => {
                 if (!expandedStages.has(stage.id.toString()) || !stage.documents?.length) return [];
-                return stage.documents.flatMap(doc => {
+                
+                const isFirstStage = stageIdx === 0;
+                const isLastStage = stageIdx === visibleStages.length - 1;
+
+                return stage.documents.flatMap((doc, docIdx) => {
                   if (!expandedDocuments.has(doc.id.toString())) return [];
+                  
                   const fields = documentFields.get(doc.id.toString()) || [];
+                  const isFirstDoc = isFirstStage && docIdx === 0;
+                  const isLastDoc = isLastStage && docIdx === stage.documents.length - 1;
 
                   const docActionHeader = (
                     <TableHead
                       key={`doc-action-${doc.id}`}
-                      className="text-center px-3 py-2 border-r border-b border-white/30 bg-[#376bae]"
+                      className={cn(
+                        "text-center px-3 py-2 border-r border-b border-white/30 bg-[#376bae]",
+                        isFirstDoc && "border-l-[3px] border-l-blue-400",
+                        isLastDoc && fields.length === 0 && "border-r-[3px] border-r-blue-400"
+                      )}
                       style={{ width: DEFAULT_COL_WIDTH, minWidth: DEFAULT_COL_WIDTH, maxWidth: DEFAULT_COL_WIDTH }}
                     >
                       <span className="text-[10px] font-semibold text-white uppercase tracking-wider">Status</span>
                     </TableHead>
                   );
 
-                  const fieldHeaders = fields.map(field => (
-                    <TableHead
-                      key={`field-${field.id}`}
-                      className="text-center px-3 py-2 border-r border-b border-white/30 bg-[#376bae]"
-                      style={{ width: DEFAULT_COL_WIDTH, minWidth: DEFAULT_COL_WIDTH, maxWidth: DEFAULT_COL_WIDTH }}
-                    >
-                      <span className="text-[10px] font-semibold text-white uppercase tracking-wider truncate" title={field.fieldName}>{field.fieldName}</span>
-                    </TableHead>
-                  ));
+                  const fieldHeaders = fields.map((field, fIdx) => {
+                    const isLastField = isLastDoc && fIdx === fields.length - 1;
+                    return (
+                      <TableHead
+                        key={`field-${field.id}`}
+                        className={cn(
+                          "text-center px-3 py-2 border-r border-b border-white/30 bg-[#376bae]",
+                          isLastField && "border-r-[3px] border-r-blue-400"
+                        )}
+                        style={{ width: DEFAULT_COL_WIDTH, minWidth: DEFAULT_COL_WIDTH, maxWidth: DEFAULT_COL_WIDTH }}
+                      >
+                        <span className="text-[10px] font-semibold text-white uppercase tracking-wider whitespace-normal break-words leading-snug" title={field.fieldName}>{field.fieldName}</span>
+                      </TableHead>
+                    );
+                  });
                   return [docActionHeader, ...fieldHeaders];
                 });
               })}
             </TableRow>
 
             {/* --- STATS ROWS --- */}
-            {/* By placing them in TableHeader, they naturally flow below the main headers and stick together natively */}
-            {!dataLoading.tasks && taskRows.length > 0 && [
+            {!dataLoading.tasks && taskRows.length > 0 && showStats && [
               { label: 'Total', bg: 'bg-slate-100', text: 'text-slate-800' },
               { label: 'Completed', bg: 'bg-emerald-50', text: 'text-emerald-800' },
               { label: 'Missing', bg: 'bg-rose-50', text: 'text-rose-800' }
@@ -381,15 +449,20 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                   const s = getColStats(col);
                   const val = stat.label === 'Total' ? s.total : stat.label === 'Completed' ? s.completed : s.missing;
                   const colWidth = col.type === 'case' ? (col.header.width || DEFAULT_COL_WIDTH) : (col.type === 'actions' ? ACTION_WIDTH : DEFAULT_COL_WIDTH);
+                  
+                  const isStageStart = idx === firstStageColIdx;
+                  const isStageEnd = idx === lastStageColIdx;
 
                   return (
                     <TableHead
                       key={col.id}
                       className={cn(
-                        "text-center py-2 px-2 border-r border-b border-slate-200 text-xs font-bold",
+                        "text-center py-1 px-2 border-r border-b border-slate-200 text-[11px] font-bold h-7",
                         stat.bg, stat.text,
                         col.type === 'actions' && "sticky right-0 z-30 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]",
-                        idx < 2 && getStickyClasses(idx)
+                        idx < 2 && getStickyClasses(idx),
+                        isStageStart && "border-l-[3px] border-l-blue-400",
+                        isStageEnd && "border-r-[3px] border-r-blue-400"
                       )}
                       style={{
                         width: colWidth, minWidth: colWidth, maxWidth: colWidth,
@@ -415,6 +488,13 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                 <TableRow key={row.key} className={cn("group border-0 transition-colors", row.type === 'dependant' ? "bg-orange-50/40" : (rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/50"), "hover:bg-blue-50/50")}>
                   {flatColumns.map((col, idx) => {
                     const colWidth = col.type === 'case' ? (col.header.width || DEFAULT_COL_WIDTH) : (col.type === 'actions' ? ACTION_WIDTH : DEFAULT_COL_WIDTH);
+                    
+                    const isStageStart = idx === firstStageColIdx;
+                    const isStageEnd = idx === lastStageColIdx;
+                    const stageBorderClasses = cn(
+                      isStageStart && "border-l-[3px] border-l-blue-400",
+                      isStageEnd && "border-r-[3px] border-r-blue-400"
+                    );
 
                     // --- CASE DETAILS ---
                     if (col.type === 'case') {
@@ -442,7 +522,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                       return (
                         <TableCell
                           key={`${row.key}-${col.id}`}
-                          className={cn("px-4 py-2.5 border-r border-b border-slate-200", col.idx < 2 ? getStickyClasses(col.idx).replace('z-30', 'z-20') : "", col.idx < 2 && (row.type === 'dependant' ? "bg-orange-50/90" : (rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/90")))}
+                          className={cn("px-4 py-2.5 border-r border-b border-slate-200", col.idx < 2 ? getStickyClasses(col.idx).replace('z-30', 'z-20') : "", col.idx < 2 && (row.type === 'dependant' ? "bg-orange-50/90" : (rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/90")), stageBorderClasses)}
                           style={{
                             width: colWidth, minWidth: colWidth, maxWidth: colWidth,
                             ...(col.idx === 1 ? { left: secondCaseColLeftPx } : {})
@@ -458,7 +538,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                       return (
                         <TableCell
                           key={`${row.key}-${col.id}`}
-                          className={cn("text-center px-4 py-2.5 border-r border-b border-slate-200 text-slate-400 text-xs", col.type === 'actions' && "sticky right-0 bg-orange-50/90 z-20 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.05)]")}
+                          className={cn("text-center px-4 py-2.5 border-r border-b border-slate-200 text-slate-400 text-xs", col.type === 'actions' && "sticky right-0 bg-orange-50/90 z-20 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.05)]", stageBorderClasses)}
                           style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}
                         >
                           -
@@ -469,8 +549,31 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                     // --- STAGE ---
                     if (col.type === 'stage') {
                       return (
-                        <TableCell key={`${row.key}-${col.id}`} className="text-center px-2 py-2 border-r border-b border-slate-200" style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}>
+                        <TableCell key={`${row.key}-${col.id}`} className={cn("text-center px-2 py-2 border-r border-b border-slate-200", stageBorderClasses)} style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}>
                           {renderCellContent({ type: 'stage', stage: col.stage }, row.task, 'combined')}
+                        </TableCell>
+                      );
+                    }
+
+                    // --- REPORT DOC ---
+                    if (col.type === 'report_doc') {
+                      const docTypeBadge = col.reportDoc.docType === 'individual' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                        col.reportDoc.docType === 'company' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                        'bg-emerald-50 text-emerald-700 border-emerald-200';
+                      return (
+                        <TableCell
+                          key={`${row.key}-${col.id}`}
+                          className={cn("text-center px-2 py-2 border-r border-b border-slate-200 border-l-2 border-l-emerald-400 bg-emerald-50/30")}
+                          style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}
+                        >
+                          <div className="flex flex-col items-center gap-1">
+                            <span className="text-[10px] font-medium text-slate-700 truncate max-w-full" title={col.reportDoc.documentName}>
+                              {col.reportDoc.documentName || 'Unknown'}
+                            </span>
+                            <span className={cn("text-[8px] px-1.5 py-0.5 rounded-full border font-bold uppercase", docTypeBadge)}>
+                              {col.reportDoc.docType === 'individual' ? 'IND' : col.reportDoc.docType === 'company' ? 'CO' : 'APP'}
+                            </span>
+                          </div>
                         </TableCell>
                       );
                     }
@@ -489,7 +592,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                         }
                       };
                       return (
-                        <TableCell key={`${row.key}-${col.id}`} className="text-center px-3 py-2.5 border-r border-b border-slate-200 bg-slate-50/30" style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}>
+                        <TableCell key={`${row.key}-${col.id}`} className={cn("text-center px-3 py-2.5 border-r border-b border-slate-200 bg-slate-50/30", stageBorderClasses)} style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}>
                           {renderCellContent(mockDocRow, row.task, 'date')}
                         </TableCell>
                       );
@@ -505,7 +608,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                         }
                       };
                       return (
-                        <TableCell key={`${row.key}-${col.id}`} className="text-center px-3 py-2.5 border-r border-b border-slate-200" style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}>
+                        <TableCell key={`${row.key}-${col.id}`} className={cn("text-center px-3 py-2.5 border-r border-b border-slate-200", stageBorderClasses)} style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}>
                           {renderCellContent(mockFieldRow, row.task, 'date')}
                         </TableCell>
                       );
@@ -516,7 +619,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                       return (
                         <TableCell
                           key={`${row.key}-${col.id}`}
-                          className={cn("text-center px-4 py-2.5 border-b border-slate-200 sticky right-0 z-20 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]", rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/90")}
+                          className={cn("text-center px-4 py-2.5 border-b border-slate-200 sticky right-0 z-20 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]", rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/90", stageBorderClasses)}
                           style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}
                         >
                           {renderCellContent({ type: 'actions' }, row.task, 'actions')}

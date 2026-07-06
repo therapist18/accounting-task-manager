@@ -763,6 +763,44 @@ export function EditRequirementDialog({
                   />
                 </div>
               </div>
+
+              {/* REPORT DOC DEFAULT SETTINGS */}
+              {formData.category === 'report-docs' && (
+                <div className="space-y-4 pt-4 border-t">
+                  <Label className="flex items-center gap-2 text-emerald-600 font-bold uppercase text-xs tracking-wide">
+                    <FileText className="h-4 w-4" /> Report Doc Settings
+                  </Label>
+                  <Card className="p-0 overflow-hidden border-emerald-200 shadow-sm">
+                    <div className="bg-emerald-50/80 px-4 py-2 border-b flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-emerald-600" />
+                      <span className="text-xs font-bold uppercase text-emerald-700">Visibility & Ordering</span>
+                    </div>
+                    <div className="p-6 space-y-6 bg-white">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label className="text-sm">Default Visibility</Label>
+                          <p className="text-[10px] text-slate-500">Show this document in reports by default.</p>
+                        </div>
+                        <Switch
+                          checked={formData.isVisible ?? true}
+                          onCheckedChange={(v) => updateField('isVisible', v)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs font-bold text-slate-500">Display Order</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={formData.order ?? 0}
+                          onChange={(e) => updateField('order', parseInt(e.target.value) || 0)}
+                          className="h-9 w-32"
+                        />
+                        <p className="text-[10px] text-slate-400">Lower numbers appear first in the report.</p>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="webdata" className="flex-1 overflow-y-auto m-0 p-6 bg-slate-50">

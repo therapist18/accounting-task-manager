@@ -171,6 +171,7 @@ export default function ReportsPage() {
   const [expandedStageColumns, setExpandedStageColumns] = useState<Set<string>>(new Set());
   const [activePerspective, setActivePerspective] = useState<'overview' | 'officers' | 'managers' | 'clients' | 'companies'>('overview');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [reportDocDefaults, setReportDocDefaults] = useState<any[]>([]);
   const sidebarPanelRef = useRef<any>(null);
 
   const handleSidebarToggle = useCallback(() => {
@@ -319,6 +320,75 @@ export default function ReportsPage() {
     const allowedIds = new Set(departmentUsers.managers.map(m => m.id));
     setAvailableTaskManagers(unifiedManagers.filter(m => allowedIds.has(m.id)));
   }, [activeDeptId, activeSubDeptIds, unifiedManagers, activeSubDepartments]);
+
+  // Fetch report_doc_defaults for current job level
+  useEffect(() => {
+    const fetchReportDocDefaults = async () => {
+      if (!activeDeptId) { setReportDocDefaults([]); return; }
+      try {
+        // Get unique job levels from tasks in this department
+        const deptTasks = tasks.filter(t => String(t.department_id) === String(activeDeptId));
+        const jobLevels = new Map<string, any>();
+        
+        deptTasks.forEach(task => {
+          const jl = task.job_level || {};
+          const key = JSON.stringify({
+            department_id: Number(jl.department_id || activeDeptId),
+            subdepartment_id: jl.subdepartment_id || null,
+            class_id: jl.class_id || null,
+            subclass_id: jl.subclass_id || null
+          });
+          if (!jobLevels.has(key)) {
+            jobLevels.set(key, {
+              department_id: Number(jl.department_id || activeDeptId),
+              subdepartment_id: jl.subdepartment_id || null,
+              class_id: jl.class_id || null,
+              subclass_id: jl.subclass_id || null,
+              level: jl.level || 1
+            });
+          }
+        });
+
+        // If no tasks, try with just the department
+        if (jobLevels.size === 0) {
+          jobLevels.set('default', {
+            department_id: Number(activeDeptId),
+            subdepartment_id: null,
+            class_id: null,
+            subclass_id: null,
+            level: 1
+          });
+        }
+
+        // Fetch report_doc_defaults for all matching job levels
+        const allDefaults: any[] = [];
+        for (const [_, jobLevel] of jobLevels) {
+          const { data, error } = await supabase
+            .from('tm_class_requirements')
+            .select('report_doc_defaults')
+            .eq('job_level', JSON.stringify(jobLevel))
+            .maybeSingle();
+          if (!error && data?.report_doc_defaults) {
+            allDefaults.push(...data.report_doc_defaults);
+          }
+        }
+
+        // Deduplicate by documentId and filter visible
+        const uniqueDefaults = Array.from(
+          new Map(allDefaults
+            .filter((d: any) => d.isVisible !== false)
+            .map((d: any) => [d.documentId, d]))
+          .values()
+        ).sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+
+        setReportDocDefaults(uniqueDefaults);
+      } catch (err) {
+        console.error('Error fetching report doc defaults:', err);
+        setReportDocDefaults([]);
+      }
+    };
+    fetchReportDocDefaults();
+  }, [activeDeptId, activeSubDeptIds, activeClassId, activeSubClassId, tasks]);
 
   const getTaskCompanyParticipant = useCallback((task: any) => {
     return task.participants_details?.find((p: any) => {
@@ -1371,14 +1441,14 @@ export default function ReportsPage() {
               expandedStageColumns={expandedStageColumns} renderCellValue={renderCellValue} safeRender={safeRender}
               handleSort={handleSort} toggleStageColumns={toggleStageColumns} isStageApplicableToCurrentFilter={isStageApplicableToCurrentFilter}
               departments={departments} stages={stages} showTime={showTime} showDelta={showDelta} showOfficers={showOfficers} activeDeptId={activeDeptId}
-              onSaveStageDate={handleSaveStageDate}
+              onSaveStageDate={handleSaveStageDate} reportDocDefaults={reportDocDefaults}
             />
           ) : (
             <TransposedReportView
               paginatedTasks={filteredByNARows} transposedRows={[]} currentPage={1} itemsPerPage={filteredByNARows.length}
               expandedSections={expandedSections} renderCellValue={renderCellValue} toggleSection={() => { }}
               userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
-              departments={departments}
+              departments={departments} reportDocDefaults={reportDocDefaults}
             />
           )}
         </div>

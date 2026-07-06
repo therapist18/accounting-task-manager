@@ -11,7 +11,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarPicker } from "@/components/ui/calendar";
-import { Plus, Minus, ArrowUpDown, SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Upload, CheckCircle2, AlertTriangle, CalendarIcon, AlertCircle, Clock } from "lucide-react";
+import { Plus, Minus, ArrowUpDown, SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Upload, CheckCircle2, AlertTriangle, CalendarIcon, AlertCircle, Clock, FileText } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { differenceInDays, isValid, format } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -292,6 +293,7 @@ export function StandardReportView({
   renderCellValue, safeRender, handleSort, toggleStageColumns,
   initialRowsPerPage = 25, showDelta = false, showOfficers = false,
   showTime = false, activeDeptId = '', onSaveStageDate, stages,
+  reportDocDefaults = [],
 }: any) {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(initialRowsPerPage);
@@ -731,6 +733,47 @@ export function StandardReportView({
           </div>
         </div>
       </div>
+
+      {reportDocDefaults.length > 0 && (
+        <div className="mt-4 mx-4 mb-4">
+          <div className="border-2 border-l-4 border-l-emerald-500 border-emerald-200 rounded-lg bg-white shadow-sm overflow-hidden">
+            <div className="bg-emerald-50/80 px-4 py-2.5 border-b border-emerald-200">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-emerald-600" />
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">Report Documents</span>
+                <Badge variant="outline" className="bg-emerald-100 text-emerald-700 border-emerald-300 text-[10px] ml-1">
+                  {reportDocDefaults.length} docs
+                </Badge>
+              </div>
+            </div>
+            <div className="p-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {reportDocDefaults.map((doc: any, idx: number) => (
+                  <div key={doc.id || idx} className="flex items-center gap-3 p-3 bg-emerald-50/50 border border-emerald-100 rounded-lg hover:bg-emerald-50 transition-colors">
+                    <div className="flex-shrink-0 w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center">
+                      <span className="text-xs font-bold text-emerald-700">{idx + 1}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{doc.documentName || 'Unknown Document'}</p>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wide">
+                        {doc.docType === 'individual' ? 'Individual' : doc.docType === 'company' ? 'Company' : 'Application'}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={cn(
+                      "text-[10px] flex-shrink-0",
+                      doc.docType === 'individual' ? "bg-blue-50 text-blue-700 border-blue-200" :
+                      doc.docType === 'company' ? "bg-purple-50 text-purple-700 border-purple-200" :
+                      "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    )}>
+                      {doc.docType === 'individual' ? 'IND' : doc.docType === 'company' ? 'CO' : 'APP'}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

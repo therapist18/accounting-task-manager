@@ -9,6 +9,8 @@ import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2, ChevronLeft
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
 import { EnquiryDialog } from "../components/EnquiryDialog"
 import { userService, getOfficerDisplayName } from "@/lib/shared-user-assignment-service"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 
 // --- Helper Functions & Constants ---
 
@@ -265,6 +267,31 @@ const MemoizedTableRow = React.memo(({
     );
   }
 
+  // Render report doc rows
+  if (row.type === 'report_doc') {
+    const doc = row.reportDoc;
+    const docTypeBadge = doc?.docType === 'individual' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+      doc?.docType === 'company' ? 'bg-purple-100 text-purple-700 border-purple-200' :
+        'bg-emerald-100 text-emerald-700 border-emerald-200';
+
+    return (
+      <TableRow className="bg-emerald-50/30 hover:bg-emerald-50 group border-b border-slate-200 border-l-4 border-l-emerald-500">
+        <TableCell className="sticky left-0 z-10 bg-emerald-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 text-center w-14 min-w-14 max-w-14">
+          {row.stageOrder}
+        </TableCell>
+        <TableCell colSpan={paginatedHeaderStructure.length * 2 + 2} className="border border-gray-100 p-2">
+          <div className="flex items-center gap-3">
+            <FileText className="h-4 w-4 text-emerald-600" />
+            <span className="font-medium text-slate-800">{row.label}</span>
+            <Badge variant="outline" className={cn("text-[10px]", docTypeBadge)}>
+              {doc?.docType === 'individual' ? 'Individual' : doc?.docType === 'company' ? 'Company' : 'Application'}
+            </Badge>
+          </div>
+        </TableCell>
+      </TableRow>
+    );
+  }
+
   return (
     <TableRow className={`${rowBg} ${hoverBg} group border-b border-slate-200`}>
       {row.type !== 'actions' && (
@@ -361,6 +388,7 @@ interface EnhancedTableProps {
   kycDocuments?: Map<string, any>;
   enhancedTasksData?: Map<string, any>;
   readOnly?: boolean;
+  reportDocDefaults?: any[];
 }
 
 export const EnhancedTable: React.FC<EnhancedTableProps> = ({
@@ -384,11 +412,12 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   onEditTask,
   users = [],
   officers = [],
-  initialColumnsPerPage = 10,  
+  initialColumnsPerPage = 10,
   allDocuments = [],
   kycDocuments = new Map(),
   enhancedTasksData = new Map(),
   readOnly = false,
+  reportDocDefaults = [],
 }) => {
   const didLogRef = useRef(false);
   const getCellContentWithCancel = useCallback((task: any, headerId: string) => {
@@ -508,7 +537,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
 
   const handleColumnsPerPageChange = useCallback((value: string) => {
     setColumnsPerPage(parseInt(value, 10));
-    setCurrentPage(1); 
+    setCurrentPage(1);
   }, []);
 
   if (!tasks.length && !loading) {

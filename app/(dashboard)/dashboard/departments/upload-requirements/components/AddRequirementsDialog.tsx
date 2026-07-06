@@ -126,30 +126,23 @@ const APPLICANT_OPTIONS = ENTITY_TYPES;
 
 export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmitting, context }: AddRequirementsDialogProps) {
   const [activeSection, setActiveSection] = useState<RequirementCategory>('processing')
-
-  // State for all categories including general
   const [generalReqs, setGeneralReqs] = useState<RequirementForm[]>([DEFAULT_REQUIREMENT('general')])
   const [processingReqs, setProcessingReqs] = useState<RequirementForm[]>([DEFAULT_REQUIREMENT('processing')])
   const [issuanceReqs, setIssuanceReqs] = useState<RequirementForm[]>([DEFAULT_REQUIREMENT('issuance')])
   const [jobSpecificReqs, setJobSpecificReqs] = useState<RequirementForm[]>([DEFAULT_REQUIREMENT('job-specific')])
   const [referenceReqs, setReferenceReqs] = useState<RequirementForm[]>([DEFAULT_REQUIREMENT('reference')])
-
+  const [reportDocs, setReportDocs] = useState<any[]>([])
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
-
-  // Bulk inputs
   const [generalBulkInput, setGeneralBulkInput] = useState('')
   const [processingBulkInput, setProcessingBulkInput] = useState('')
   const [issuanceBulkInput, setIssuanceBulkInput] = useState('')
   const [jobSpecificBulkInput, setJobSpecificBulkInput] = useState('')
   const [referenceBulkInput, setReferenceBulkInput] = useState('')
-
   const [automationTypes, setAutomationTypes] = useState<any[]>([])
   const [masterFields, setMasterFields] = useState<any[]>([])
   const [templates, setTemplates] = useState<any[]>([])
   const [loadingTemplates, setLoadingTemplates] = useState(false)
-
-  // Table data hook for fetching available tables
   const { tables, loadingTables } = useTableData()
 
   useEffect(() => {
@@ -240,6 +233,11 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
   const handleSubmit = async () => {
     if (!context) return;
 
+    // Special handling for report-docs
+    if (activeSection === 'report-docs') {
+      if (reportDocs.length === 0) return;
+    }
+
     let source: RequirementForm[] = [];
     switch (activeSection) {
       case 'general': source = generalReqs; break;
@@ -252,7 +250,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
 
     const validItems = source.filter(req => req.name.trim() !== '');
 
-    if (validItems.length === 0) return;
+    if (activeSection !== 'report-docs' && validItems.length === 0) return;
 
     try {
       const jobLevelObj = {
@@ -302,6 +300,40 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
 
       if (automationUpdates.length > 0) {
         await Promise.all(automationUpdates);
+      }
+
+      if (activeSection === 'report-docs') {
+        // Handle report-docs separately - add to report_doc_defaults
+        const existingDefaults = existingRecord?.report_doc_defaults || [];
+        // Classification based on SettingsPage approach using category field
+        const classifyDocType = (doc: any): 'individual' | 'company' | 'application' => {
+          const category = (doc.category || '').toLowerCase()
+          if (category.includes('company') || category.includes('corporate')) return 'company'
+          if (category.includes('director') || category.includes('individual') || category.includes('personal')) return 'individual'
+          // Fallback to entity_types if category doesn't match
+          const entityTypes = doc.entity_types || []
+          if (entityTypes.includes('company')) return 'company'
+          if (entityTypes.length > 0) return 'individual'
+          return 'application'
+        };
+
+        const newReportDocs = reportDocs.map((doc, index) => {
+          const docType = classifyDocType(doc);
+          return {
+            id: (Date.now() + index).toString(),
+            documentId: doc.id,
+            documentName: doc.display_name || doc.name || 'Unknown',
+            docType,
+            order: existingDefaults.length + index,
+            isVisible: true
+          };
+        });
+
+        payload.report_doc_defaults = [...existingDefaults, ...newReportDocs];
+        await onSubmit(payload);
+        toast({ title: "Success", description: "Report docs added successfully." });
+        handleClose();
+        return;
       }
 
       if (activeSection === 'job-specific') {
@@ -401,6 +433,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
       setIssuanceReqs([DEFAULT_REQUIREMENT('issuance')])
       setJobSpecificReqs([DEFAULT_REQUIREMENT('job-specific')])
       setReferenceReqs([DEFAULT_REQUIREMENT('reference')])
+      setReportDocs([])
 
       setGeneralBulkInput('')
       setProcessingBulkInput('')
@@ -526,7 +559,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
 
         <div className="flex-1 overflow-auto flex flex-col px-6 space-y-4 pt-4">
           <div className="bg-slate-200/50 p-1 rounded-xl sticky top-0 z-20 backdrop-blur-md flex gap-1">
-            {REQUIREMENT_CATEGORIES.map(cat => cat.value).filter(sec => context?.departmentId === 1 || sec === 'general' || sec === 'job-specific' || sec === 'reference').map((sec) => (
+            {REQUIREMENT_CATEGORIES.map(cat => cat.value).filter(sec => context?.departmentId === 1 || sec === 'general' || sec === 'job-specific' || sec === 'reference' || sec === 'report-docs').map((sec) => (
               <Button key={sec} variant={activeSection === sec ? 'default' : 'ghost'} className={cn("flex-1 h-8 text-xs capitalize rounded-lg transition-all", activeSection === sec && "shadow-sm")} onClick={() => setActiveSection(sec as RequirementCategory)}>
                 {sec.replace('-', ' ')}
               </Button>
@@ -534,6 +567,120 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
           </div>
 
           <div className="space-y-6 pb-6">
+            {/* Report Docs Tab - Special UI */}
+            {activeSection === 'report-docs' ? (
+              <div className="space-y-4">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 shadow-sm">
+                  <div className="flex items-center gap-2 mb-3">
+                    <FileText className="h-5 w-5 text-emerald-600" />
+                    <Label className="text-sm font-bold text-emerald-700">Report Document Defaults</Label>
+                  </div>
+                  <p className="text-xs text-emerald-600 mb-4">
+                    Select KYC documents to display by default in reports. Documents are grouped by type (Individual, Company, Application) based on their entity types.
+                  </p>
+
+                  {/* Selected Documents */}
+                  {reportDocs.length > 0 && (
+                    <div className="space-y-2 mb-4">
+                      <Label className="text-[10px] uppercase font-bold text-slate-500">Selected Documents ({reportDocs.length})</Label>
+                      <div className="space-y-2">
+                        {reportDocs.map((doc, idx) => (
+                          <div key={doc.id} className="flex items-center justify-between p-3 bg-white border border-emerald-200 rounded-lg">
+                            <div className="flex items-center gap-3">
+                              <span className="flex items-center justify-center w-6 h-6 bg-emerald-100 rounded-full text-xs font-bold text-emerald-700">
+                                {idx + 1}
+                              </span>
+                              <div>
+                                <p className="text-sm font-medium text-slate-800">{doc.display_name || doc.name}</p>
+                                <p className="text-[10px] text-slate-500">
+                                  {doc.category || 'Uncategorized'}
+                                </p>
+                              </div>
+                              <Badge variant="outline" className={cn(
+                                "text-[9px] ml-2",
+                                (doc.category || '').toLowerCase().includes('company') ? "bg-purple-50 text-purple-700 border-purple-200" :
+                                (doc.category || '').toLowerCase().includes('director') || (doc.category || '').toLowerCase().includes('individual') ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              )}>
+                                {(doc.category || '').toLowerCase().includes('company') ? 'Company' :
+                                 (doc.category || '').toLowerCase().includes('director') || (doc.category || '').toLowerCase().includes('individual') ? 'Individual' :
+                                 'Application'}
+                              </Badge>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-red-400 hover:text-red-600"
+                              onClick={() => setReportDocs(reportDocs.filter((_, i) => i !== idx))}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                    </div>
+                    </div>
+                  )}
+
+                {/* KYC Document Selector */}
+                <div className="space-y-2">
+                  <Label className="text-[10px] uppercase font-bold text-slate-500">Add KYC Document</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-full justify-between border-dashed border-2 border-emerald-300 hover:border-emerald-400 hover:bg-emerald-50 transition-all h-10">
+                        <span className="text-slate-500 text-sm">Select a KYC document to add...</span>
+                        <Plus className="h-4 w-4 text-emerald-500" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[450px] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search KYC documents..." />
+                        <CommandList>
+                          <CommandEmpty>No documents found.</CommandEmpty>
+                          <CommandGroup className="max-h-[300px] overflow-y-auto">
+                            {kycDocuments.map(doc => {
+                              const alreadyAdded = reportDocs.some(d => d.id === doc.id)
+                              const docCategory = (doc.category || '').toLowerCase()
+                              const docType = docCategory.includes('company') ? 'Company' :
+                                docCategory.includes('director') || docCategory.includes('individual') ? 'Individual' : 'Application'
+                              return (
+                                <CommandItem
+                                  key={doc.id}
+                                  disabled={alreadyAdded}
+                                  onSelect={() => {
+                                    if (!alreadyAdded) {
+                                      setReportDocs([...reportDocs, doc])
+                                    }
+                                  }}
+                                >
+                                  <Check className={cn("mr-2 h-4 w-4", alreadyAdded ? "opacity-100" : "opacity-0")} />
+                                  <div className="flex-1 flex items-center gap-2">
+                                    <span className="text-sm">{doc.display_name || doc.name}</span>
+                                    <Badge variant="outline" className={cn(
+                                      "text-[8px] px-1.5 py-0",
+                                      docType === 'Company' ? "bg-purple-50 text-purple-600 border-purple-200" :
+                                        docType === 'Individual' ? "bg-blue-50 text-blue-600 border-blue-200" :
+                                          "bg-emerald-50 text-emerald-600 border-emerald-200"
+                                    )}>
+                                      {docType}
+                                    </Badge>
+                                    {doc.category && (
+                                      <span className="text-[10px] text-slate-400">{doc.category}</span>
+                                    )}
+                                  </div>
+                                  {alreadyAdded && <span className="text-xs text-slate-400">(added)</span>}
+                                </CommandItem>
+                              )
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+              </div>
+          ) : (
+          <>
             <div className="bg-white border rounded-xl p-4 shadow-sm space-y-3">
               <Label className="text-[10px] uppercase font-bold text-slate-400">
                 Quick Add {activeSection === 'job-specific' ? 'Questions' : 'Requirements'} (One per line)
@@ -1064,23 +1211,25 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
             >
               <Plus className="mr-2 h-4 w-4" /> Add Another Item
             </Button>
-          </div>
+          </>
+          )}
         </div>
+      </div>
 
-        <DialogFooter className="p-6 bg-white border-t gap-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-          <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={isSubmitting} className="min-w-[150px]">
-            {isSubmitting ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              `Save & Merge Configuration`
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <DialogFooter className="p-6 bg-white border-t gap-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+        <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+        <Button onClick={handleSubmit} disabled={isSubmitting} className="min-w-[150px]">
+          {isSubmitting ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            activeSection === 'report-docs' ? 'Add Report Documents' : 'Save & Merge Configuration'
+          )}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+    </Dialog >
   )
 }

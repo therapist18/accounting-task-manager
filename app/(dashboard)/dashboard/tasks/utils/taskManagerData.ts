@@ -408,6 +408,144 @@ export const fetchStages = async (departmentId: string, departments: Department[
 }
 
 /**
+ * Stage IDs that gate the Processing/Issuance Requirements sections in the
+ * tasks-requirements module. When one of these stages is marked completed,
+ * the documents currently satisfying the matching requirement category get
+ * snapshotted onto tm_tasks for audit purposes and the section locks.
+ */
+export const REQUIREMENTS_LOCK_STAGE_IDS = {
+  PROCESSING: '30cf2d19-2138-4b8a-a4ec-307ce624ade3', // Pro. Upload Screenshot
+  ISSUANCE: '76a954ea-f579-427c-b080-2348b778ab20',   // Issuance Upload Screenshot
+  DEFERRED: 'cd1fac36-30f8-42e5-9d86-585427817ded',   // Deferred (Depends)
+} as const;
+
+// Resolve the (entityType, entityId) pairs present on a task, mirroring the
+// column/relationship resolution used by RequirementsTableCombined.
+const resolveTaskEntities = (task: any): Array<{ entityType: string; entityId: number }> => {
+  const entities: Array<{ entityType: string; entityId: number }> = [];
+  const seen = new Set<string>();
+  const add = (entityType: string, entityId: any) => {
+    if (!entityId) return;
+    const key = `${entityType}:${entityId}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    entities.push({ entityType, entityId: Number(entityId) });
+  };
+
+  const participants = task.participants_details || [];
+  const applicant = task.applicant_details || {};
+
+  if (applicant.type === 'company') add('company', applicant.id);
+  if (task.company_id) add('company', task.company_id);
+
+  if (applicant.type === 'individual' && applicant.id) {
+    const roles = Array.isArray(applicant.role) ? applicant.role : (applicant.role ? [applicant.role] : []);
+    if (roles.includes('dependant') || roles.includes('dependent')) add('dependant', applicant.id);
+    else if (roles.includes('director') || roles.includes('shareholder')) add('director', applicant.id);
+    else if (roles.includes('understudy')) add('understudy', applicant.id);
+    else add('principal', applicant.id);
+  }
+  if (task.individual_id) add('principal', task.individual_id);
+
+  participants.forEach((p: any) => {
+    if (p.type !== 'individual' || !p.id) return;
+    const roles = Array.isArray(p.role) ? p.role : (p.role ? [p.role] : []);
+    if (roles.includes('director') || roles.includes('shareholder')) add('director', p.id);
+    if (roles.includes('dependant') || roles.includes('dependent')) add('dependant', p.id);
+    if (roles.includes('understudy')) add('understudy', p.id);
+    if (roles.includes('sponsor')) add('sponsor', p.id);
+    if (roles.includes('principal') || roles.includes('applicant')) add('principal', p.id);
+  });
+
+  if (task.understudy) add('understudy', task.understudy);
+
+  return entities;
+};
+
+/**
+ * Snapshot the documents currently satisfying a task's Processing (or
+ * Issuance) requirements onto tm_tasks, for audit purposes and so the
+ * Report Documents section can render the exact documents that were locked
+ * in rather than whatever is "latest" at render time.
+ */
+export const captureRequirementsDocumentsSnapshot = async (task: any, stageId: string): Promise<void> => {
+  const normalizedStageId = (stageId || '').toLowerCase();
+  const category = normalizedStageId === REQUIREMENTS_LOCK_STAGE_IDS.PROCESSING
+    ? 'processing'
+    : normalizedStageId === REQUIREMENTS_LOCK_STAGE_IDS.ISSUANCE
+      ? 'issuance'
+      : null;
+  if (!category) return;
+
+  const requirements = (task.requirements || []).filter((r: any) => (r.category || '').toLowerCase() === category);
+  if (requirements.length === 0) return;
+
+  const entities = resolveTaskEntities(task);
+  const companyEntities = entities.filter(e => e.entityType === 'company');
+  const individualEntities = entities.filter(e => e.entityType !== 'company');
+  const companyIds = companyEntities.map(e => e.entityId);
+  const individualIds = individualEntities.map(e => e.entityId);
+  const docTypeIds = Array.from(new Set(requirements.flatMap((r: any) => r.document_ids || (r.document_id ? [r.document_id] : []))));
+  if (docTypeIds.length === 0) return;
+
+  try {
+    const [companyDocsRes, individualDocsRes] = await Promise.all([
+      companyIds.length
+        ? supabase.from('acc_portal_kyc_uploads').select('*').in('company_id', companyIds).in('document_id', docTypeIds)
+        : Promise.resolve({ data: [] as any[] }),
+      individualIds.length
+        ? supabase.from('acc_portal_directors_documents').select('*').in('director_id', individualIds).in('document_id', docTypeIds)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+
+    const companyDocs = companyDocsRes.data || [];
+    const individualDocs = individualDocsRes.data || [];
+    const timestamp = new Date().toISOString();
+    const snapshot: any[] = [];
+
+    requirements.forEach((req: any) => {
+      const docIds: string[] = req.document_ids || (req.document_id ? [req.document_id] : []);
+      if (docIds.length === 0) return;
+      const allowedEntityTypes = req.entityTypes || (req.applicantType ? [req.applicantType] : []);
+
+      entities
+        .filter(e => allowedEntityTypes.length === 0 || allowedEntityTypes.includes(e.entityType))
+        .forEach(entity => {
+          const isCompany = entity.entityType === 'company';
+          const pool = isCompany ? companyDocs : individualDocs;
+          const idField = isCompany ? 'company_id' : 'director_id';
+          const matches = pool.filter((d: any) => d[idField] === entity.entityId && docIds.includes(d.document_id));
+          if (matches.length === 0) return;
+
+          const matchesByDocType = new Map<string, any[]>();
+          matches.forEach((d: any) => {
+            if (!matchesByDocType.has(d.document_id)) matchesByDocType.set(d.document_id, []);
+            matchesByDocType.get(d.document_id)!.push(d);
+          });
+
+          matchesByDocType.forEach((docs, documentTypeId) => {
+            snapshot.push({
+              requirementId: req.id,
+              documentTypeId,
+              entityType: entity.entityType,
+              entityId: entity.entityId,
+              sourceTable: isCompany ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents',
+              documentRecordIds: docs.map((d: any) => d.id),
+              capturedAt: timestamp,
+            });
+          });
+        });
+    });
+
+    const column = category === 'processing' ? 'processing_requirements_documents' : 'issuance_requirements_documents';
+    const { error } = await supabase.from('tm_tasks').update({ [column]: snapshot }).eq('id', task.id);
+    if (error) throw error;
+  } catch (error) {
+    console.error(`Error capturing ${category} requirements documents snapshot:`, error);
+  }
+};
+
+/**
  * Fetch all documents from the database
  */
 export const fetchAllDocuments = async (): Promise<DirectorDocument[]> => {

@@ -14,6 +14,8 @@ import {
   fetchTasks,
   fetchStages,
   type Task as UtilTask,
+  REQUIREMENTS_LOCK_STAGE_IDS,
+  captureRequirementsDocumentsSnapshot,
 } from "../tasks/utils/taskManagerData"
 
 type Department = {
@@ -323,9 +325,15 @@ export default function TasksPage() {
 
     if (error) {
       toast({ title: "Error saving stage", variant: "destructive" });
-    } else {
-      setTasks(prev => prev.map(t => t.id.toString() === taskId ? { ...t, stages: updatedStages } : t));
+      return;
     }
+
+    const normalizedStageId = stageId.toLowerCase();
+    if (normalizedStageId === REQUIREMENTS_LOCK_STAGE_IDS.PROCESSING || normalizedStageId === REQUIREMENTS_LOCK_STAGE_IDS.ISSUANCE) {
+      await captureRequirementsDocumentsSnapshot({ ...task, stages: updatedStages }, normalizedStageId);
+    }
+
+    setTasks(prev => prev.map(t => t.id.toString() === taskId ? { ...t, stages: updatedStages } : t));
   };
 
   const handleStageDocumentUpload = (task: UtilTask, stage: any) => {

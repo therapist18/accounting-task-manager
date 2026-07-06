@@ -50,14 +50,15 @@ export const AGE_RANGE_TYPES: { value: AgeRangeType; label: string }[] = [
   { value: 'adult', label: 'Adult (18+)' },
 ];
 
-export type RequirementCategory = 'general' | 'processing' | 'issuance' | 'job-specific' | 'reference';
+export type RequirementCategory = 'general' | 'processing' | 'issuance' | 'job-specific' | 'reference' | 'report-docs';
 
 export const REQUIREMENT_CATEGORIES: { value: RequirementCategory; label: string; description?: string }[] = [
   { value: 'general', label: 'General', description: 'General document requirements' },
   { value: 'processing', label: 'Processing', description: 'Documents needed for processing' },
   { value: 'issuance', label: 'Issuance', description: 'Documents for issuance purposes' },
   { value: 'job-specific', label: 'Job Specific', description: 'Job-specific document requirements' },
-  { value: 'reference', label: 'Reference', description: 'Mandatory reference documents (e.g., TCCs, tax compliance)' }
+  { value: 'reference', label: 'Reference', description: 'Mandatory reference documents (e.g., TCCs, tax compliance)' },
+  { value: 'report-docs', label: 'Report Doc Default', description: 'Documents shown by default in reports' }
 ];
 
 export type DirectorType = 'all' | 'primary';

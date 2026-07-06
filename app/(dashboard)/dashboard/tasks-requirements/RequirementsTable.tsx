@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import { Briefcase, FileText, Loader2, Search, UploadCloud, Eye, Zap, FileType, Wand2, Download, FileUp, Trash2, AlertCircle, Edit3, RefreshCw, Send, AlertTriangle } from "lucide-react"
+import { Briefcase, FileText, Loader2, Search, UploadCloud, Eye, Zap, FileType, Wand2, Download, FileUp, Trash2, AlertCircle, Edit3, RefreshCw, Send, AlertTriangle, Lock } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
@@ -112,6 +112,7 @@ export function RequirementsTable({
       originalDoc: any; // Added to store original doc for save actions
     }>;
     currentIndex: number;
+    locked?: boolean;
   } | null>(null);
 
   const [isLetterDialogOpen, setIsLetterDialogOpen] = useState(false);
@@ -937,7 +938,7 @@ export function RequirementsTable({
     });
   }, []);
 
-  const renderDocumentStatus = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number, relationshipData?: any) => {
+  const renderDocumentStatus = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number, relationshipData?: any, locked?: boolean) => {
     const status = getDocumentStatusForColumn(task, item, columnType, applicantId);
     const isLetter = item.main_category === 'Letters';
 
@@ -997,7 +998,8 @@ export function RequirementsTable({
 
         setPreviewDocument({
           documents: documentPreviews,
-          currentIndex: 0
+          currentIndex: 0,
+          locked: !!locked
         });
         setDocumentPreviewOpen(true);
       } catch (err) {
@@ -1020,22 +1022,24 @@ export function RequirementsTable({
             >
               <Zap className="h-4 w-4" />
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50"
-              onClick={() => handleUploadAction(task, item, columnType, applicantId)}
-              title={`Upload ${item.display_name}`}
-            >
-              <UploadCloud className="h-4 w-4" />
-            </Button>
+            {!locked && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50"
+                onClick={() => handleUploadAction(task, item, columnType, applicantId)}
+                title={`Upload ${item.display_name}`}
+              >
+                <UploadCloud className="h-4 w-4" />
+              </Button>
+            )}
             {status.type === 'view' && (
               <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-green-600 hover:bg-green-100" onClick={handleViewClick} title={`View ${status.count} document(s)`}><Eye className="h-4 w-4" /></Button>
             )}
           </>
         )}
 
-        {isLetter && item.hasTemplate && (
+        {isLetter && item.hasTemplate && !locked && (
           <Button
             variant="ghost"
             size="sm"
@@ -1048,7 +1052,7 @@ export function RequirementsTable({
           </Button>
         )}
 
-        {isLetter && !item.hasTemplate && (
+        {isLetter && !item.hasTemplate && !locked && (
           <Button
             variant="ghost"
             size="sm"
@@ -1061,7 +1065,7 @@ export function RequirementsTable({
           </Button>
         )}
 
-        {!item.web_automation?.automationId && !isLetter && status.type === 'upload' && (
+        {!item.web_automation?.automationId && !isLetter && status.type === 'upload' && !locked && (
           <Button
             variant="ghost"
             size="sm"
@@ -1078,6 +1082,11 @@ export function RequirementsTable({
             <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-green-600 hover:bg-green-100" onClick={handleViewClick} title={`View ${status.count} document(s)`}><Eye className="h-4 w-4" /></Button>
             {status.count > 1 && (<Badge variant="outline" className="h-5 w-5 p-0 flex items-center justify-center text-xs bg-green-50 text-green-700 border-green-200">{status.count}</Badge>)}
           </div>
+        )}
+        {locked && (
+          <span title="Locked — stage completed" className="text-slate-400 ml-1">
+            <Lock className="h-4 w-4" />
+          </span>
         )}
       </div>
     );
@@ -1333,8 +1342,15 @@ export function RequirementsTable({
                     </div>
                   </DialogTitle>
                 </div>
-                <div className="text-sm font-medium bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-100">
-                  {previewDocument?.documents.length || 0} File(s)
+                <div className="flex items-center gap-2">
+                  {previewDocument?.locked && (
+                    <Badge variant="outline" className="text-[10px] uppercase font-bold border-slate-300 text-slate-500 bg-slate-100">
+                      Locked
+                    </Badge>
+                  )}
+                  <div className="text-sm font-medium bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-100">
+                    {previewDocument?.documents.length || 0} File(s)
+                  </div>
                 </div>
               </div>
             </DialogHeader>
@@ -1350,9 +1366,9 @@ export function RequirementsTable({
                       fileUrl={doc.fileUrl}
                       expanded={true}
                       showSaveButton={true}
-                      onSave={(data) => handleSaveDocument(doc.originalDoc, data)}
-                      onDataChange={(fieldName, value) => handlePreviewDataChange(doc.id, fieldName, value)}
-                      onDelete={() => handleDeleteDocument?.(doc.originalDoc)}
+                      onSave={previewDocument?.locked ? undefined : (data) => handleSaveDocument(doc.originalDoc, data)}
+                      onDataChange={previewDocument?.locked ? undefined : (fieldName, value) => handlePreviewDataChange(doc.id, fieldName, value)}
+                      onDelete={previewDocument?.locked ? undefined : () => handleDeleteDocument?.(doc.originalDoc)}
                       onDialogClose={() => setDocumentPreviewOpen(false)}
                     />
                   </div>

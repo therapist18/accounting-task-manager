@@ -12,7 +12,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { 
   Plus, Minus, Briefcase, AlertTriangle, Loader2, 
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, 
-  Building, Layers, Shield, User as UserIcon, Users, SearchX, Upload, CheckCircle2
+  Building, Layers, Shield, User as UserIcon, Users, SearchX, Upload, CheckCircle2, FileText
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getOfficerDisplayName } from "@/lib/shared-user-assignment-service";
@@ -111,7 +111,8 @@ const NAPill = () => (
 
 export function TransposedReportView({
   paginatedTasks, transposedRows, expandedSections, renderCellValue, toggleSection,
-  loading = false, error = null, initialColumnsPerPage = 10, userData = { officers: [], users: [] }
+  loading = false, error = null, initialColumnsPerPage = 10, userData = { officers: [], users: [] },
+  reportDocDefaults = [],
 }: any) {
   const [columnsPage, setColumnsPage] = useState(1);
   const [columnsPerPage, setColumnsPerPage] = useState(initialColumnsPerPage);
@@ -329,6 +330,47 @@ export function TransposedReportView({
           )}
         </div>
       </div>
+
+      {reportDocDefaults.length > 0 && (
+        <div className="mt-4 mx-8 mb-4">
+          <div className="border-2 border-l-4 border-l-emerald-500 border-emerald-200 rounded-lg bg-white shadow-sm overflow-hidden">
+            <div className="bg-emerald-50/80 px-4 py-2.5 border-b border-emerald-200">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-emerald-600" />
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">Report Documents</span>
+                <Badge variant="outline" className="bg-emerald-100 text-emerald-700 border-emerald-300 text-[10px] ml-1">
+                  {reportDocDefaults.length} docs
+                </Badge>
+              </div>
+            </div>
+            <div className="p-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {reportDocDefaults.map((doc: any, idx: number) => (
+                  <div key={doc.id || idx} className="flex items-center gap-3 p-3 bg-emerald-50/50 border border-emerald-100 rounded-lg hover:bg-emerald-50 transition-colors">
+                    <div className="flex-shrink-0 w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center">
+                      <span className="text-xs font-bold text-emerald-700">{idx + 1}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{doc.documentName || 'Unknown Document'}</p>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wide">
+                        {doc.docType === 'individual' ? 'Individual' : doc.docType === 'company' ? 'Company' : 'Application'}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={cn(
+                      "text-[10px] flex-shrink-0",
+                      doc.docType === 'individual' ? "bg-blue-50 text-blue-700 border-blue-200" :
+                      doc.docType === 'company' ? "bg-purple-50 text-purple-700 border-purple-200" :
+                      "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    )}>
+                      {doc.docType === 'individual' ? 'IND' : doc.docType === 'company' ? 'CO' : 'APP'}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
