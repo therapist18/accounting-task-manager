@@ -9,6 +9,7 @@ import { FileText, Plus, Minus, Loader2, AlertTriangle, ChevronLeft, ChevronRigh
 import { AutomationMappingDialog } from "../components/AutomationMappingDialog"
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
 import { cn } from "@/lib/utils"
+import { formatDateValue } from "../utils/taskManagerData"
 
 // --- INTERFACE ---
 interface StandardTableProps {
@@ -641,6 +642,22 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                       const docMetadata = { display_name: col.reportDoc.documentName };
                       const hasFiles = colRecords.length > 0;
 
+                      // NEW: Extract immigration date value if it exists
+                      let immigrationDateValue = null;
+                      if (hasFiles) {
+                        const docRecord = colRecords[0];
+                        const kycData = kycDocuments.get(col.reportDoc.documentId);
+                        if (kycData?.fields) {
+                          const immigrationField = kycData.fields.find((f: any) => f.isImmigrationDate);
+                          if (immigrationField) {
+                            const fieldName = immigrationField.fieldName || immigrationField.name || immigrationField.id;
+                            immigrationDateValue = docRecord.extracted_details?.[fieldName] ||
+                              docRecord.extracted_data?.[fieldName] ||
+                              docRecord.edited_details?.[fieldName];
+                          }
+                        }
+                      }
+
                       return (
                         <TableCell
                           key={`${row.key}-${col.id}`}
@@ -649,6 +666,12 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                         >
                           {hasFiles ? (
                             <div className="flex flex-col items-center justify-center gap-1">
+                              {/* NEW: Render the immigration date value */}
+                              {immigrationDateValue && (
+                                <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100/50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                  {formatDateValue ? formatDateValue(immigrationDateValue) : immigrationDateValue}
+                                </span>
+                              )}
                               <Button
                                 variant="outline"
                                 size="sm"

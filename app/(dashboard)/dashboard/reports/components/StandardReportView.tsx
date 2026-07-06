@@ -670,13 +670,16 @@ export function StandardReportView({
                              </div>
                            );
                         }
-                      } else {
-                        // ── Non-stage / task / N/A cell ──
-                        const val = safeRender(rawCellVal);
-                        const isMissing = React.isValidElement(val) && val.props?.className?.includes('text-rose-600');
-                        const isPrimary = col.field === 'applicant_name' || col.field === 'company_name';
-                        cellContent = isMissing ? val : <DataCell val={val} isMissing={val === 'N/A'} isPrimary={isPrimary} />;
-                      }
+                     } else if (col.type === 'report_doc' || col.type === 'reference_requirement') {
+  // ── Render raw custom node directly ──
+  cellContent = rawCellVal;
+} else {
+  // ── Non-stage / task / N/A cell ──
+  const val = safeRender(rawCellVal);
+  const isMissing = React.isValidElement(val) && val.props?.className?.includes('text-rose-600');
+  const isPrimary = col.field === 'applicant_name' || col.field === 'company_name';
+  cellContent = isMissing ? val : <DataCell val={val} isMissing={val === 'N/A'} isPrimary={isPrimary} />;
+}
 
                       return (
                         <TableCell

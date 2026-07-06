@@ -869,7 +869,7 @@ export default function ReportsPage() {
       const isEffectiveTo = effectiveToField ? (latestDoc.extracted_details?.[effectiveToField.fieldName] || latestDoc.edited_details?.[effectiveToField.fieldName]) : (latestDoc.extracted_details?.isEffectiveTo || latestDoc.edited_details?.isEffectiveTo);
       return <div className="text-gray-500"><span className="font-medium text-gray-700">{isEffectiveTo || '-'}</span></div>;
     }
-    if (col.type === 'report_doc') {
+   if (col.type === 'report_doc') {
       const docDef = col.reportDoc;
       const indDocs = allIndividualDocuments[task.id] || [];
       const compDocs = allCompanyDocuments[task.id] || [];
@@ -880,7 +880,6 @@ export default function ReportsPage() {
         d.kyc_document_id?.toString() === docDef.documentId?.toString()
       );
 
-      // Check task stages if it's an application document
       if (!uploaded && task.stages) {
         for (const stageId of Object.keys(task.stages)) {
           const stageData = task.stages[stageId];
@@ -897,30 +896,52 @@ export default function ReportsPage() {
       }
 
       if (uploaded) {
+        // --- NEW: Extract Immigration Date ---
+        let immigrationDateValue = null;
+        const kycData = kycDocuments.get(docDef.documentId?.toString());
+        if (kycData?.fields) {
+          const immigrationField = kycData.fields.find((f: any) => f.isImmigrationDate);
+          if (immigrationField) {
+            const fieldName = immigrationField.fieldName || immigrationField.name || immigrationField.id;
+            immigrationDateValue = uploaded.extracted_details?.[fieldName] ||
+                                   uploaded.extracted_data?.[fieldName] ||
+                                   uploaded.edited_details?.[fieldName];
+          }
+        }
+
         return (
-          <TooltipProvider delayDuration={150}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-1.5 cursor-default select-none group/cell">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                  <span className="text-xs font-medium text-slate-700 truncate max-w-[120px]">
-                    Uploaded
-                  </span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent className="bg-slate-800 text-white text-xs z-[9999]">
-                {uploaded.file_name || 'Document Uploaded'}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <div className="flex flex-col items-center justify-center gap-1 w-full">
+            {immigrationDateValue && (
+              <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100/80 px-1.5 py-0.5 rounded border border-emerald-200/60 truncate max-w-full">
+                {formatDate(immigrationDateValue, false) || immigrationDateValue}
+              </span>
+            )}
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-1.5 cursor-default select-none group/cell">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                    <span className="text-xs font-medium text-slate-700 truncate max-w-[120px]">
+                      Uploaded
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="bg-slate-800 text-white text-xs z-[9999]">
+                  {uploaded.file_name || 'Document Uploaded'}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         );
       }
 
       return (
-        <span className="flex items-center gap-1.5 text-slate-400">
-          <div className="h-1.5 w-1.5 rounded-full bg-slate-300 shrink-0" />
-          <span className="text-xs font-medium italic">Pending</span>
-        </span>
+        <div className="flex flex-col items-center justify-center gap-1 w-full h-full">
+          <div className="flex items-center gap-1.5 text-slate-400">
+            <div className="h-1.5 w-1.5 rounded-full bg-slate-300 shrink-0" />
+            <span className="text-xs font-medium italic">Pending</span>
+          </div>
+        </div>
       );
     }
 
@@ -1052,7 +1073,7 @@ export default function ReportsPage() {
 
       return parts.join(' | ');
     }
-    if (col.type === 'report_doc') {
+  if (col.type === 'report_doc') {
       const docDef = col.reportDoc;
       const indDocs = allIndividualDocuments[task.id] || [];
       const compDocs = allCompanyDocuments[task.id] || [];
@@ -1077,7 +1098,26 @@ export default function ReportsPage() {
           }
         }
       }
-      return uploaded ? 'Uploaded' : 'Pending';
+
+      // --- NEW: Add date extraction mapping for Excel/PDF exports ---
+      let dateString = '';
+      if (uploaded) {
+        const kycData = kycDocuments.get(docDef.documentId?.toString());
+        if (kycData?.fields) {
+          const immigrationField = kycData.fields.find((f: any) => f.isImmigrationDate);
+          if (immigrationField) {
+            const fieldName = immigrationField.fieldName || immigrationField.name || immigrationField.id;
+            const dateVal = uploaded.extracted_details?.[fieldName] ||
+                            uploaded.extracted_data?.[fieldName] ||
+                            uploaded.edited_details?.[fieldName];
+            if (dateVal) {
+              dateString = formatDate(dateVal, false) || String(dateVal);
+            }
+          }
+        }
+      }
+
+      return uploaded ? (dateString ? `Uploaded (${dateString})` : 'Uploaded') : 'Pending';
     }
 
     return '';

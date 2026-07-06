@@ -354,11 +354,33 @@ const MemoizedTableRow = React.memo(({
           const docMetadata = { display_name: doc?.documentName };
           const hasFiles = colRecords.length > 0;
 
+          // NEW: Extract immigration date value if it exists
+          let immigrationDateValue = null;
+          if (hasFiles) {
+            const docRecord = colRecords[0];
+            const kycData = kycDocuments.get(doc?.documentId);
+            if (kycData?.fields) {
+              const immigrationField = kycData.fields.find((f: any) => f.isImmigrationDate);
+              if (immigrationField) {
+                const fieldName = immigrationField.fieldName || immigrationField.name || immigrationField.id;
+                immigrationDateValue = docRecord.extracted_details?.[fieldName] ||
+                  docRecord.extracted_data?.[fieldName] ||
+                  docRecord.edited_details?.[fieldName];
+              }
+            }
+          }
+
           return (
             <React.Fragment key={`${row.key}-${colIndex}`}>
               <TableCell className={cn("text-center text-sm py-1.5 px-2 align-middle border-l-4 border-t border-b border-gray-100 w-[150px] bg-emerald-50/10", item.type === 'dependant' ? 'bg-orange-50/30' : '')}>
                 {hasFiles ? (
                   <div className="flex flex-col items-center justify-center gap-1">
+                    {/* NEW: Render the immigration date value */}
+                    {immigrationDateValue && (
+                      <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100/50 px-1.5 py-0.5 rounded border border-emerald-200">
+                        {String(immigrationDateValue)}
+                      </span>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
