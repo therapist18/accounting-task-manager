@@ -2,6 +2,7 @@
 "use client"
 
 import React, { useState, useEffect, useMemo, useCallback } from "react"
+import Link from "next/link"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -528,7 +529,15 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                       let content = <span className="text-slate-400 text-xs">-</span>;
 
                       if (row.type === 'principal') {
-                        content = <div className="truncate w-full text-sm">{getCellContent(row.task, col.header.id)}</div>;
+                        if (col.header.id === 'applicant_name') {
+                          content = (
+                            <Link href={`/dashboard/tasks/${row.task.id}`} className="font-semibold text-blue-600 hover:text-blue-800 hover:underline truncate block text-left">
+                              {getCellContent(row.task, col.header.id)}
+                            </Link>
+                          );
+                        } else {
+                          content = <div className="truncate w-full text-sm">{getCellContent(row.task, col.header.id)}</div>;
+                        }
 
                         if (col.idx === 0 && taskDependants.get(row.task.id.toString())?.length > 0) {
                           content = (
@@ -541,7 +550,13 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                           )
                         }
                       } else {
-                        if (['applicant_name', 'client_name'].includes(col.header.id)) content = <span className="text-sm font-semibold text-amber-900 truncate">{row.dependant.full_name} <span className="text-xs font-normal text-amber-600">({row.dependant.relationship})</span></span>;
+                        if (['applicant_name', 'client_name'].includes(col.header.id)) {
+                          content = (
+                            <Link href={`/dashboard/tasks/${row.task.id}`} className="text-sm font-semibold text-amber-900 hover:text-amber-750 hover:underline truncate block text-left">
+                              {row.dependant.full_name} <span className="text-xs font-normal text-amber-600">({row.dependant.relationship})</span>
+                            </Link>
+                          );
+                        }
                         else if (col.header.id === 'nationality') content = <span className="text-sm">{row.dependant.nationality || '-'}</span>;
                         else if (col.header.id === 'age') content = <span className="text-sm">{row.dependant.age || '-'}</span>;
                       }

@@ -69,9 +69,10 @@ export function ReviewSubmissionDialog({
 
   const submittedFields = useMemo(() => {
     if (!draft?.fields) return []
-    return Object.entries(draft.fields).map(([fieldKey, value]: [string, any]) => ({
+    return Object.entries(draft.fields).map(([fieldKey, entry]: [string, any]) => ({
       fieldKey,
-      value,
+      value: typeof entry === 'object' && entry !== null && 'value' in entry ? entry.value : entry,
+      metadata: typeof entry === 'object' && entry !== null && 'value' in entry ? entry : null,
     }))
   }, [draft])
 
@@ -160,11 +161,18 @@ export function ReviewSubmissionDialog({
           const automationId = parts[0]
           const variableName = parts.slice(1).join(':')
 
-          const auto = automationWebdataMap[automationId]
-          const fieldDef = auto?.webdata?.find((f: any) => f.variableName === variableName)
+          // Use metadata from new format, or fall back to webdata map
+          const meta = field.metadata
+          let fieldDef = meta ? { variableName: meta.variableName, entityTypes: meta.entityTypes, masterFieldIds: meta.masterFieldIds } : null
+
+          if (!fieldDef) {
+            const auto = automationWebdataMap[automationId]
+            fieldDef = auto?.webdata?.find((f: any) => f.variableName === variableName)
+          }
+
           if (!fieldDef) continue
 
-          const linkedMasterFieldId = fieldDef.linkedMasterFields?.[0] || fieldDef.masterFieldIds?.[0] || fieldDef.linkedMasterFieldId
+          const linkedMasterFieldId = fieldDef.linkedMasterFields?.[0] || fieldDef.masterFieldIds?.[0] || fieldDef.linkedMasterFieldId || (fieldDef.masterFieldIds?.length > 0 ? fieldDef.masterFieldIds[0] : null)
           if (!linkedMasterFieldId) continue
 
           // Find the job field definition to get the source table/path
@@ -198,8 +206,10 @@ export function ReviewSubmissionDialog({
           }
           const { data: existing } = await query.maybeSingle()
 
+          const fieldValueToApply = meta ? meta.value : field.value
+
           if (existing) {
-            const updateData = updateJsonValue(existing, source.path, field.value)
+            const updateData = updateJsonValue(existing, source.path, fieldValueToApply)
 
             const queryField = source.table === 'tm_tasks' ? 'id' :
               source.linking_variable ? source.linking_variable :
@@ -353,22 +363,42 @@ export function ReviewSubmissionDialog({
               <ScrollArea className="flex-1 pr-2">
                 <div className="border rounded-md divide-y bg-slate-50/50">
                   {submittedFields.length > 0 ? (
-                    submittedFields.map((field, idx) => (
-                      <div key={idx} className="p-3 flex items-center justify-between bg-white text-sm">
-                        <div className="flex items-center gap-3">
-                          <Database className="h-4 w-4 text-blue-500" />
-                          <div>
-                            <p className="font-semibold text-slate-700">{getFieldName(field.fieldKey)}</p>
-                            <p className="text-[10px] text-slate-400 font-mono">{field.fieldKey}</p>
+                    submittedFields.map((field, idx) => {
+                      const meta = field.metadata
+                      return (
+                        <div key={idx} className="p-3 flex items-center justify-between bg-white text-sm">
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <Database className="h-4 w-4 text-blue-500 shrink-0" />
+                            <div className="min-w-0">
+                              <p className="font-semibold text-slate-700 truncate">{getFieldName(field.fieldKey)}</p>
+                              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                <p className="text-[10px] text-slate-400 font-mono">{field.fieldKey}</p>
+                                {meta?.automationName && (
+                                  <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-[8px] border px-1 py-0 font-medium">
+                                    {meta.automationName}
+                                  </Badge>
+                                )}
+                                {meta?.fieldType && (
+                                  <span className="text-[9px] text-slate-500 bg-slate-100 px-1 py-0.5 rounded font-medium uppercase">
+                                    {meta.fieldType}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0 ml-3">
+                            <p className="text-sm font-medium text-slate-800 max-w-[200px] truncate">
+                              {typeof field.value === 'object' ? JSON.stringify(field.value) : String(field.value || '-')}
+                            </p>
+                            {meta?.entityTypes?.length > 0 && (
+                              <p className="text-[9px] text-slate-400 mt-0.5 font-medium">
+                                {meta.entityTypes.join(', ')}
+                              </p>
+                            )}
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-sm font-medium text-slate-800 max-w-[200px] truncate">
-                            {typeof field.value === 'object' ? JSON.stringify(field.value) : String(field.value || '-')}
-                          </p>
-                        </div>
-                      </div>
-                    ))
+                      )
+                    })
                   ) : (
                     <p className="p-4 text-center text-sm text-slate-400 italic">No fields submitted.</p>
                   )}

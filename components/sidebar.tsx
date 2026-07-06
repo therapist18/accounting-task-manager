@@ -138,7 +138,7 @@ function getInitials(user: AuthUser | null): string {
 
 // --- Dynamic Navigation Components ---
 const NavGroup = ({ item, isCollapsed, setIsCollapsed, pathname }) => {
-    const isActive = item.items.some((sub: any) => pathname === sub.href);
+    const isActive = item.items.some((sub: any) => pathname === sub.href || (sub.href !== "/" && pathname.startsWith(sub.href + "/")));
     const [isOpen, setIsOpen] = useState(isActive);
 
     useEffect(() => {
@@ -191,7 +191,7 @@ const NavGroup = ({ item, isCollapsed, setIsCollapsed, pathname }) => {
             {!isCollapsed && isOpen && (
                 <div className="ml-[22px] mt-1 mb-2 flex flex-col space-y-1 border-l border-white/20 pl-4">
                     {item.items.map((sub: any) => {
-                        const isSubActive = pathname === sub.href;
+                        const isSubActive = pathname === sub.href || (sub.href !== "/" && pathname.startsWith(sub.href + "/"));
                         return (
                             <Link
                                 key={sub.href}

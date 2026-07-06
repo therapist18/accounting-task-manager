@@ -2152,8 +2152,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                   );
                 }
 
-                const isLocked = isRequirementSectionLocked(col.task, lockCategory);
                 const ctx = buildTableFieldCtxForColumn(automationId, webdata, col);
+                const isLocked = false; // Web data fields are not locked by processing/issuance stages
                 let displayValue: any = '-';
                 let targetEntityId: any = null;
 

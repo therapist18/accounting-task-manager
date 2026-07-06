@@ -2,8 +2,9 @@
 "use client"
 
 import { format, isAfter, isEqual, isValid, parse, startOfToday } from 'date-fns';
-import { Plus, Minus, LinkIcon, X, RefreshCw, Edit, UserPlus } from "lucide-react";
+import { Plus, Minus, LinkIcon, X, RefreshCw, Edit, UserPlus, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import React, { useMemo, useCallback, useEffect, useState } from "react";
 import supabase from '@/lib/supabase/client';
@@ -1007,12 +1008,23 @@ export const getCellContent = (
   const complexCellMap: Record<string, React.ReactNode> = {
     applicant_name: (
       <div className="flex items-center justify-between gap-1 w-[300px]">
-        <div className="flex-grow">
-          <div className="font-medium truncate" title={task.applicant_name}>
+        <div className="flex-grow min-w-0">
+          <Link
+            href={`/dashboard/tasks/${task.id}`}
+            className="font-medium truncate block hover:text-custom-blue hover:underline transition-colors cursor-pointer"
+            title={`Open workspace for ${task.applicant_name || 'N/A'}`}
+          >
             {task.applicant_name || 'N/A'}
-          </div>
+          </Link>
         </div>
-        <div className="flex gap-1">
+        <div className="flex gap-1 shrink-0">
+          <Link
+            href={`/dashboard/tasks/${task.id}`}
+            className="h-6 w-6 rounded flex items-center justify-center hover:bg-blue-50 text-slate-400 hover:text-custom-blue transition-colors"
+            title="Open job workspace"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+          </Link>
           {taskDeps.length > 0 && (
             <ExpandButton isExpanded={isExpanded} onClick={() => toggleDependants(task.id.toString())} className="text-white hover:bg-green-100 flex-shrink-0" />
           )}

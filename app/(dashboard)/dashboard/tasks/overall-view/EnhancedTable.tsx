@@ -2,6 +2,7 @@
 "use client"
 
 import React, { useCallback, useMemo, useState, useRef, useEffect } from "react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -166,18 +167,26 @@ const safeRender = (content: any) => {
 const TableHeaderCell = React.memo(({ item, header, getCellContent }) => {
   const renderContent = () => {
     if (item.type === 'principal') {
-      return getCellContent(item.task, header.id);
+      const rawContent = getCellContent(item.task, header.id);
+      if (header.id === 'applicant_name') {
+        return (
+          <Link href={`/dashboard/tasks/${item.task.id}`} className="font-semibold text-blue-100 hover:text-white hover:underline truncate block">
+            {rawContent}
+          </Link>
+        );
+      }
+      return rawContent;
     }
     const dependant = item.dependant;
     switch (header.id) {
       case 'applicant_name':
         return (
-          <div className="flex flex-col">
+          <Link href={`/dashboard/tasks/${item.task.id}`} className="flex flex-col text-blue-100 hover:text-white hover:underline">
             <span>{dependant?.full_name || dependant?.name || 'N/A'}</span>
-            <span className="text-xs text-gray-500">
+            <span className="text-xs text-blue-200 font-normal">
               {dependant?.relationship || 'Dependant'}
             </span>
-          </div>
+          </Link>
         );
       case 'nationality':
         return dependant?.nationality || 'N/A';
