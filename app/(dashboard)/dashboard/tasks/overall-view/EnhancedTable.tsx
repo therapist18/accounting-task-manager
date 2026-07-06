@@ -225,7 +225,10 @@ const MemoizedTableRow = React.memo(({
   onEditTask,
   setEditingTask,
   setEditDialogOpen,
-  readOnly
+  readOnly,
+  allIndividualDocuments = {},
+  allCompanyDocuments = {},
+  handleViewReportDocument
 }: {
   row: any;
   rowIndex: number;
@@ -243,6 +246,9 @@ const MemoizedTableRow = React.memo(({
   setEditingTask: (task: any) => void;
   setEditDialogOpen: (open: boolean) => void;
   readOnly?: boolean;
+  allIndividualDocuments?: Record<number, any[]>;
+  allCompanyDocuments?: Record<number, any[]>;
+  handleViewReportDocument?: (colRecords: any[], docMetadata: any, task: any) => void;
 }) => {
   const rowBg = row.isSubSubRow ? 'bg-slate-100/50' : row.isSubRow ? 'bg-slate-50/60' : 'bg-white';
   const hoverBg = 'hover:bg-blue-50/50';
@@ -279,15 +285,102 @@ const MemoizedTableRow = React.memo(({
         <TableCell className="sticky left-0 z-10 bg-emerald-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 text-center w-14 min-w-14 max-w-14">
           {row.stageOrder}
         </TableCell>
-        <TableCell colSpan={paginatedHeaderStructure.length * 2 + 2} className="border border-gray-100 p-2">
-          <div className="flex items-center gap-3">
-            <FileText className="h-4 w-4 text-emerald-600" />
-            <span className="font-medium text-slate-800">{row.label}</span>
-            <Badge variant="outline" className={cn("text-[10px]", docTypeBadge)}>
-              {doc?.docType === 'individual' ? 'Individual' : doc?.docType === 'company' ? 'Company' : 'Application'}
+        <TableCell className="sticky left-14 z-10 bg-emerald-50/50 group-hover:bg-emerald-50 border border-gray-100 font-medium text-sm text-slate-700 p-2 w-[280px] min-w-[280px] max-w-[280px]">
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-emerald-600 shrink-0" />
+            <span className="truncate font-semibold text-slate-800" title={row.label}>{row.label}</span>
+            <Badge variant="outline" className={cn("text-[8px] font-bold uppercase shrink-0", docTypeBadge)}>
+              {doc?.docType === 'individual' ? 'IND' : doc?.docType === 'company' ? 'CO' : 'APP'}
             </Badge>
           </div>
         </TableCell>
+        {paginatedHeaderStructure.map((item, colIndex) => {
+          let colEntityType = 'principal';
+          let entityId = null;
+          if (doc?.docType === 'company') {
+            colEntityType = 'company';
+            entityId = item.task.company_id;
+          } else if (item.type === 'principal') {
+            colEntityType = 'principal';
+            entityId = item.task.individual_id || item.task.applicant_details?.id;
+          } else if (item.type === 'dependant') {
+            colEntityType = 'dependant';
+            entityId = item.dependant?.id;
+          }
+
+          const isJobLevelApplicable = item.task.report_doc_defaults?.some((d: any) => d.documentId === doc?.documentId);
+          const isEntityApplicable = doc?.appliesTo?.includes(item.type === 'principal' ? (doc?.docType === 'company' ? 'company' : 'principal') : 'dependant');
+          const isApplicable = isJobLevelApplicable && isEntityApplicable;
+
+          if (!isApplicable) {
+            return (
+              <React.Fragment key={`${row.key}-${colIndex}`}>
+                <TableCell className={cn("text-center text-sm py-1 px-2 align-middle border-l-4 border-t border-b border-gray-100 w-[150px] bg-slate-50/50 text-gray-400 italic text-[11px]", item.type === 'dependant' ? 'bg-orange-50/20' : '')}>
+                  N/A
+                </TableCell>
+                <TableCell className={cn("text-center text-sm py-1 px-2 align-middle border-r-4 border-t border-b border-gray-100 w-[120px] bg-slate-50/50 text-gray-400 italic text-[11px]", item.type === 'dependant' ? 'bg-orange-50/20' : '')}>
+                  -
+                </TableCell>
+              </React.Fragment>
+            );
+          }
+
+          const snapshot = [
+            ...(item.task.processing_requirements_documents || []),
+            ...(item.task.issuance_requirements_documents || [])
+          ];
+          const entry = snapshot.find((s: any) =>
+            s.documentTypeId === doc?.documentId &&
+            s.entityType === colEntityType &&
+            Number(s.entityId) === Number(entityId)
+          );
+
+          let colRecords = [];
+          let isFromSnapshot = false;
+
+          if (entry) {
+            const pool = colEntityType === 'company'
+              ? (allCompanyDocuments[entityId] || [])
+              : (allIndividualDocuments[entityId] || []);
+            colRecords = pool.filter((d: any) => (entry.documentRecordIds || []).includes(d.id));
+            isFromSnapshot = true;
+          } else {
+            const pool = colEntityType === 'company'
+              ? (allCompanyDocuments[entityId] || [])
+              : (allIndividualDocuments[entityId] || []);
+            colRecords = pool.filter((d: any) => d.document_id === doc?.documentId);
+          }
+
+          const docMetadata = { display_name: doc?.documentName };
+          const hasFiles = colRecords.length > 0;
+
+          return (
+            <React.Fragment key={`${row.key}-${colIndex}`}>
+              <TableCell className={cn("text-center text-sm py-1.5 px-2 align-middle border-l-4 border-t border-b border-gray-100 w-[150px] bg-emerald-50/10", item.type === 'dependant' ? 'bg-orange-50/30' : '')}>
+                {hasFiles ? (
+                  <div className="flex flex-col items-center justify-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 py-0 px-2 bg-white text-blue-600 border-blue-200 hover:bg-blue-50 shadow-sm flex items-center gap-1 text-[10px]"
+                      onClick={() => handleViewReportDocument?.(colRecords, docMetadata, item.task)}
+                    >
+                      <Eye className="h-3 w-3" />
+                      <span>View</span>
+                    </Button>
+                  </div>
+                ) : (
+                  <Badge variant="outline" className="bg-slate-50 text-slate-400 border-slate-200 text-[9px] font-medium py-0 px-1.5">
+                    Not Uploaded
+                  </Badge>
+                )}
+              </TableCell>
+              <TableCell className={cn("text-center text-sm py-1 px-2 align-middle border-r-4 border-t border-b border-gray-100 w-[120px] bg-emerald-50/10", item.type === 'dependant' ? 'bg-orange-50/30' : '')}>
+                -
+              </TableCell>
+            </React.Fragment>
+          );
+        })}
       </TableRow>
     );
   }
@@ -389,6 +482,9 @@ interface EnhancedTableProps {
   enhancedTasksData?: Map<string, any>;
   readOnly?: boolean;
   reportDocDefaults?: any[];
+  allIndividualDocuments?: Record<number, any[]>;
+  allCompanyDocuments?: Record<number, any[]>;
+  handleViewReportDocument?: (colRecords: any[], docMetadata: any, task: any) => void;
 }
 
 export const EnhancedTable: React.FC<EnhancedTableProps> = ({
@@ -418,6 +514,9 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   enhancedTasksData = new Map(),
   readOnly = false,
   reportDocDefaults = [],
+  allIndividualDocuments = {},
+  allCompanyDocuments = {},
+  handleViewReportDocument,
 }) => {
   const didLogRef = useRef(false);
   const getCellContentWithCancel = useCallback((task: any, headerId: string) => {
@@ -693,6 +792,9 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
                   setEditingTask={setEditingTask}
                   setEditDialogOpen={setEditDialogOpen}
                   readOnly={readOnly}
+                  allIndividualDocuments={allIndividualDocuments}
+                  allCompanyDocuments={allCompanyDocuments}
+                  handleViewReportDocument={handleViewReportDocument}
                 />
               ))
             )}

@@ -124,6 +124,28 @@ interface AddRequirementsDialogProps {
 
 const APPLICANT_OPTIONS = ENTITY_TYPES;
 
+const ENTITY_TYPE_OPTIONS = [
+  { value: 'company', label: 'Company' },
+  { value: 'principal', label: 'Principal' },
+  { value: 'director', label: 'Director' },
+  { value: 'shareholder', label: 'Shareholder' },
+  { value: 'dependant', label: 'Dependant' },
+  { value: 'employee', label: 'Employee' },
+  { value: 'understudy', label: 'Understudy' },
+  { value: 'sponsor', label: 'Sponsor' },
+];
+
+function getDefaultAppliesTo(doc: any): string[] {
+  const category = (doc.category || '').toLowerCase()
+  if (category.includes('company') || category.includes('corporate')) return ['company']
+  if (category.includes('director') || category.includes('individual') || category.includes('personal'))
+    return ['principal', 'director', 'shareholder', 'dependant', 'employee', 'understudy', 'sponsor']
+  const entityTypes = doc.entity_types || []
+  if (entityTypes.includes('company')) return ['company']
+  if (entityTypes.length > 0) return ['principal', 'director', 'shareholder', 'dependant', 'employee', 'understudy', 'sponsor']
+  return ['company', 'principal', 'director', 'shareholder', 'dependant', 'employee', 'understudy', 'sponsor']
+}
+
 export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmitting, context }: AddRequirementsDialogProps) {
   const [activeSection, setActiveSection] = useState<RequirementCategory>('processing')
   const [generalReqs, setGeneralReqs] = useState<RequirementForm[]>([DEFAULT_REQUIREMENT('general')])
@@ -324,6 +346,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
             documentId: doc.id,
             documentName: doc.display_name || doc.name || 'Unknown',
             docType,
+            appliesTo: doc.appliesTo || getDefaultAppliesTo(doc),
             order: existingDefaults.length + index,
             isVisible: true
           };
@@ -579,47 +602,82 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                     Select KYC documents to display by default in reports. Documents are grouped by type (Individual, Company, Application) based on their entity types.
                   </p>
 
-                  {/* Selected Documents */}
-                  {reportDocs.length > 0 && (
-                    <div className="space-y-2 mb-4">
-                      <Label className="text-[10px] uppercase font-bold text-slate-500">Selected Documents ({reportDocs.length})</Label>
-                      <div className="space-y-2">
-                        {reportDocs.map((doc, idx) => (
-                          <div key={doc.id} className="flex items-center justify-between p-3 bg-white border border-emerald-200 rounded-lg">
-                            <div className="flex items-center gap-3">
-                              <span className="flex items-center justify-center w-6 h-6 bg-emerald-100 rounded-full text-xs font-bold text-emerald-700">
-                                {idx + 1}
-                              </span>
-                              <div>
-                                <p className="text-sm font-medium text-slate-800">{doc.display_name || doc.name}</p>
-                                <p className="text-[10px] text-slate-500">
-                                  {doc.category || 'Uncategorized'}
-                                </p>
-                              </div>
-                              <Badge variant="outline" className={cn(
-                                "text-[9px] ml-2",
-                                (doc.category || '').toLowerCase().includes('company') ? "bg-purple-50 text-purple-700 border-purple-200" :
-                                (doc.category || '').toLowerCase().includes('director') || (doc.category || '').toLowerCase().includes('individual') ? "bg-blue-50 text-blue-700 border-blue-200" :
-                                "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              )}>
-                                {(doc.category || '').toLowerCase().includes('company') ? 'Company' :
-                                 (doc.category || '').toLowerCase().includes('director') || (doc.category || '').toLowerCase().includes('individual') ? 'Individual' :
-                                 'Application'}
-                              </Badge>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-red-400 hover:text-red-600"
-                              onClick={() => setReportDocs(reportDocs.filter((_, i) => i !== idx))}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ))}
-                    </div>
-                    </div>
-                  )}
+                   {/* Selected Documents */}
+                   {reportDocs.length > 0 && (
+                     <div className="space-y-2 mb-4">
+                       <Label className="text-[10px] uppercase font-bold text-slate-500">Selected Documents ({reportDocs.length})</Label>
+                       <div className="space-y-3">
+                         {reportDocs.map((doc, idx) => (
+                           <div key={doc.id} className="p-3 bg-white border border-emerald-200 rounded-lg space-y-2">
+                             <div className="flex items-center justify-between">
+                               <div className="flex items-center gap-3">
+                                 <span className="flex items-center justify-center w-6 h-6 bg-emerald-100 rounded-full text-xs font-bold text-emerald-700">
+                                   {idx + 1}
+                                 </span>
+                                 <div>
+                                   <p className="text-sm font-medium text-slate-800">{doc.display_name || doc.name}</p>
+                                   <p className="text-[10px] text-slate-500">
+                                     {doc.category || 'Uncategorized'}
+                                   </p>
+                                 </div>
+                                 <Badge variant="outline" className={cn(
+                                   "text-[9px] ml-2",
+                                   (doc.category || '').toLowerCase().includes('company') ? "bg-purple-50 text-purple-700 border-purple-200" :
+                                   (doc.category || '').toLowerCase().includes('director') || (doc.category || '').toLowerCase().includes('individual') ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                   "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                 )}>
+                                   {(doc.category || '').toLowerCase().includes('company') ? 'Company' :
+                                    (doc.category || '').toLowerCase().includes('director') || (doc.category || '').toLowerCase().includes('individual') ? 'Individual' :
+                                    'Application'}
+                                 </Badge>
+                               </div>
+                               <Button
+                                 variant="ghost"
+                                 size="icon"
+                                 className="h-8 w-8 text-red-400 hover:text-red-600"
+                                 onClick={() => setReportDocs(reportDocs.filter((_, i) => i !== idx))}
+                               >
+                                 <Trash2 className="h-4 w-4" />
+                               </Button>
+                             </div>
+                             {/* Applies To */}
+                             <div className="flex items-center gap-2 flex-wrap">
+                               <Label className="text-[10px] font-bold text-slate-400 shrink-0">Applies To:</Label>
+                               <div className="flex flex-wrap gap-1">
+                                 {ENTITY_TYPE_OPTIONS.map(opt => {
+                                   const isSelected = (doc.appliesTo || []).includes(opt.value)
+                                   return (
+                                     <button
+                                       key={opt.value}
+                                       type="button"
+                                       className={cn(
+                                         "text-[10px] px-2 py-0.5 rounded-full border transition-all font-medium",
+                                         isSelected
+                                           ? "bg-emerald-100 text-emerald-700 border-emerald-300"
+                                           : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+                                       )}
+                                       onClick={() => {
+                                         const newDocs = [...reportDocs]
+                                         const current = newDocs[idx].appliesTo || []
+                                         if (isSelected) {
+                                           newDocs[idx] = { ...newDocs[idx], appliesTo: current.filter((v: string) => v !== opt.value) }
+                                         } else {
+                                           newDocs[idx] = { ...newDocs[idx], appliesTo: [...current, opt.value] }
+                                         }
+                                         setReportDocs(newDocs)
+                                       }}
+                                     >
+                                       {opt.label}
+                                     </button>
+                                   )
+                                 })}
+                               </div>
+                             </div>
+                           </div>
+                         ))}
+                       </div>
+                     </div>
+                   )}
 
                 {/* KYC Document Selector */}
                 <div className="space-y-2">
@@ -648,7 +706,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                                   disabled={alreadyAdded}
                                   onSelect={() => {
                                     if (!alreadyAdded) {
-                                      setReportDocs([...reportDocs, doc])
+                                      setReportDocs([...reportDocs, { ...doc, appliesTo: getDefaultAppliesTo(doc) }])
                                     }
                                   }}
                                 >

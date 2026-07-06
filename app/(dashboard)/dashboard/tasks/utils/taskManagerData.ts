@@ -41,6 +41,7 @@ export interface Task {
   current_stage?: any;
   requirements?: any[];
   referenceDocuments?: Record<string, any[]>;
+  report_doc_defaults?: any[];
 }
 
 export interface Department {
@@ -238,6 +239,22 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
         requirements: finalRequirements
       };
 
+      // Find the single best matching requirements record to get its report_doc_defaults
+      let bestMatch = null;
+      if (jobLevel.subclass_id) {
+        bestMatch = matchingRequirements?.find((r: any) => r.job_level?.subclass_id === jobLevel.subclass_id);
+      }
+      if (!bestMatch && jobLevel.class_id) {
+        bestMatch = matchingRequirements?.find((r: any) => r.job_level?.class_id === jobLevel.class_id && !r.job_level?.subclass_id);
+      }
+      if (!bestMatch && jobLevel.subdepartment_id) {
+        bestMatch = matchingRequirements?.find((r: any) => r.job_level?.subdepartment_id === jobLevel.subdepartment_id && !r.job_level?.class_id);
+      }
+      if (!bestMatch && jobLevel.department_id) {
+        bestMatch = matchingRequirements?.find((r: any) => r.job_level?.department_id === jobLevel.department_id && !r.job_level?.subdepartment_id);
+      }
+      const reportDocDefaults = bestMatch?.report_doc_defaults || [];
+
       const processedTask: Task = {
         ...task,
         applicant_name: task.applicant_details?.name || task.applicant_name || '',
@@ -266,6 +283,7 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
           phone: taskManager.phone || ''
         } : undefined,
         requirements: taskRequirements?.requirements || [],
+        report_doc_defaults: reportDocDefaults,
         referenceDocuments: {}
       };
       return processedTask;
@@ -749,3 +767,78 @@ export const getDocumentForTaskStage = (
 
   return relevantDocs[0] // Already sorted by created_at desc
 }
+
+/**
+ * Fetch all uploaded individual and company documents for a list of tasks
+ */
+export const fetchUploadedDocumentsForTasks = async (tasks: any[]) => {
+  const individualIds = new Set<number>();
+  const companyIds = new Set<number>();
+
+  tasks.forEach(task => {
+    if (task.individual_id) individualIds.add(task.individual_id);
+    if (task.applicant_details?.id && task.applicant_details?.type !== 'company') {
+      individualIds.add(task.applicant_details.id);
+    }
+    if (task.company_id) companyIds.add(task.company_id);
+    if (task.applicant_details?.id && task.applicant_details?.type === 'company') {
+      companyIds.add(task.applicant_details.id);
+    }
+    // Also dependants
+    const dependants = task.dependants_members || task.dependant_member || [];
+    dependants.forEach((d: any) => {
+      if (d.id) {
+        const numericId = Number(d.id);
+        if (!isNaN(numericId)) individualIds.add(numericId);
+      }
+    });
+  });
+
+  const indIdsArr = Array.from(individualIds).filter(id => Boolean(id) && !isNaN(Number(id)));
+  const coIdsArr = Array.from(companyIds).filter(id => Boolean(id) && !isNaN(Number(id)));
+
+  const promises = [];
+  if (indIdsArr.length > 0) {
+    promises.push(
+      supabase
+        .from('acc_portal_directors_documents')
+        .select('*, acc_portal_kyc (id, name, display_name)')
+        .in('director_id', indIdsArr)
+    );
+  } else {
+    promises.push(Promise.resolve({ data: [] }));
+  }
+
+  if (coIdsArr.length > 0) {
+    promises.push(
+      supabase
+        .from('acc_portal_kyc_uploads')
+        .select('*, acc_portal_kyc (id, name, display_name)')
+        .in('company_id', coIdsArr)
+    );
+  } else {
+    promises.push(Promise.resolve({ data: [] }));
+  }
+
+  const [indRes, coRes] = await Promise.all(promises);
+
+  const individualDocsMap: Record<number, any[]> = {};
+  if (indRes.data) {
+    indRes.data.forEach((doc: any) => {
+      const dirId = Number(doc.director_id);
+      if (!individualDocsMap[dirId]) individualDocsMap[dirId] = [];
+      individualDocsMap[dirId].push(doc);
+    });
+  }
+
+  const companyDocsMap: Record<number, any[]> = {};
+  if (coRes.data) {
+    coRes.data.forEach((doc: any) => {
+      const compId = Number(doc.company_id);
+      if (!companyDocsMap[compId]) companyDocsMap[compId] = [];
+      companyDocsMap[compId].push(doc);
+    });
+  }
+
+  return { individualDocsMap, companyDocsMap };
+};

@@ -25,6 +25,7 @@ import { DepartmentSidebar } from "@/app/(dashboard)/dashboard/departments/main-
 import { EditRequirementDialog } from "./components/EditRequirementDialog"
 import { AddRequirementsDialog } from "./components/AddRequirementsDialog"
 import { EditJobQuestionDialog } from "./components/EditJobQuestionDialog"
+import { DeleteConfirmationDialog } from "@/app/(dashboard)/dashboard/tasks/components/DeleteConfirmationDialog"
 import { COMPUTED_FUNCTIONS } from "@/lib/constants/computed-functions"
 import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
@@ -128,6 +129,7 @@ interface ReportDocDefault {
   documentId: string
   documentName?: string
   docType: 'individual' | 'company' | 'application'
+  appliesTo: string[]
   order: number
   isVisible: boolean
 }
@@ -172,12 +174,16 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingRequirement, setEditingRequirement] = useState<ApiRequirement | null>(null)
+  const [isEditReportDocDialogOpen, setIsEditReportDocDialogOpen] = useState(false)
+  const [editingReportDoc, setEditingReportDoc] = useState<any | null>(null)
   const [isEditQuestionDialogOpen, setIsEditQuestionDialogOpen] = useState(false)
   const [editingQuestion, setEditingQuestion] = useState<JobQuestion | null>(null)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [addContext, setAddContext] = useState<EditingContext | null>(null)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [deleteContext, setDeleteContext] = useState<{ type: string, index: number, requirementId?: string, isQuestion?: boolean } | null>(null)
+  const [isRemoveReportDocConfirmOpen, setIsRemoveReportDocConfirmOpen] = useState(false)
+  const [removingReportDocId, setRemovingReportDocId] = useState<string | null>(null)
   const [editingContext, setEditingContext] = useState<EditingContext | null>(null)
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
   const [masterFields, setMasterFields] = useState<any[]>([])
@@ -1071,6 +1077,17 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     return 'application'
   }
 
+  const getDefaultAppliesTo = (doc: any): string[] => {
+    const category = (doc.category || '').toLowerCase()
+    if (category.includes('company') || category.includes('corporate')) return ['company']
+    if (category.includes('director') || category.includes('individual') || category.includes('personal'))
+      return ['principal', 'director', 'shareholder', 'dependant', 'employee', 'understudy', 'sponsor']
+    const entityTypes = doc.entity_types || []
+    if (entityTypes.includes('company')) return ['company']
+    if (entityTypes.length > 0) return ['principal', 'director', 'shareholder', 'dependant', 'employee', 'understudy', 'sponsor']
+    return ['company', 'principal', 'director', 'shareholder', 'dependant', 'employee', 'understudy', 'sponsor']
+  }
+
   const handleAddReportDoc = async (documentId: string) => {
     if (!editingContext) return
     try {
@@ -1096,6 +1113,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         documentId,
         documentName: doc?.display_name || doc?.name || 'Unknown',
         docType,
+        appliesTo: getDefaultAppliesTo(doc),
         order: currentDefaults.length,
         isVisible: true
       }
@@ -1133,19 +1151,20 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     }
   }
 
-  const handleRemoveReportDoc = async (docId: string) => {
-    if (!editingContext) return
+  const handleRemoveReportDoc = async (docId: string, ctx?: EditingContext) => {
+    const contextToUse = ctx || editingContext
+    if (!contextToUse) return
     try {
       setIsSubmitting(true)
       const { data: existing, error: fetchError } = await supabase
         .from('tm_class_requirements')
         .select('*')
         .eq('job_level', JSON.stringify({
-          department_id: Number(editingContext.departmentId),
-          subdepartment_id: Number(editingContext.subdepartmentId),
-          class_id: editingContext.classId ? Number(editingContext.classId) : null,
-          subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
-          level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
+          department_id: Number(contextToUse.departmentId),
+          subdepartment_id: Number(contextToUse.subdepartmentId),
+          class_id: contextToUse.classId ? Number(contextToUse.classId) : null,
+          subclass_id: contextToUse.subclassId ? Number(contextToUse.subclassId) : null,
+          level: contextToUse.type === 'subdepartment' ? 2 : contextToUse.type === 'class' ? 3 : 4
         }))
         .maybeSingle()
       if (fetchError) throw fetchError
@@ -1170,8 +1189,9 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     }
   }
 
-  const handleToggleReportDocVisibility = async (docId: string) => {
-    if (!editingContext) return
+  const handleToggleReportDocVisibility = async (docId: string, ctx?: EditingContext) => {
+    const contextToUse = ctx || editingContext
+    if (!contextToUse) return
     const updated = reportDocDefaults.map(d =>
       d.id === docId ? { ...d, isVisible: !d.isVisible } : d
     )
@@ -1181,11 +1201,11 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         .from('tm_class_requirements')
         .select('*')
         .eq('job_level', JSON.stringify({
-          department_id: Number(editingContext.departmentId),
-          subdepartment_id: Number(editingContext.subdepartmentId),
-          class_id: editingContext.classId ? Number(editingContext.classId) : null,
-          subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
-          level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
+          department_id: Number(contextToUse.departmentId),
+          subdepartment_id: Number(contextToUse.subdepartmentId),
+          class_id: contextToUse.classId ? Number(contextToUse.classId) : null,
+          subclass_id: contextToUse.subclassId ? Number(contextToUse.subclassId) : null,
+          level: contextToUse.type === 'subdepartment' ? 2 : contextToUse.type === 'class' ? 3 : 4
         }))
         .maybeSingle()
       if (existing) {
@@ -1199,8 +1219,9 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     }
   }
 
-  const handleMoveReportDoc = async (index: number, direction: 'up' | 'down') => {
-    if (!editingContext) return
+  const handleMoveReportDoc = async (index: number, direction: 'up' | 'down', ctx?: EditingContext) => {
+    const contextToUse = ctx || editingContext
+    if (!contextToUse) return
     const items = [...reportDocDefaults]
     const targetIndex = direction === 'up' ? index - 1 : index + 1
     if (targetIndex < 0 || targetIndex >= items.length) return
@@ -1212,11 +1233,11 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         .from('tm_class_requirements')
         .select('*')
         .eq('job_level', JSON.stringify({
-          department_id: Number(editingContext.departmentId),
-          subdepartment_id: Number(editingContext.subdepartmentId),
-          class_id: editingContext.classId ? Number(editingContext.classId) : null,
-          subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
-          level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
+          department_id: Number(contextToUse.departmentId),
+          subdepartment_id: Number(contextToUse.subdepartmentId),
+          class_id: contextToUse.classId ? Number(contextToUse.classId) : null,
+          subclass_id: contextToUse.subclassId ? Number(contextToUse.subclassId) : null,
+          level: contextToUse.type === 'subdepartment' ? 2 : contextToUse.type === 'class' ? 3 : 4
         }))
         .maybeSingle()
       if (existing) {
@@ -1227,6 +1248,85 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       }
     } catch (error) {
       console.error(error)
+    }
+  }
+
+  const handleToggleReportDocAppliesTo = async (docId: string, entityType: string, ctx?: EditingContext) => {
+    const contextToUse = ctx || editingContext
+    if (!contextToUse) return
+    const updated = reportDocDefaults.map(d => {
+      if (d.id !== docId) return d
+      const current = d.appliesTo || []
+      const next = current.includes(entityType)
+        ? current.filter((v: string) => v !== entityType)
+        : [...current, entityType]
+      return { ...d, appliesTo: next }
+    })
+    setReportDocDefaults(updated)
+    try {
+      const { data: existing } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .eq('job_level', JSON.stringify({
+          department_id: Number(contextToUse.departmentId),
+          subdepartment_id: Number(contextToUse.subdepartmentId),
+          class_id: contextToUse.classId ? Number(contextToUse.classId) : null,
+          subclass_id: contextToUse.subclassId ? Number(contextToUse.subclassId) : null,
+          level: contextToUse.type === 'subdepartment' ? 2 : contextToUse.type === 'class' ? 3 : 4
+        }))
+        .maybeSingle()
+      if (existing) {
+        await supabase
+          .from('tm_class_requirements')
+          .update({ report_doc_defaults: updated, updated_at: new Date().toISOString() })
+          .eq('id', existing.id)
+      }
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  const handleEditReportDoc = (doc: any, ctx: EditingContext) => {
+    setEditingContext(ctx)
+    setEditingReportDoc({ ...doc, category: 'report-docs' })
+    setIsEditReportDocDialogOpen(true)
+  }
+
+  const handleSaveReportDoc = async (updatedDoc: any) => {
+    const contextToUse = editingContext
+    if (!contextToUse) return
+    try {
+      setIsSubmitting(true)
+      const { data: existing } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .eq('job_level', JSON.stringify({
+          department_id: Number(contextToUse.departmentId),
+          subdepartment_id: Number(contextToUse.subdepartmentId),
+          class_id: contextToUse.classId ? Number(contextToUse.classId) : null,
+          subclass_id: contextToUse.subclassId ? Number(contextToUse.subclassId) : null,
+          level: contextToUse.type === 'subdepartment' ? 2 : contextToUse.type === 'class' ? 3 : 4
+        }))
+        .maybeSingle()
+      if (!existing) throw new Error('No record found')
+
+      const updatedDefaults = (existing.report_doc_defaults || []).map((d: any) =>
+        d.id === updatedDoc.id ? { ...d, ...updatedDoc, category: undefined } : d
+      )
+      const { error } = await supabase
+        .from('tm_class_requirements')
+        .update({ report_doc_defaults: updatedDefaults, updated_at: new Date().toISOString() })
+        .eq('id', existing.id)
+      if (error) throw error
+      setReportDocDefaults(updatedDefaults)
+      setIsEditReportDocDialogOpen(false)
+      setEditingReportDoc(null)
+      toast({ title: "Success", description: "Report document updated" })
+    } catch (error) {
+      console.error(error)
+      toast({ title: "Error", description: "Failed to update report document", variant: "destructive" })
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -1259,6 +1359,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 <TableHead className="w-12 text-center border-r">#</TableHead>
                 <TableHead className="min-w-[200px] border-r">Document Name</TableHead>
                 <TableHead className="border-r">Doc Type</TableHead>
+                <TableHead className="border-r min-w-[280px]">Applies To</TableHead>
                 <TableHead className="border-r text-center">Ordering</TableHead>
                 <TableHead className="border-r text-center">Visible</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -1267,7 +1368,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
             <TableBody>
               {reportDocDefaults.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
+                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
                     No report documents configured. Add KYC documents to display by default in reports.
                   </TableCell>
                 </TableRow>
@@ -1276,7 +1377,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                   <React.Fragment key={groupKey}>
                     {docs.length > 0 && (
                       <TableRow className="bg-slate-100/80 border-y">
-                        <TableCell colSpan={6} className="py-2 px-4 font-bold text-xs uppercase text-slate-500">
+                        <TableCell colSpan={7} className="py-2 px-4 font-bold text-xs uppercase text-slate-500">
                           {groupKey === 'individual' ? 'Individual Documents' :
                            groupKey === 'company' ? 'Company Documents' : 'Application Documents'}
                           <span className="text-slate-400 font-normal ml-2">({docs.length})</span>
@@ -1292,12 +1393,34 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                           {doc.documentName || 'Unknown Document'}
                         </TableCell>
                         <TableCell className="border-r">{getDocTypeBadge(doc.docType)}</TableCell>
+                        <TableCell className="border-r">
+                          <div className="flex flex-wrap gap-1">
+                            {(['company', 'principal', 'director', 'shareholder', 'dependant', 'employee', 'understudy', 'sponsor'] as const).map(et => {
+                              const isSelected = (doc.appliesTo || []).includes(et)
+                              return (
+                                <button
+                                  key={et}
+                                  type="button"
+                                  className={cn(
+                                    "text-[9px] px-1.5 py-0.5 rounded-full border transition-all font-medium capitalize",
+                                    isSelected
+                                      ? "bg-emerald-100 text-emerald-700 border-emerald-300"
+                                      : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+                                  )}
+                                  onClick={() => handleToggleReportDocAppliesTo(doc.id, et, context)}
+                                >
+                                  {et}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </TableCell>
                         <TableCell className="border-r text-center">
                           <div className="flex items-center justify-center gap-1">
                             <Button
                               variant="ghost" size="icon" className="h-7 w-7 text-slate-400"
                               disabled={doc.order <= 0 || isSubmitting}
-                              onClick={() => handleMoveReportDoc(reportDocDefaults.indexOf(doc), 'up')}
+                              onClick={() => handleMoveReportDoc(reportDocDefaults.indexOf(doc), 'up', context)}
                             >
                               <ArrowUp className="h-3.5 w-3.5" />
                             </Button>
@@ -1305,7 +1428,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                             <Button
                               variant="ghost" size="icon" className="h-7 w-7 text-slate-400"
                               disabled={doc.order >= reportDocDefaults.length - 1 || isSubmitting}
-                              onClick={() => handleMoveReportDoc(reportDocDefaults.indexOf(doc), 'down')}
+                              onClick={() => handleMoveReportDoc(reportDocDefaults.indexOf(doc), 'down', context)}
                             >
                               <ArrowDown className="h-3.5 w-3.5" />
                             </Button>
@@ -1314,7 +1437,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         <TableCell className="border-r text-center">
                           <Button
                             variant="ghost" size="icon" className="h-7 w-7 mx-auto"
-                            onClick={() => handleToggleReportDocVisibility(doc.id)}
+                            onClick={() => handleToggleReportDocVisibility(doc.id, context)}
                           >
                             {doc.isVisible ? (
                               <Eye className="h-4 w-4 text-emerald-600" />
@@ -1324,11 +1447,21 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                           </Button>
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500"
-                            onClick={() => handleRemoveReportDoc(doc.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-blue-600"
+                              onClick={() => handleEditReportDoc(doc, context)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500"
+                              onClick={() => {
+                                setRemovingReportDocId(doc.id)
+                                setIsRemoveReportDocConfirmOpen(true)
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -2139,6 +2272,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
 
               <AddRequirementsDialog isOpen={isAddDialogOpen} onOpenChange={setIsAddDialogOpen} onSubmit={handleAddRequirements} isSubmitting={isSubmitting} context={addContext} />
               <EditRequirementDialog isOpen={isEditDialogOpen} onOpenChange={setIsEditDialogOpen} requirement={editingRequirement} onSave={handleSaveRequirement} isSubmitting={isSubmitting} context={editingContext} />
+              <EditRequirementDialog isOpen={isEditReportDocDialogOpen} onOpenChange={setIsEditReportDocDialogOpen} requirement={editingReportDoc} onSave={handleSaveReportDoc} isSubmitting={isSubmitting} context={editingContext} />
 
               <EditJobQuestionDialog
                 isOpen={isEditQuestionDialogOpen}
@@ -2153,6 +2287,21 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                 <DialogContent><DialogHeader><DialogTitle>Confirm Delete</DialogTitle></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>Cancel</Button><Button variant="destructive" onClick={() => deleteContext?.requirementId && handleDeleteRequirement(deleteContext.requirementId)} disabled={isSubmitting}>Delete</Button></DialogFooter></DialogContent>
               </Dialog>
+
+              <DeleteConfirmationDialog
+                open={isRemoveReportDocConfirmOpen}
+                onOpenChange={setIsRemoveReportDocConfirmOpen}
+                onConfirm={() => {
+                  if (removingReportDocId) {
+                    handleRemoveReportDoc(removingReportDocId)
+                  }
+                  setIsRemoveReportDocConfirmOpen(false)
+                  setRemovingReportDocId(null)
+                }}
+                title="Remove Report Document"
+                description="Are you sure you want to remove this document from report documents? This action cannot be undone."
+                confirmText="Remove"
+              />
             </div>
           </main>
         </ResizablePanel>

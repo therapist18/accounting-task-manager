@@ -120,7 +120,7 @@ export function EditRequirementDialog({
 
       setFormData({
         ...requirement,
-        name: requirement.name || '',
+        name: requirement.name || requirement.documentName || '',
         description: requirement.description || '',
         type: requirement.type || 'document',
         isVisible: requirement.isVisible !== false,
@@ -142,8 +142,14 @@ export function EditRequirementDialog({
         sourceTable: requirement.sourceTable || '',
         linkingVariable: requirement.linkingVariable || null,
         selectedTemplateId: requirement.selectedTemplateId || undefined,
-        selectedTemplate: requirement.selectedTemplate || undefined
+        selectedTemplate: requirement.selectedTemplate || undefined,
+        appliesTo: requirement.appliesTo || []
       });
+
+      // Report Doc Default items only ever use the General Settings tab
+      if ((requirement.category || 'general') === 'report-docs') {
+        setActiveTab('general');
+      }
 
       fetchKycDocuments();
       fetchAutomationTypes();
@@ -254,6 +260,25 @@ export function EditRequirementDialog({
     }
 
     setIsSubmitting(true);
+
+    // Report Doc shortcut — just pass formData back to parent
+    if (formData.category === 'report-docs') {
+      try {
+        await onSave({
+          ...formData,
+          documentName: formData.name.trim(),
+          updated_at: new Date().toISOString()
+        });
+        onOpenChange(false);
+      } catch (saveError) {
+        console.error('[handleSubmit] Error saving report doc:', saveError);
+        toast({ title: 'Error', description: 'Failed to save report document', variant: 'destructive' });
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
     try {
       let web_automation = null;
       console.log('[handleSubmit] Form data:', {
@@ -341,6 +366,7 @@ export function EditRequirementDialog({
         sourceTable: formData.sourceTable || '',
         linkingVariable: formData.linkingVariable || null,
         selectedTemplateId: formData.selectedTemplateId || undefined,
+        appliesTo: formData.appliesTo || [],
         updated_at: new Date().toISOString()
       };
       console.log('[handleSubmit] Created updated requirement:', updatedRequirement);
@@ -372,14 +398,22 @@ export function EditRequirementDialog({
 
   if (!requirement) return null
 
+  const isReportDoc = formData.category === 'report-docs'
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl h-[92vh] flex flex-col p-0 overflow-hidden bg-slate-50">
         <DialogHeader className="p-6 pb-4 border-b bg-white">
           <div className="flex justify-between items-center">
             <div>
-              <DialogTitle className="text-xl">Requirement Configuration</DialogTitle>
-              <DialogDescription>Setup how this document requirement behaves and pulls data.</DialogDescription>
+              <DialogTitle className="text-xl">
+                {formData.category === 'report-docs' ? 'Report Document Configuration' : 'Requirement Configuration'}
+              </DialogTitle>
+              <DialogDescription>
+                {formData.category === 'report-docs'
+                  ? 'Configure how this report document appears in reports.'
+                  : 'Setup how this document requirement behaves and pulls data.'}
+              </DialogDescription>
             </div>
             <Badge variant="secondary" className="px-3 py-1 uppercase tracking-wider text-[10px]">
               {formData.category}
@@ -389,18 +423,22 @@ export function EditRequirementDialog({
 
         <div className="flex-1 overflow-hidden flex flex-col">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
-            <div className="px-6 bg-white border-b">
-              <TabsList className="bg-transparent gap-6 h-12 p-0">
-                <TabsTrigger value="general" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 border-primary rounded-none h-full px-0">General Settings</TabsTrigger>
-                <TabsTrigger value="webdata" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 border-primary rounded-none h-full px-0">Web Data Mapping ({automationWebdata.length > 0 ? automationWebdata.length : formData.webdata?.length || 0})</TabsTrigger>
-              </TabsList>
-            </div>
+            {!isReportDoc && (
+              <div className="px-6 bg-white border-b">
+                <TabsList className="bg-transparent gap-6 h-12 p-0">
+                  <TabsTrigger value="general" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 border-primary rounded-none h-full px-0">General Settings</TabsTrigger>
+                  <TabsTrigger value="webdata" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 border-primary rounded-none h-full px-0">Web Data Mapping ({automationWebdata.length > 0 ? automationWebdata.length : formData.webdata?.length || 0})</TabsTrigger>
+                </TabsList>
+              </div>
+            )}
 
             <TabsContent value="general" className="flex-1 overflow-y-auto p-6 m-0 space-y-6">
               {/* TOP SECTION: IDENTITY */}
               <div className="grid grid-cols-3 gap-6">
-                <div className="col-span-2 space-y-2">
-                  <Label className="text-xs font-bold uppercase text-slate-500">Requirement Display Name</Label>
+                <div className={cn("space-y-2", isReportDoc ? "col-span-3" : "col-span-2")}>
+                  <Label className="text-xs font-bold uppercase text-slate-500">
+                    {isReportDoc ? "Document Name" : "Requirement Display Name"}
+                  </Label>
                   <Input
                     value={formData.name}
                     onChange={e => updateField('name', e.target.value)}
@@ -409,71 +447,78 @@ export function EditRequirementDialog({
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold uppercase text-slate-500">Required Count</Label>
-                  <Input
-                    type="number"
-                    min="1"
-                    value={formData.requiredDocumentCount}
-                    onChange={e => updateField('requiredDocumentCount', parseInt(e.target.value))}
-                    className="h-10"
-                  />
-                </div>
+                {!isReportDoc && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase text-slate-500">Required Count</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={formData.requiredDocumentCount}
+                      onChange={e => updateField('requiredDocumentCount', parseInt(e.target.value))}
+                      className="h-10"
+                    />
+                  </div>
+                )}
               </div>
 
-              {/* CATEGORY SELECTION */}
-              <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase text-slate-500">Category</Label>
-                <Select value={formData.category || 'general'} onValueChange={(value: RequirementCategory) => updateField('category', value)}>
-                  <SelectTrigger className="bg-white h-10">
-                    <SelectValue placeholder="Select category..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {REQUIREMENT_CATEGORIES.map(category => (
-                      <SelectItem key={category.value} value={category.value}>
-                        {category.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {!isReportDoc && (
+                <>
+                  {/* CATEGORY SELECTION */}
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase text-slate-500">Category</Label>
+                    <Select value={formData.category || 'general'} onValueChange={(value: RequirementCategory) => updateField('category', value)}>
+                      <SelectTrigger className="bg-white h-10">
+                        <SelectValue placeholder="Select category..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {REQUIREMENT_CATEGORIES.map(category => (
+                          <SelectItem key={category.value} value={category.value}>
+                            {category.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-              {/* APPLICANT TYPES POPOVER */}
-              <div className="space-y-2">
-                <Label className="flex justify-between items-center text-xs font-bold uppercase text-slate-500">
-                  Target Entities
-                  <Button variant="link" size="sm" className="h-auto p-0 text-[10px]" onClick={() => updateField('entityTypes', [])}>Reset Selection</Button>
-                </Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-between h-10 bg-white">
-                      <div className="flex gap-1.5 flex-wrap">
-                        {(formData.entityTypes || []).length > 0 ? formData.entityTypes.map(t => (
-                          <Badge key={t} variant="secondary" className="capitalize text-[10px] px-2">{t}</Badge>
-                        )) : <span className="text-slate-400 font-normal">Who needs to provide this?</span>}
-                      </div>
-                      <ChevronsUpDown className="h-4 w-4 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[350px] p-0" align="start">
-                    <Command>
-                      <CommandInput placeholder="Search roles..." />
-                      <CommandList>
-                        <CommandGroup>
-                          {ENTITY_TYPES.map(opt => (
-                            <CommandItem key={opt.value} onSelect={() => toggleEntityType(opt.value as EntityType)}>
-                              <Check className={cn("mr-2 h-4 w-4", (formData.entityTypes || []).includes(opt.value) ? "opacity-100" : "opacity-0")} />
-                              {opt.label}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
+                  {/* APPLICANT TYPES POPOVER */}
+                  <div className="space-y-2">
+                    <Label className="flex justify-between items-center text-xs font-bold uppercase text-slate-500">
+                      Target Entities
+                      <Button variant="link" size="sm" className="h-auto p-0 text-[10px]" onClick={() => updateField('entityTypes', [])}>Reset Selection</Button>
+                    </Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full justify-between h-10 bg-white">
+                          <div className="flex gap-1.5 flex-wrap">
+                            {(formData.entityTypes || []).length > 0 ? formData.entityTypes.map(t => (
+                              <Badge key={t} variant="secondary" className="capitalize text-[10px] px-2">{t}</Badge>
+                            )) : <span className="text-slate-400 font-normal">Who needs to provide this?</span>}
+                          </div>
+                          <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[350px] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Search roles..." />
+                          <CommandList>
+                            <CommandGroup>
+                              {ENTITY_TYPES.map(opt => (
+                                <CommandItem key={opt.value} onSelect={() => toggleEntityType(opt.value as EntityType)}>
+                                  <Check className={cn("mr-2 h-4 w-4", (formData.entityTypes || []).includes(opt.value) ? "opacity-100" : "opacity-0")} />
+                                  {opt.label}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </>
+              )}
 
               {/* EXECUTION & DOCUMENT LOGIC SECTION */}
+              {!isReportDoc && (
               <Card className="p-0 overflow-hidden border-slate-200 shadow-sm">
                 <div className="bg-slate-100/80 px-4 py-2 border-b flex items-center gap-2">
                   <Settings2 className="h-4 w-4 text-slate-600" />
@@ -610,8 +655,10 @@ export function EditRequirementDialog({
                   </div>
                 </div>
               </Card>
+              )}
 
               {/* CRITERIA & TEMPLATES */}
+              {!isReportDoc && (
               <div className="grid grid-cols-2 gap-8">
                 <div className="space-y-4">
                   <Label className="flex items-center gap-2 text-primary font-bold uppercase text-xs tracking-wide">
@@ -726,8 +773,10 @@ export function EditRequirementDialog({
                   </div>
                 </div>
               </div>
+              )}
 
               {/* AUTOMATION & INSTRUCTIONS */}
+              {!isReportDoc && (
               <div className="space-y-4 pt-4 border-t">
                 <div className="flex items-center justify-between">
                   <Label className="flex items-center gap-2 text-purple-600 font-bold uppercase text-xs tracking-wide">
@@ -763,6 +812,7 @@ export function EditRequirementDialog({
                   />
                 </div>
               </div>
+              )}
 
               {/* REPORT DOC DEFAULT SETTINGS */}
               {formData.category === 'report-docs' && (
@@ -773,7 +823,7 @@ export function EditRequirementDialog({
                   <Card className="p-0 overflow-hidden border-emerald-200 shadow-sm">
                     <div className="bg-emerald-50/80 px-4 py-2 border-b flex items-center gap-2">
                       <FileText className="h-4 w-4 text-emerald-600" />
-                      <span className="text-xs font-bold uppercase text-emerald-700">Visibility & Ordering</span>
+                      <span className="text-xs font-bold uppercase text-emerald-700">Visibility, Ordering & Entity Applicability</span>
                     </div>
                     <div className="p-6 space-y-6 bg-white">
                       <div className="flex items-center justify-between">
@@ -796,6 +846,36 @@ export function EditRequirementDialog({
                           className="h-9 w-32"
                         />
                         <p className="text-[10px] text-slate-400">Lower numbers appear first in the report.</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs font-bold text-slate-500">Applies To (Entity Types)</Label>
+                        <p className="text-[10px] text-slate-400">Select which entity types this document applies to. Cells for non-applicable entities show N/A.</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(['company', 'principal', 'director', 'shareholder', 'dependant', 'employee', 'understudy', 'sponsor'] as const).map(et => {
+                            const isSelected = (formData.appliesTo || []).includes(et)
+                            return (
+                              <button
+                                key={et}
+                                type="button"
+                                className={cn(
+                                  "text-[11px] px-2.5 py-1 rounded-full border transition-all font-medium capitalize",
+                                  isSelected
+                                    ? "bg-emerald-100 text-emerald-700 border-emerald-300"
+                                    : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+                                )}
+                                onClick={() => {
+                                  const current = formData.appliesTo || []
+                                  const next = isSelected
+                                    ? current.filter((v: string) => v !== et)
+                                    : [...current, et]
+                                  updateField('appliesTo', next)
+                                }}
+                              >
+                                {et}
+                              </button>
+                            )
+                          })}
+                        </div>
                       </div>
                     </div>
                   </Card>

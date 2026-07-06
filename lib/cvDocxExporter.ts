@@ -13,7 +13,7 @@ import {
 } from "docx";
 import { saveAs } from "file-saver";
 
-export async function exportToDocx(cvData: any) {
+export async function exportToDocx(cvData: any, cvSettings?: { primaryColor?: string; accentColor?: string }) {
   const {
     personalInfo = {},
     personalDetails = {},
@@ -26,6 +26,15 @@ export async function exportToDocx(cvData: any) {
     references = [],
     declaration = "",
   } = cvData;
+
+  // Convert hex color to docx format (remove # prefix)
+  const toDocxColor = (hex?: string): string => {
+    if (!hex) return "2c3e50";
+    return hex.replace("#", "");
+  };
+
+  const primaryColor = toDocxColor(cvSettings?.primaryColor);
+  const accentColor = toDocxColor(cvSettings?.accentColor);
 
   const doc = new Document({
     sections: [
@@ -41,7 +50,7 @@ export async function exportToDocx(cvData: any) {
                 text: personalInfo.fullName || "Your Name",
                 bold: true,
                 size: 36, // 18pt
-                color: "2c3e50",
+                color: primaryColor,
               }),
             ],
           }),
@@ -53,7 +62,7 @@ export async function exportToDocx(cvData: any) {
                 text: (personalInfo.title || "Professional Title").toUpperCase(),
                 bold: true,
                 size: 24, // 12pt
-                color: "3498db",
+                color: accentColor,
               }),
             ],
           }),
@@ -64,7 +73,7 @@ export async function exportToDocx(cvData: any) {
             spacing: { after: 300 },
             border: {
               bottom: {
-                color: "2c3e50",
+                color: primaryColor,
                 space: 10,
                 style: BorderStyle.SINGLE,
                 size: 12,
@@ -80,14 +89,14 @@ export async function exportToDocx(cvData: any) {
                 ? new TextRun({
                     text: `\nLinkedIn: ${personalInfo.linkedin}`,
                     size: 18,
-                    color: "3498db",
+                    color: accentColor,
                   })
                 : new TextRun({ text: "" }),
               personalInfo.github
                 ? new TextRun({
                     text: ` | GitHub: ${personalInfo.github}`,
                     size: 18,
-                    color: "3498db",
+                    color: accentColor,
                   })
                 : new TextRun({ text: "" }),
             ],
@@ -102,7 +111,7 @@ export async function exportToDocx(cvData: any) {
                 text: "PROFESSIONAL PROFILE",
                 bold: true,
                 size: 24,
-                color: "2c3e50",
+                color: primaryColor,
               }),
             ],
           }),
@@ -126,7 +135,7 @@ export async function exportToDocx(cvData: any) {
                 text: "CORE COMPETENCIES",
                 bold: true,
                 size: 24,
-                color: "2c3e50",
+                color: primaryColor,
               }),
             ],
           }),
@@ -138,7 +147,7 @@ export async function exportToDocx(cvData: any) {
                   text: `${skillGroup.category}: `,
                   bold: true,
                   size: 20,
-                  color: "3498db",
+                  color: accentColor,
                 }),
                 new TextRun({
                   text: Array.isArray(skillGroup.items)
@@ -160,7 +169,7 @@ export async function exportToDocx(cvData: any) {
                     text: "PROFESSIONAL EXPERIENCE",
                     bold: true,
                     size: 24,
-                    color: "2c3e50",
+                    color: primaryColor,
                   }),
                 ],
               })
@@ -198,7 +207,7 @@ export async function exportToDocx(cvData: any) {
                     bold: true,
                     italics: true,
                     size: 20,
-                    color: "3498db",
+                    color: accentColor,
                   }),
                 ],
               }),
@@ -248,7 +257,7 @@ export async function exportToDocx(cvData: any) {
                     text: "INTERNSHIPS",
                     bold: true,
                     size: 24,
-                    color: "2c3e50",
+                    color: primaryColor,
                   }),
                 ],
               })
@@ -285,7 +294,7 @@ export async function exportToDocx(cvData: any) {
                     bold: true,
                     italics: true,
                     size: 20,
-                    color: "3498db",
+                    color: accentColor,
                   }),
                 ],
               }),
@@ -335,7 +344,7 @@ export async function exportToDocx(cvData: any) {
                     text: "KEY PROJECTS",
                     bold: true,
                     size: 24,
-                    color: "2c3e50",
+                    color: primaryColor,
                   }),
                 ],
               })
@@ -349,7 +358,7 @@ export async function exportToDocx(cvData: any) {
                   text: proj.title || "Project Title",
                   bold: true,
                   size: 20,
-                  color: "2c3e50",
+                  color: primaryColor,
                 }),
                 proj.year ? new TextRun({ text: ` (${proj.year}): `, bold: true, size: 20 }) : new TextRun({ text: ": ", size: 20 }),
                 new TextRun({
@@ -370,7 +379,7 @@ export async function exportToDocx(cvData: any) {
                     text: "EDUCATION & CERTIFICATIONS",
                     bold: true,
                     size: 24,
-                    color: "2c3e50",
+                    color: primaryColor,
                   }),
                 ],
               })
@@ -384,7 +393,7 @@ export async function exportToDocx(cvData: any) {
                   text: edu.degree || "Degree",
                   bold: true,
                   size: 20,
-                  color: "3498db",
+                  color: accentColor,
                 }),
                 new TextRun({ text: " - ", size: 20 }),
                 new TextRun({ text: edu.institution || "Institution", size: 20 }),
@@ -404,7 +413,7 @@ export async function exportToDocx(cvData: any) {
                     text: "PERSONAL DETAILS",
                     bold: true,
                     size: 24,
-                    color: "2c3e50",
+                    color: primaryColor,
                   }),
                 ],
               })
@@ -423,7 +432,7 @@ export async function exportToDocx(cvData: any) {
                     text: `${label}: `,
                     bold: true,
                     size: 20,
-                    color: "3498db",
+                    color: accentColor,
                   }),
                   new TextRun({
                     text: String(val),
@@ -443,7 +452,7 @@ export async function exportToDocx(cvData: any) {
                     text: "REFERENCES",
                     bold: true,
                     size: 24,
-                    color: "2c3e50",
+                    color: primaryColor,
                   }),
                 ],
               })
@@ -464,7 +473,7 @@ export async function exportToDocx(cvData: any) {
                   size: 19,
                 }),
                 ref.address ? new TextRun({ text: `\nAddress: ${ref.address}`, size: 18 }) : new TextRun({ text: "" }),
-                new TextRun({ text: `\nContact: ${ref.contact || ""}`, size: 18, color: "3498db" }),
+                new TextRun({ text: `\nContact: ${ref.contact || ""}`, size: 18, color: accentColor }),
               ],
             });
           }),

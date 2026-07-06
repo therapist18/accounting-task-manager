@@ -499,31 +499,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
   const classDocsAndFields = useMemo(() => { return classRequirements?.[0]?.documents_and_fields || []; }, [classRequirements]);
 
-  // Report Documents render the actual documents locked in when Processing/Issuance
-  // Requirements were completed, rather than querying "current" documents live —
-  // this reflects the exact documents used to fulfil the task application.
-  const allTasksInView = useMemo(() => {
-    return (filteredGroupedTasks || []).flatMap((group: any) => group.tasks || []);
-  }, [filteredGroupedTasks]);
-
-  const getReportDocSnapshotEntry = useCallback((documentTypeId: string) => {
-    for (const task of allTasksInView) {
-      const snapshot = [
-        ...(task.processing_requirements_documents || []),
-        ...(task.issuance_requirements_documents || [])
-      ];
-      const entry = snapshot.find((s: any) => s.documentTypeId === documentTypeId);
-      if (entry) return { task, entry };
-    }
-    return null;
-  }, [allTasksInView]);
-
-  const getReportDocRecords = useCallback((task: any, entry: any) => {
-    const pool = entry.sourceTable === 'acc_portal_kyc_uploads'
-      ? (allCompanyDocuments[entry.entityId] || [])
-      : (allIndividualDocuments[entry.entityId] || []);
-    return pool.filter((d: any) => (entry.documentRecordIds || []).includes(d.id));
-  }, [allCompanyDocuments, allIndividualDocuments]);
+  // Note: Document snapshot entry and record resolution for Report Documents is now performed
+  // column-by-column inside the table rendering logic to ensure proper task & entity scoping.
 
   const checkApplicability = (colType: string, requirement: any, colRoles?: string[]) => {
     if (!requirement) return false;
@@ -2175,6 +2152,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                   );
                 }
 
+                const isLocked = isRequirementSectionLocked(col.task, lockCategory);
                 const ctx = buildTableFieldCtxForColumn(automationId, webdata, col);
                 let displayValue: any = '-';
                 let targetEntityId: any = null;
@@ -2289,7 +2267,13 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                       </div>
                                       {source && (
                                         <Button size="sm" variant="ghost" className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-blue-600 hover:bg-blue-50 rounded-md"
-                                          onClick={() => startFieldEdit(automationId, field, col.groupIndex, String(targetEntityId), isValidValue(sourceVal) ? sourceVal : '', col.id)}>
+                                          onClick={() => {
+                                            if (isLocked) {
+                                              toast.error("This section is locked because the stage has been completed.");
+                                              return;
+                                            }
+                                            startFieldEdit(automationId, field, col.groupIndex, String(targetEntityId), isValidValue(sourceVal) ? sourceVal : '', col.id);
+                                          }}>
                                           <Pencil className="h-3.5 w-3.5" />
                                         </Button>
                                       )}
@@ -2302,16 +2286,20 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                         ) : (
                           <span className={cn(
                             "text-sm h-8 flex items-center px-2.5 rounded-md transition-colors relative group",
-                            persistenceSource ? "cursor-pointer border border-transparent hover:bg-slate-100" : "cursor-default",
+                            (persistenceSource && !isLocked) ? "cursor-pointer border border-transparent hover:bg-slate-100" : "cursor-default",
                             isMissing ? "text-red-500 font-medium" : "text-slate-800"
                           )}
                           onClick={() => {
+                            if (isLocked) {
+                              toast.error("This section is locked because the stage has been completed.");
+                              return;
+                            }
                             if (!persistenceSource || !isEditableField || !targetEntityId) return;
                             startFieldEdit(automationId, field, col.groupIndex, String(targetEntityId), displayValue, col.id);
                           }}
                           >
                             <span className="truncate pr-6">{isMissing ? 'Missing Value' : cleanFieldValueStr(displayValue) || '-'}</span>
-                            {persistenceSource && isEditableField && <Pencil className="h-3.5 w-3.5 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 top-1/2 -translate-y-1/2" />}
+                            {persistenceSource && isEditableField && !isLocked && <Pencil className="h-3.5 w-3.5 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 top-1/2 -translate-y-1/2" />}
                           </span>
                         )}
                       </div>
@@ -3043,48 +3031,90 @@ return (
                                 </TableCell>
                               </TableRow>
                               {docsOfType.map((doc: any, idx: number) => {
-                                const match = getReportDocSnapshotEntry(doc.documentId);
-                                const records = match ? getReportDocRecords(match.task, match.entry) : [];
                                 const docMetadata = documentMetadataCache.get(doc.documentId);
+                                const docAppliesTo = doc.appliesTo || [];
 
                                 return (
                                   <TableRow key={doc.id || idx} className="hover:bg-emerald-50/30 border-l-4 border-l-emerald-500">
                                     <TableCell className="py-2 px-4 text-center font-mono text-xs text-slate-500">
                                       {doc.order + 1}
                                     </TableCell>
-                                    <TableCell colSpan={2} className="py-2 px-4">
+                                    <TableCell className="py-2 px-4">
                                       <span className="flex items-center gap-2">
                                         <FileText className="h-4 w-4 text-emerald-600" />
                                         <span className="text-sm font-medium text-slate-800">{doc.documentName || 'Unknown Document'}</span>
                                       </span>
                                     </TableCell>
-                                    <TableCell colSpan={totalColumns - 3} className="py-2 px-4">
-                                      {records.length > 0 ? (
-                                        <div className="flex items-center justify-center gap-2">
-                                          <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">
-                                            Locked In
-                                          </Badge>
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="h-7 bg-white text-blue-600 border-blue-200 hover:bg-blue-50 shadow-sm flex items-center gap-1.5"
-                                            onClick={() => handleViewDocuments(records, docMetadata || { display_name: doc.documentName }, { label: '' }, undefined, true)}
-                                          >
-                                            <Eye className="h-3.5 w-3.5" />
-                                            <span className="text-xs font-bold uppercase tracking-wider">View</span>
-                                          </Button>
-                                        </div>
-                                      ) : (
-                                        <Badge variant="outline" className={cn(
-                                          "text-[10px]",
-                                          docType === 'individual' ? "bg-blue-50 text-blue-700 border-blue-200" :
-                                          docType === 'company' ? "bg-purple-50 text-purple-700 border-purple-200" :
-                                          "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                        )}>
-                                          Not Available Yet
-                                        </Badge>
-                                      )}
-                                    </TableCell>
+                                    {columnDefinitions.map((col, colIdx) => {
+                                      const isApplicable = docAppliesTo.includes(col.type);
+                                      if (!isApplicable) {
+                                        return (
+                                          <TableCell key={`rdoc-${doc.id}-${colIdx}`} className="text-center border p-2 align-middle bg-slate-50/30">
+                                            <span className="inline-flex items-center justify-center px-2 py-0.5 text-[10px] text-slate-400 font-medium italic">
+                                              N/A
+                                            </span>
+                                          </TableCell>
+                                        );
+                                      }
+
+                                      // 1. Resolve from snapshot if available for this specific task and entity
+                                      const snapshot = [
+                                        ...(col.task?.processing_requirements_documents || []),
+                                        ...(col.task?.issuance_requirements_documents || [])
+                                      ];
+                                      const entry = snapshot.find((s: any) => 
+                                        s.documentTypeId === doc.documentId && 
+                                        s.entityType === col.type && 
+                                        Number(s.entityId) === Number(col.id)
+                                      );
+
+                                      let colRecords = [];
+                                      let isFromSnapshot = false;
+
+                                      if (entry) {
+                                        const pool = col.type === 'company'
+                                          ? (allCompanyDocuments[col.id] || [])
+                                          : (allIndividualDocuments[col.id] || []);
+                                        colRecords = pool.filter((d: any) => (entry.documentRecordIds || []).includes(d.id));
+                                        isFromSnapshot = true;
+                                      } else {
+                                        // 2. Fall back to live uploaded documents
+                                        colRecords = getDocumentsByType(doc.documentId, col.task, col.type, col.id);
+                                      }
+
+                                      return (
+                                        <TableCell key={`rdoc-${doc.id}-${colIdx}`} className="text-center border p-2 align-middle">
+                                          {colRecords.length > 0 ? (
+                                            <div className="flex items-center justify-center gap-1.5">
+                                              <Badge variant="outline" className={cn(
+                                                "text-[10px]",
+                                                isFromSnapshot ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-blue-50 text-blue-700 border-blue-200"
+                                              )}>
+                                                {isFromSnapshot ? 'Locked In' : 'Active Upload'}
+                                              </Badge>
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-6 bg-white text-blue-600 border-blue-200 hover:bg-blue-50 shadow-sm flex items-center gap-1"
+                                                onClick={() => handleViewDocuments(colRecords, docMetadata || { display_name: doc.documentName }, col, undefined, isFromSnapshot)}
+                                              >
+                                                <Eye className="h-3 w-3" />
+                                                <span className="text-[10px] font-bold uppercase tracking-wider">View</span>
+                                              </Button>
+                                            </div>
+                                          ) : (
+                                            <Badge variant="outline" className={cn(
+                                              "text-[10px]",
+                                              docType === 'individual' ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                              docType === 'company' ? "bg-purple-50 text-purple-700 border-purple-200" :
+                                              "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                            )}>
+                                              Not Available Yet
+                                            </Badge>
+                                          )}
+                                        </TableCell>
+                                      );
+                                    })}
                                   </TableRow>
                                 );
                               })}

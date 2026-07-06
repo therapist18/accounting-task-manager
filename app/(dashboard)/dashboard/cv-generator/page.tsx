@@ -581,10 +581,10 @@ const isJustYear = (dateStr: string): boolean => {
 };
 
 export default function CVGeneratorPage() {
-  const [cvData, setCvData] = useState<any>(() => loadFromLocalStorage('cvData', initialCVData));
+  const [cvData, setCvData] = useState<any>(initialCVData);
   const [mobileView, setMobileView] = useState<'edit' | 'preview'>('edit');
-  const [selectedLayout, setSelectedLayout] = useState<string>(() => loadFromLocalStorage('selectedLayout', "theme1"));
-  const [zoomLevel, setZoomLevel] = useState<number>(() => loadFromLocalStorage('zoomLevel', 0.75));
+  const [selectedLayout, setSelectedLayout] = useState<string>("theme1");
+  const [zoomLevel, setZoomLevel] = useState<number>(0.75);
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
   const [extractionProgress, setExtractionProgress] = useState<string>("");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
@@ -605,6 +605,7 @@ export default function CVGeneratorPage() {
   const [linkedIndividualId, setLinkedIndividualId] = useState<number | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [mounted, setMounted] = useState(false);
   const [registryFormData, setRegistryFormData] = useState({
     fullName: '',
     phone: '',
@@ -637,7 +638,7 @@ export default function CVGeneratorPage() {
   const [coverLetterText, setCoverLetterText] = useState('');
   const [sendMethod, setSendMethod] = useState<'email' | 'whatsapp'>('email');
   const [activeSection, setActiveSection] = useState('contact');
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(() => loadFromLocalStorage('collapsedGroups', {}));
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [collapsedItems, setCollapsedItems] = useState<Record<string, boolean>>({});
   const toggleItem = (key: string) => setCollapsedItems(p => ({ ...p, [key]: !p[key] }));
   const [showAiWriter, setShowAiWriter] = useState(false);
@@ -647,8 +648,40 @@ export default function CVGeneratorPage() {
   const [showResumeVersions, setShowResumeVersions] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showAdvancedExport, setShowAdvancedExport] = useState(false);
-  const [cvVersions, setCvVersions] = useState<{ id: string; name: string; data: any; createdAt: string }[]>(() => loadFromLocalStorage('cvVersions', []));
+  const [cvVersions, setCvVersions] = useState<{ id: string; name: string; data: any; createdAt: string }[]>([]);
   const [activeDesignTab, setActiveDesignTab] = useState('theme');
+
+  // Load from localStorage after mount to avoid hydration mismatch
+  useEffect(() => {
+    const savedCvData = loadFromLocalStorage('cvData', initialCVData);
+    const savedLayout = loadFromLocalStorage('selectedLayout', 'theme1');
+    const savedZoom = loadFromLocalStorage('zoomLevel', 0.75);
+    const savedGroups = loadFromLocalStorage('collapsedGroups', {});
+    const savedVersions = loadFromLocalStorage('cvVersions', []);
+    const savedDrafts = loadFromLocalStorage('cvDrafts', []);
+    const savedPortalDraftId = loadFromLocalStorage('currentPortalDraftId', null);
+    const savedHasSavedDraft = loadFromLocalStorage('hasSavedDraft', false);
+    const savedLastDraftName = loadFromLocalStorage('lastDraftName', '');
+    const savedCollabCountry = loadFromLocalStorage('collabTargetCountry', 'kenya');
+    const savedCollabRole = loadFromLocalStorage('collabTargetRole', 'software-engineer');
+    const savedHasClientSubmission = loadFromLocalStorage('hasClientSubmission', false);
+    const savedClientSubmission = loadFromLocalStorage('clientSubmission', null);
+    
+    setCvData(savedCvData);
+    setSelectedLayout(savedLayout);
+    setZoomLevel(savedZoom);
+    setCollapsedGroups(savedGroups);
+    setCvVersions(savedVersions);
+    setCvDrafts(savedDrafts);
+    setCurrentPortalDraftId(savedPortalDraftId);
+    setHasSavedDraft(savedHasSavedDraft);
+    setLastDraftName(savedLastDraftName);
+    setCollabTargetCountry(savedCollabCountry);
+    setCollabTargetRole(savedCollabRole);
+    setHasClientSubmission(savedHasClientSubmission);
+    setClientSubmission(savedClientSubmission);
+    setMounted(true);
+  }, []);
 
   // Company options for references and recommender (from both client and third-party tables)
   const [companyOptions, setCompanyOptions] = useState<ComboOption[]>([]);
@@ -682,22 +715,24 @@ export default function CVGeneratorPage() {
   useEffect(() => { loadCompanyOptions(); }, [loadCompanyOptions]);
 
   // Draft system — metadata cached locally, full data in Supabase storage
-  const [cvDrafts, setCvDrafts] = useState<{ id: string; name: string; data: any; createdAt: string; isPortalDraft: boolean }[]>(() => loadFromLocalStorage('cvDrafts', []));
+  const [cvDrafts, setCvDrafts] = useState<{ id: string; name: string; data: any; createdAt: string; isPortalDraft: boolean }[]>([]);
   const [showSaveDraftModal, setShowSaveDraftModal] = useState(false);
   const [draftNameInput, setDraftNameInput] = useState('');
   const [savingDraftForPortal, setSavingDraftForPortal] = useState(false);
-  const [currentPortalDraftId, setCurrentPortalDraftId] = useState<string | null>(() => loadFromLocalStorage('currentPortalDraftId', null));
+  const [currentPortalDraftId, setCurrentPortalDraftId] = useState<string | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [showDraftsList, setShowDraftsList] = useState(false);
   const [portalDraftId, setPortalDraftId] = useState<string | null>(null);
+  const [hasSavedDraft, setHasSavedDraft] = useState<boolean>(false);
+  const [lastDraftName, setLastDraftName] = useState<string>('');
 
   // AI Resume Collaboration Portal State
-  const [collabTargetCountry, setCollabTargetCountry] = useState<'kenya' | 'other'>(() => loadFromLocalStorage('collabTargetCountry', 'kenya'));
-  const [collabTargetRole, setCollabTargetRole] = useState<string>(() => loadFromLocalStorage('collabTargetRole', 'software-engineer'));
+  const [collabTargetCountry, setCollabTargetCountry] = useState<'kenya' | 'other'>('kenya');
+  const [collabTargetRole, setCollabTargetRole] = useState<string>('software-engineer');
   
   // Pending Client Submissions
-  const [hasClientSubmission, setHasClientSubmission] = useState<boolean>(() => loadFromLocalStorage('hasClientSubmission', false));
-  const [clientSubmission, setClientSubmission] = useState<any>(() => loadFromLocalStorage('clientSubmission', null));
+  const [hasClientSubmission, setHasClientSubmission] = useState<boolean>(false);
+  const [clientSubmission, setClientSubmission] = useState<any>(null);
   const [acceptedFields, setAcceptedFields] = useState<Record<string, boolean>>({});
 
   // Client Portal Navigation / Steps
@@ -735,9 +770,11 @@ export default function CVGeneratorPage() {
       saveToLocalStorage('clientSubmission', clientSubmission);
       saveToLocalStorage('cvDrafts', cvDrafts);
       saveToLocalStorage('currentPortalDraftId', currentPortalDraftId);
+      saveToLocalStorage('hasSavedDraft', hasSavedDraft);
+      saveToLocalStorage('lastDraftName', lastDraftName);
     }, 500);
     return () => { if (autoSaveRef.current) clearTimeout(autoSaveRef.current); };
-  }, [cvData, cvSettings, selectedLayout, collapsedGroups, cvVersions, zoomLevel, collabTargetCountry, collabTargetRole, hasClientSubmission, clientSubmission, cvDrafts, currentPortalDraftId]);
+  }, [cvData, cvSettings, selectedLayout, collapsedGroups, cvVersions, zoomLevel, collabTargetCountry, collabTargetRole, hasClientSubmission, clientSubmission, cvDrafts, currentPortalDraftId, hasSavedDraft, lastDraftName]);
 
   // Initialize client edits in client portal
   useEffect(() => {
@@ -795,6 +832,7 @@ export default function CVGeneratorPage() {
       // Fetch the CV record from Supabase
       (async () => {
         try {
+          console.log('[CV Builder] Fetching CV record for applicantId:', applicantIdParam);
           const { data: record, error } = await supabase
             .from('job_applicant_cvs')
             .select('*')
@@ -802,116 +840,323 @@ export default function CVGeneratorPage() {
             .single();
 
           if (error || !record) {
+            console.error('[CV Builder] Failed to fetch CV record:', error);
             toast.error('Could not load applicant CV data.');
             return;
           }
 
+          console.log('[CV Builder] Fetched CV record:', {
+            id: record.id,
+            full_name: record.full_name,
+            has_extracted_details: !!record.extracted_details,
+            has_bcl_cv_snapshot: !!record.bcl_cv_snapshot,
+            extracted_details_keys: record.extracted_details ? Object.keys(record.extracted_details) : [],
+            individual_id: record.individual_id,
+            qualifications: record.qualifications,
+          });
+
           if (record.individual_id) setLinkedIndividualId(record.individual_id);
 
-          const ed = record.extracted_details || {};
+          // PRIORITY: Use bcl_cv_snapshot if available (contains the full edited CV data)
+          if (record.bcl_cv_snapshot && Object.keys(record.bcl_cv_snapshot).length > 0) {
+            console.log('[CV Builder] Loading from bcl_cv_snapshot (existing CV data)');
+            const snapshotData = record.bcl_cv_snapshot;
 
-          const prefilledData = {
-            personalInfo: {
-              fullName: record.full_name || ed['Full Name'] || ed.full_name || "",
-              title: record.position_applied || ed['Position Applied'] || ed.position_applied || "",
-              email: record.email || ed['Email'] || ed.email || "",
-              phone: record.phone_number || ed['Phone Number'] || ed.phone_number || "",
-              location: ed['Location'] || ed.address || "",
-              github: ed['GitHub'] || ed.github || "",
-              linkedin: ed['LinkedIn'] || ed.linkedin || "",
-              photoUrl: ""
-            },
-            personalDetails: {
-              dateOfBirth: record.date_of_birth || ed['Date of Birth'] || ed.date_of_birth || "",
-              nationality: ed['Nationality'] || ed.nationality || "",
-              maritalStatus: ed['Marital Status'] || ed.marital_status || "",
-              residence: ed['Residence'] || ed.residence || "",
-              kenyaStatus: ed['Kenya Status'] || ed.kenya_status || "",
-              nairobiRes: ed['Nairobi Res'] || ed.nairobi_res || "",
-              drivingExperience: ed['Driving License'] || ed.driving_license || ""
-            },
-            summary: ed['Professional Summary'] || ed['Summary'] || ed.summary || "",
-            skills: Array.isArray(ed['Skills'] || ed.skills)
-              ? (ed['Skills'] || ed.skills).map((s: any) => ({
-                  category: s.category || "",
-                  items: Array.isArray(s.items) ? s.items.join(", ") : String(s.items || "")
-                }))
-              : [],
-            experience: Array.isArray(ed['Work Experience'] || ed.experience)
-              ? (ed['Work Experience'] || ed.experience).map((exp: any) => ({
-                  company: exp.company || exp.Company || "",
-                  location: exp.location || exp.Location || "",
-                  role: exp.role || exp.position || exp.Position || exp.Role || "",
-                  startDate: exp.startDate || exp['Start Date'] || exp.start_date || "",
-                  endDate: exp.endDate || exp['End Date'] || exp.end_date || "",
-                  companyDesc: exp.companyDesc || exp.description || "",
-                  responsibilities: Array.isArray(exp.responsibilities) ? exp.responsibilities : []
-                }))
-              : [],
-            education: Array.isArray(ed['Education'] || ed.education)
-              ? (ed['Education'] || ed.education).map((edu: any) => ({
+            // Merge snapshot with EMPTY_CV_DATA to ensure all fields exist
+            const mergedData = {
+              ...EMPTY_CV_DATA,
+              ...snapshotData,
+              personalInfo: { ...EMPTY_CV_DATA.personalInfo, ...(snapshotData.personalInfo || {}) },
+              personalDetails: { ...EMPTY_CV_DATA.personalDetails, ...(snapshotData.personalDetails || {}) },
+              skills: (() => {
+                if (!Array.isArray(snapshotData.skills)) return EMPTY_CV_DATA.skills;
+                return snapshotData.skills.map((s: any) => {
+                  // Normalize format: {Skill: "..."} -> {category: "", items: "..."}
+                  if (s.Skill || s.skill) {
+                    return { category: "", items: s.Skill || s.skill || "" };
+                  }
+                  return s;
+                });
+              })(),
+              experience: Array.isArray(snapshotData.experience) ? snapshotData.experience : EMPTY_CV_DATA.experience,
+              internships: Array.isArray(snapshotData.internships) ? snapshotData.internships : EMPTY_CV_DATA.internships,
+              projects: Array.isArray(snapshotData.projects) ? snapshotData.projects : EMPTY_CV_DATA.projects,
+              education: Array.isArray(snapshotData.education) ? snapshotData.education : EMPTY_CV_DATA.education,
+              references: Array.isArray(snapshotData.references) ? snapshotData.references : EMPTY_CV_DATA.references,
+              languages: Array.isArray(snapshotData.languages) ? snapshotData.languages : EMPTY_CV_DATA.languages,
+              certifications: (() => {
+                if (!Array.isArray(snapshotData.certifications)) return EMPTY_CV_DATA.certifications;
+                return snapshotData.certifications.map((c: any) => {
+                  // Normalize format: {Qualification: "..."} -> {name: "...", issuer: "", date: "", url: ""}
+                  if (c.Qualification || c.qualification) {
+                    return { name: c.Qualification || c.qualification || "", issuer: "", date: "", url: "" };
+                  }
+                  return c;
+                });
+              })(),
+              achievements: Array.isArray(snapshotData.achievements) ? snapshotData.achievements : EMPTY_CV_DATA.achievements,
+              additionalInfo: Array.isArray(snapshotData.additionalInfo) ? snapshotData.additionalInfo : EMPTY_CV_DATA.additionalInfo,
+            };
+
+            console.log('[CV Builder] Merged snapshot data:', {
+              personalInfo: mergedData.personalInfo,
+              skills_count: mergedData.skills.length,
+              experience_count: mergedData.experience.length,
+              education_count: mergedData.education.length,
+              languages_count: mergedData.languages.length,
+              certifications_count: mergedData.certifications.length,
+              achievements_count: mergedData.achievements.length,
+              references_count: mergedData.references.length,
+            });
+
+            try { localStorage.removeItem('cv_generator_cvData'); } catch {}
+            setCvData(mergedData);
+            
+            // Restore cvSettings and selectedLayout if saved in snapshot
+            if (snapshotData.cvSettings) {
+              setCvSettings((prev: any) => ({ ...prev, ...snapshotData.cvSettings }));
+            }
+            if (snapshotData.selectedLayout) {
+              setSelectedLayout(snapshotData.selectedLayout);
+            }
+            
+            // Mark as having a saved draft since we loaded from bcl_cv_snapshot
+            setHasSavedDraft(true);
+            setLastDraftName(`CV - ${record.full_name || 'Applicant'}`);
+            toast.success('Loaded existing CV data from database.');
+          } else {
+            // No bcl_cv_snapshot, build from extracted_details
+            console.log('[CV Builder] No bcl_cv_snapshot found, building from extracted_details');
+            const ed = record.extracted_details || {};
+            console.log('[CV Builder] Extracted details keys:', Object.keys(ed));
+            console.log('[CV Builder] Extracted details:', ed);
+
+            const prefilledData = {
+              personalInfo: {
+                fullName: record.full_name || ed['Full Name'] || ed.full_name || "",
+                title: record.position_applied || ed['Position Applied'] || ed.position_applied || "",
+                email: record.email || ed['Email'] || ed.email || "",
+                phone: record.phone_number || ed['Phone Number'] || ed.phone_number || "",
+                location: ed['Location'] || ed.address || "",
+                github: ed['GitHub'] || ed.github || "",
+                linkedin: ed['LinkedIn'] || ed.linkedin || "",
+                photoUrl: ""
+              },
+              personalDetails: {
+                dateOfBirth: record.date_of_birth || ed['Date of Birth'] || ed.date_of_birth || "",
+                nationality: ed['Nationality'] || ed.nationality || "",
+                maritalStatus: ed['Marital Status'] || ed.marital_status || "",
+                residence: ed['Residence'] || ed.residence || "",
+                kenyaStatus: ed['Kenya Status'] || ed.kenya_status || "",
+                nairobiRes: ed['Nairobi Res'] || ed.nairobi_res || "",
+                drivingExperience: ed['Driving License'] || ed.driving_license || ""
+              },
+              summary: ed['Professional Summary'] || ed['Summary'] || ed.summary || "",
+              skills: (() => {
+                const rawSkills = ed['Skills'] || ed.skills;
+                console.log('[CV Builder] Raw skills data:', rawSkills);
+                if (!Array.isArray(rawSkills) || rawSkills.length === 0) {
+                  console.log('[CV Builder] No skills found in extracted details');
+                  return [];
+                }
+                const mapped = rawSkills.map((s: any) => {
+                  console.log('[CV Builder] Processing skill item:', s);
+                  // Handle format: {Skill: "...", Proficiency Level: "..."}
+                  if (s.Skill || s.skill) {
+                    const result = {
+                      category: "",
+                      items: s.Skill || s.skill || ""
+                    };
+                    console.log('[CV Builder] Mapped skill (Skill format):', result);
+                    return result;
+                  }
+                  // Handle format: {category: "...", items: "..."}
+                  if (s.category !== undefined || s.items !== undefined) {
+                    const result = {
+                      category: s.category || "",
+                      items: Array.isArray(s.items) ? s.items.join(", ") : String(s.items || "")
+                    };
+                    console.log('[CV Builder] Mapped skill (category format):', result);
+                    return result;
+                  }
+                  // Fallback: try to extract any string value
+                  const val = Object.values(s).find(v => typeof v === 'string') || "";
+                  const result = { category: "", items: String(val) };
+                  console.log('[CV Builder] Mapped skill (fallback):', result);
+                  return result;
+                });
+                console.log('[CV Builder] Final mapped skills:', mapped);
+                return mapped;
+              })(),
+              experience: Array.isArray(ed['Work Experience'] || ed.experience)
+                ? (ed['Work Experience'] || ed.experience).map((exp: any) => {
+                    // Handle responsibilities - can be string or array
+                    let responsibilities = [];
+                    if (Array.isArray(exp.responsibilities || exp.Responsibilities)) {
+                      responsibilities = exp.responsibilities || exp.Responsibilities;
+                    } else if (typeof exp.responsibilities === 'string' && exp.responsibilities) {
+                      responsibilities = exp.responsibilities.split('\n').filter(Boolean);
+                    } else if (typeof exp.Responsibilities === 'string' && exp.Responsibilities) {
+                      responsibilities = exp.Responsibilities.split('\n').filter(Boolean);
+                    }
+                    
+                    return {
+                      company: exp.company || exp.Company || "",
+                      location: exp.location || exp.Location || "",
+                      role: exp.role || exp.position || exp.Position || exp.Role || "",
+                      startDate: exp.startDate || exp['Start Date'] || exp.start_date || "",
+                      endDate: exp.endDate || exp['End Date'] || exp.end_date || "",
+                      companyDesc: exp.companyDesc || exp.description || "",
+                      responsibilities: responsibilities
+                    };
+                  })
+                : [],
+              education: (() => {
+                const rawEdu = ed['Education'] || ed.education;
+                if (!Array.isArray(rawEdu) || rawEdu.length === 0) return [];
+                return rawEdu.map((edu: any) => ({
                   degree: edu.degree || edu.Degree || "",
                   institution: edu.institution || edu.Institution || "",
                   year: edu.year || edu.Year || edu.endDate || "",
-                  details: edu.details || edu.description || ""
-                }))
-              : [],
-            internships: Array.isArray(ed['Internships'] || ed.internships) ? ed['Internships'] || ed.internships : [],
-            projects: Array.isArray(ed['Projects'] || ed.projects) ? ed['Projects'] || ed.projects : [],
-            references: Array.isArray(ed['Referees'] || ed.references || ed.referees)
-              ? (ed['Referees'] || ed.references || ed.referees).map((ref: any) => ({
-                  name: ref.name || ref.Name || "",
-                  title: ref.title || ref.Title || ref.position || "",
+                  details: edu.details || edu.description || edu.grade || ""
+                }));
+              })(),
+              internships: Array.isArray(ed['Internships'] || ed.internships) ? ed['Internships'] || ed.internships : [],
+              projects: Array.isArray(ed['Projects'] || ed.projects) ? ed['Projects'] || ed.projects : [],
+              references: (() => {
+                const rawRefs = ed['Referees'] || ed.references || ed.referees;
+                if (!Array.isArray(rawRefs) || rawRefs.length === 0) return [];
+                return rawRefs.map((ref: any) => ({
+                  name: ref.name || ref.Name || ref['Referee Name'] || "",
+                  title: ref.title || ref.Title || ref.position || ref.Position || "",
                   company: ref.company || ref.Company || "",
                   address: ref.address || ref.Address || "",
-                  contact: ref.contact || ref.Contact || ref.phone || ref.email || ""
-                }))
-              : [],
-            languages: Array.isArray(ed['Languages'] || ed.languages)
-              ? (ed['Languages'] || ed.languages).map((l: any) => ({
+                  contact: ref.contact || ref.Contact || ref.phone || ref.Phone || ref.email || ref.Email || ""
+                }));
+              })(),
+              languages: (() => {
+                const rawLangs = ed['Languages'] || ed.languages;
+                if (!Array.isArray(rawLangs) || rawLangs.length === 0) return [];
+                return rawLangs.map((l: any) => ({
                   language: l.language || l.Language || "",
                   proficiency: l.proficiency || l.Proficiency || ""
-                }))
-              : [],
-            certifications: Array.isArray(ed['Professional Qualifications'] || ed.certifications)
-              ? (ed['Professional Qualifications'] || ed.certifications).map((c: any) => ({
-                  name: c.name || c.Name || c.qualification || "",
-                  issuer: c.issuer || c.Issuer || c.institution || "",
-                  date: c.date || c.Date || c.year || "",
-                  url: c.url || ""
-                }))
-              : [],
-            achievements: Array.isArray(ed['Achievements'] || ed.achievements) ? ed['Achievements'] || ed.achievements : [],
-            additionalInfo: Array.isArray(ed['Additional Info'] || ed.additionalInfo) ? ed['Additional Info'] || ed.additionalInfo : [],
-            declaration: ed['Declaration'] || ed.declaration || "",
-            verifiedBadge: false
-          };
+                }));
+              })(),
+              certifications: (() => {
+                // Handle both array format (from extraction) and text format (from database qualifications column)
+                const certsFromExtraction = ed['Professional Qualifications'] || ed.certifications || ed['Certifications'];
+                console.log('[CV Builder] Raw certifications data:', certsFromExtraction);
+                if (Array.isArray(certsFromExtraction) && certsFromExtraction.length > 0) {
+                  const mapped = certsFromExtraction.map((c: any) => {
+                    console.log('[CV Builder] Processing certification item:', c);
+                    // Handle format: {Qualification: "..."}
+                    if (c.Qualification || c.qualification) {
+                      const result = {
+                        name: c.Qualification || c.qualification || "",
+                        issuer: "",
+                        date: "",
+                        url: ""
+                      };
+                      console.log('[CV Builder] Mapped certification (Qualification format):', result);
+                      return result;
+                    }
+                    // Handle format: {name: "...", issuer: "...", date: "...", url: "..."}
+                    const result = {
+                      name: c.name || c.Name || "",
+                      issuer: c.issuer || c.Issuer || c.institution || "",
+                      date: c.date || c.Date || c.year || "",
+                      url: c.url || ""
+                    };
+                    console.log('[CV Builder] Mapped certification (name format):', result);
+                    return result;
+                  });
+                  console.log('[CV Builder] Final mapped certifications:', mapped);
+                  return mapped;
+                }
+                // Fall back to text-based qualifications from database
+                const qualificationsText = record.qualifications || ed['Qualifications'] || ed.qualifications || "";
+                console.log('[CV Builder] Text qualifications:', qualificationsText);
+                if (qualificationsText && typeof qualificationsText === 'string') {
+                  return qualificationsText.split('\n').filter(Boolean).map((q: string) => ({
+                    name: q.trim(),
+                    issuer: '',
+                    date: '',
+                    url: ''
+                  }));
+                }
+                return [];
+              })(),
+              achievements: (() => {
+                const rawAchievements = ed['Achievements'] || ed.achievements;
+                if (!Array.isArray(rawAchievements) || rawAchievements.length === 0) return [];
+                return rawAchievements.map((a: any) => {
+                  // Handle various formats
+                  if (a['Achievement'] || a.achievement) {
+                    return {
+                      title: a['Achievement'] || a.achievement || "",
+                      description: a.description || a.Description || "",
+                      date: a.date || a.Date || ""
+                    };
+                  }
+                  return {
+                    title: a.title || a.Title || "",
+                    description: a.description || a.Description || "",
+                    date: a.date || a.Date || ""
+                  };
+                });
+              })(),
+              additionalInfo: (() => {
+                const rawAdditional = ed['Additional Info'] || ed.additionalInfo;
+                if (!Array.isArray(rawAdditional) || rawAdditional.length === 0) return [];
+                return rawAdditional.map((info: any) => ({
+                  label: info.label || info.Label || info.name || "",
+                  value: info.value || info.Value || info.description || ""
+                }));
+              })(),
+              declaration: ed['Declaration'] || ed.declaration || "",
+              verifiedBadge: false
+            };
 
-          // Clear localStorage to prevent stale data from interfering
-          try { localStorage.removeItem('cv_generator_cvData'); } catch {}
+            console.log('[CV Builder] Built prefilledData:', {
+              personalInfo: prefilledData.personalInfo,
+              skills_count: prefilledData.skills.length,
+              experience_count: prefilledData.experience.length,
+              education_count: prefilledData.education.length,
+              languages_count: prefilledData.languages.length,
+              certifications_count: prefilledData.certifications.length,
+              references_count: prefilledData.references.length,
+              achievements_count: prefilledData.achievements.length,
+            });
 
-          // Check for existing draft at cv-builder/{applicant_id}/draft.json
-          try {
-            const { data: draftBlob, error: draftError } = await supabase.storage
-              .from('kyc-documents')
-              .download(`cv-builder/${applicantIdParam}/draft.json`);
+            // Clear localStorage to prevent stale data from interfering
+            try { localStorage.removeItem('cv_generator_cvData'); } catch {}
 
-            if (!draftError && draftBlob) {
-              const draftText = await draftBlob.text();
-              const draft = JSON.parse(draftText);
-              toast(`Found existing draft "${draft.name}". Loading draft data instead.`, { icon: '📋' });
-              if (draft.data) setCvData(draft.data);
-              if (draft.cvSettings) setCvSettings(draft.cvSettings);
-              if (draft.selectedLayout) setSelectedLayout(draft.selectedLayout);
-            } else {
-              // No draft found, use prefilled data from extraction
+            // Check for existing draft at cv-builder/{applicant_id}/draft.json
+            try {
+              const { data: draftBlob, error: draftError } = await supabase.storage
+                .from('kyc-documents')
+                .download(`cv-builder/${applicantIdParam}/draft.json`);
+
+              if (!draftError && draftBlob) {
+                const draftText = await draftBlob.text();
+                const draft = JSON.parse(draftText);
+                console.log('[CV Builder] Found existing draft in storage:', draft.name);
+                toast(`Found existing draft "${draft.name}". Loading draft data instead.`, { icon: '📋' });
+                if (draft.data) setCvData(draft.data);
+                if (draft.cvSettings) setCvSettings(draft.cvSettings);
+                if (draft.selectedLayout) setSelectedLayout(draft.selectedLayout);
+              } else {
+                // No draft found, use prefilled data from extraction
+                console.log('[CV Builder] No draft found, using prefilled data from extracted_details');
+                setCvData(prefilledData);
+                toast.success('CV pre-filled from applicant data. You can now edit and build the CV.');
+              }
+            } catch {
+              // Draft check failed, use prefilled data
+              console.log('[CV Builder] Draft check failed, using prefilled data');
               setCvData(prefilledData);
               toast.success('CV pre-filled from applicant data. You can now edit and build the CV.');
             }
-          } catch {
-            // Draft check failed, use prefilled data
-            setCvData(prefilledData);
-            toast.success('CV pre-filled from applicant data. You can now edit and build the CV.');
           }
 
           setWorkflowStep('review-edit');
@@ -921,6 +1166,7 @@ export default function CVGeneratorPage() {
           // Clean URL params
           window.history.replaceState({}, '', window.location.pathname);
         } catch (e) {
+          console.error('[CV Builder] Failed to load applicant data:', e);
           toast.error('Failed to load applicant data.');
         }
       })();
@@ -1082,7 +1328,7 @@ export default function CVGeneratorPage() {
     }));
   };
 
-  // Draft functions — all drafts persisted to Supabase storage
+  // Draft functions — all drafts persisted to Supabase storage + bcl_cv_snapshot in database
   const saveDraft = async (name: string, forPortal: boolean = false): Promise<string> => {
     setIsSavingDraft(true);
     const id = (forPortal && currentPortalDraftId) ? currentPortalDraftId : (crypto.randomUUID ? crypto.randomUUID() : `draft-${Date.now()}`);
@@ -1097,21 +1343,75 @@ export default function CVGeneratorPage() {
     };
     setCvDrafts(prev => { const filtered = prev.filter(d => d.id !== id); return [newDraft, ...filtered]; });
     if (forPortal) setCurrentPortalDraftId(id);
+    
+    // Track if database save succeeded
+    let dbSaveSucceeded = false;
+    
     try {
-      const payload = JSON.stringify(newDraft);
-      const blob = new Blob([payload], { type: 'application/json' });
-
+      // Always save to database first (bcl_cv_snapshot) - this is the primary save
       if (applicantId) {
-        // Save to cv-builder/{applicant_id}/draft.json
-        await supabase.storage.from('kyc-documents').upload(`cv-builder/${applicantId}/draft.json`, blob, { upsert: true });
-      } else {
-        // Fallback to cv-drafts/{id}/draft.json for portal drafts / standalone use
-        await supabase.storage.from('kyc-documents').upload(`cv-drafts/${id}/draft.json`, blob, { upsert: true });
+        console.log('[CV Builder] Saving CV data to bcl_cv_snapshot in job_applicant_cvs for applicantId:', applicantId);
+        // Save cvData along with cvSettings and selectedLayout in the snapshot
+        const snapshotPayload = {
+          ...cvData,
+          cvSettings,
+          selectedLayout,
+        };
+        const { error: snapshotError } = await supabase
+          .from('job_applicant_cvs')
+          .update({
+            bcl_cv_snapshot: snapshotPayload,
+            updated_at: new Date().toISOString()
+          })
+          .eq('applicant_id', applicantId);
+
+        if (snapshotError) {
+          console.error('[CV Builder] Failed to save bcl_cv_snapshot:', snapshotError);
+          toast.error('Failed to save to database');
+        } else {
+          console.log('[CV Builder] Successfully saved bcl_cv_snapshot to job_applicant_cvs');
+          dbSaveSucceeded = true;
+        }
+
+        // If linked individual, also update their record
+        if (linkedIndividualId) {
+          console.log('[CV Builder] Also saving CV data for linked individual:', linkedIndividualId);
+        }
+      }
+      
+      // Then try to save to storage (backup) - catch errors gracefully
+      try {
+        const payload = JSON.stringify(newDraft);
+        const blob = new Blob([payload], { type: 'application/json' });
+
+        if (applicantId) {
+          console.log('[CV Builder] Saving draft to storage:', `cv-builder/${applicantId}/draft.json`);
+          // Try to remove existing file first, then upload
+          try {
+            await supabase.storage.from('kyc-documents').remove([`cv-builder/${applicantId}/draft.json`]);
+          } catch { /* ignore if file doesn't exist */ }
+          await supabase.storage.from('kyc-documents').upload(`cv-builder/${applicantId}/draft.json`, blob);
+        } else {
+          // Fallback to cv-drafts/{id}/draft.json for portal drafts / standalone use
+          try {
+            await supabase.storage.from('kyc-documents').remove([`cv-drafts/${id}/draft.json`]);
+          } catch { /* ignore if file doesn't exist */ }
+          await supabase.storage.from('kyc-documents').upload(`cv-drafts/${id}/draft.json`, blob);
+        }
+        console.log('[CV Builder] Draft saved to storage successfully');
+      } catch (storageErr) {
+        console.warn('[CV Builder] Storage save failed (database save succeeded):', storageErr);
+        // Don't fail the whole operation if storage fails
       }
     } catch (e) {
-      console.warn('Draft storage save failed:', e);
+      console.warn('[CV Builder] Draft save failed:', e);
     }
     setIsSavingDraft(false);
+    if (dbSaveSucceeded) {
+      setHasSavedDraft(true);
+      setLastDraftName(name);
+      toast.success(`Draft "${name}" saved successfully`);
+    }
     return id;
   };
 
@@ -1146,8 +1446,14 @@ export default function CVGeneratorPage() {
         if (draft.cvSettings) setCvSettings(draft.cvSettings);
         if (draft.selectedLayout) setSelectedLayout(draft.selectedLayout);
       }
+      
+      // Mark as having a saved draft
+      setHasSavedDraft(true);
+      setLastDraftName(draft.name);
     } catch {
       if (draft.data) setCvData(draft.data);
+      setHasSavedDraft(true);
+      setLastDraftName(draft.name);
     }
     setWorkflowStep('review-edit');
     setActiveSection('contact');
@@ -1709,11 +2015,13 @@ export default function CVGeneratorPage() {
     if (!selectedIndividual && !applicantId) return;
     setIsSavingCv(true);
     try {
+      console.log('[CV Builder] saveCVToDb called:', { applicantId, selectedIndividual: selectedIndividual?.id, linkedIndividualId });
       const cvJson = JSON.stringify(cvData, null, 2);
       const blob = new Blob([cvJson], { type: 'application/json' });
 
       // Path A: Save to client's acc_portal_directors_documents (if selectedIndividual)
       if (selectedIndividual) {
+        console.log('[CV Builder] Saving CV to client record:', selectedIndividual.id);
         const filePath = `individual-documents/${selectedIndividual.id}/${CV_DOCUMENT_ID}/cv_${Date.now()}.json`;
         const { error: uploadError } = await supabase.storage
           .from('kyc-documents')
@@ -1731,6 +2039,7 @@ export default function CVGeneratorPage() {
 
       // Path B: Save to cv-builder storage + update bcl_cv_snapshot (if applicantId)
       if (applicantId) {
+        console.log('[CV Builder] Saving CV for applicantId:', applicantId);
         // 1. Store backup at cv-builder/{applicant_id}/built-cv.json
         const builderPath = `cv-builder/${applicantId}/built-cv.json`;
         const { error: uploadError } = await supabase.storage
@@ -1738,15 +2047,22 @@ export default function CVGeneratorPage() {
           .upload(builderPath, blob, { upsert: true });
         if (uploadError) throw uploadError;
 
-        // 2. Update bcl_cv_snapshot in job_applicant_cvs
+        // 2. Update bcl_cv_snapshot in job_applicant_cvs (include cvSettings and selectedLayout)
+        console.log('[CV Builder] Updating bcl_cv_snapshot in job_applicant_cvs');
+        const snapshotPayload = {
+          ...cvData,
+          cvSettings,
+          selectedLayout,
+        };
         const { error: snapshotError } = await supabase
           .from('job_applicant_cvs')
-          .update({ bcl_cv_snapshot: cvData, updated_at: new Date().toISOString() })
+          .update({ bcl_cv_snapshot: snapshotPayload, updated_at: new Date().toISOString() })
           .eq('applicant_id', applicantId);
         if (snapshotError) throw snapshotError;
 
         // 3. If linked client, also save to acc_portal_directors_documents
         if (linkedIndividualId) {
+          console.log('[CV Builder] Also saving to linked individual record:', linkedIndividualId);
           const registryPath = `individual-documents/${linkedIndividualId}/${CV_DOCUMENT_ID}/cv_${Date.now()}.json`;
           await supabase.storage
             .from('kyc-documents')
@@ -1762,9 +2078,11 @@ export default function CVGeneratorPage() {
         }
       }
 
+      console.log('[CV Builder] CV saved successfully');
       toast.success(selectedIndividual ? 'CV saved to client record successfully' : 'BCL Vouched CV saved successfully');
       setShowSaveCvPrompt(false);
     } catch (err: any) {
+      console.error('[CV Builder] Failed to save CV:', err);
       toast.error(`Failed to save CV: ${err.message}`);
     } finally {
       setIsSavingCv(false);
@@ -1834,7 +2152,7 @@ export default function CVGeneratorPage() {
 
   const handleDownloadDocx = () => {
     try {
-      exportToDocx(cvData);
+      exportToDocx(cvData, { primaryColor: cvSettings.primaryColor, accentColor: cvSettings.accentColor });
       toast.success("Word document (.docx) generated successfully!");
     } catch (e: any) {
       console.error(e);
@@ -3259,6 +3577,18 @@ export default function CVGeneratorPage() {
     return renderClientPortal();
   }
 
+  // Show loading state until mounted (prevents hydration mismatch)
+  if (!mounted) {
+    return (
+      <div className="flex flex-col h-screen items-center justify-center bg-[#FAFAFC]">
+        <div className="flex items-center gap-3">
+          <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+          <span className="text-lg text-slate-600">Loading CV Builder...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-[#FAFAFC]">
       {/* HEADER with workflow steps */}
@@ -3301,8 +3631,17 @@ export default function CVGeneratorPage() {
               )}
             </Button>
           )}
-          <Button size="sm" variant="outline" onClick={() => { setDraftNameInput(`CV - ${cvData.personalInfo?.fullName || 'Draft'} - ${new Date().toLocaleDateString()}`); setShowSaveDraftModal(true); setSavingDraftForPortal(false); }} className="text-xs h-8 gap-1.5 border-slate-200">
-            <Save className="h-3.5 w-3.5" /> Save Draft
+          <Button size="sm" variant="outline" onClick={() => { 
+            if (hasSavedDraft && lastDraftName) {
+              // Quick save with same name
+              saveDraft(lastDraftName, false);
+            } else {
+              setDraftNameInput(`CV - ${cvData.personalInfo?.fullName || 'Draft'} - ${new Date().toLocaleDateString()}`); 
+              setShowSaveDraftModal(true); 
+              setSavingDraftForPortal(false);
+            }
+          }} className={`text-xs h-8 gap-1.5 border-slate-200 ${hasSavedDraft ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : ''}`}>
+            <Save className="h-3.5 w-3.5" /> {hasSavedDraft ? 'Update Draft' : 'Save Draft'}
           </Button>
           <Button size="sm" variant="outline" onClick={() => setShowSendCvModal(true)} className="text-xs h-8 gap-1.5 border-slate-200 text-emerald-700 border-emerald-200 hover:bg-emerald-50">
             <MessageSquare className="h-3.5 w-3.5" /> Send CV

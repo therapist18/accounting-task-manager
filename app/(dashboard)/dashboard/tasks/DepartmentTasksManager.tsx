@@ -24,7 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import * as XLSX from 'xlsx'
-import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchKycDocument, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document, fetchTasksDuplicate, fetchDocumentWorkflowLogs, REQUIREMENTS_LOCK_STAGE_IDS, captureRequirementsDocumentsSnapshot } from "./utils/taskManagerData"
+import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchKycDocument, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document, fetchTasksDuplicate, fetchDocumentWorkflowLogs, REQUIREMENTS_LOCK_STAGE_IDS, captureRequirementsDocumentsSnapshot, fetchUploadedDocumentsForTasks } from "./utils/taskManagerData"
 import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog';
 import { StandardTable } from './overall-view/StandardTable';
 import { EnhancedTable } from './overall-view/EnhancedTable';
@@ -89,6 +89,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [isReadOnly, setIsReadOnly] = useState(false);
   const realtimeSubscriptionRef = useRef<any>(null);
   const [reportDocDefaults, setReportDocDefaults] = useState<any[]>([]);
+  const [allIndividualDocuments, setAllIndividualDocuments] = useState<Record<number, any[]>>({});
+  const [allCompanyDocuments, setAllCompanyDocuments] = useState<Record<number, any[]>>({});
   useEffect(() => {
     if (initialSearchTerm) setGlobalSearchTerm(initialSearchTerm);
   }, [initialSearchTerm]);
@@ -514,6 +516,10 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         fetchTasks(departmentId, subdepartmentId, companies),
         fetchStages(departmentId, departments)
       ])
+
+      const { individualDocsMap, companyDocsMap } = await fetchUploadedDocumentsForTasks(tasksData);
+      setAllIndividualDocuments(individualDocsMap);
+      setAllCompanyDocuments(companyDocsMap);
 
       setTasks(tasksData)
       setStages(stagesData)
@@ -2161,6 +2167,73 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     }
   }, [getDocumentForTaskStage, kycDocuments]);
 
+  const handleViewReportDocument = useCallback(async (colRecords: any[], docMetadata: any, task: any) => {
+    if (!colRecords || colRecords.length === 0) return;
+    try {
+      const docRecord = colRecords[0];
+      const kycId = docRecord.document_id;
+      let kycData = kycDocuments.get(kycId);
+      if (!kycData && kycId) {
+        kycData = await fetchKycDocument(kycId);
+        if (kycData) {
+          setKycDocuments(prev => new Map(prev.set(kycId, kycData)));
+        }
+      }
+
+      const documentName = docMetadata?.display_name || docMetadata?.name || kycData?.display_name || kycData?.name || 'Document';
+      const kycFields = kycData?.fields || [];
+      const fields = kycFields.map((field: any) => ({
+        id: field.id || field.fieldName,
+        name: field.fieldName,
+        type: field.fieldType,
+        required: field.isRequired,
+        description: field.description,
+        isArray: field.isArray,
+        arrayConfig: field.arrayConfig
+      }));
+
+      const extractedData = { ...(docRecord.extracted_details || {}) };
+      fields.forEach((field: any) => {
+        if (extractedData[field.id] === undefined) {
+          extractedData[field.id] = '';
+        }
+      });
+
+      const bucketName = 'kyc-documents';
+      const filePath = docRecord.file_path?.startsWith(bucketName)
+        ? docRecord.file_path
+        : `${bucketName}/${docRecord.file_path}`;
+      const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+      const fileName = docRecord.file_path?.split('/').pop() || documentName;
+
+      const previewData = {
+        id: docRecord.id,
+        documentId: docRecord.id,
+        documentName,
+        fileUrl,
+        fileName,
+        extractedData,
+        fields,
+        type: kycData?.documentType || 'document',
+        file: {
+          name: fileName,
+          type: fileName.split('.').pop()?.toLowerCase() || 'pdf',
+          url: fileUrl
+        },
+        taskId: task?.id,
+        task
+      };
+      setPreviewDocument(previewData);
+    } catch (error) {
+      console.error('Error preparing report document for view:', error);
+      toast({
+        title: 'Error',
+        description: `Failed to load document: ${error.message}`,
+        variant: 'destructive',
+      });
+    }
+  }, [kycDocuments]);
+
   const handleTaskEdit = (task: UtilTask) => {
     console.log('[handleTaskEdit] Opening edit for task:', {
       id: task.id,
@@ -3739,6 +3812,9 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                 getStaffName={getStaffName}
                 readOnly={isReadOnly}
                 reportDocDefaults={reportDocDefaults}
+                allIndividualDocuments={allIndividualDocuments}
+                allCompanyDocuments={allCompanyDocuments}
+                handleViewReportDocument={handleViewReportDocument}
                 onDocumentPreview={async (doc) => {
                   setPreviewDocument(doc);
                   if (doc.document_id) {
@@ -3838,6 +3914,9 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                 readOnly={isReadOnly}
                 showStats={showStats}
                 reportDocDefaults={reportDocDefaults}
+                allIndividualDocuments={allIndividualDocuments}
+                allCompanyDocuments={allCompanyDocuments}
+                handleViewReportDocument={handleViewReportDocument}
               />
             )}
           </div>

@@ -3,7 +3,9 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { FileText, Plus, Minus, Loader2, AlertTriangle, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { FileText, Plus, Minus, Loader2, AlertTriangle, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Eye, CheckCircle2 } from "lucide-react"
 import { AutomationMappingDialog } from "../components/AutomationMappingDialog"
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
 import { cn } from "@/lib/utils"
@@ -46,6 +48,9 @@ interface StandardTableProps {
   readOnly?: boolean
   showStats?: boolean
   reportDocDefaults?: any[]
+  allIndividualDocuments?: Record<number, any[]>
+  allCompanyDocuments?: Record<number, any[]>
+  handleViewReportDocument?: (colRecords: any[], docMetadata: any, task: any) => void
 }
 
 const DEFAULT_COL_WIDTH = 180;
@@ -58,10 +63,13 @@ export const StandardTable: React.FC<StandardTableProps> = ({
   sortConfig, dataLoading = {}, error,
   getCellContent, getSortedTasks, getDocumentForTaskStage, requestSort,
   onTaskAction, getKycFields, toggleStageExpansion,
-  toggleDocumentExpansion, toggleDependantsExpansion,   renderCellContent,
+  toggleDocumentExpansion, toggleDependantsExpansion, renderCellContent,
   readOnly = false,
   showStats = true,
-  reportDocDefaults = []
+  reportDocDefaults = [],
+  allIndividualDocuments = {},
+  allCompanyDocuments = {},
+  handleViewReportDocument
 }) => {
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
   const [selectedRequirement, setSelectedRequirement] = useState<any>(null);
@@ -351,7 +359,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
             <TableRow className="hover:bg-transparent border-0">
               {visibleStages.flatMap((stage, stageIdx) => {
                 if (!expandedStages.has(stage.id.toString()) || !stage.documents?.length) return [];
-                
+
                 const isFirstStage = stageIdx === 0;
                 const isLastStage = stageIdx === visibleStages.length - 1;
 
@@ -359,7 +367,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                   const kycData = kycDocuments.get(doc.kycId);
                   const docDisplayName = kycData?.display_name || kycData?.name || doc.display_name || doc.name || 'Document';
                   const isExpanded = expandedDocuments.has(doc.id.toString());
-                  
+
                   const isFirstDoc = isFirstStage && docIdx === 0;
                   const isLastDoc = isLastStage && docIdx === stage.documents.length - 1;
 
@@ -387,19 +395,37 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                   );
                 });
               })}
+              {reportDocDefaults && reportDocDefaults.length > 0 && reportDocDefaults.map((doc: any) => (
+                <TableHead
+                  key={`report-doc-header-${doc.id}`}
+                  rowSpan={2}
+                  colSpan={1}
+                  className="border-r border-b border-white/30 text-center px-3 py-2 bg-[#059669] border-l border-l-emerald-400/50"
+                  style={{ width: DEFAULT_COL_WIDTH, minWidth: DEFAULT_COL_WIDTH, maxWidth: DEFAULT_COL_WIDTH }}
+                >
+                  <div className="flex flex-col items-center justify-center gap-1">
+                    <span className="text-[11px] font-semibold text-white uppercase tracking-wider whitespace-normal break-words leading-snug" title={doc.documentName}>
+                      {doc.documentName || 'Document'}
+                    </span>
+                    <span className="text-[9px] text-emerald-100 font-bold opacity-80 uppercase">
+                      {doc.docType === 'individual' ? 'IND' : doc.docType === 'company' ? 'CO' : 'APP'}
+                    </span>
+                  </div>
+                </TableHead>
+              ))}
             </TableRow>
 
             {/* ROW 3: Fields */}
             <TableRow className="hover:bg-transparent border-0">
               {visibleStages.flatMap((stage, stageIdx) => {
                 if (!expandedStages.has(stage.id.toString()) || !stage.documents?.length) return [];
-                
+
                 const isFirstStage = stageIdx === 0;
                 const isLastStage = stageIdx === visibleStages.length - 1;
 
                 return stage.documents.flatMap((doc, docIdx) => {
                   if (!expandedDocuments.has(doc.id.toString())) return [];
-                  
+
                   const fields = documentFields.get(doc.id.toString()) || [];
                   const isFirstDoc = isFirstStage && docIdx === 0;
                   const isLastDoc = isLastStage && docIdx === stage.documents.length - 1;
@@ -449,7 +475,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                   const s = getColStats(col);
                   const val = stat.label === 'Total' ? s.total : stat.label === 'Completed' ? s.completed : s.missing;
                   const colWidth = col.type === 'case' ? (col.header.width || DEFAULT_COL_WIDTH) : (col.type === 'actions' ? ACTION_WIDTH : DEFAULT_COL_WIDTH);
-                  
+
                   const isStageStart = idx === firstStageColIdx;
                   const isStageEnd = idx === lastStageColIdx;
 
@@ -488,7 +514,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                 <TableRow key={row.key} className={cn("group border-0 transition-colors", row.type === 'dependant' ? "bg-orange-50/40" : (rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/50"), "hover:bg-blue-50/50")}>
                   {flatColumns.map((col, idx) => {
                     const colWidth = col.type === 'case' ? (col.header.width || DEFAULT_COL_WIDTH) : (col.type === 'actions' ? ACTION_WIDTH : DEFAULT_COL_WIDTH);
-                    
+
                     const isStageStart = idx === firstStageColIdx;
                     const isStageEnd = idx === lastStageColIdx;
                     const stageBorderClasses = cn(
@@ -557,23 +583,87 @@ export const StandardTable: React.FC<StandardTableProps> = ({
 
                     // --- REPORT DOC ---
                     if (col.type === 'report_doc') {
-                      const docTypeBadge = col.reportDoc.docType === 'individual' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                        col.reportDoc.docType === 'company' ? 'bg-purple-50 text-purple-700 border-purple-200' :
-                        'bg-emerald-50 text-emerald-700 border-emerald-200';
+                      let rowEntityType = 'principal';
+                      let entityId = null;
+                      if (col.reportDoc.docType === 'company') {
+                        rowEntityType = 'company';
+                        entityId = row.task.company_id;
+                      } else if (row.type === 'principal') {
+                        rowEntityType = 'principal';
+                        entityId = row.task.individual_id || row.task.applicant_details?.id;
+                      } else if (row.type === 'dependant') {
+                        rowEntityType = 'dependant';
+                        entityId = row.dependant?.id;
+                      }
+
+                      const isJobLevelApplicable = row.task.report_doc_defaults?.some((d: any) => d.documentId === col.reportDoc.documentId);
+                      const isEntityApplicable = col.reportDoc.appliesTo?.includes(row.type === 'principal' ? (col.reportDoc.docType === 'company' ? 'company' : 'principal') : 'dependant');
+                      const isApplicable = isJobLevelApplicable && isEntityApplicable;
+
+                      if (!isApplicable) {
+                        return (
+                          <TableCell
+                            key={`${row.key}-${col.id}`}
+                            className={cn("text-center px-2 py-2 border-r border-b border-slate-200 bg-slate-50/50 text-gray-400 italic text-[11px]")}
+                            style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}
+                          >
+                            N/A
+                          </TableCell>
+                        );
+                      }
+
+                      const snapshot = [
+                        ...(row.task.processing_requirements_documents || []),
+                        ...(row.task.issuance_requirements_documents || [])
+                      ];
+                      const entry = snapshot.find((s: any) =>
+                        s.documentTypeId === col.reportDoc.documentId &&
+                        s.entityType === rowEntityType &&
+                        Number(s.entityId) === Number(entityId)
+                      );
+
+                      let colRecords = [];
+                      let isFromSnapshot = false;
+
+                      if (entry) {
+                        const pool = rowEntityType === 'company'
+                          ? (allCompanyDocuments[entityId] || [])
+                          : (allIndividualDocuments[entityId] || []);
+                        colRecords = pool.filter((d: any) => (entry.documentRecordIds || []).includes(d.id));
+                        isFromSnapshot = true;
+                      } else {
+                        const pool = rowEntityType === 'company'
+                          ? (allCompanyDocuments[entityId] || [])
+                          : (allIndividualDocuments[entityId] || []);
+                        colRecords = pool.filter((d: any) => d.document_id === col.reportDoc.documentId);
+                      }
+
+                      const docMetadata = { display_name: col.reportDoc.documentName };
+                      const hasFiles = colRecords.length > 0;
+
                       return (
                         <TableCell
                           key={`${row.key}-${col.id}`}
-                          className={cn("text-center px-2 py-2 border-r border-b border-slate-200 border-l-2 border-l-emerald-400 bg-emerald-50/30")}
+                          className={cn("text-center px-2 py-2 border-r border-b border-slate-200 bg-emerald-50/10")}
                           style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}
                         >
-                          <div className="flex flex-col items-center gap-1">
-                            <span className="text-[10px] font-medium text-slate-700 truncate max-w-full" title={col.reportDoc.documentName}>
-                              {col.reportDoc.documentName || 'Unknown'}
-                            </span>
-                            <span className={cn("text-[8px] px-1.5 py-0.5 rounded-full border font-bold uppercase", docTypeBadge)}>
-                              {col.reportDoc.docType === 'individual' ? 'IND' : col.reportDoc.docType === 'company' ? 'CO' : 'APP'}
-                            </span>
-                          </div>
+                          {hasFiles ? (
+                            <div className="flex flex-col items-center justify-center gap-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-6 py-0 px-2 bg-white text-blue-600 border-blue-200 hover:bg-blue-50 shadow-sm flex items-center gap-1 text-[10px]"
+                                onClick={() => handleViewReportDocument?.(colRecords, docMetadata, row.task)}
+                              >
+                                <Eye className="h-3 w-3" />
+                                <span>View</span>
+                              </Button>
+                            </div>
+                          ) : (
+                            <Badge variant="outline" className="bg-slate-50 text-slate-400 border-slate-200 text-[9px] font-medium py-0 px-1.5">
+                              Not Uploaded
+                            </Badge>
+                          )}
                         </TableCell>
                       );
                     }

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Loader2, LayoutGrid, Plus, Minus, Briefcase, FileDown, ChevronDown, FileText, ChevronLeft, ChevronRight, RefreshCw, AlertTriangle, Clock, ArrowUpDown, Search, Timer, AlertCircle, CheckCircle2, Clock3, User, EyeOff, Eye, Filter, RotateCcw, X, TableProperties, Download, ArrowRight, Send, Shield, Users, Upload } from "lucide-react";
+import { Loader2, LayoutGrid, Plus, Minus, Briefcase, FileDown, ChevronDown, FileText, ChevronLeft, ChevronRight, RefreshCw, AlertTriangle, Clock, ArrowUpDown, Search, Timer, AlertCircle, CheckCircle2, Clock3, User, EyeOff, Eye, Filter, RotateCcw, X, TableProperties, Download, ArrowRight, Send, Shield, Users, Upload, Layers } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -18,7 +18,7 @@ import { supabase } from "@/lib/supabase/client";
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver'
 import { getCurrentStageStatus, getCellContent, getEnhancedImmigrationStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, ENHANCED_TABLE_HEADERS_IMMIGRATION, enhanceTasksWithIndividualData, getRawCellValue } from "../tasks/overall-view/tableUtils";
-import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields } from "../tasks/utils/taskManagerData";
+import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchUploadedDocumentsForTasks } from "../tasks/utils/taskManagerData";
 import { getOfficerDisplayName } from "@/lib/shared-user-assignment-service";
 import { fetchDepartments } from "../departments/departments/database";
 import { userService } from "@/lib/shared-user-assignment-service";
@@ -172,6 +172,10 @@ export default function ReportsPage() {
   const [activePerspective, setActivePerspective] = useState<'overview' | 'officers' | 'managers' | 'clients' | 'companies'>('overview');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [reportDocDefaults, setReportDocDefaults] = useState<any[]>([]);
+  const [allIndividualDocuments, setAllIndividualDocuments] = useState<Record<number, any[]>>({});
+  const [allCompanyDocuments, setAllCompanyDocuments] = useState<Record<number, any[]>>({});
+  const [previewDocument, setPreviewDocument] = useState<any>(null);
+  const [isDocumentPreviewOpen, setIsDocumentPreviewOpen] = useState(false);
   const sidebarPanelRef = useRef<any>(null);
 
   const handleSidebarToggle = useCallback(() => {
@@ -274,6 +278,10 @@ export default function ReportsPage() {
 
       const safeTasks = Array.isArray(tasksData) ? tasksData : [];
 
+      const { individualDocsMap, companyDocsMap } = await fetchUploadedDocumentsForTasks(safeTasks);
+      setAllIndividualDocuments(individualDocsMap);
+      setAllCompanyDocuments(companyDocsMap);
+
       const { enhancedTasksData: enhancedMap, taskDependants: dependantsMap } =
         await enhanceTasksWithIndividualData(safeTasks);
 
@@ -329,7 +337,7 @@ export default function ReportsPage() {
         // Get unique job levels from tasks in this department
         const deptTasks = tasks.filter(t => String(t.department_id) === String(activeDeptId));
         const jobLevels = new Map<string, any>();
-        
+
         deptTasks.forEach(task => {
           const jl = task.job_level || {};
           const key = JSON.stringify({
@@ -378,7 +386,7 @@ export default function ReportsPage() {
           new Map(allDefaults
             .filter((d: any) => d.isVisible !== false)
             .map((d: any) => [d.documentId, d]))
-          .values()
+            .values()
         ).sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
 
         setReportDocDefaults(uniqueDefaults);
@@ -615,8 +623,16 @@ export default function ReportsPage() {
         });
       }
     });
+
+    // Add Report Doc columns
+    if (reportDocDefaults && reportDocDefaults.length > 0) {
+      reportDocDefaults.forEach(doc => {
+        cols.push({ id: `report-doc-${doc.documentId || doc.id}`, type: 'report_doc', reportDoc: doc, label: doc.documentName });
+      });
+    }
+
     return cols;
-  }, [activeReport, stages, isStageApplicableToCurrentFilter, expandedStageColumns, showDocRequirementsColumns, tasks]);
+  }, [activeReport, stages, isStageApplicableToCurrentFilter, expandedStageColumns, showDocRequirementsColumns, tasks, reportDocDefaults]);
 
   useEffect(() => {
     if (columns.length > 0) setVisibleColumnIds(prev => Array.from(new Set([...prev, ...columns.map(c => c.id)])));
@@ -853,9 +869,67 @@ export default function ReportsPage() {
       const isEffectiveTo = effectiveToField ? (latestDoc.extracted_details?.[effectiveToField.fieldName] || latestDoc.edited_details?.[effectiveToField.fieldName]) : (latestDoc.extracted_details?.isEffectiveTo || latestDoc.edited_details?.isEffectiveTo);
       return <div className="text-gray-500"><span className="font-medium text-gray-700">{isEffectiveTo || '-'}</span></div>;
     }
+    if (col.type === 'report_doc') {
+      const docDef = col.reportDoc;
+      const indDocs = allIndividualDocuments[task.id] || [];
+      const compDocs = allCompanyDocuments[task.id] || [];
+
+      let uploaded = [...indDocs, ...compDocs].find((d: any) =>
+        d.document_id?.toString() === docDef.documentId?.toString() ||
+        d.document_type_id?.toString() === docDef.documentId?.toString() ||
+        d.kyc_document_id?.toString() === docDef.documentId?.toString()
+      );
+
+      // Check task stages if it's an application document
+      if (!uploaded && task.stages) {
+        for (const stageId of Object.keys(task.stages)) {
+          const stageData = task.stages[stageId];
+          if (stageData.documents) {
+            const docs = Object.values(stageData.documents);
+            const found = docs.find((d: any) =>
+              d.document_id?.toString() === docDef.documentId?.toString() ||
+              d.document_type_id?.toString() === docDef.documentId?.toString() ||
+              d.kyc_document_id?.toString() === docDef.documentId?.toString()
+            );
+            if (found) { uploaded = found; break; }
+          }
+        }
+      }
+
+      if (uploaded) {
+        return (
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-1.5 cursor-default select-none group/cell">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <span className="text-xs font-medium text-slate-700 truncate max-w-[120px]">
+                    Uploaded
+                  </span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="bg-slate-800 text-white text-xs z-[9999]">
+                {uploaded.file_name || 'Document Uploaded'}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        );
+      }
+
+      return (
+        <span className="flex items-center gap-1.5 text-slate-400">
+          <div className="h-1.5 w-1.5 rounded-full bg-slate-300 shrink-0" />
+          <span className="text-xs font-medium italic">Pending</span>
+        </span>
+      );
+    }
 
     return <span className="text-sm text-gray-400">—</span>;
-  }, [stages, departments, kycDocuments, companies, enhancedTasksData, taskDependants, showTime, activeDeptId, unifiedOfficers, allDocuments]);
+  }, [
+    stages, departments, kycDocuments, companies, enhancedTasksData, taskDependants,
+    showTime, activeDeptId, unifiedOfficers, allDocuments,
+    allIndividualDocuments, allCompanyDocuments // Ensure these were added to dependencies!
+  ]);
 
   const handleSaveStageDate = useCallback(async (taskId: string, stageId: string, date: string) => {
     try {
@@ -978,8 +1052,41 @@ export default function ReportsPage() {
 
       return parts.join(' | ');
     }
+    if (col.type === 'report_doc') {
+      const docDef = col.reportDoc;
+      const indDocs = allIndividualDocuments[task.id] || [];
+      const compDocs = allCompanyDocuments[task.id] || [];
+
+      let uploaded = [...indDocs, ...compDocs].find((d: any) =>
+        d.document_id?.toString() === docDef.documentId?.toString() ||
+        d.document_type_id?.toString() === docDef.documentId?.toString() ||
+        d.kyc_document_id?.toString() === docDef.documentId?.toString()
+      );
+
+      if (!uploaded && task.stages) {
+        for (const stageId of Object.keys(task.stages)) {
+          const stageData = task.stages[stageId];
+          if (stageData.documents) {
+            const docs = Object.values(stageData.documents);
+            const found = docs.find((d: any) =>
+              d.document_id?.toString() === docDef.documentId?.toString() ||
+              d.document_type_id?.toString() === docDef.documentId?.toString() ||
+              d.kyc_document_id?.toString() === docDef.documentId?.toString()
+            );
+            if (found) { uploaded = found; break; }
+          }
+        }
+      }
+      return uploaded ? 'Uploaded' : 'Pending';
+    }
+
     return '';
-  }, [departments, stages, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, unifiedOfficers, allDocuments, kycDocuments]);
+  }, [
+    departments, stages, enhancedTasksData, companies, getStaffName,
+    getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper,
+    unifiedOfficers, allDocuments, kycDocuments,
+    allIndividualDocuments, allCompanyDocuments // Ensure these were added to dependencies!
+  ]);
 
   const sortedTasks = useMemo(() => {
     if (!sortConfig || !filteredColumns.length) return searchedTasks;
@@ -1382,6 +1489,57 @@ export default function ReportsPage() {
     if (taskCols.length) groups.push({ id: 'task_info', label: 'Task Details', span: taskCols.length, applicable: true });
     return groups;
   }, [filteredColumns]);
+
+  const transposedRows = useMemo(() => {
+    if (!filteredByNARows.length) return [];
+    const rows = [];
+
+    // 1. Task Details Section
+    rows.push({ id: 'task_details', type: 'section_header', label: 'Task Details', icon: Briefcase });
+    const taskFields = activeReport?.configuration?.taskFields || [];
+    taskFields.forEach((f: any) => {
+      rows.push({
+        id: `task_${f.id}`,
+        type: 'task',
+        field: f.id,
+        label: ENHANCED_TABLE_HEADERS_IMMIGRATION.find(h => h.id === f.id)?.label || f.id.replace(/_/g, ' ').toUpperCase()
+      });
+    });
+
+    // 2. Stages Section
+    rows.push({ id: 'stages', type: 'section_header', label: 'Stages', icon: Layers });
+    const activeStageIds = Object.keys(activeReport?.configuration?.stages || {});
+    const sortedStages = stages.filter(s => activeStageIds.includes(s.id) && isStageApplicableToCurrentFilter(s.id)).sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+
+    sortedStages.forEach((stage, idx) => {
+      rows.push({
+        id: `stage_${stage.id}`,
+        type: 'stage_info',
+        stageId: stage.id,
+        label: stage.name,
+        stageOrder: idx + 1,
+        sectionId: 'stages',
+        requiresUpload: !!(stage.documents && stage.documents.length > 0),
+        fields: []
+      });
+    });
+
+    // 3. Report Documents Section
+    if (reportDocDefaults && reportDocDefaults.length > 0) {
+      rows.push({ id: 'report_docs', type: 'section_header', label: `Report Documents (${reportDocDefaults.length})`, icon: FileText });
+      reportDocDefaults.forEach((doc, idx) => {
+        rows.push({
+          id: `report_doc_${doc.documentId || doc.id}`,
+          type: 'report_doc',
+          reportDoc: doc,
+          label: doc.documentName || 'Document',
+          stageOrder: idx + 1,
+          sectionId: 'report_docs'
+        });
+      });
+    }
+    return rows;
+  }, [filteredByNARows, activeReport, stages, isStageApplicableToCurrentFilter, reportDocDefaults]);
 
   if (reportLoading) {
     return (

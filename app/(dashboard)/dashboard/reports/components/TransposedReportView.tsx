@@ -202,12 +202,22 @@ export function TransposedReportView({
               {/* Dynamic Body Rows (Stages, Stats, etc.) */}
               {bodyRows.map((row, rIdx) => {
                 if (row.type === 'section_header') {
+                  const isReportDocs = row.id === 'report_docs';
                   return (
-                    <TableRow key={row.id} className="bg-blue-50/80 hover:bg-blue-50 border-y border-blue-200">
+                    <TableRow key={row.id} className={cn(
+                      "border-y",
+                      isReportDocs ? "bg-emerald-50/80 hover:bg-emerald-50 border-emerald-200" : "bg-blue-50/80 hover:bg-blue-50 border-blue-200"
+                    )}>
                       <TableCell colSpan={paginatedColumns.length + 2} className="p-0">
-                        <div className="flex items-center justify-between px-6 py-3 sticky left-0 w-max min-w-full border-l-4 border-l-blue-500">
+                        <div className={cn(
+                          "flex items-center justify-between px-6 py-3 sticky left-0 w-max min-w-full border-l-4",
+                          isReportDocs ? "border-l-emerald-500" : "border-l-blue-500"
+                        )}>
                            <div className="flex items-center gap-3">
-                              <div className="h-8 w-8 rounded-lg bg-custom-blue text-white flex items-center justify-center">
+                              <div className={cn(
+                                "h-8 w-8 rounded-lg text-white flex items-center justify-center",
+                                isReportDocs ? "bg-emerald-600" : "bg-custom-blue"
+                              )}>
                                  {row.icon ? <row.icon size={16}/> : <Layers size={16}/>}
                               </div>
                               <span className="text-[13px] font-bold text-slate-900 tracking-tight">{row.label}</span>
@@ -227,9 +237,15 @@ export function TransposedReportView({
                 return (
                   <TableRow key={row.id} className="hover:bg-blue-50/20 group">
                     <TableCell className={cn("sticky left-0 z-20 bg-white border-r border-b border-slate-100 text-center text-[11px] font-bold text-slate-400", INDEX_WIDTH)}>{row.stageOrder || rIdx}</TableCell>
-                    <TableCell className={cn("sticky left-[56px] z-20 bg-white border-r border-b border-slate-100 px-6 py-3", LABEL_WIDTH)}>
+                    <TableCell className={cn(
+                      "sticky left-[56px] z-20 bg-white border-r border-b border-slate-100 px-6 py-3", LABEL_WIDTH,
+                      row.type === 'report_doc' && "border-l-[3px] border-l-emerald-500 bg-emerald-50/30"
+                    )}>
                       <div className="flex flex-col gap-0.5">
-                        <span className={cn("text-[13px] font-semibold transition-colors", row.type === 'stage' ? "text-slate-900" : "text-slate-600")}>
+                        <span className={cn(
+                          "text-[13px] font-semibold transition-colors", 
+                          row.type === 'stage' || row.type === 'report_doc' ? "text-slate-900" : "text-slate-600"
+                        )}>
                           {row.label}
                         </span>
                         {row.isSubRow && <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Sub-Attribute</span>}
@@ -308,7 +324,10 @@ export function TransposedReportView({
                       }
 
                       return (
-                        <TableCell key={task.id} className={cn("border-b border-slate-100 text-center px-4 py-3 align-top", DATA_COLUMN_WIDTH)}>
+                        <TableCell key={task.id} className={cn(
+                          "border-b border-slate-100 text-center px-4 py-3 align-top", DATA_COLUMN_WIDTH,
+                          row.type === 'report_doc' && "bg-emerald-50/10"
+                        )}>
                           <div className="text-[13px] leading-relaxed">
                             {content}
                           </div>
@@ -330,47 +349,6 @@ export function TransposedReportView({
           )}
         </div>
       </div>
-
-      {reportDocDefaults.length > 0 && (
-        <div className="mt-4 mx-8 mb-4">
-          <div className="border-2 border-l-4 border-l-emerald-500 border-emerald-200 rounded-lg bg-white shadow-sm overflow-hidden">
-            <div className="bg-emerald-50/80 px-4 py-2.5 border-b border-emerald-200">
-              <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-emerald-600" />
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">Report Documents</span>
-                <Badge variant="outline" className="bg-emerald-100 text-emerald-700 border-emerald-300 text-[10px] ml-1">
-                  {reportDocDefaults.length} docs
-                </Badge>
-              </div>
-            </div>
-            <div className="p-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {reportDocDefaults.map((doc: any, idx: number) => (
-                  <div key={doc.id || idx} className="flex items-center gap-3 p-3 bg-emerald-50/50 border border-emerald-100 rounded-lg hover:bg-emerald-50 transition-colors">
-                    <div className="flex-shrink-0 w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center">
-                      <span className="text-xs font-bold text-emerald-700">{idx + 1}</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-800 truncate">{doc.documentName || 'Unknown Document'}</p>
-                      <p className="text-[10px] text-slate-500 uppercase tracking-wide">
-                        {doc.docType === 'individual' ? 'Individual' : doc.docType === 'company' ? 'Company' : 'Application'}
-                      </p>
-                    </div>
-                    <Badge variant="outline" className={cn(
-                      "text-[10px] flex-shrink-0",
-                      doc.docType === 'individual' ? "bg-blue-50 text-blue-700 border-blue-200" :
-                      doc.docType === 'company' ? "bg-purple-50 text-purple-700 border-purple-200" :
-                      "bg-emerald-50 text-emerald-700 border-emerald-200"
-                    )}>
-                      {doc.docType === 'individual' ? 'IND' : doc.docType === 'company' ? 'CO' : 'APP'}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
