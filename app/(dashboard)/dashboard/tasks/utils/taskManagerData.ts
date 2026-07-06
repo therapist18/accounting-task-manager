@@ -682,14 +682,18 @@ export const formatDateValue = (dateString: string | Date | null | undefined): s
     let date: Date
 
     if (typeof dateString === 'string') {
-      // If it's already in the expected format, return as is
-      if (dateString.includes('/') && dateString.includes(':')) {
+      if (/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/.test(dateString)) {
+        return dateString
+      }
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateString)) {
         return dateString
       }
       date = new Date(dateString)
     } else {
       date = dateString
     }
+
+    if (isNaN(date.getTime())) return 'Invalid Date'
 
     const day = String(date.getDate()).padStart(2, '0')
     const month = String(date.getMonth() + 1).padStart(2, '0')

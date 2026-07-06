@@ -9,6 +9,7 @@ import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2, ChevronLeft
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
 import { EnquiryDialog } from "../components/EnquiryDialog"
 import { userService, getOfficerDisplayName } from "@/lib/shared-user-assignment-service"
+import { formatDateValue } from "../utils/taskManagerData"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
@@ -375,10 +376,9 @@ const MemoizedTableRow = React.memo(({
               <TableCell className={cn("text-center text-sm py-1.5 px-2 align-middle border-l-4 border-t border-b border-gray-100 w-[150px] bg-emerald-50/10", item.type === 'dependant' ? 'bg-orange-50/30' : '')}>
                 {hasFiles ? (
                   <div className="flex flex-col items-center justify-center gap-1">
-                    {/* NEW: Render the immigration date value */}
                     {immigrationDateValue && (
                       <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100/50 px-1.5 py-0.5 rounded border border-emerald-200">
-                        {String(immigrationDateValue)}
+                        {formatDateValue(immigrationDateValue)}
                       </span>
                     )}
                     <Button

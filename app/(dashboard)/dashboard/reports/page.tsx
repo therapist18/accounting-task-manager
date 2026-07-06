@@ -18,7 +18,7 @@ import { supabase } from "@/lib/supabase/client";
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver'
 import { getCurrentStageStatus, getCellContent, getEnhancedImmigrationStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, ENHANCED_TABLE_HEADERS_IMMIGRATION, enhanceTasksWithIndividualData, getRawCellValue } from "../tasks/overall-view/tableUtils";
-import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchUploadedDocumentsForTasks } from "../tasks/utils/taskManagerData";
+import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchUploadedDocumentsForTasks, formatDateValue } from "../tasks/utils/taskManagerData";
 import { getOfficerDisplayName } from "@/lib/shared-user-assignment-service";
 import { fetchDepartments } from "../departments/departments/database";
 import { userService } from "@/lib/shared-user-assignment-service";
@@ -871,49 +871,62 @@ export default function ReportsPage() {
     }
    if (col.type === 'report_doc') {
       const docDef = col.reportDoc;
-      const indDocs = allIndividualDocuments[task.id] || [];
-      const compDocs = allCompanyDocuments[task.id] || [];
 
-      let uploaded = [...indDocs, ...compDocs].find((d: any) =>
-        d.document_id?.toString() === docDef.documentId?.toString() ||
-        d.document_type_id?.toString() === docDef.documentId?.toString() ||
-        d.kyc_document_id?.toString() === docDef.documentId?.toString()
-      );
-
-      if (!uploaded && task.stages) {
-        for (const stageId of Object.keys(task.stages)) {
-          const stageData = task.stages[stageId];
-          if (stageData.documents) {
-            const docs = Object.values(stageData.documents);
-            const found = docs.find((d: any) =>
-              d.document_id?.toString() === docDef.documentId?.toString() ||
-              d.document_type_id?.toString() === docDef.documentId?.toString() ||
-              d.kyc_document_id?.toString() === docDef.documentId?.toString()
-            );
-            if (found) { uploaded = found; break; }
-          }
-        }
+      let entityType = 'principal';
+      let entityId = null;
+      if (docDef.docType === 'company') {
+        entityType = 'company';
+        entityId = task.company_id || task.applicant_details?.id;
+      } else {
+        entityId = task.individual_id || task.applicant_details?.id;
       }
 
-      if (uploaded) {
-        // --- NEW: Extract Immigration Date ---
-        let immigrationDateValue = null;
-        const kycData = kycDocuments.get(docDef.documentId?.toString());
+      const snapshot = [
+        ...(task.processing_requirements_documents || []),
+        ...(task.issuance_requirements_documents || [])
+      ];
+      const entry = snapshot.find((s: any) =>
+        s.documentTypeId === docDef.documentId &&
+        s.entityType === entityType &&
+        Number(s.entityId) === Number(entityId)
+      );
+
+      let colRecords = [];
+      if (entry) {
+        const pool = entityType === 'company'
+          ? (allCompanyDocuments[entityId] || [])
+          : (allIndividualDocuments[entityId] || []);
+        colRecords = pool.filter((d: any) => (entry.documentRecordIds || []).includes(d.id));
+      } else {
+        const pool = entityType === 'company'
+          ? (allCompanyDocuments[entityId] || [])
+          : (allIndividualDocuments[entityId] || []);
+        colRecords = pool.filter((d: any) => d.document_id === docDef.documentId);
+      }
+
+      const hasFiles = colRecords.length > 0;
+
+      let immigrationDateValue = null;
+      if (hasFiles) {
+        const docRecord = colRecords[0];
+        const kycData = kycDocuments.get(docDef.documentId);
         if (kycData?.fields) {
           const immigrationField = kycData.fields.find((f: any) => f.isImmigrationDate);
           if (immigrationField) {
             const fieldName = immigrationField.fieldName || immigrationField.name || immigrationField.id;
-            immigrationDateValue = uploaded.extracted_details?.[fieldName] ||
-                                   uploaded.extracted_data?.[fieldName] ||
-                                   uploaded.edited_details?.[fieldName];
+            immigrationDateValue = docRecord.extracted_details?.[fieldName] ||
+                                   docRecord.extracted_data?.[fieldName] ||
+                                   docRecord.edited_details?.[fieldName];
           }
         }
+      }
 
+      if (hasFiles) {
         return (
           <div className="flex flex-col items-center justify-center gap-1 w-full">
             {immigrationDateValue && (
               <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100/80 px-1.5 py-0.5 rounded border border-emerald-200/60 truncate max-w-full">
-                {formatDate(immigrationDateValue, false) || immigrationDateValue}
+                {formatDateValue(immigrationDateValue)}
               </span>
             )}
             <TooltipProvider delayDuration={150}>
@@ -927,7 +940,7 @@ export default function ReportsPage() {
                   </div>
                 </TooltipTrigger>
                 <TooltipContent className="bg-slate-800 text-white text-xs z-[9999]">
-                  {uploaded.file_name || 'Document Uploaded'}
+                  {colRecords[0]?.file_name || 'Document Uploaded'}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
