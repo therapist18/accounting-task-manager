@@ -1964,16 +1964,25 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   }, [pendingQuestionClientReqs, pendingRequirementClientReqs, pendingWebdataClientReqs]);
 
   const handleSubmitClientReqs = async () => {
-    if (!editingContext) return;
+    const currentDeptId = activeDept;
+    const currentSubdeptId = activeSubdept[String(currentDeptId)];
+    if (!currentDeptId || !currentSubdeptId) return;
+    const activeClassKey = `${String(currentDeptId)}-${String(currentSubdeptId)}`;
+    const currentClassId = activeClass[activeClassKey];
+    const activeSubclassKey = `${activeClassKey}-${String(currentClassId)}`;
+    const currentSubclassId = activeSubclass[activeSubclassKey];
+    const level = currentSubclassId ? 4 : currentClassId ? 3 : 2;
+
+    const jobLevel = {
+      department_id: Number(currentDeptId),
+      subdepartment_id: Number(currentSubdeptId),
+      class_id: currentClassId ? Number(currentClassId) : null,
+      subclass_id: currentSubclassId ? Number(currentSubclassId) : null,
+      level,
+    };
+
     try {
       setIsSubmitting(true);
-      const jobLevel = {
-        department_id: Number(editingContext.departmentId),
-        subdepartment_id: Number(editingContext.subdepartmentId),
-        class_id: editingContext.classId ? Number(editingContext.classId) : null,
-        subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
-        level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
-      };
 
       // 1. Save questions and requirements to tm_class_requirements
       const { data: existing, error: fetchError } = await supabase
@@ -2016,10 +2025,10 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         if (updateError) throw updateError;
       }
 
-      // 2. Save webdata field changes to tm_automations
-      for (const [automationId, fieldsUpdate] of Object.entries(pendingWebdataClientReqs)) {
+      // 2. Save webdata field changes to tm_automations (concurrent via Promise.all)
+      const automationUpdates = Object.entries(pendingWebdataClientReqs).map(async ([automationId, fieldsUpdate]) => {
         const automation = allAutomations.find(a => a.id === automationId);
-        if (!automation) continue;
+        if (!automation) return;
         const updatedWebdata = automation.webdata.map((f, i) => {
           const fieldUpdate = fieldsUpdate[i];
           if (!fieldUpdate) return f;
@@ -2040,7 +2049,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           .eq('id', automationId);
         if (error) throw error;
         setAllAutomations(prev => prev.map(a => a.id === automationId ? { ...a, webdata: updatedWebdata } : a));
-      }
+      });
+      await Promise.all(automationUpdates);
 
       // 3. Clear pending state and refresh
       setPendingQuestionClientReqs({});

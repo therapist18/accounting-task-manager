@@ -1173,6 +1173,7 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[78vw] h-[92vh] p-0 overflow-hidden bg-slate-100 flex flex-col gap-0 border-0 shadow-2xl" showClose={false}>
+        <DialogTitle className="sr-only">Report Manager</DialogTitle>
         {/* Branded Header Bar */}
         <div className="flex items-center justify-between px-6 py-3 shrink-0 border-b border-slate-200 bg-white" style={{ borderTop: '3px solid #376bae' }}>
           <div className="flex items-center gap-3">
