@@ -256,6 +256,10 @@ export const getArrayFieldDataImpl = (field: any, ctx: FieldResolutionContext): 
   return arrayData;
 };
 
+const TABLE_KEY_OVERRIDES: Record<string, string> = {
+  registry_individuals: 'id',
+};
+
 export async function fetchSourceDataImpl(params: FetchSourceDataParams): Promise<{ sourceData: Record<string, Record<string, any>>; masterFieldComputedValues: Record<string, any> | null }> {
   const { selectedAutomationId, webData, jobFields, relationshipData, taskId, currentIndividualId, task } = params;
   if (!selectedAutomationId || Object.keys(jobFields).length === 0 || !webData.length) {
@@ -321,11 +325,12 @@ export async function fetchSourceDataImpl(params: FetchSourceDataParams): Promis
   for (const [, { table, ids, linkingVariable }] of standardFetchQueue.entries()) {
     const idArray = Array.from(ids);
     if (idArray.length === 0) continue;
-    fetchPromises.push(supabase.from(table).select('*').in(linkingVariable, idArray).then(({ data, error }: { data: any[] | null; error: any }) => {
+    const effectiveLinkingVar = TABLE_KEY_OVERRIDES[table] || linkingVariable;
+    fetchPromises.push(supabase.from(table).select('*').in(effectiveLinkingVar, idArray).then(({ data, error }: { data: any[] | null; error: any }) => {
       if (!error && data) {
         if (!newSourceData[table]) newSourceData[table] = {};
         data.forEach((record: any) => {
-          const recordKey = String(record[linkingVariable]);
+          const recordKey = String(record[effectiveLinkingVar]);
           newSourceData[table][recordKey] = record;
           if (table === 'tm_tasks' && record.id) {
             newSourceData[table][String(record.id)] = record;

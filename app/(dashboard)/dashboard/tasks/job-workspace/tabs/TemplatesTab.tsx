@@ -151,7 +151,7 @@ export function TemplatesTab({ data }: TemplatesTabProps) {
           template={templates.length === 1 ? templates[0] : null}
           availableTemplates={templates}
           documentName={selectedTemplateReq.display_name || selectedTemplateReq.name}
-          masterFields={{}}
+          masterFields={new Map()}
           entityIdMap={{}}
           sourceDataCache={{}}
           personData={{}}

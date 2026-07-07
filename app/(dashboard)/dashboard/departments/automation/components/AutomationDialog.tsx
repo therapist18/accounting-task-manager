@@ -2195,6 +2195,7 @@ function AddDataFieldDialog({
 const automationFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
   description: z.string().optional(),
+  automation_type: z.string().optional(),
   webhook_url: z.string().url("Must be a valid URL").optional().or(z.literal("")),
   webhook_method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).default("POST"),
   is_active: z.boolean().default(true),
@@ -2254,6 +2255,7 @@ export function AutomationDialog({
     defaultValues: {
       name: "",
       description: "",
+      automation_type: "",
       webhook_url: "",
       webhook_method: "POST",
       is_active: true,
@@ -2346,6 +2348,7 @@ export function AutomationDialog({
       form.reset({
         name: initialData.name || "",
         description: initialData.description || "",
+        automation_type: initialData.automation_type || "",
         webhook_url: initialData.webhook_url || "",
         webhook_method: initialData.webhook_method || "POST",
         is_active: initialData.is_active ?? true,
@@ -2388,6 +2391,7 @@ export function AutomationDialog({
     } else {
       form.reset({
         name: "",
+        automation_type: "",
         webhook_method: "POST",
         is_active: true,
         category: "general",
@@ -2828,7 +2832,38 @@ export function AutomationDialog({
                                 )}
                               />
                             </div>
-                            <div className="grid grid-cols-2 gap-4 pt-2">
+                            <FormField
+                              control={form.control}
+                              name="automation_type"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel className="text-sm font-bold text-slate-500">Automation Type</FormLabel>
+                                  <Select onValueChange={field.onChange} value={field.value || ''}>
+                                    <FormControl><SelectTrigger><SelectValue placeholder="Select type (inferred from URL if empty)" /></SelectTrigger></FormControl>
+                                    <SelectContent>
+                                      <SelectItem value="class-d">Class D (Dependant Pass)</SelectItem>
+                                      <SelectItem value="class-g">Class G (Trade/Business)</SelectItem>
+                                      <SelectItem value="class-r">Class R (EAC Nationals)</SelectItem>
+                                      <SelectItem value="class-n">Class N</SelectItem>
+                                      <SelectItem value="student-pass">Student Pass</SelectItem>
+                                      <SelectItem value="special-pass">Special Pass</SelectItem>
+                                      <SelectItem value="dependant-pass">Dependant Pass</SelectItem>
+                                      <SelectItem value="children-dependants">Children & Dependants</SelectItem>
+                                      <SelectItem value="citizenship-endorsement">Citizenship Endorsement</SelectItem>
+                                      <SelectItem value="dual-citizenship">Dual Citizenship</SelectItem>
+                                      <SelectItem value="re-entry-pass">Re-entry Pass</SelectItem>
+                                      <SelectItem value="foreign-national-certificate">Foreign National Certificate</SelectItem>
+                                      <SelectItem value="regularization">Regularization</SelectItem>
+                                      <SelectItem value="citizen-registration-f10">Citizen Registration (F10)</SelectItem>
+                                      <SelectItem value="eta-kenya">eTA Kenya</SelectItem>
+                                      <SelectItem value="upload-requirements">Upload Requirements</SelectItem>
+                                      <SelectItem value="download-permit">Download Permit</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </FormItem>
+                              )}
+                            />
+                            <div className="grid grid-cols-2 gap-4">
                               <FormField control={form.control} name="max_concurrent_runs" render={({ field }) => (
                                 <FormItem>
                                   <FormLabel className="text-sm font-bold text-slate-500">Concurrency</FormLabel>

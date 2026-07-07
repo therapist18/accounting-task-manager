@@ -96,64 +96,225 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
   const [automationJobId, setAutomationJobId] = useState<string | null>(null);
   const [automationProgress, setAutomationProgress] = useState<any>(null);
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
-  
-  const pollProgress = useCallback(async (jobId: string) => {
+
+  const saveScreenshotToSupabase = async (base64Screenshot: string, directorId: string): Promise<any> => {
+    setIsSavingScreenshot(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/permit/eta-kenya/progress/${jobId}`);
-      if (response.status === 404) {
-        console.log('Job completed - stopping polling');
-        setPollingInterval(prevInterval => {
-          if (prevInterval) {
-            clearInterval(prevInterval);
-          }
-          return null;
+      const byteCharacters = atob(base64Screenshot);
+      const byteNumbers = new Array(byteCharacters.length).fill(0).map((_, i) => byteCharacters.charCodeAt(i));
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'image/png' });
+      const timestamp = Date.now();
+      const fileName = `eta - kenya - confirmation - ${timestamp}.png`;
+      const storagePath = `individual - documents / ${directorId} /${ETA_SCREENSHOT_DOCUMENT_ID}/${fileName} `;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('kyc-documents')
+        .upload(storagePath, blob, {
+          contentType: 'image/png',
+          upsert: false,
         });
-        setIsAutomationRunning(false);
-        setAutomationProgress(prev => ({ ...prev, isRunning: false, message: 'Automation completed' }));
-        return;
-      }
+      if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message} `);
+      const { data: docRecord, error: insertError } = await supabase
+        .from('acc_portal_directors_documents')
+        .insert({
+          director_id: directorId,
+          document_id: ETA_SCREENSHOT_DOCUMENT_ID,
+          file_path: storagePath,
+          file_name: fileName,
+          status: 'active',
+          extraction_status: 'success',
+          extracted_details: {
+            source: 'eta-kenya-automation',
+            captured_at: new Date().toISOString(),
+            task_id: taskId,
+          },
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+      if (insertError) throw new Error(`DB insert failed: ${insertError.message} `);
+      console.log('✅ Screenshot saved to Supabase:', docRecord);
+      return docRecord;
+    } finally {
+      setIsSavingScreenshot(false);
+    }
+  };
 
-      if (!response.ok) {
-        console.error('Failed to fetch progress:', response.status);
-        return;
-      }
+  const deriveAutomationType = useCallback((automation: any): string => {
+    if (automation?.automation_type) return automation.automation_type;
+    const url = automation?.webhook_url || '';
+    const parts = url.split('/').filter(Boolean);
+    const last = parts[parts.length - 1];
+    if (last && !last.includes('localhost') && !last.includes('http')) return last;
+    const secondLast = parts[parts.length - 2];
+    if (secondLast && secondLast !== 'permit' && !secondLast.includes(':')) return secondLast;
+    return 'class-d';
+  }, []);
 
-      const data = await response.json();
-      if (data.success && data.progress) {
-        setAutomationProgress(data.progress);
-        if (!data.progress.isRunning) {
-          setPollingInterval(prevInterval => {
-            if (prevInterval) {
-              clearInterval(prevInterval);
-            }
-            return null;
+  const getEntityNameAndId = useCallback((entityType?: string, entityId?: string) => {
+    const targetId = entityId;
+    if (!entityType && !targetId) return { name: 'Not specified', id: 'Not specified' };
+    const type = entityType?.toLowerCase();
+    if (type === 'company') {
+      return {
+        name: relationshipData?.company?.company_name || task?.company_name || 'Not specified',
+        id: String(relationshipData?.company?.id || task?.company_id || 'Not specified')
+      };
+    }
+    const allPeople = [
+      ...(relationshipData?.directors || []),
+      ...(relationshipData?.dependants || []),
+      relationshipData?.understudy,
+      relationshipData?.sponsor,
+      relationshipData?.principal
+    ].filter(Boolean);
+    const person = allPeople.find(p => String(p.id) === String(targetId));
+    if (person) {
+      return {
+        name: person.full_name || person.name || (person.first_name ? `${person.first_name} ${person.last_name || ''}` : 'Not specified'),
+        id: String(person.id)
+      };
+    }
+    return {
+      name: 'Not specified',
+      id: 'Not specified'
+    };
+  }, [relationshipData, task]);
+
+  const getPrimaryEntityType = useCallback(() => {
+    const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
+    if (!activeAutomation?.fields) return 'principal';
+    const entityTypes = new Set<string>();
+    activeAutomation.fields.forEach((field: any) => { if (field.entityTypes && field.entityTypes.length > 0) field.entityTypes.forEach((type: string) => entityTypes.add(type)); });
+    const priorityOrder = ['company', 'director', 'understudy', 'sponsor', 'dependant', 'principal'];
+    for (const type of priorityOrder) {
+      if (entityTypes.has(type)) return type;
+    }
+    return 'principal';
+  }, [webData, selectedAutomationId]);
+
+  const getPrimaryTargetEntityId = useCallback((): string => {
+    const primaryEntityType = getPrimaryEntityType();
+    const entityInfo = getEntityNameAndId(primaryEntityType);
+    return entityInfo.id !== 'Not specified'
+      ? entityInfo.id
+      : (task?.applicant_details?.id || '');
+  }, [getPrimaryEntityType, getEntityNameAndId, task]);
+
+  const handleCompletedJob = useCallback(async (job: any) => {
+    const directorId = getPrimaryTargetEntityId();
+    const evidence = job.evidence || [];
+    const screenshots = evidence.filter((e: any) => e.type === 'screenshot');
+
+    if (screenshots.length > 0 && directorId && directorId !== 'N/A') {
+      let lastSavedDoc = null;
+      for (const screenshot of screenshots) {
+        try {
+          const resp = await fetch(screenshot.url);
+          const blob = await resp.blob();
+          const base64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const result = reader.result?.toString().split(',')[1] || '';
+              resolve(result);
+            };
+            reader.readAsDataURL(blob);
           });
-          setIsAutomationRunning(false);
+          const savedDoc = await saveScreenshotToSupabase(base64, directorId);
+          lastSavedDoc = savedDoc;
+        } catch (err) {
+          console.error('Failed to save evidence screenshot:', err);
         }
       }
-    } catch (error) {
-      console.error('Error polling progress:', error);
-      if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-        setPollingInterval(prevInterval => {
-          if (prevInterval) {
-            clearInterval(prevInterval);
-          }
-          return null;
+
+      if (lastSavedDoc) {
+        setSavedScreenshotDoc(lastSavedDoc);
+        setPreviewingDocuments({
+          document_display_name: 'Automation Screenshot',
+          documents: [lastSavedDoc],
+          person_full_name: individualName || directorId,
+          requirementId: ETA_SCREENSHOT_DOCUMENT_ID,
         });
-        setIsAutomationRunning(false);
+        setShowPreviewModal(true);
+        if (refreshDocuments) refreshDocuments();
+
+        toast({
+          title: '✅ Automation Completed!',
+          description: 'Screenshot saved and ready for review.',
+        });
+        return;
       }
     }
+
+    toast({
+      title: '✅ Automation Completed!',
+      description: job.message || job.result?.message || 'Automation completed successfully.',
+    });
+  }, [getPrimaryTargetEntityId, individualName, refreshDocuments, saveScreenshotToSupabase]);
+
+  const clearPolling = useCallback(() => {
+    setPollingInterval(prev => {
+      if (prev) clearInterval(prev);
+      return null;
+    });
   }, []);
+
+  const pollSupabaseJob = useCallback(async (jobId: string) => {
+    try {
+      const { data: job, error } = await supabase
+        .from('automation_jobs')
+        .select('*')
+        .eq('id', jobId)
+        .single();
+
+      if (error || !job) {
+        console.log('Job not found - stopping polling');
+        clearPolling();
+        setIsAutomationRunning(false);
+        return;
+      }
+
+      setAutomationProgress({
+        isRunning: job.status === 'pending' || job.status === 'claiming' || job.status === 'running',
+        progress: job.progress || 0,
+        currentStep: job.current_step || '',
+        message: job.message || '',
+        logs: job.logs || [],
+        evidence: job.evidence || [],
+        status: job.status,
+      });
+
+      if (job.status === 'completed') {
+        clearPolling();
+        setIsAutomationRunning(false);
+        await handleCompletedJob(job);
+      } else if (job.status === 'failed') {
+        clearPolling();
+        setIsAutomationRunning(false);
+        toast({
+          title: '❌ Automation Failed',
+          description: job.error || 'Unknown error',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Error polling job:', error);
+    }
+  }, [handleCompletedJob, clearPolling]);
 
   const stopAutomation = useCallback(async () => {
     if (!automationJobId) return;
-    try {
-      await fetch(`http://localhost:5000/api/permit/eta-kenya/progress/${automationJobId}`, { method: 'DELETE' });
-    } catch (_) { }
-    setPollingInterval(prev => { if (prev) clearInterval(prev); return null; });
+    await supabase.from('automation_jobs').update({
+      status: 'failed',
+      error: 'Cancelled by user',
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('id', automationJobId);
+    clearPolling();
     setIsAutomationRunning(false);
     setAutomationProgress(prev => prev ? { ...prev, isRunning: false, message: 'Stopped by user' } : prev);
-  }, [automationJobId]);
+  }, [automationJobId, clearPolling]);
 
   useEffect(() => {
     return () => {
@@ -285,56 +446,6 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
   const resolveTargetEntityId = useCallback((field: any) =>
     resolveTargetEntityIdImpl(field, { relationshipData, currentIndividualId, task } as FieldResolutionContext),
     [relationshipData, currentIndividualId, task]);
-
-  const getEntityNameAndId = useCallback((entityType?: string, entityId?: string) => {
-    const targetId = entityId;
-    if (!entityType && !targetId) return { name: 'Not specified', id: 'Not specified' };
-    const type = entityType?.toLowerCase();
-    if (type === 'company') {
-      return {
-        name: relationshipData?.company?.company_name || task?.company_name || 'Not specified',
-        id: String(relationshipData?.company?.id || task?.company_id || 'Not specified')
-      };
-    }
-    const allPeople = [
-      ...(relationshipData?.directors || []),
-      ...(relationshipData?.dependants || []),
-      relationshipData?.understudy,
-      relationshipData?.sponsor,
-      relationshipData?.principal
-    ].filter(Boolean);
-    const person = allPeople.find(p => String(p.id) === String(targetId));
-    if (person) {
-      return {
-        name: person.full_name || person.name || (person.first_name ? `${person.first_name} ${person.last_name || ''}` : 'Not specified'),
-        id: String(person.id)
-      };
-    }
-    return {
-      name: 'Not specified',
-      id: 'Not specified'
-    };
-  }, [relationshipData, task]);
-
-  const getPrimaryEntityType = useCallback(() => {
-    const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
-    if (!activeAutomation?.fields) return 'principal';
-    const entityTypes = new Set<string>();
-    activeAutomation.fields.forEach((field: any) => { if (field.entityTypes && field.entityTypes.length > 0) field.entityTypes.forEach((type: string) => entityTypes.add(type)); });
-    const priorityOrder = ['company', 'director', 'understudy', 'sponsor', 'dependant', 'principal'];
-    for (const type of priorityOrder) {
-      if (entityTypes.has(type)) return type;
-    }
-    return 'principal';
-  }, [webData, selectedAutomationId]);
-
-  const getPrimaryTargetEntityId = useCallback((): string => {
-    const primaryEntityType = getPrimaryEntityType();
-    const entityInfo = getEntityNameAndId(primaryEntityType);
-    return entityInfo.id !== 'Not specified'
-      ? entityInfo.id
-      : (task?.applicant_details?.id || '');
-  }, [getPrimaryEntityType, getEntityNameAndId, task]);
 
   const toggleArrayFieldExpansion = (fieldVariableName: string) => setExpandedArrayFields(prev => { const newSet = new Set(prev); if (newSet.has(fieldVariableName)) newSet.delete(fieldVariableName); else newSet.add(fieldVariableName); return newSet; });
   const toggleSourceFieldExpansion = (fieldId: string) => setExpandedSourceFields(prev => { const newSet = new Set(prev); if (newSet.has(fieldId)) newSet.delete(fieldId); else newSet.add(fieldId); return newSet; });
@@ -585,50 +696,6 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
     return cleaned;
   };
 
-  const saveScreenshotToSupabase = async (base64Screenshot: string, directorId: string): Promise<any> => {
-    setIsSavingScreenshot(true);
-    try {
-      const byteCharacters = atob(base64Screenshot);
-      const byteNumbers = new Array(byteCharacters.length).fill(0).map((_, i) => byteCharacters.charCodeAt(i));
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: 'image/png' });
-      const timestamp = Date.now();
-      const fileName = `eta - kenya - confirmation - ${timestamp}.png`;
-      const storagePath = `individual - documents / ${directorId} /${ETA_SCREENSHOT_DOCUMENT_ID}/${fileName} `;
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('kyc-documents')
-        .upload(storagePath, blob, {
-          contentType: 'image/png',
-          upsert: false,
-        });
-      if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message} `);
-      const { data: docRecord, error: insertError } = await supabase
-        .from('acc_portal_directors_documents')
-        .insert({
-          director_id: directorId,
-          document_id: ETA_SCREENSHOT_DOCUMENT_ID,
-          file_path: storagePath,
-          file_name: fileName,
-          status: 'active',
-          extraction_status: 'success',
-          extracted_details: {
-            source: 'eta-kenya-automation',
-            captured_at: new Date().toISOString(),
-            task_id: taskId,
-          },
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .select()
-        .single();
-      if (insertError) throw new Error(`DB insert failed: ${insertError.message} `);
-      console.log('✅ Screenshot saved to Supabase:', docRecord);
-      return docRecord;
-    } finally {
-      setIsSavingScreenshot(false);
-    }
-  };
-
   const handleRunAutomation = async () => {
     if (!selectedAutomationId) { toast({ title: "Validation Error", description: "Missing automation selection", variant: "destructive" }); return; }
     setIsAutomationRunning(true);
@@ -674,100 +741,47 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
         step2Data: {},
         step3Data: {}
       };
-      const res = await fetch(automation.webhook_url, { method: automation.webhook_method || 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (!res.ok) throw new Error("Trigger failed: " + res.status);
 
-      const response = await res.json();
+      const jobType = deriveAutomationType(automation);
 
-      console.log('🔍 Debug - Response:', response);
-      console.log('🔍 Debug - Automation ID:', mapping.automationId);
-      console.log('🔍 Debug - Has jobId:', !!response.jobId);
-      console.log('🔍 Debug - Includes eta:', mapping.automationId?.toLowerCase().includes('eta'));
+      const { data: job, error } = await supabase
+        .from('automation_jobs')
+        .insert({
+          type: jobType,
+          status: 'pending',
+          data: payload,
+          retry_count_max: 3,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
 
-      // ── PROGRESS TRACKING: Capture jobId and start polling for eTA Kenya ────────
-      // TEMPORARY: Remove automation ID check for debugging
-      if (response.jobId) {
-        console.log('✅ Starting polling for jobId:', response.jobId);
-        setAutomationJobId(response.jobId);
-        setAutomationProgress({ isRunning: true, progress: 0, currentStep: 'Initializing', message: 'Starting automation...' });
+      if (error) throw new Error(error.message);
+      if (!job) throw new Error('Failed to create automation job');
 
-        // Start polling for progress
-        const interval = setInterval(() => {
-          pollProgress(response.jobId);
-        }, 2000); // Poll every 2 seconds
-        setPollingInterval(interval);
-      } else {
-        console.log('❌ No jobId in response - polling will not start');
-      }
+      setAutomationJobId(job.id);
+      setAutomationProgress({
+        isRunning: true,
+        progress: 0,
+        currentStep: 'Queued',
+        message: 'Job queued, waiting for agent...',
+        logs: [],
+      });
 
-      if (response.success) {
-        // ── SAVE SCREENSHOT TO SUPABASE ─────────────────────────────────────
-        if (response.screenshot) {
-          const directorId = getPrimaryTargetEntityId();
+      const interval = setInterval(() => {
+        pollSupabaseJob(job.id);
+      }, 2000);
+      setPollingInterval(interval);
 
-          if (directorId && directorId !== 'N/A') {
-            try {
-              const savedDoc = await saveScreenshotToSupabase(response.screenshot, directorId);
-              setSavedScreenshotDoc(savedDoc);
+      toast({
+        title: 'Automation Queued',
+        description: `Job submitted for ${automation.name || jobType}. The agent will pick it up shortly.`,
+      });
 
-              // ── AUTO-OPEN PREVIEW with the saved document ──────────────────
-              const previewDoc = {
-                ...savedDoc,
-                file_path: savedDoc.file_path,
-                file_name: savedDoc.file_name,
-                extracted_details: savedDoc.extracted_details || {},
-                document_fields: [],
-              };
-              setPreviewingDocuments({
-                document_display_name: 'eTA Kenya Confirmation Screenshot',
-                documents: [previewDoc],
-                person_full_name: individualName || directorId,
-                requirementId: ETA_SCREENSHOT_DOCUMENT_ID,
-              });
-              setShowPreviewModal(true);
-
-              // Refresh parent document list
-              if (refreshDocuments) refreshDocuments();
-
-              toast({
-                title: '✅ Automation Completed!',
-                description: 'Screenshot saved and ready for review.',
-              });
-            } catch (saveErr: any) {
-              console.error('Screenshot save error:', saveErr);
-              toast({
-                title: 'Automation Succeeded (screenshot save failed)',
-                description: saveErr.message,
-                variant: 'destructive',
-              });
-            }
-          } else {
-            // No valid director ID — fall back to download
-            const screenshotDataUrl = `data: image / png; base64, ${response.screenshot} `;
-            const link = document.createElement('a');
-            link.href = screenshotDataUrl;
-            link.download = `eta - confirmation - ${Date.now()}.png`;
-            link.click();
-
-            toast({
-              title: '✅ Automation Completed!',
-              description: response.message || 'Screenshot downloaded (no entity ID to save against).',
-            });
-          }
-        } else {
-          // No screenshot
-          toast({
-            title: '✅ Automation Completed!',
-            description: response.message || 'Please check your email for payment instructions.',
-          });
-        }
-      } else {
-        throw new Error(response.message || 'Automation failed');
-      }
     } catch (e) {
       console.error("Automation Error:", e);
       toast({ title: 'Automation Error', description: e.message, variant: 'destructive' });
-    } finally {
       setIsAutomationRunning(false);
     }
   };

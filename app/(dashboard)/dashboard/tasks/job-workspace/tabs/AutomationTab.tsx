@@ -3,19 +3,22 @@
 
 import React, { useState, useMemo, useCallback, useEffect } from "react"
 import {
-  ChevronDown, ChevronRight, Settings2, FileText, User, Loader2, RefreshCw,
+  ChevronDown, ChevronRight, FileText, User, Loader2, RefreshCw,
   CheckCircle2, AlertCircle, Eye, Briefcase, UserCheck, HeartPulse, ArrowUpDown, ArrowUp, ArrowDown, Users2,
-  Database, Zap, Search, Settings
+  Database, Zap, Search, Play, X, StopCircle, Terminal
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
-import { resolveVariableValueImpl, resolveTargetEntityIdImpl, fetchSourceDataImpl } from "../../utils/fieldResolution"
-import { isValidValue, cleanFieldValue as cleanFieldValueStr } from "../../utils/AutomationMappingDialog"
+import { resolveVariableValueImpl, resolveTargetEntityIdImpl, fetchSourceDataImpl, getArrayFieldDataImpl, getFieldValueImpl, type FieldResolutionContext } from "../../utils/fieldResolution"
+import { isValidValue, cleanFieldValue, ETA_SCREENSHOT_DOCUMENT_ID } from "../../utils/AutomationMappingDialog"
+import { executeComputedField } from "../../utils/automationComputedFunctions"
 import type { JobWorkspaceData } from "../fetchJobWorkspaceData"
-import { AutomationMappingDialog } from "../../components/AutomationMappingDialog"
 import supabase from "@/lib/supabase/client"
+import { toast } from '@/lib/hooks/use-toast'
 
 interface AutomationTabProps {
   data: JobWorkspaceData
@@ -122,14 +125,38 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
   const [expandedAutomations, setExpandedAutomations] = useState<Set<number>>(new Set(automations?.map(a => a.id) || []))
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
-  const [mappingOpen, setMappingOpen] = useState(false)
-  const [mappingField, setMappingField] = useState<any>(null)
 
   const [fieldSourceDataCache, setFieldSourceDataCache] = useState<Record<string, Record<string, any>>>({})
   const [fieldMasterComputedCache, setFieldMasterComputedCache] = useState<Record<string, any>>({})
   const [resolvedValues, setResolvedValues] = useState<Record<string, any>>({})
   const [resolving, setResolving] = useState<Record<string, boolean>>({})
   const [jobFieldsRecord, setJobFieldsRecord] = useState<Record<string, any>>({})
+
+  // Run automation state
+  const [runningAutomationId, setRunningAutomationId] = useState<number | null>(null)
+  const [automationJobId, setAutomationJobId] = useState<string | null>(null)
+  const [automationProgress, setAutomationProgress] = useState<any>(null)
+  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null)
+  const [showConsole, setShowConsole] = useState(false)
+
+  // Editing state
+  const [editingCell, setEditingCell] = useState<any>(null)
+  const [editValue, setEditValue] = useState('')
+
+  // Documents & computed
+  const [documentFiles, setDocumentFiles] = useState<any[]>([])
+  const [computedFieldsPreview, setComputedFieldsPreview] = useState<Record<string, string>>({})
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(false)
+  const [isComputing, setIsComputing] = useState(false)
+
+  // Preview state
+  const [showPreviewModal, setShowPreviewModal] = useState(false)
+  const [previewingDocuments, setPreviewingDocuments] = useState<any>(null)
+  const [savedScreenshotDoc, setSavedScreenshotDoc] = useState<any>(null)
+  const [isSavingScreenshot, setIsSavingScreenshot] = useState(false)
+  const [individualName, setIndividualName] = useState<string>('')
+
+  const logsEndRef = React.useRef<HTMLDivElement>(null)
 
   const columns = useMemo(() => buildParticipantColumns(task), [task])
 
@@ -179,16 +206,16 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
   // Load job fields
   useEffect(() => {
     const linkedFieldIds = new Set<string>()
-      ; (automations || []).forEach(auto => {
-        if (auto.webdata && auto.webdata.length > 0) {
-          auto.webdata.forEach((field: any) => {
-            ; (field.linkedMasterFields || field.masterFieldIds || []).forEach((id: any) => linkedFieldIds.add(String(id)))
-              ; (field.arrayItems || []).forEach((item: any) => {
-                ; (item.linkedMasterFields || item.masterFieldIds || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : [])).forEach((id: any) => linkedFieldIds.add(String(id)))
-              })
+    ;(automations || []).forEach(auto => {
+      if (auto.webdata && auto.webdata.length > 0) {
+        auto.webdata.forEach((field: any) => {
+          ;(field.linkedMasterFields || field.masterFieldIds || []).forEach((id: any) => linkedFieldIds.add(String(id)))
+          ;(field.arrayItems || []).forEach((item: any) => {
+            ;(item.linkedMasterFields || item.masterFieldIds || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : [])).forEach((id: any) => linkedFieldIds.add(String(id)))
           })
-        }
-      })
+        })
+      }
+    })
     if (linkedFieldIds.size === 0) return
     const fetchJobFields = async () => {
       const { data: fields } = await supabase.from('tm_job_fields').select('*').in('id', Array.from(linkedFieldIds))
@@ -210,28 +237,28 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
       const mergedComputed: Record<string, any> = {}
       const calls: Promise<void>[] = []
 
-        ; (automations || []).forEach(auto => {
-          if (!expandedAutomations.has(auto.id) || !auto.webdata?.length) return
-          relationshipData.forEach((relData: any) => {
-            calls.push(
-              fetchSourceDataImpl({
-                selectedAutomationId: String(auto.id),
-                webData: [{ automationId: String(auto.id), fields: auto.webdata }],
-                jobFields: jobFieldsRecord,
-                relationshipData: relData,
-                taskId: String(task?.id || ""),
-                currentIndividualId: String(task?.individual_id || ""),
-                task
-              }).then(({ sourceData: sd, masterFieldComputedValues: mc }) => {
-                Object.entries(sd).forEach(([table, records]) => {
-                  if (!mergedSource[table]) mergedSource[table] = {}
-                  Object.assign(mergedSource[table], records)
-                })
-                if (mc) Object.assign(mergedComputed, mc)
-              }).catch(err => console.error('Error resolving field values', err))
-            )
-          })
+      ;(automations || []).forEach(auto => {
+        if (!expandedAutomations.has(auto.id) || !auto.webdata?.length) return
+        relationshipData.forEach((relData: any) => {
+          calls.push(
+            fetchSourceDataImpl({
+              selectedAutomationId: String(auto.id),
+              webData: [{ automationId: String(auto.id), fields: auto.webdata }],
+              jobFields: jobFieldsRecord,
+              relationshipData: relData,
+              taskId: String(task?.id || ""),
+              currentIndividualId: String(task?.individual_id || ""),
+              task
+            }).then(({ sourceData: sd, masterFieldComputedValues: mc }) => {
+              Object.entries(sd).forEach(([table, records]) => {
+                if (!mergedSource[table]) mergedSource[table] = {}
+                Object.assign(mergedSource[table], records)
+              })
+              if (mc) Object.assign(mergedComputed, mc)
+            }).catch(err => console.error('Error resolving field values', err))
+          )
         })
+      })
       await Promise.all(calls)
       setFieldSourceDataCache(prev => {
         const next = { ...prev }
@@ -272,22 +299,534 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
   // Auto-resolve when source data is ready
   useEffect(() => {
     if (Object.keys(fieldSourceDataCache).length === 0) return
-      ; (automations || []).forEach(auto => {
-        if (!expandedAutomations.has(auto.id)) return
-          ; (auto.webdata || []).forEach((field: any) => {
-            columns.forEach(col => {
-              const cacheKey = `${field.variableName || field.name}-${col.id}`
-              if (resolvedValues[cacheKey] === undefined && !resolving[cacheKey] && isFieldApplicable(field, col)) {
-                resolveFieldForCol(field, col)
-              }
-            })
-          })
+    ;(automations || []).forEach(auto => {
+      if (!expandedAutomations.has(auto.id)) return
+      ;(auto.webdata || []).forEach((field: any) => {
+        columns.forEach(col => {
+          const cacheKey = `${field.variableName || field.name}-${col.id}`
+          if (resolvedValues[cacheKey] === undefined && !resolving[cacheKey] && isFieldApplicable(field, col)) {
+            resolveFieldForCol(field, col)
+          }
+        })
       })
+    })
   }, [fieldSourceDataCache, expandedAutomations, automations, columns, resolvedValues, resolving, resolveFieldForCol])
 
   const handleSort = (colKey: string) => {
     setSortCol(prev => prev === colKey ? (setSortDir(d => d === "asc" ? "desc" : "asc"), colKey) : (setSortDir("asc"), colKey))
   }
+
+  // ---- New functions from AutomationMappingDialog ----
+
+  const deriveAutomationType = useCallback((automation: any): string => {
+    if (automation?.automation_type) return automation.automation_type;
+    const url = automation?.webhook_url || '';
+    const parts = url.split('/').filter(Boolean);
+    const last = parts[parts.length - 1];
+    if (last && !last.includes('localhost') && !last.includes('http')) return last;
+    const secondLast = parts[parts.length - 2];
+    if (secondLast && secondLast !== 'permit' && !secondLast.includes(':')) return secondLast;
+    return 'class-d';
+  }, []);
+
+  const clearPolling = useCallback(() => {
+    setPollingInterval(prev => {
+      if (prev) clearInterval(prev);
+      return null;
+    });
+  }, []);
+
+  const saveScreenshotToSupabase = async (base64Screenshot: string, directorId: string): Promise<any> => {
+    setIsSavingScreenshot(true);
+    try {
+      const byteCharacters = atob(base64Screenshot);
+      const byteNumbers = new Array(byteCharacters.length).fill(0).map((_, i) => byteCharacters.charCodeAt(i));
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'image/png' });
+      const timestamp = Date.now();
+      const fileName = `eta - kenya - confirmation - ${timestamp}.png`;
+      const storagePath = `individual - documents / ${directorId} /${ETA_SCREENSHOT_DOCUMENT_ID}/${fileName}`;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('kyc-documents')
+        .upload(storagePath, blob, {
+          contentType: 'image/png',
+          upsert: false,
+        });
+      if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message}`);
+      const { data: docRecord, error: insertError } = await supabase
+        .from('acc_portal_directors_documents')
+        .insert({
+          director_id: directorId,
+          document_id: ETA_SCREENSHOT_DOCUMENT_ID,
+          file_path: storagePath,
+          file_name: fileName,
+          status: 'active',
+          extraction_status: 'success',
+          extracted_details: {
+            source: 'eta-kenya-automation',
+            captured_at: new Date().toISOString(),
+            task_id: task?.id,
+          },
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+      if (insertError) throw new Error(`DB insert failed: ${insertError.message}`);
+      console.log('✅ Screenshot saved to Supabase:', docRecord);
+      return docRecord;
+    } finally {
+      setIsSavingScreenshot(false);
+    }
+  };
+
+  const getPrimaryEntityType = useCallback(() => {
+    return 'principal';
+  }, []);
+
+  const getPrimaryTargetEntityId = useCallback((): string => {
+    return task?.individual_id?.toString() || task?.applicant_details?.id || '';
+  }, [task]);
+
+  const getEntityNameAndId = useCallback((entityType?: string, entityId?: string) => {
+    const targetId = entityId;
+    if (!entityType && !targetId) return { name: 'Not specified', id: 'Not specified' };
+    const relData = relationshipData[0];
+    const type = entityType?.toLowerCase();
+    if (type === 'company') {
+      return {
+        name: relData?.company?.company_name || task?.company_name || 'Not specified',
+        id: String(relData?.company?.id || task?.company_id || 'Not specified')
+      };
+    }
+    const allPeople = [
+      ...(relData?.directors || []),
+      ...(relData?.dependants || []),
+      relData?.understudy,
+      relData?.sponsor,
+      relData?.principal
+    ].filter(Boolean);
+    const person = allPeople.find(p => String(p.id) === String(targetId));
+    if (person) {
+      return {
+        name: person.full_name || person.name || (person.first_name ? `${person.first_name} ${person.last_name || ''}` : 'Not specified'),
+        id: String(person.id)
+      };
+    }
+    return { name: 'Not specified', id: 'Not specified' };
+  }, [relationshipData, task]);
+
+  const handleCompletedJob = useCallback(async (job: any) => {
+    const directorId = getPrimaryTargetEntityId();
+    const evidence = job.evidence || [];
+    const screenshots = evidence.filter((e: any) => e.type === 'screenshot');
+
+    if (screenshots.length > 0 && directorId && directorId !== 'N/A') {
+      let lastSavedDoc = null;
+      for (const screenshot of screenshots) {
+        try {
+          const resp = await fetch(screenshot.url);
+          const blob = await resp.blob();
+          const base64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const result = reader.result?.toString().split(',')[1] || '';
+              resolve(result);
+            };
+            reader.readAsDataURL(blob);
+          });
+          const savedDoc = await saveScreenshotToSupabase(base64, directorId);
+          lastSavedDoc = savedDoc;
+        } catch (err) {
+          console.error('Failed to save evidence screenshot:', err);
+        }
+      }
+
+      if (lastSavedDoc) {
+        setSavedScreenshotDoc(lastSavedDoc);
+        setPreviewingDocuments({
+          document_display_name: 'Automation Screenshot',
+          documents: [lastSavedDoc],
+          person_full_name: individualName || directorId,
+          requirementId: ETA_SCREENSHOT_DOCUMENT_ID,
+        });
+        setShowPreviewModal(true);
+        if (onRefresh) onRefresh();
+
+        toast({
+          title: '✅ Automation Completed!',
+          description: 'Screenshot saved and ready for review.',
+        });
+        return;
+      }
+    }
+
+    toast({
+      title: '✅ Automation Completed!',
+      description: job.message || job.result?.message || 'Automation completed successfully.',
+    });
+  }, [getPrimaryTargetEntityId, individualName, onRefresh, saveScreenshotToSupabase]);
+
+  const pollSupabaseJob = useCallback(async (jobId: string) => {
+    try {
+      const { data: job, error } = await supabase
+        .from('automation_jobs')
+        .select('*')
+        .eq('id', jobId)
+        .single();
+
+      if (error || !job) {
+        console.log('Job not found - stopping polling');
+        clearPolling();
+        setRunningAutomationId(null);
+        return;
+      }
+
+      setAutomationProgress({
+        isRunning: job.status === 'pending' || job.status === 'claiming' || job.status === 'running',
+        progress: job.progress || 0,
+        currentStep: job.current_step || '',
+        message: job.message || '',
+        logs: job.logs || [],
+        evidence: job.evidence || [],
+        status: job.status,
+      });
+
+      if (job.status === 'completed') {
+        clearPolling();
+        setRunningAutomationId(null);
+        await handleCompletedJob(job);
+      } else if (job.status === 'failed') {
+        clearPolling();
+        setRunningAutomationId(null);
+        toast({
+          title: '❌ Automation Failed',
+          description: job.error || 'Unknown error',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Error polling job:', error);
+    }
+  }, [handleCompletedJob, clearPolling]);
+
+  const stopAutomation = useCallback(async () => {
+    if (!automationJobId) return;
+    await supabase.from('automation_jobs').update({
+      status: 'failed',
+      error: 'Cancelled by user',
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('id', automationJobId);
+    clearPolling();
+    setRunningAutomationId(null);
+    setAutomationProgress(prev => prev ? { ...prev, isRunning: false, message: 'Stopped by user' } : prev);
+  }, [automationJobId, clearPolling]);
+
+  useEffect(() => {
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [pollingInterval]);
+
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [automationProgress?.logs?.length]);
+
+  const buildFieldResolutionContextForAuto = useCallback((automationId: string, fields: any[]): FieldResolutionContext => ({
+    sourceData: fieldSourceDataCache,
+    jobFields: jobFieldsRecord,
+    webData: [{ automationId: String(automationId), fields }],
+    selectedAutomationId: String(automationId),
+    masterFieldComputedValues: fieldMasterComputedCache,
+    relationshipData: relationshipData[0],
+    taskId: String(task?.id || ""),
+    currentIndividualId: String(task?.individual_id || ""),
+    task,
+  }), [fieldSourceDataCache, jobFieldsRecord, fieldMasterComputedCache, relationshipData, task]);
+
+  const resolveTargetEntityId = useCallback((field: any) =>
+    resolveTargetEntityIdImpl(field, { relationshipData: relationshipData[0], currentIndividualId: String(task?.individual_id || ""), task } as FieldResolutionContext),
+    [relationshipData, task]);
+
+  const resolveVariableValue = useCallback((fieldDef: any, targetEntityId: string) =>
+    resolveVariableValueImpl(fieldDef, targetEntityId, buildFieldResolutionContextForAuto(fieldDef.automation_id || "", [fieldDef])),
+    [buildFieldResolutionContextForAuto]);
+
+  const getArrayFieldData = useCallback((field: any) =>
+    getArrayFieldDataImpl(field, buildFieldResolutionContextForAuto(field.automation_id || "", [field])),
+    [buildFieldResolutionContextForAuto]);
+
+  const getFieldValue = useCallback((fieldIdOrVariable: string, entityId: string, sourceIdx: number = 0, extractionMode: string = 'latest', preserveArray: boolean = false) =>
+    getFieldValueImpl(fieldIdOrVariable, entityId, sourceIdx, extractionMode, preserveArray, buildFieldResolutionContextForAuto("", [])),
+    [buildFieldResolutionContextForAuto]);
+
+  const cleanFormData = (data: Record<string, any>): Record<string, any> => {
+    const cleaned: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value === null || value === undefined || value === '' || value === 'Missing') continue;
+      if (Array.isArray(value)) {
+        const cleanedArray = value
+          .map(item => {
+            if (typeof item === 'object' && item !== null) {
+              const cleanedItem: Record<string, any> = {};
+              let hasMeaningfulData = false;
+              for (const [itemKey, itemValue] of Object.entries(item)) {
+                if (['entityId', 'index', 'id'].includes(itemKey)) { cleanedItem[itemKey] = itemValue; continue; }
+                if (itemValue !== null && itemValue !== undefined && itemValue !== '' && itemValue !== 'Missing') {
+                  cleanedItem[itemKey] = itemValue;
+                  hasMeaningfulData = true;
+                }
+              }
+              return hasMeaningfulData ? cleanedItem : null;
+            }
+            return item;
+          })
+          .filter(item => item !== null);
+        if (cleanedArray.length > 0) cleaned[key] = cleanedArray;
+      } else if (typeof value === 'object' && value !== null) {
+        const cleanedObj: Record<string, any> = {};
+        let hasMeaningfulData = false;
+        for (const [objKey, objValue] of Object.entries(value)) {
+          if (['entityId', 'index', 'id'].includes(objKey)) { cleanedObj[objKey] = objValue; continue; }
+          if (objValue !== null && objValue !== undefined && objValue !== '' && objValue !== 'Missing') {
+            cleanedObj[objKey] = objValue;
+            hasMeaningfulData = true;
+          }
+        }
+        if (hasMeaningfulData) cleaned[key] = cleanedObj;
+      } else {
+        cleaned[key] = value;
+      }
+    }
+    return cleaned;
+  };
+
+  const handleRunAutomation = useCallback(async (automation: any) => {
+    const automationId = automation.id;
+    if (!automationId) { toast({ title: "Validation Error", description: "Missing automation selection", variant: "destructive" }); return; }
+
+    setRunningAutomationId(automationId);
+    setShowConsole(true);
+    setAutomationProgress({
+      isRunning: true,
+      progress: 0,
+      currentStep: 'Preparing',
+      message: 'Collecting form data...',
+      logs: [{ level: 'info', message: 'Starting automation...', timestamp: new Date().toISOString() }],
+    });
+
+    try {
+      const automationLogin = automation.login || {};
+      const fields = automation.webdata || [];
+      const formData: Record<string, any> = {};
+
+      const ctx = buildFieldResolutionContextForAuto(String(automationId), fields);
+      const currentTargetId = String(task?.individual_id || "");
+
+      for (const f of fields) {
+        const targetId = resolveTargetEntityId(f) || currentTargetId;
+        if (f.fieldType === 'array') {
+          formData[f.variableName] = getArrayFieldData(f);
+        } else if (f.fieldType === 'document') {
+          const doc = documentFiles.find(d =>
+            f.linkedKycDocuments?.includes(d.document_id) &&
+            String(d.owner_id) === String(targetId)
+          );
+          const fileUrl = doc?.file_path?.startsWith('http') ? doc.file_path : getFileUrl(doc?.file_path || '');
+          formData[f.variableName] = fileUrl || null;
+        } else if (f.fieldType === 'computed') {
+          formData[f.variableName] = computedFieldsPreview[f.variableName];
+        } else {
+          const val = resolveVariableValue(f, targetId);
+          formData[f.variableName] = val === "Missing" ? null : cleanFieldValue(val);
+        }
+      }
+
+      const payload = {
+        url: automationLogin.url || "https://fns.immigration.go.ke/account/login.html",
+        photoPath: "",
+        login: {
+          email: automationLogin.email || "",
+          idNumber: (typeof automationLogin.idNumber === 'string' && automationLogin.idNumber !== '[object Object]') ? automationLogin.idNumber : "",
+          password: automationLogin.password || ""
+        },
+        formData: cleanFormData(formData),
+        step2Data: {},
+        step3Data: {}
+      };
+
+      const jobType = deriveAutomationType(automation);
+
+      const { data: job, error } = await supabase
+        .from('automation_jobs')
+        .insert({
+          type: jobType,
+          status: 'pending',
+          data: payload,
+          retry_count_max: 3,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (error) throw new Error(error.message);
+      if (!job) throw new Error('Failed to create automation job');
+
+      setAutomationJobId(job.id);
+      setAutomationProgress({
+        isRunning: true,
+        progress: 0,
+        currentStep: 'Queued',
+        message: 'Job queued, waiting for agent...',
+        logs: [{ level: 'info', message: `Job ${job.id} queued, waiting for agent...`, timestamp: new Date().toISOString() }],
+      });
+
+      const interval = setInterval(() => {
+        pollSupabaseJob(job.id);
+      }, 2000);
+      setPollingInterval(interval);
+
+      toast({
+        title: 'Automation Queued',
+        description: `Job submitted for ${automation.name || jobType}. The agent will pick it up shortly.`,
+      });
+
+    } catch (e) {
+      console.error("Automation Error:", e);
+      toast({ title: 'Automation Error', description: e.message || 'Unknown error', variant: 'destructive' });
+      setRunningAutomationId(null);
+    }
+  }, [task, buildFieldResolutionContextForAuto, resolveTargetEntityId, getArrayFieldData, documentFiles, computedFieldsPreview, resolveVariableValue, cleanFormData, deriveAutomationType, pollSupabaseJob]);
+
+  const getFileUrl = (filePath: string) => {
+    if (!filePath) return '';
+    if (filePath.startsWith('http')) return filePath;
+    const bucketName = 'kyc-documents';
+    let cleanPath = filePath;
+    if (cleanPath.startsWith(bucketName + '/')) {
+      cleanPath = cleanPath.substring(bucketName.length + 1);
+    }
+    const fullPath = `${bucketName}/${cleanPath}`;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) { console.error('NEXT_PUBLIC_SUPABASE_URL not set'); return ''; }
+    const encodedPath = encodeURIComponent(fullPath).replace(/%2F/g, '/');
+    return `${supabaseUrl}/storage/v1/object/public/${encodedPath}`;
+  };
+
+  const startEditing = async (field: any, col: ColDef, currentVal: any) => {
+    setEditingCell({ field, col, currentVal });
+    setEditValue(currentVal !== null && currentVal !== undefined && currentVal !== 'Missing' ? String(currentVal) : '');
+  };
+
+  const cancelEditing = () => { setEditingCell(null); setEditValue(''); };
+
+  const saveEdit = async () => {
+    if (!editingCell) return;
+    const { col, currentVal } = editingCell;
+    const cacheKey = `${editingCell.field.variableName || editingCell.field.name}-${col.id}`;
+    setResolvedValues(prev => ({ ...prev, [cacheKey]: editValue }));
+    setEditingCell(null);
+    setEditValue('');
+    toast({ title: 'Overridden', description: 'Value saved locally. It will be used for the next run.', variant: 'default' });
+  };
+
+  const handlePreviewDocument = (doc: any) => {
+    if (!doc) return;
+    setPreviewingDocuments({
+      document_display_name: doc.file_name || 'Document',
+      documents: [doc],
+      person_full_name: individualName || 'Unknown',
+      requirementId: doc.requirement_id || 'Unknown'
+    });
+    setShowPreviewModal(true);
+  };
+
+  useEffect(() => {
+    const fetchIndividualName = async () => {
+      const indId = task?.individual_id;
+      if (!indId) return;
+      const relData = relationshipData[0];
+      if (relData?.principal?.full_name) { setIndividualName(relData.principal.full_name); return; }
+      try {
+        const { data: individual } = await supabase.from('registry_individuals').select('first_name, last_name, full_name').eq('id', indId).single();
+        if (individual) {
+          setIndividualName(individual.full_name || `${individual.first_name || ''} ${individual.last_name || ''}`);
+        }
+      } catch (error) {
+        console.error('Error fetching individual name:', error);
+      }
+    };
+    fetchIndividualName();
+  }, [task?.individual_id, relationshipData]);
+
+  // Auto-compute computed fields
+  useEffect(() => {
+    if (!task?.individual_id) return;
+    const runComputation = async () => {
+      const computedConfigs: any[] = [];
+      (automations || []).forEach(auto => {
+        (auto.webdata || []).forEach((f: any) => {
+          if (f.fieldType === 'computed') computedConfigs.push(f);
+        });
+      });
+      if (computedConfigs.length === 0) { setComputedFieldsPreview({}); return; }
+      setIsComputing(true);
+      try {
+        const results: Record<string, any> = {};
+        const cid = relationshipData[0]?.company?.id || task?.company_id;
+        for (const config of computedConfigs) {
+          const val = await executeComputedField(
+            config.computedFunction, String(task.individual_id),
+            config.computedDocuments || [], null, 'latest', null,
+            config.computed_config, cid, config.entityTypes?.[0]
+          );
+          results[config.variableName] = val;
+        }
+        setComputedFieldsPreview(results);
+      } catch (error) { console.error('Error auto-computing fields:', error); } finally { setIsComputing(false); }
+    };
+    const timer = setTimeout(runComputation, 500);
+    return () => clearTimeout(timer);
+  }, [task?.individual_id, automations, relationshipData, task]);
+
+  // Fetch documents when automation is expanded
+  useEffect(() => {
+    if (!showConsole || !automationJobId) return;
+    const loadDocs = async () => {
+      setIsLoadingDocuments(true);
+      try {
+        const reqKycIds = new Set<string>();
+        const personIds = new Set<string>();
+        (automations || []).forEach(auto => {
+          if (auto.id !== runningAutomationId) return;
+          (auto.webdata || []).forEach((f: any) => {
+            if (f.fieldType === 'document' && f.linkedKycDocuments) {
+              f.linkedKycDocuments.forEach((docId: string) => reqKycIds.add(docId));
+              const targetId = resolveTargetEntityId(f) || String(task?.individual_id || "");
+              personIds.add(targetId);
+            }
+          });
+        });
+        if (personIds.size > 0 && reqKycIds.size > 0) {
+          const { data: docs } = await supabase.from('acc_portal_directors_documents')
+            .select('*, kyc_document:acc_portal_kyc!document_id(*)')
+            .in('director_id', Array.from(personIds))
+            .in('document_id', Array.from(reqKycIds))
+            .neq('status', 'deleted');
+          if (docs) setDocumentFiles(docs.map(d => ({ ...d, owner_type: 'person', owner_id: String(d.director_id) })));
+        }
+      } catch (err) {
+        console.error('Error fetching documents:', err);
+      } finally {
+        setIsLoadingDocuments(false);
+      }
+    };
+    loadDocs();
+  }, [showConsole, automationJobId, automations, runningAutomationId, task, resolveTargetEntityId]);
 
   if (!task) return null
 
@@ -302,6 +841,11 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
           </Badge>
         </div>
         <div className="flex items-center gap-2">
+          {automationJobId && showConsole && (
+            <Button variant="outline" size="sm" className="h-8 text-xs border-slate-200 text-slate-600 hover:bg-slate-50" onClick={() => setShowConsole(!showConsole)}>
+              <Terminal className="h-3.5 w-3.5 mr-1.5" /> {showConsole ? 'Hide Console' : 'Show Console'}
+            </Button>
+          )}
           <Button variant="outline" size="sm" className="h-8 text-xs border-slate-200 text-slate-600 hover:bg-slate-50" onClick={onRefresh}>
             <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Refresh
           </Button>
@@ -361,6 +905,7 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
               {automations.map((automation: any) => {
                 const isExpanded = expandedAutomations.has(automation.id)
                 const fields = automation.webdata || automation.fields || automation.web_data_fields || automation.mapped_fields || []
+                const isRunning = runningAutomationId === automation.id
 
                 // Sorting logic
                 let sortedFields = [...fields]
@@ -386,7 +931,10 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
                   <React.Fragment key={automation.id}>
                     {/* Category Separator Row */}
                     <TableRow
-                      className="bg-slate-100/80 hover:bg-slate-200/80 cursor-pointer transition-colors"
+                      className={cn(
+                        "hover:bg-slate-200/80 cursor-pointer transition-colors",
+                        isRunning ? "bg-purple-50/80" : "bg-slate-100/80"
+                      )}
                       onClick={() => setExpandedAutomations(prev => {
                         const next = new Set(prev)
                         if (next.has(automation.id)) next.delete(automation.id)
@@ -398,27 +946,39 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}
-                            <Zap className="h-3.5 w-3.5 text-purple-600" />
+                            {isRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-600" /> : <Zap className="h-3.5 w-3.5 text-purple-600" />}
                             <span className="text-[11px] font-black uppercase tracking-widest text-slate-700">
                               {automation.name || automation.automation_name || `Automation #${automation.id}`}
                             </span>
                             <Badge variant="outline" className="text-[9px] h-4 px-1.5 bg-white border-slate-300 text-slate-500">
                               {fields.length} Fields
                             </Badge>
+                            {isRunning && (
+                              <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[9px]">
+                                Running...
+                              </Badge>
+                            )}
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="text-[9px] font-bold uppercase tracking-wider text-green-600 bg-green-50 px-2 py-0.5 rounded border border-green-100">
-                              {automation.status || "Active"}
-                            </span>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 w-6 p-0 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-full"
-                              onClick={(e) => { e.stopPropagation(); setMappingField(automation); setMappingOpen(true); }}
-                              title="Edit Mapping"
-                            >
-                              <Settings className="h-3.5 w-3.5" />
-                            </Button>
+                            {isRunning ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 text-[10px] text-red-600 hover:bg-red-50 font-bold gap-1"
+                                onClick={(e) => { e.stopPropagation(); stopAutomation(); }}
+                              >
+                                <StopCircle className="h-3.5 w-3.5" /> Stop
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 text-[10px] text-green-600 hover:bg-green-50 font-bold gap-1"
+                                onClick={(e) => { e.stopPropagation(); handleRunAutomation(automation); }}
+                              >
+                                <Play className="h-3.5 w-3.5" /> Run
+                              </Button>
+                            )}
                           </div>
                         </div>
                       </TableCell>
@@ -471,12 +1031,16 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
                             const val = resolvedValues[cacheKey]
                             const isResolving = resolving[cacheKey] || false
                             const isMissing = !isValidValue(val)
+                            const isEditing = editingCell?.field?.variableName === field.variableName && editingCell?.col?.id === col.id
 
                             return (
                               <TableCell
                                 key={`fv-${field.id || field.variableName}-${col.type}-${col.id}`}
-                                className="h-12 text-center border-b border-r p-2 align-middle cursor-pointer hover:bg-slate-100/50 transition-colors"
-                                onClick={() => { if (val === undefined && !isResolving) resolveFieldForCol(field, col); }}
+                                className="h-12 text-center border-b border-r p-2 align-middle transition-colors"
+                                onClick={() => {
+                                  if (isEditing) return;
+                                  if (val === undefined && !isResolving) resolveFieldForCol(field, col);
+                                }}
                               >
                                 {!applicable ? (
                                   <span className="text-[9px] font-bold text-slate-300 uppercase italic">N/A</span>
@@ -495,18 +1059,37 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
                                     <Database className="h-3 w-3" />
                                     <span className="text-[9px] font-bold uppercase tracking-wider">Array Items</span>
                                   </div>
+                                ) : isEditing ? (
+                                  <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                                    <Input
+                                      className="h-7 w-28 text-[10px] px-1.5"
+                                      value={editValue}
+                                      onChange={e => setEditValue(e.target.value)}
+                                      onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }}
+                                      autoFocus
+                                    />
+                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-green-600" onClick={(e) => { e.stopPropagation(); saveEdit(); }}>
+                                      <CheckCircle2 className="h-3 w-3" />
+                                    </Button>
+                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-400" onClick={(e) => { e.stopPropagation(); cancelEditing(); }}>
+                                      <X className="h-3 w-3" />
+                                    </Button>
+                                  </div>
                                 ) : isResolving ? (
                                   <Loader2 className="h-4 w-4 animate-spin text-purple-500 mx-auto" />
                                 ) : val !== undefined ? (
-                                  <div className={cn(
-                                    "px-2 py-1 rounded border inline-block max-w-full",
-                                    isMissing ? "bg-red-50 border-red-100" : "bg-green-50 border-green-100"
-                                  )}>
+                                  <div
+                                    className={cn(
+                                      "px-2 py-1 rounded border inline-block max-w-full cursor-pointer hover:ring-1 hover:ring-purple-300",
+                                      isMissing ? "bg-red-50 border-red-100" : "bg-green-50 border-green-100"
+                                    )}
+                                    onClick={(e) => { e.stopPropagation(); startEditing(field, col, val); }}
+                                  >
                                     <span className={cn(
                                       "text-[11px] font-bold truncate block w-full",
                                       isMissing ? "text-red-500 uppercase text-[9px] tracking-wider" : "text-green-700"
                                     )}>
-                                      {isMissing ? 'Missing' : cleanFieldValueStr(val)}
+                                      {isMissing ? 'Missing' : cleanFieldValue(val)}
                                     </span>
                                   </div>
                                 ) : (
@@ -521,6 +1104,39 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
                         </TableRow>
                       )
                     })}
+
+                    {/* Console/logs panel for this automation */}
+                    {isRunning && showConsole && automationProgress && (
+                      <TableRow>
+                        <TableCell colSpan={columns.length + 2} className="p-0 border-b">
+                          <div className="bg-slate-900 text-green-400 font-mono text-[10px] p-3 max-h-48 overflow-y-auto">
+                            <div className="flex items-center gap-2 mb-2 text-[9px] text-slate-400 uppercase tracking-wider font-bold">
+                              <Terminal className="h-3 w-3" />
+                              Console — {automationProgress.status || 'Running'}
+                              <span className="ml-auto">{automationProgress.progress || 0}%</span>
+                            </div>
+                            {(automationProgress.logs || []).map((log: any, i: number) => (
+                              <div key={i} className="flex gap-2 leading-5">
+                                <span className="text-slate-500 shrink-0">
+                                  {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : ''}
+                                </span>
+                                <span className={cn(
+                                  log.level === 'error' ? 'text-red-400' :
+                                  log.level === 'warn' ? 'text-yellow-400' :
+                                  log.level === 'success' ? 'text-green-300' : 'text-green-400'
+                                )}>
+                                  {log.message || JSON.stringify(log)}
+                                </span>
+                              </div>
+                            ))}
+                            {(automationProgress.logs || []).length === 0 && (
+                              <div className="text-slate-500 italic">Waiting for logs...</div>
+                            )}
+                            <div ref={logsEndRef} />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
                   </React.Fragment>
                 )
               })}
@@ -529,16 +1145,38 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
         </div>
       )}
 
-      {/* Mapping Edit Dialog */}
-      {mappingOpen && (
-        <AutomationMappingDialog
-          isOpen={mappingOpen}
-          onClose={() => setMappingOpen(false)}
-          automation={mappingField}
-          relationshipData={task?.registry_metadata?.client_requirements_draft?.data || {}}
-          onRefresh={onRefresh}
-        />
-      )}
+      {/* Screenshot Preview Modal */}
+      <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold">
+              {previewingDocuments?.document_display_name || 'Document Preview'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {previewingDocuments?.documents?.map((doc: any, idx: number) => {
+              const fileUrl = getFileUrl(doc.file_path);
+              return (
+                <div key={idx} className="border rounded-lg overflow-hidden">
+                  <div className="bg-slate-50 px-3 py-2 border-b flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-600">{doc.file_name}</span>
+                    {fileUrl && (
+                      <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-600 hover:underline">
+                        Open full size
+                      </a>
+                    )}
+                  </div>
+                  {fileUrl && (
+                    <div className="p-2 bg-slate-100/50 flex items-center justify-center">
+                      <img src={fileUrl} alt={doc.file_name} className="max-w-full max-h-[400px] object-contain rounded" />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
