@@ -35,8 +35,8 @@ export function SendRequirementsDialog({
   automationWebdataMap,
   allCompanyDocuments,
   allIndividualDocuments,
-  fieldSourceDataCache,
-  fieldMasterComputedCache,
+  fieldSourceDataCache = {},
+  fieldMasterComputedCache = {},
   jobFieldsRecord,
   relationshipData
 }: SendRequirementsDialogProps) {
