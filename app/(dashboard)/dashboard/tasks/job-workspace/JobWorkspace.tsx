@@ -5,7 +5,6 @@ import React, { useState, useMemo } from "react"
 import { ArrowLeft, Briefcase, CheckCircle2, Clock, FileText, User, Zap, History, MessageSquare, CreditCard, FileType, Building2, ChevronRight, LayoutList, Calendar, Globe, Hash } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type { JobWorkspaceData } from "./fetchJobWorkspaceData"
@@ -128,53 +127,66 @@ export function JobWorkspace({ data, onBack, onRefresh }: JobWorkspaceProps) {
         </div>
       </div>
 
-      {/* Tabs - Force Mount + Flex Hierarchy for perfect scrolling */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        <div className="border-b bg-white px-6 shrink-0 shadow-sm z-10">
-          <TabsList className="bg-transparent h-10 p-0 gap-0">
-            {TAB_DEFINITIONS.map(tab => {
-              const Icon = tab.icon
-              return (
-                <TabsTrigger
-                  key={tab.value}
-                  value={tab.value}
-                  className="text-xs font-medium py-2 px-3 rounded-none border-b-2 border-transparent data-[state=active]:border-custom-blue data-[state=active]:text-custom-blue data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:font-semibold text-slate-500 hover:text-slate-700 transition-colors"
-                >
-                  <Icon className="h-3.5 w-3.5 mr-1.5" />
-                  {tab.label}
-                </TabsTrigger>
-              )
-            })}
-          </TabsList>
+      {/* Pill-style Tabs (matching DepartmentTasksManager) */}
+      <div className="border-b border-slate-200 bg-white px-6 py-3 shrink-0 shadow-sm z-10">
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-full border border-slate-200 w-fit">
+          {TAB_DEFINITIONS.map(tab => {
+            const Icon = tab.icon
+            const isActive = activeTab === tab.value
+            return (
+              <button
+                key={tab.value}
+                onClick={() => setActiveTab(tab.value)}
+                className={cn(
+                  "px-4 py-1.5 text-sm font-bold rounded-full transition-all flex items-center gap-1.5 whitespace-nowrap",
+                  isActive
+                    ? "bg-custom-blue text-white shadow-sm"
+                    : "text-slate-500 hover:text-slate-800"
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {tab.label}
+              </button>
+            )
+          })}
         </div>
+      </div>
 
-        <div className="flex-1 overflow-hidden relative">
-          <TabsContent value="overview" forceMount className="h-full m-0 p-6 overflow-y-auto data-[state=inactive]:hidden">
+      {/* Tab Content */}
+      <div className="flex-1 overflow-hidden relative">
+        <div className={cn("h-full overflow-y-auto", activeTab !== "overview" && "hidden")}>
+          <div className="p-6">
             <OverviewTabContent data={data} />
-          </TabsContent>
-          <TabsContent value="workflow" forceMount className="h-full m-0 overflow-y-auto data-[state=inactive]:hidden">
-            <WorkflowTab task={task} stages={stages} allDocuments={data.allDocuments} />
-          </TabsContent>
-          <TabsContent value="requirements" forceMount className="h-full m-0 overflow-y-auto data-[state=inactive]:hidden">
-            <RequirementsTab data={data} onRefresh={onRefresh} />
-          </TabsContent>
-          <TabsContent value="templates" forceMount className="h-full m-0 overflow-y-auto data-[state=inactive]:hidden">
-            <TemplatesTab data={data} />
-          </TabsContent>
-          <TabsContent value="billing" forceMount className="h-full m-0 p-6 overflow-y-auto data-[state=inactive]:hidden">
-            <BillingTab task={task} onRefresh={onRefresh} />
-          </TabsContent>
-          <TabsContent value="automation" forceMount className="h-full m-0 overflow-y-auto data-[state=inactive]:hidden">
-            <AutomationTab data={data} onRefresh={onRefresh} />
-          </TabsContent>
-          <TabsContent value="history" forceMount className="h-full m-0 p-6 overflow-y-auto data-[state=inactive]:hidden">
-            <HistoryTab task={task} stages={stages} />
-          </TabsContent>
-          <TabsContent value="notes" forceMount className="h-full m-0 p-6 overflow-y-auto data-[state=inactive]:hidden">
-            <NotesTab task={task} onRefresh={onRefresh} />
-          </TabsContent>
+          </div>
         </div>
-      </Tabs>
+        <div className={cn("h-full overflow-y-auto", activeTab !== "workflow" && "hidden")}>
+          <WorkflowTab task={task} stages={stages} allDocuments={data.allDocuments} />
+        </div>
+        <div className={cn("h-full overflow-y-auto", activeTab !== "requirements" && "hidden")}>
+          <RequirementsTab data={data} onRefresh={onRefresh} />
+        </div>
+        <div className={cn("h-full overflow-y-auto", activeTab !== "templates" && "hidden")}>
+          <TemplatesTab data={data} />
+        </div>
+        <div className={cn("h-full overflow-y-auto", activeTab !== "billing" && "hidden")}>
+          <div className="p-6">
+            <BillingTab task={task} onRefresh={onRefresh} />
+          </div>
+        </div>
+        <div className={cn("h-full overflow-y-auto", activeTab !== "automation" && "hidden")}>
+          <AutomationTab data={data} onRefresh={onRefresh} />
+        </div>
+        <div className={cn("h-full overflow-y-auto", activeTab !== "history" && "hidden")}>
+          <div className="p-6">
+            <HistoryTab task={task} stages={stages} />
+          </div>
+        </div>
+        <div className={cn("h-full overflow-y-auto", activeTab !== "notes" && "hidden")}>
+          <div className="p-6">
+            <NotesTab task={task} onRefresh={onRefresh} />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
