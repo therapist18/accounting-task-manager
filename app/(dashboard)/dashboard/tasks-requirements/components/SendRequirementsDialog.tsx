@@ -565,7 +565,7 @@ export function SendRequirementsDialog({
               </TabsContent>
 
               {/* TABS CONTENT: LINK */}
-              <TabsContent value="link" className="h-full flex flex-col justify-center py-6 m-0 p-8 bg-slate-50/50">
+              <TabsContent value="link" className="h-full flex flex-col justify-center py-6 m-0 p-8 bg-slate-50/50 overflow-auto">
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-12 max-w-2xl mx-auto text-center space-y-8">
                   <div className="bg-blue-50 p-6 rounded-3xl w-fit mx-auto border-4 border-white shadow-inner">
                     <LinkIcon className="h-12 w-12 text-blue-600" />
@@ -597,7 +597,7 @@ export function SendRequirementsDialog({
               </TabsContent>
 
               {/* TABS CONTENT: PDF */}
-              <TabsContent value="pdf" className="h-full flex flex-col justify-center py-6 m-0 p-8 bg-slate-50/50">
+              <TabsContent value="pdf" className="h-full flex flex-col justify-center py-6 m-0 p-8 bg-slate-50/50 overflow-auto">
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-12 max-w-2xl mx-auto text-center space-y-8">
                   <div className="bg-orange-50 p-6 rounded-3xl w-fit mx-auto border-4 border-white shadow-inner">
                     <Printer className="h-12 w-12 text-orange-500" />

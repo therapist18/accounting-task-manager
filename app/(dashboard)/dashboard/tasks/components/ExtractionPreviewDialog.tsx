@@ -53,13 +53,22 @@ export function ExtractionPreviewDialog({
             onDelete={async (doc) => {
               try {
                 const docId = previewDocument.documentId || previewDocument.id;
+                console.log('[DEBUG] ExtractionPreviewDialog onDelete wrapper:', {
+                  docId,
+                  previewDocumentId: previewDocument.id,
+                  previewDocumentDocumentId: previewDocument.documentId,
+                  docArgFromExtractionPreview: doc,
+                });
                 if (docId) {
                   await handleDeleteDocument(docId);
+                  console.log('[DEBUG] ExtractionPreviewDialog: handleDeleteDocument resolved for', docId);
                   setPreviewDocument(null);
                   setIsDocumentPreviewOpen(false);
+                } else {
+                  console.warn('[DEBUG] ExtractionPreviewDialog onDelete: no docId resolved, skipping delete', previewDocument);
                 }
               } catch (error) {
-                console.error('Error deleting document:', error);
+                console.error('[DEBUG] ExtractionPreviewDialog onDelete: error thrown by handleDeleteDocument', error);
                 // toast is handled in handleDeleteDocument or ExtractionPreview wrapper
               }
             }}

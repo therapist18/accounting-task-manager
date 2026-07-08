@@ -2050,7 +2050,46 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData]);
 
   const handleDeleteDocument = useCallback(async (documentId: string) => {
+    console.log('[DEBUG] DepartmentTasksManager.handleDeleteDocument called with documentId:', documentId, typeof documentId);
     try {
+      const docToDelete = allDocuments.find(doc => doc.id === documentId);
+      console.log('[DEBUG] DepartmentTasksManager.handleDeleteDocument: lookup in allDocuments', {
+        found: !!docToDelete,
+        allDocumentsCount: allDocuments.length,
+        sampleIdType: allDocuments[0] ? typeof allDocuments[0].id : 'n/a',
+        docToDelete,
+      });
+
+      if (docToDelete?.file_path) {
+        const filePath = docToDelete.file_path.startsWith('kyc-documents/')
+          ? docToDelete.file_path.substring('kyc-documents/'.length)
+          : docToDelete.file_path;
+        const { data: storageData, error: storageError } = await supabase.storage.from('kyc-documents').remove([filePath]);
+        console.log('[DEBUG] DepartmentTasksManager.handleDeleteDocument: storage remove result', { filePath, storageData, storageError });
+      } else {
+        console.warn('[DEBUG] DepartmentTasksManager.handleDeleteDocument: no file_path found, skipping storage removal');
+      }
+
+      const { data: deletedRows, error: dbError } = await supabase
+        .from('acc_portal_directors_documents')
+        .delete()
+        .eq('id', documentId)
+        .select();
+
+      console.log('[DEBUG] DepartmentTasksManager.handleDeleteDocument: db delete result', {
+        documentId,
+        deletedRows,
+        deletedCount: deletedRows?.length ?? 0,
+        dbError,
+      });
+
+      if (dbError) throw dbError;
+
+      if (!deletedRows || deletedRows.length === 0) {
+        console.error('[DEBUG] DepartmentTasksManager.handleDeleteDocument: delete matched 0 rows - likely wrong id or blocked by RLS policy', documentId);
+        throw new Error(`No document row was deleted for id ${documentId}. Check that the id is correct and that RLS policies allow DELETE on acc_portal_directors_documents.`);
+      }
+
       toast({
         title: 'Success',
         description: 'Document deleted successfully',
@@ -2063,14 +2102,14 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       // Refresh the tasks silently to update the UI without showing loading state
       await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true);
     } catch (error) {
-      console.error('Error deleting document:', error);
+      console.error('[DEBUG] DepartmentTasksManager.handleDeleteDocument: caught error', error);
       toast({
         title: 'Error',
-        description: 'Failed to delete document',
+        description: error instanceof Error ? error.message : 'Failed to delete document',
         variant: 'destructive',
       });
     }
-  }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData]);
+  }, [allDocuments, activeDepartmentTab, activeSubdepartmentTab, loadTasksData]);
 
   // Clear cache when manually refreshing
   const clearCacheAndRefresh = useCallback(() => {

@@ -5,11 +5,11 @@ import React, { Suspense, useEffect, useMemo, useState, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { SearchableSelect } from "@/components/ui/searchable-select"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
+import { Card, CardContent } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   FileText, Database, HelpCircle, Loader2, Send, UploadCloud, Eye, Calendar,
@@ -513,6 +513,29 @@ function ClientFillRequirementsContent() {
     return matches.reduce((prev: any, curr: any) => new Date(curr.created_at || 0) > new Date(prev.created_at || 0) ? curr : prev)
   }
 
+  // Flattened one-row-per-slot list so the documents table can be rendered without nested cards.
+  const documentRows = useMemo(() => {
+    const rows: any[] = []
+    requirements.forEach((req: any) => {
+      const docIdList = normalizeDocIds(req)
+      const isMultiType = docIdList.length > 1
+      docIdList.forEach((docId: string, docIdx: number) => {
+        const entityTypes = req.entityTypes || (req.entityType ? [req.entityType] : [])
+        const applicableCols = columns.filter((col: ColDef) => isApplicableToCol(entityTypes, col))
+        const slots = applicableCols.length > 0 ? applicableCols : [{ type: "individual", id: "primary", label: getTaskName(task), subLabel: "" } as ColDef]
+        slots.forEach((col: ColDef) => {
+          rows.push({ req, docId, docIdx, isMultiType, totalTypes: docIdList.length, col })
+        })
+      })
+    })
+    return rows
+  }, [requirements, columns, task])
+
+  const inputHighlightClass = (hasValue: boolean) => cn(
+    "rounded-lg font-medium transition-colors",
+    hasValue ? "bg-green-50/70 border-green-300" : "bg-white border-slate-200"
+  )
+
   const handleSubmit = async () => {
     if (!task || !taskId) return
     setSubmitting(true)
@@ -669,234 +692,219 @@ function ClientFillRequirementsContent() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 py-12 px-4 selection:bg-blue-100">
-      <div className="mx-auto max-w-4xl space-y-8">
+    <main className="min-h-screen bg-slate-50 py-6 sm:py-12 px-3 sm:px-4 selection:bg-blue-100">
+      <div className="mx-auto max-w-4xl space-y-6 sm:space-y-8">
         {/* Header Section */}
-        <div className="bg-white border rounded-2xl p-8 shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-8 opacity-5">
+        <div className="bg-white border rounded-2xl p-5 sm:p-8 shadow-xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-8 opacity-5 hidden sm:block">
             <ClipboardList className="h-32 w-32" />
           </div>
           <div className="relative z-10">
-            <Badge className="mb-4 bg-blue-50 text-blue-700 border-blue-200 text-[11px] font-semibold uppercase tracking-wide px-4 py-1 rounded-full">Client Requirements</Badge>
-            <h1 className="text-xl font-medium text-slate-900 tracking-tight">{getTaskName(task)}</h1>
+            <Badge className="mb-3 sm:mb-4 bg-blue-50 text-blue-700 border-blue-200 text-[11px] font-semibold uppercase tracking-wide px-4 py-1 rounded-full">Client Requirements</Badge>
+            <h1 className="text-lg sm:text-xl font-medium text-slate-900 tracking-tight">{getTaskName(task)}</h1>
             <p className="text-sm font-medium text-slate-400 mt-2 flex items-center gap-2">
-              <Info className="h-4 w-4" />
+              <Info className="h-4 w-4 shrink-0" />
               Please provide the following documents and information to proceed.
             </p>
           </div>
         </div>
 
         {/* Documents Section */}
-        <section className="space-y-4">
-          <div className="flex items-center gap-3 ml-2">
+        <section className="space-y-3 sm:space-y-4">
+          <div className="flex items-center gap-3 ml-1 sm:ml-2">
             <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
               <FileText className="h-5 w-5" />
             </div>
             <h2 className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Document Uploads</h2>
           </div>
-          
-          <div className="grid gap-4">
-            {requirements.length > 0 ? requirements.map((req: any) => {
-              const entityBadges = getEntityBadges(req.entityTypes || (req.entityType ? [req.entityType] : []))
-              const docIdList = normalizeDocIds(req)
-              const isMultiType = docIdList.length > 1
-              return (
-                <Card key={req.id || req.name} className="border-none shadow-md overflow-hidden hover:shadow-lg transition-all rounded-xl">
-                  <CardHeader className="bg-white border-b pb-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <CardTitle className="text-lg font-medium text-slate-800">{req.name}</CardTitle>
-                        {req.description && <CardDescription className="text-xs font-medium text-slate-500 leading-relaxed">{req.description}</CardDescription>}
-                      </div>
-                      <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                        {isMultiType && (
-                          <Badge className="rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white border-none bg-slate-500">
-                            {docIdList.length} Document Types
-                          </Badge>
-                        )}
-                        {entityBadges.map((cfg: any) => (
-                          <Badge key={cfg.type} className={cn("rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white border-none", cfg.bgColor)}>
-                            <cfg.Icon className="h-2.5 w-2.5 mr-1" />
-                            {cfg.label}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="p-6 bg-slate-50/50">
-                    <div className="grid gap-5">
-                      {docIdList.map((docId: string, docIdx: number) => {
-                        const entityTypes = req.entityTypes || (req.entityType ? [req.entityType] : [])
-                        const applicableCols = columns.filter((col: ColDef) => isApplicableToCol(entityTypes, col))
-                        const slots = applicableCols.length > 0 ? applicableCols : [{ type: "individual", id: "primary", label: getTaskName(task), subLabel: "" } as ColDef]
-                        const providedCount = slots.filter((col: ColDef) => docFiles[`${docId}::${col.id}`] || getExistingDoc(docId, col)).length
-                        return (
-                          <div key={docId} className={cn("space-y-2.5", isMultiType && "pl-3 border-l-2 border-slate-200")}>
-                            <div className="flex items-center justify-between gap-2 flex-wrap">
-                              <Label className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                                {documentsMeta[docId]?.display_name || documentsMeta[docId]?.name || "Document"}
-                                {isMultiType && (
-                                  <span className="ml-2 text-slate-300 normal-case tracking-normal">Type {docIdx + 1} of {docIdList.length}</span>
-                                )}
-                              </Label>
-                              <Badge variant="secondary" className={cn(
-                                "text-[9px] font-semibold uppercase tracking-wide rounded-full px-2 py-0 border",
-                                providedCount === slots.length ? "bg-green-50 text-green-600 border-green-200" : "bg-amber-50 text-amber-600 border-amber-200"
-                              )}>
-                                {providedCount}/{slots.length} Provided
-                              </Badge>
-                            </div>
-                            <div className="grid gap-3 sm:grid-cols-2">
-                              {slots.map((col: ColDef) => {
-                                const slotKey = `${docId}::${col.id}`
-                                const existingDoc = getExistingDoc(docId, col)
-                                const immigrationDate = existingDoc ? getImmigrationDateValue(documentsMeta[docId], existingDoc.extracted_details) : null
-                                const signedUrl = existingDoc ? signedUrls[String(existingDoc.id)] : null
-                                const isImage = !!signedUrl && /\.(jpe?g|png|gif|webp)$/i.test(existingDoc?.file_path || '')
-                                const isReplacing = !!docFiles[slotKey]
-                                return (
-                                  <div key={slotKey} className="bg-white border-2 border-dashed border-slate-200 rounded-xl p-5 transition-all hover:border-blue-300">
-                                    <div className="flex items-center justify-between gap-2 mb-3">
-                                      <p className="text-sm font-semibold text-slate-700 truncate">{col.label}</p>
-                                      {col.subLabel && (
-                                        <Badge variant="secondary" className="text-[9px] font-semibold uppercase tracking-wide rounded-full px-2 py-0 bg-slate-100 text-slate-500 border-slate-200 shrink-0">
-                                          {col.subLabel}
-                                        </Badge>
-                                      )}
-                                    </div>
 
-                                    {existingDoc && !isReplacing && (
-                                      <div className="flex items-start gap-3 mb-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                                        {isImage ? (
-                                          <img src={signedUrl} alt="Document preview" className="w-16 h-16 object-cover rounded-md border border-slate-200 shrink-0" />
-                                        ) : (
-                                          <div className="w-16 h-16 flex items-center justify-center bg-white rounded-md border border-slate-200 shrink-0">
-                                            <FileText className="h-6 w-6 text-slate-400" />
-                                          </div>
-                                        )}
-                                        <div className="min-w-0 flex-1 space-y-1.5">
-                                          <p className="text-xs font-semibold text-slate-700 truncate">{existingDoc.file_name || 'Existing document on file'}</p>
-                                          {immigrationDate && (
-                                            <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-[10px] font-semibold">
-                                              <Calendar className="h-3 w-3" /> Immigration Date: {String(immigrationDate)}
-                                            </div>
-                                          )}
-                                          {signedUrl && (
-                                            <a href={signedUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] font-semibold text-blue-600 hover:underline inline-flex items-center gap-1">
-                                              <Eye className="h-3 w-3" /> View full document
-                                            </a>
-                                          )}
-                                        </div>
-                                      </div>
-                                    )}
-
-                                    <div className="flex items-center gap-3 flex-wrap">
-                                      {docFiles[slotKey] && (
-                                        <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-full">
-                                          <CheckCircle2 className="h-4 w-4" />
-                                          <span className="text-[11px] font-medium truncate max-w-[150px]">{docFiles[slotKey]?.name}</span>
-                                          <button onClick={() => setDocFiles(prev => ({ ...prev, [slotKey]: null }))} className="hover:text-red-500">
-                                            <X className="h-3.5 w-3.5" />
-                                          </button>
-                                        </div>
-                                      )}
-
-                                      <input
-                                        type="file"
-                                        className="hidden"
-                                        ref={el => fileInputRefs.current[slotKey] = el}
-                                        onChange={(e) => setDocFiles(prev => ({ ...prev, [slotKey]: e.target.files?.[0] || null }))}
-                                      />
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-9 rounded-full px-4 font-medium border-slate-300 hover:border-blue-400 hover:bg-blue-50 text-slate-600 transition-all"
-                                        onClick={() => fileInputRefs.current[slotKey]?.click()}
-                                      >
-                                        <UploadCloud className="h-4 w-4 mr-2" />
-                                        {isReplacing ? 'Replace File' : existingDoc ? 'Upload a Different File' : 'Select File'}
-                                      </Button>
-                                    </div>
-                                  </div>
-                                )
-                              })}
-                            </div>
+          {documentRows.length > 0 ? (
+            <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm bg-white">
+              <Table className="min-w-[640px]">
+                <TableHeader>
+                  <TableRow className="bg-slate-50 hover:bg-slate-50">
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Document</TableHead>
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 hidden sm:table-cell w-[160px]">For</TableHead>
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Status / Preview</TableHead>
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 text-right w-[140px]">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {documentRows.map(({ req, docId, docIdx, isMultiType, totalTypes, col }) => {
+                    const slotKey = `${docId}::${col.id}`
+                    const existingDoc = getExistingDoc(docId, col)
+                    const immigrationDate = existingDoc ? getImmigrationDateValue(documentsMeta[docId], existingDoc.extracted_details) : null
+                    const signedUrl = existingDoc ? signedUrls[String(existingDoc.id)] : null
+                    const isImage = !!signedUrl && /\.(jpe?g|png|gif|webp)$/i.test(existingDoc?.file_path || '')
+                    const isReplacing = !!docFiles[slotKey]
+                    const hasData = isReplacing || !!existingDoc
+                    return (
+                      <TableRow key={`${req.id || req.name}-${docId}-${col.id}`} className={cn(hasData && "bg-green-50/40 hover:bg-green-50/60")}>
+                        <TableCell className="align-top py-3">
+                          <div className="flex flex-col gap-1 max-w-[220px]">
+                            <span className="font-semibold text-slate-800">{documentsMeta[docId]?.display_name || documentsMeta[docId]?.name || "Document"}</span>
+                            <span className="text-[11px] text-slate-400">
+                              {req.name}{isMultiType && ` · Type ${docIdx + 1} of ${totalTypes}`}
+                            </span>
+                            <span className="sm:hidden inline-flex w-fit items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-semibold">
+                              {col.label}{col.subLabel ? ` · ${col.subLabel}` : ''}
+                            </span>
                           </div>
-                        )
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
-              )
-            }) : (
-              <div className="bg-white border rounded-xl p-10 text-center text-slate-400 font-medium italic shadow-sm">
-                No document uploads requested.
-              </div>
-            )}
-          </div>
+                        </TableCell>
+                        <TableCell className="align-top py-3 hidden sm:table-cell">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-sm font-medium text-slate-700">{col.label}</span>
+                            {col.subLabel && <span className="text-[10px] text-slate-400 uppercase tracking-wide">{col.subLabel}</span>}
+                          </div>
+                        </TableCell>
+                        <TableCell className="align-top py-3">
+                          {docFiles[slotKey] ? (
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-full w-fit">
+                              <CheckCircle2 className="h-4 w-4 shrink-0" />
+                              <span className="text-[11px] font-medium truncate max-w-[130px]">{docFiles[slotKey]?.name}</span>
+                              <button onClick={() => setDocFiles(prev => ({ ...prev, [slotKey]: null }))} className="hover:text-red-500 shrink-0">
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ) : existingDoc ? (
+                            <div className="flex items-start gap-2">
+                              {isImage ? (
+                                <img src={signedUrl} alt="Document preview" className="w-10 h-10 object-cover rounded border border-slate-200 shrink-0" />
+                              ) : (
+                                <div className="w-10 h-10 flex items-center justify-center bg-slate-50 rounded border border-slate-200 shrink-0">
+                                  <FileText className="h-4 w-4 text-slate-400" />
+                                </div>
+                              )}
+                              <div className="min-w-0 space-y-1">
+                                <p className="text-xs font-semibold text-slate-700 truncate max-w-[160px]">{existingDoc.file_name || 'On file'}</p>
+                                {immigrationDate && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-[9px] font-semibold w-fit">
+                                    <Calendar className="h-2.5 w-2.5" /> {String(immigrationDate)}
+                                  </span>
+                                )}
+                                {signedUrl && (
+                                  <a href={signedUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-semibold text-blue-600 hover:underline flex items-center gap-1 w-fit">
+                                    <Eye className="h-2.5 w-2.5" /> View
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-semibold w-fit">Missing</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="align-top py-3 text-right">
+                          <input
+                            type="file"
+                            className="hidden"
+                            ref={el => fileInputRefs.current[slotKey] = el}
+                            onChange={(e) => setDocFiles(prev => ({ ...prev, [slotKey]: e.target.files?.[0] || null }))}
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-3 rounded-full text-[11px] font-medium border-slate-300 hover:border-blue-400 hover:bg-blue-50 text-slate-600 transition-all"
+                            onClick={() => fileInputRefs.current[slotKey]?.click()}
+                          >
+                            <UploadCloud className="h-3.5 w-3.5 mr-1.5" />
+                            {isReplacing ? 'Replace' : existingDoc ? 'Replace' : 'Upload'}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="bg-white border rounded-xl p-10 text-center text-slate-400 font-medium italic shadow-sm">
+              No document uploads requested.
+            </div>
+          )}
         </section>
 
         {/* Information Fields Section */}
-        <section className="space-y-4">
-          <div className="flex items-center gap-3 ml-2">
+        <section className="space-y-3 sm:space-y-4">
+          <div className="flex items-center gap-3 ml-1 sm:ml-2">
             <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
               <Database className="h-5 w-5" />
             </div>
             <h2 className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Personal Information</h2>
           </div>
-          
-          <Card className="border-none shadow-md overflow-hidden rounded-xl bg-white">
-            <CardContent className="p-8 grid gap-6 md:grid-cols-2">
-              {clientFields.length > 0 ? clientFields.map((field: any) => {
-                const entityBadges = getEntityBadges(field.entityTypes || (field.entityType ? [field.entityType] : []))
-                return (
-                  <div key={field.key} className="space-y-3 p-5 rounded-2xl bg-slate-50/50 border border-slate-100 transition-all hover:bg-white hover:shadow-md">
-                    <div className="flex items-center justify-between gap-2">
-                      <Label className="text-sm font-medium text-slate-700 tracking-tight">
-                        {getFieldLabel(field)}
-                      </Label>
-                      <div className="flex gap-1">
-                        {entityBadges.map((cfg: any) => (
-                          <div key={cfg.type} className={cn("p-1 rounded-md text-white shadow-sm", cfg.bgColor)}>
-                            <cfg.Icon className="h-2.5 w-2.5" />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
 
-                    {field.options && field.options.length > 0 ? (
-                      <SearchableSelect
-                        value={fieldValues[field.key] || ""}
-                        onValueChange={(val) => setFieldValues(prev => ({ ...prev, [field.key]: val }))}
-                        options={field.options}
-                        placeholder="Choose option..."
-                        searchPlaceholder="Search options..."
-                        buttonClassName="h-12 text-sm bg-white border-slate-200 rounded-xl font-medium shadow-sm"
-                      />
-                    ) : (
-                      <Input
-                        value={fieldValues[field.key] || ""}
-                        onChange={(e) => setFieldValues(prev => ({ ...prev, [field.key]: e.target.value }))}
-                        placeholder={`Enter ${getFieldLabel(field)}...`}
-                        className="bg-white h-12 border-slate-200 rounded-xl font-medium focus:ring-blue-500 shadow-sm"
-                      />
-                    )}
-                    {field.description && (
-                      <p className="text-[10px] font-medium text-slate-400 italic flex items-center gap-1">
-                        <Info className="h-3 w-3" />
-                        {field.description}
-                      </p>
-                    )}
-                  </div>
-                )
-              }) : <p className="text-sm text-slate-400 font-medium italic md:col-span-2 text-center py-10">No information fields requested.</p>}
-            </CardContent>
-          </Card>
+          {clientFields.length > 0 ? (
+            <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm bg-white">
+              <Table className="min-w-[520px]">
+                <TableHeader>
+                  <TableRow className="bg-slate-50 hover:bg-slate-50">
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Field</TableHead>
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 hidden sm:table-cell w-[140px]">For</TableHead>
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Value</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {clientFields.map((field: any) => {
+                    const entityBadges = getEntityBadges(field.entityTypes || (field.entityType ? [field.entityType] : []))
+                    const hasValue = isValidExistingValue(fieldValues[field.key])
+                    return (
+                      <TableRow key={field.key} className={cn(hasValue && "bg-green-50/40 hover:bg-green-50/60")}>
+                        <TableCell className="align-top py-3">
+                          <div className="flex flex-col gap-1 max-w-[220px]">
+                            <span className="font-medium text-slate-700">{getFieldLabel(field)}</span>
+                            {field.description && <span className="text-[10px] text-slate-400 italic">{field.description}</span>}
+                            <div className="sm:hidden flex gap-1 mt-1">
+                              {entityBadges.map((cfg: any) => (
+                                <div key={cfg.type} className={cn("p-1 rounded-md text-white shadow-sm", cfg.bgColor)}>
+                                  <cfg.Icon className="h-2.5 w-2.5" />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="align-top py-3 hidden sm:table-cell">
+                          <div className="flex gap-1">
+                            {entityBadges.map((cfg: any) => (
+                              <div key={cfg.type} className={cn("p-1 rounded-md text-white shadow-sm", cfg.bgColor)} title={cfg.label}>
+                                <cfg.Icon className="h-2.5 w-2.5" />
+                              </div>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="align-top py-3 min-w-[200px]">
+                          {field.options && field.options.length > 0 ? (
+                            <SearchableSelect
+                              value={fieldValues[field.key] || ""}
+                              onValueChange={(val) => setFieldValues(prev => ({ ...prev, [field.key]: val }))}
+                              options={field.options}
+                              placeholder="Choose option..."
+                              searchPlaceholder="Search options..."
+                              buttonClassName={cn("h-10 text-sm", inputHighlightClass(hasValue))}
+                            />
+                          ) : (
+                            <Input
+                              value={fieldValues[field.key] || ""}
+                              onChange={(e) => setFieldValues(prev => ({ ...prev, [field.key]: e.target.value }))}
+                              placeholder={`Enter ${getFieldLabel(field)}...`}
+                              className={cn("h-10", inputHighlightClass(hasValue))}
+                            />
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="bg-white border rounded-xl p-10 text-center text-slate-400 font-medium italic shadow-sm">
+              No information fields requested.
+            </div>
+          )}
         </section>
 
         {/* Array / Repeated Details Section */}
-        <section className="space-y-4">
-          <div className="flex items-center gap-3 ml-2">
+        <section className="space-y-3 sm:space-y-4">
+          <div className="flex items-center gap-3 ml-1 sm:ml-2">
             <div className="p-1.5 bg-teal-50 text-teal-600 rounded-lg">
               <Database className="h-5 w-5" />
             </div>
@@ -910,65 +918,76 @@ function ClientFillRequirementsContent() {
               const slots = applicableCols.length > 0 ? applicableCols : [{ type: "individual", id: "primary", label: getTaskName(task), subLabel: "" } as ColDef]
               const entityBadges = getEntityBadges(entityTypes)
               return (
-                <Card key={field.key} className="border-none shadow-md overflow-hidden rounded-xl">
-                  <CardHeader className="bg-white border-b pb-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <CardTitle className="text-lg font-medium text-slate-800">{getFieldLabel(field)}</CardTitle>
-                        {field.description && <CardDescription className="text-xs font-medium text-slate-500 leading-relaxed">{field.description}</CardDescription>}
-                      </div>
-                      <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                        {entityBadges.map((cfg: any) => (
-                          <Badge key={cfg.type} className={cn("rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white border-none", cfg.bgColor)}>
-                            <cfg.Icon className="h-2.5 w-2.5 mr-1" />
-                            {cfg.label}
-                          </Badge>
-                        ))}
-                      </div>
+                <div key={field.key} className="rounded-xl border border-slate-200 shadow-sm bg-white overflow-hidden">
+                  <div className="px-4 sm:px-5 py-3 border-b bg-slate-50/70 flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <p className="font-medium text-slate-800 text-sm">{getFieldLabel(field)}</p>
+                      {field.description && <p className="text-[10px] text-slate-400 mt-0.5">{field.description}</p>}
                     </div>
-                  </CardHeader>
-                  <CardContent className="p-6 bg-slate-50/50 grid gap-4">
-                    {slots.map((col: ColDef) => {
-                      const slotKey = `${field.key}::${col.id}`
-                      return (
-                        <div key={slotKey} className="bg-white border border-slate-200 rounded-xl p-5">
-                          <div className="flex items-center justify-between gap-2 mb-4">
-                            <p className="text-sm font-semibold text-slate-700">{col.label}</p>
-                            {col.subLabel && (
-                              <Badge variant="secondary" className="text-[9px] font-semibold uppercase tracking-wide rounded-full px-2 py-0 bg-slate-100 text-slate-500 border-slate-200">
-                                {col.subLabel}
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="grid gap-4 sm:grid-cols-2">
-                            {(field.arrayItems || []).map((item: any) => (
-                              <div key={item.variableName} className="space-y-1.5">
-                                <Label className="text-xs font-medium text-slate-500">{getFieldLabel(item)}</Label>
-                                {item.options && item.options.length > 0 ? (
-                                  <SearchableSelect
-                                    value={arrayFieldValues[slotKey]?.[item.variableName] || ""}
-                                    onValueChange={(val) => updateArrayFieldValue(slotKey, item.variableName, val)}
-                                    options={item.options}
-                                    placeholder="Choose option..."
-                                    searchPlaceholder="Search options..."
-                                    buttonClassName="h-11 text-sm bg-white border-slate-200 rounded-lg font-medium"
-                                  />
-                                ) : (
-                                  <Input
-                                    value={arrayFieldValues[slotKey]?.[item.variableName] || ""}
-                                    onChange={(e) => updateArrayFieldValue(slotKey, item.variableName, e.target.value)}
-                                    placeholder={`Enter ${getFieldLabel(item)}...`}
-                                    className="h-11 bg-white border-slate-200 rounded-lg font-medium focus:ring-blue-500"
-                                  />
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </CardContent>
-                </Card>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {entityBadges.map((cfg: any) => (
+                        <Badge key={cfg.type} className={cn("rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white border-none", cfg.bgColor)}>
+                          <cfg.Icon className="h-2.5 w-2.5 mr-1" />
+                          {cfg.label}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <Table className="min-w-[480px]">
+                      <TableHeader>
+                        <TableRow className="bg-slate-50/60 hover:bg-slate-50/60">
+                          <TableHead className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 w-[140px]">Entity</TableHead>
+                          {(field.arrayItems || []).map((item: any) => (
+                            <TableHead key={item.variableName} className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 min-w-[160px]">
+                              {getFieldLabel(item)}
+                            </TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {slots.map((col: ColDef) => {
+                          const slotKey = `${field.key}::${col.id}`
+                          return (
+                            <TableRow key={slotKey}>
+                              <TableCell className="align-top py-3">
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-semibold text-slate-700">{col.label}</span>
+                                  {col.subLabel && <span className="text-[9px] text-slate-400 uppercase tracking-wide">{col.subLabel}</span>}
+                                </div>
+                              </TableCell>
+                              {(field.arrayItems || []).map((item: any) => {
+                                const val = arrayFieldValues[slotKey]?.[item.variableName] || ""
+                                const hasVal = isValidExistingValue(val)
+                                return (
+                                  <TableCell key={item.variableName} className="align-top py-3">
+                                    {item.options && item.options.length > 0 ? (
+                                      <SearchableSelect
+                                        value={val}
+                                        onValueChange={(v) => updateArrayFieldValue(slotKey, item.variableName, v)}
+                                        options={item.options}
+                                        placeholder="Choose..."
+                                        searchPlaceholder="Search options..."
+                                        buttonClassName={cn("h-10 text-sm", inputHighlightClass(hasVal))}
+                                      />
+                                    ) : (
+                                      <Input
+                                        value={val}
+                                        onChange={(e) => updateArrayFieldValue(slotKey, item.variableName, e.target.value)}
+                                        placeholder={`Enter ${getFieldLabel(item)}...`}
+                                        className={cn("h-10", inputHighlightClass(hasVal))}
+                                      />
+                                    )}
+                                  </TableCell>
+                                )
+                              })}
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
               )
             }) : (
               <div className="bg-white border rounded-xl p-10 text-center text-slate-400 font-medium italic shadow-sm">
@@ -979,75 +998,96 @@ function ClientFillRequirementsContent() {
         </section>
 
         {/* Questions Section */}
-        <section className="space-y-4">
-          <div className="flex items-center gap-3 ml-2">
+        <section className="space-y-3 sm:space-y-4">
+          <div className="flex items-center gap-3 ml-1 sm:ml-2">
             <div className="p-1.5 bg-purple-50 text-purple-600 rounded-lg">
               <HelpCircle className="h-5 w-5" />
             </div>
             <h2 className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Additional Questions</h2>
           </div>
-          
-          <Card className="border-none shadow-md overflow-hidden rounded-xl bg-white">
-            <CardContent className="p-8 space-y-8">
-              {questions.length > 0 ? questions.map((question: any) => (
-                <div key={question.id} className="space-y-3">
-                  <div className="flex flex-col gap-1">
-                    <Label className="text-[12px] font-medium text-slate-800 flex items-center">
-                      {question.label}
-                      {question.required && <span className="text-red-500 ml-1 text-lg font-semibold">*</span>}
-                    </Label>
-                    {question.description && (
-                      <p className="text-[11px] font-medium text-slate-400 italic">{question.description}</p>
-                    )}
-                  </div>
-                  
-                  {question.type === "textarea" ? (
-                    <Textarea
-                      value={answers[question.id] || ""}
-                      onChange={(e) => setAnswers(prev => ({ ...prev, [question.id]: e.target.value }))}
-                      placeholder="Type your answer in detail..."
-                      className="bg-slate-50/30 border-slate-200 rounded-xl font-medium focus:ring-blue-500 p-4 min-h-[120px]"
-                    />
-                  ) : question.options && question.options.length > 0 ? (
-                    <SearchableSelect
-                      value={answers[question.id] || ""}
-                      onValueChange={(val) => setAnswers(prev => ({ ...prev, [question.id]: val }))}
-                      options={question.options.map((opt: any) => typeof opt === 'string' ? { value: opt, label: opt } : opt)}
-                      placeholder="Select an answer..."
-                      searchPlaceholder="Search answers..."
-                      buttonClassName="h-12 bg-slate-50/30 border-slate-200 rounded-xl font-medium"
-                    />
-                  ) : (
-                    <Input
-                      value={answers[question.id] || ""}
-                      onChange={(e) => setAnswers(prev => ({ ...prev, [question.id]: e.target.value }))}
-                      placeholder="Type your answer..."
-                      className="bg-slate-50/30 h-12 border-slate-200 rounded-xl font-medium focus:ring-blue-500 shadow-sm"
-                    />
-                  )}
-                </div>
-              )) : <p className="text-sm text-slate-400 font-medium italic text-center py-10">No questions requested.</p>}
-            </CardContent>
-          </Card>
+
+          {questions.length > 0 ? (
+            <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm bg-white">
+              <Table className="min-w-[520px]">
+                <TableHeader>
+                  <TableRow className="bg-slate-50 hover:bg-slate-50">
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Question</TableHead>
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Answer</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {questions.map((question: any) => {
+                    const hasValue = isValidExistingValue(answers[question.id])
+                    const questionOptions = (question.options || []).map((opt: any) => typeof opt === 'string' ? { value: opt, label: opt } : opt)
+                    return (
+                      <TableRow key={question.id} className={cn(hasValue && "bg-green-50/40 hover:bg-green-50/60")}>
+                        <TableCell className="align-top py-3">
+                          <div className="flex flex-col gap-1 max-w-[220px]">
+                            <span className="font-medium text-slate-800 flex items-center">
+                              {question.label}
+                              {question.required && <span className="text-red-500 ml-1 text-base font-semibold">*</span>}
+                            </span>
+                            {question.description && (
+                              <span className="text-[10px] text-slate-400 italic">{question.description}</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="align-top py-3 min-w-[220px]">
+                          {question.type === "textarea" ? (
+                            <Textarea
+                              value={answers[question.id] || ""}
+                              onChange={(e) => setAnswers(prev => ({ ...prev, [question.id]: e.target.value }))}
+                              placeholder="Type your answer in detail..."
+                              className={cn("min-h-[90px] p-3", inputHighlightClass(hasValue))}
+                            />
+                          ) : questionOptions.length > 0 ? (
+                            <SearchableSelect
+                              value={answers[question.id] || ""}
+                              onValueChange={(val) => setAnswers(prev => ({ ...prev, [question.id]: val }))}
+                              options={questionOptions}
+                              placeholder="Select an answer..."
+                              searchPlaceholder="Search answers..."
+                              buttonClassName={cn("h-10 text-sm", inputHighlightClass(hasValue))}
+                            />
+                          ) : (
+                            <Input
+                              value={answers[question.id] || ""}
+                              onChange={(e) => setAnswers(prev => ({ ...prev, [question.id]: e.target.value }))}
+                              placeholder="Type your answer..."
+                              className={cn("h-10", inputHighlightClass(hasValue))}
+                            />
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="bg-white border rounded-xl p-10 text-center text-slate-400 font-medium italic shadow-sm">
+              No questions requested.
+            </div>
+          )}
         </section>
 
         {/* Footer Submit Button */}
-        <div className="sticky bottom-8 bg-white/80 backdrop-blur-md border border-slate-200 rounded-full p-3 shadow-2xl flex justify-between items-center z-50">
-          <div className="px-6">
+        <div className="sticky bottom-3 sm:bottom-8 bg-white/90 backdrop-blur-md border border-slate-200 rounded-full p-2.5 sm:p-3 shadow-2xl flex justify-between items-center gap-3 z-50">
+          <div className="px-3 sm:px-6 hidden sm:block">
              <div className="flex items-center gap-2">
                 <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Secure Submission</span>
              </div>
           </div>
-          <Button 
-            onClick={handleSubmit} 
-            disabled={submitting} 
-            className="h-14 rounded-full px-10 text-sm font-medium uppercase tracking-wide bg-custom-blue hover:bg-blue-700 shadow-lg transition-all active:scale-95 disabled:opacity-70"
+          <Button
+            onClick={handleSubmit}
+            disabled={submitting}
+            className="h-12 sm:h-14 rounded-full px-6 sm:px-10 text-sm font-medium uppercase tracking-wide bg-custom-blue hover:bg-blue-700 shadow-lg transition-all active:scale-95 disabled:opacity-70 w-full sm:w-auto"
           >
             {submitting ? (
-              <Loader2 className="h-5 w-5 mr-3 animate-spin" />
+              <Loader2 className="h-5 w-5 mr-2 sm:mr-3 animate-spin" />
             ) : (
-              <Send className="h-5 w-5 mr-3" />
+              <Send className="h-5 w-5 mr-2 sm:mr-3" />
             )}
             {submitting ? 'Submitting...' : 'Submit Requirements'}
           </Button>

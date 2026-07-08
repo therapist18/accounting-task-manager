@@ -577,7 +577,7 @@ export const ExtractionPreview = ({
                     document_display_name: documentName,
                     document_id: type,
                     extracted_details: localData,
-                    id: file?.id,
+                    id: documentId,
                     file_path: fileUrl
                   }}
                   documentTypes={documentTypes || []}

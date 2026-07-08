@@ -400,19 +400,34 @@ export default function EditableStageCell({
     setIsLoading(true);
     try {
       if (documentToDelete.file_path) {
-        const filePath = documentToDelete.file_path.startsWith('kyc-documents/')
-          ? documentToDelete.file_path.substring('kyc-documents/'.length)
+        const bucketMarker = 'kyc-documents/';
+        const markerIndex = documentToDelete.file_path.indexOf(bucketMarker);
+        const filePath = markerIndex !== -1
+          ? documentToDelete.file_path.substring(markerIndex + bucketMarker.length)
           : documentToDelete.file_path;
-        await supabase.storage.from('kyc-documents').remove([filePath]);
+        const { error: storageError } = await supabase.storage.from('kyc-documents').remove([filePath]);
+        console.log('[DEBUG] EditableStageCell.handleDeleteDocument: storage remove result', { filePath, storageError });
       }
 
-      const isOneOff = documentToDelete.type === 'one_off' || documentToDelete.documentId === 'one_off';
       const documentId = documentToDelete.id || documentToDelete.file?.id || documentToDelete.documentId || documentToDelete.document_id;
-      const docIdentifier = isOneOff ? (documentToDelete.documentId || documentToDelete.fileUrl || documentToDelete.fileName || documentId) : documentId;
+      // "one_off" here is a KYC *document type* classification (see add-stage-dialog.tsx), not an
+      // indicator that this document instance lacks a DB row - always delete by real UUID when we have one.
+      const isRealDocumentId = typeof documentId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(documentId);
+      const docIdentifier = isRealDocumentId ? documentId : (documentToDelete.documentId || documentToDelete.fileUrl || documentToDelete.fileName || documentId);
 
-      if (!isOneOff) {
-        const { error: dbError } = await supabase.from('acc_portal_directors_documents').delete().eq('id', documentId);
+      console.log('[DEBUG] EditableStageCell.handleDeleteDocument: resolved ids', { documentId, isRealDocumentId, type: documentToDelete.type });
+
+      if (isRealDocumentId) {
+        const { data: deletedRows, error: dbError } = await supabase
+          .from('acc_portal_directors_documents')
+          .delete()
+          .eq('id', documentId)
+          .select();
+        console.log('[DEBUG] EditableStageCell.handleDeleteDocument: db delete result', { documentId, deletedRows, deletedCount: deletedRows?.length ?? 0, dbError });
         if (dbError) throw dbError;
+        if (!deletedRows || deletedRows.length === 0) {
+          throw new Error(`No document row was deleted for id ${documentId}.`);
+        }
       }
 
       const currentTask = await supabase.from('tm_tasks').select('stages, source_document_id').eq('id', task.id).single();
@@ -425,7 +440,7 @@ export default function EditableStageCell({
         if (Array.isArray(updatedSourceDocIds[stage.id])) {
           updatedSourceDocIds[stage.id] = updatedSourceDocIds[stage.id].filter((doc: any) => {
             const docId = typeof doc === 'string' ? doc : doc.id;
-            const compareId = isOneOff ? docIdentifier : (documentToDelete.id || documentToDelete.file?.id);
+            const compareId = isRealDocumentId ? (documentToDelete.id || documentToDelete.file?.id) : docIdentifier;
             return docId !== compareId;
           });
           if (updatedSourceDocIds[stage.id].length === 0) {
@@ -434,7 +449,7 @@ export default function EditableStageCell({
           }
         } else {
           const docId = typeof updatedSourceDocIds[stage.id] === 'string' ? updatedSourceDocIds[stage.id] : updatedSourceDocIds[stage.id].id;
-          const compareId = isOneOff ? docIdentifier : (documentToDelete.id || documentToDelete.file?.id);
+          const compareId = isRealDocumentId ? (documentToDelete.id || documentToDelete.file?.id) : docIdentifier;
           if (docId === compareId) {
             delete updatedSourceDocIds[stage.id];
             if (updatedStages[stage.id]) delete updatedStages[stage.id];
@@ -458,7 +473,8 @@ export default function EditableStageCell({
       if (onFetchData) await onFetchData();
 
     } catch (error) {
-      toast({ title: 'Error', description: 'Failed to delete document', variant: 'destructive' });
+      console.error('[DEBUG] EditableStageCell.handleDeleteDocument: caught error', error);
+      toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to delete document', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }

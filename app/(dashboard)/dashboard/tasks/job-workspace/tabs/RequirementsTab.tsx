@@ -717,7 +717,7 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
                                     </div>
                                     <div className="p-3 flex items-center justify-center text-center">
                                       {status.type === 'view' ? (
-                                        <Button variant="ghost" size="sm" className="h-8 px-4 text-sm font-medium text-blue-600 bg-blue-50/50 hover:bg-blue-100 hover:text-blue-700 rounded-full border border-transparent hover:border-blue-200 transition-all" onClick={() => handlePreview(req, col, isLocked)}>
+                                        <Button variant="ghost" size="sm" className="h-8 px-4 text-sm font-medium text-blue-600 bg-blue-50/50 hover:bg-blue-100 hover:text-blue-700 rounded-full border border-transparent hover:border-blue-200 transition-all" onClick={() => handlePreview(req, col, isLocked, isComposite ? latestDocId : undefined)}>
                                           <Eye className="h-4 w-4 mr-1.5" /> View
                                         </Button>
                                       ) : (

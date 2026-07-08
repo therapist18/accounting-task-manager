@@ -1218,6 +1218,67 @@ export function StageUploadDialog({
     }
   };
 
+  // Handle reverting a resolution that hides it from standard task flow
+  const handleRevertResolution = async (logId: number) => {
+    setIsLoading(true);
+    try {
+      const { data: log, error } = await supabase
+        .from('document_workflow_logs')
+        .select('*')
+        .eq('id', logId)
+        .single();
+
+      if (error) throw error;
+      if (!log) return;
+
+      const resolutions = Array.isArray(log.resolutions) ? log.resolutions : [];
+      // Remove the last resolution
+      const updatedResolutions = resolutions.slice(0, -1);
+
+      const hasHolds = Array.isArray(log.holds) && log.holds.length > 0;
+      const hasComments = Array.isArray(log.comments) && log.comments.length > 0;
+      const hasReminders = Array.isArray(log.reminders) && log.reminders.length > 0;
+      const hasTasks = Array.isArray(log.tasks) && log.tasks.length > 0;
+
+      // If it was the only thing in the log, delete the entire record
+      if (!hasHolds && !hasComments && !hasReminders && !hasTasks && updatedResolutions.length === 0) {
+        await supabase.from('document_workflow_logs').delete().eq('id', logId);
+      } else {
+        // Fallback to a logical previous state action type
+        let nextActionType = log.action_type;
+        if (log.action_type === 'resolution' && updatedResolutions.length === 0) {
+          if (hasTasks) nextActionType = 'task_created';
+          else if (hasHolds) nextActionType = 'hold';
+          else if (hasReminders) nextActionType = 'reminder_sent';
+          else nextActionType = 'comment';
+        }
+
+        await supabase.from('document_workflow_logs').update({
+          resolutions: updatedResolutions,
+          action_type: nextActionType,
+          updated_at: new Date().toISOString()
+        }).eq('id', logId);
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Resolution reverted. Document is now available to be linked to workflows.'
+      });
+
+      // Trigger a re-fetch
+      setRefreshTrigger(prev => prev + 1);
+    } catch (err: any) {
+      console.error('Revert error:', err);
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to revert resolution.',
+        variant: 'destructive'
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const saveAllDocuments = useCallback(async () => {
     if (!stage?.id || !task?.id) {
       toast({ title: 'Error', description: 'Missing stage or task information', variant: 'destructive' });
@@ -1731,6 +1792,7 @@ export function StageUploadDialog({
                         messageState={tabMessageStates[doc.id]}
                         onMessageStateChange={(docId, message) => setTabMessageStates(prev => ({ ...prev, [docId]: message }))}
                         workflowDocuments={workflowDocuments}
+                        onRevertResolution={handleRevertResolution}
                       />
                     </div>
                   ))

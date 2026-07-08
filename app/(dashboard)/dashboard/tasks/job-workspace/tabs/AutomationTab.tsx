@@ -5,7 +5,7 @@ import React, { useState, useMemo, useCallback, useEffect } from "react"
 import {
   ChevronDown, ChevronRight, FileText, User, Loader2, RefreshCw,
   CheckCircle2, AlertCircle, Eye, Briefcase, UserCheck, HeartPulse, ArrowUpDown, ArrowUp, ArrowDown, Users2,
-  Database, Zap, Search, Play, X, StopCircle, Terminal, Calendar, Edit3
+  Database, Zap, Search, Play, X, StopCircle, Terminal, Calendar, Edit3, Check
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -19,6 +19,7 @@ import { executeComputedField } from "../../utils/automationComputedFunctions"
 import type { JobWorkspaceData } from "../fetchJobWorkspaceData"
 import supabase from "@/lib/supabase/client"
 import { toast } from '@/lib/hooks/use-toast'
+import { ExtractionPreview } from "@/components/ExtractionPreview"
 
 interface AutomationTabProps {
   data: JobWorkspaceData
@@ -157,6 +158,14 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
   // Editing state
   const [editingCell, setEditingCell] = useState<any>(null)
   const [editValue, setEditValue] = useState('')
+  const [arrayOverrides, setArrayOverrides] = useState<Record<string, Record<string, any>>>({})
+  const [editingArrayCell, setEditingArrayCell] = useState<any>(null)
+  const [arrayEditValue, setArrayEditValue] = useState('')
+
+  // Document field preview state
+  const [docPreviewOpen, setDocPreviewOpen] = useState(false)
+  const [docPreviewData, setDocPreviewData] = useState<any>(null)
+  const [docPreviewLoading, setDocPreviewLoading] = useState<string | null>(null)
 
   // Documents & computed
   const [documentFiles, setDocumentFiles] = useState<any[]>([])
@@ -541,6 +550,84 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
     return col?.label || String(id)
   }, [columns]);
 
+  const getArrayOverrideKey = useCallback((field: any, entityId: any) => {
+    const fieldKey = field.variableName || field.name || field.field_name
+    return `${field.automation_id || field.automationId || ''}-${fieldKey}-${entityId}`
+  }, []);
+
+  const mergeArrayOverrides = useCallback((field: any, rows: any[]) => {
+    return (rows || []).map((row: any) => {
+      const overrides = arrayOverrides[getArrayOverrideKey(field, row.entityId)]
+      return overrides ? { ...row, ...overrides } : row
+    })
+  }, [arrayOverrides, getArrayOverrideKey]);
+
+  const startEditingArrayCell = (field: any, entityId: any, itemVar: string, currentVal: any) => {
+    setEditingArrayCell({ overrideKey: getArrayOverrideKey(field, entityId), itemVar })
+    setArrayEditValue(currentVal !== null && currentVal !== undefined && currentVal !== 'Missing' ? String(currentVal) : '')
+  };
+
+  const cancelEditingArrayCell = () => { setEditingArrayCell(null); setArrayEditValue('') };
+
+  const saveArrayCellEdit = () => {
+    if (!editingArrayCell) return;
+    const { overrideKey, itemVar } = editingArrayCell;
+    setArrayOverrides(prev => ({ ...prev, [overrideKey]: { ...(prev[overrideKey] || {}), [itemVar]: arrayEditValue } }));
+    setEditingArrayCell(null);
+    setArrayEditValue('');
+  };
+
+  const handlePreviewDocumentField = useCallback(async (field: any, col: ColDef) => {
+    const linkedDocIds: string[] = field.linkedKycDocuments || []
+    if (linkedDocIds.length === 0) {
+      toast({ title: 'No document linked', description: 'This field has no linked document type configured.', variant: 'destructive' })
+      return
+    }
+    const loadingKey = `${field.variableName || field.name}-${col.id}`
+    setDocPreviewLoading(loadingKey)
+    try {
+      let docs: any[] = []
+      if (col.type === 'company') {
+        const { data } = await supabase.from('acc_portal_kyc_uploads').select('*')
+          .eq('company_id', col.id).in('document_id', linkedDocIds).neq('status', 'deleted')
+        docs = data || []
+      } else {
+        const { data } = await supabase.from('acc_portal_directors_documents').select('*')
+          .eq('director_id', col.id).in('document_id', linkedDocIds).neq('status', 'deleted')
+        docs = data || []
+      }
+      if (docs.length === 0) {
+        toast({ title: 'No document found', description: `No matching document has been uploaded for ${col.label} yet.`, variant: 'destructive' })
+        return
+      }
+
+      const documentPreviews = await Promise.all(docs.map(async (doc: any) => {
+        const { data: signData } = await supabase.storage.from('kyc-documents').createSignedUrl(doc.file_path, 3600)
+        let fields: any[] = []
+        if (doc.document_id) {
+          const { data: kycData } = await supabase.from('acc_portal_kyc').select('fields').eq('id', doc.document_id).single()
+          if (kycData) fields = kycData.fields || []
+        }
+        return {
+          id: doc.id,
+          fileUrl: signData?.signedUrl,
+          extractedData: doc.extracted_details || {},
+          fields,
+          name: getFieldLabel(field),
+          originalDoc: doc
+        }
+      }))
+
+      setDocPreviewData({ documents: documentPreviews.filter(Boolean) })
+      setDocPreviewOpen(true)
+    } catch (err) {
+      console.error('Error previewing document field:', err)
+      toast({ title: 'Preview failed', description: 'Could not load the document preview.', variant: 'destructive' })
+    } finally {
+      setDocPreviewLoading(null)
+    }
+  }, []);
+
   const cleanFormData = (data: Record<string, any>): Record<string, any> => {
     const cleaned: Record<string, any> = {};
     for (const [key, value] of Object.entries(data)) {
@@ -606,7 +693,7 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
       for (const f of fields) {
         const targetId = resolveTargetEntityId(f) || currentTargetId;
         if (f.fieldType === 'array') {
-          formData[f.variableName] = getArrayFieldData(f);
+          formData[f.variableName] = mergeArrayOverrides(f, getArrayFieldData(f));
         } else if (f.fieldType === 'document') {
           const doc = documentFiles.find(d =>
             f.linkedKycDocuments?.includes(d.document_id) &&
@@ -678,7 +765,7 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
       toast({ title: 'Automation Error', description: e.message || 'Unknown error', variant: 'destructive' });
       setRunningAutomationId(null);
     }
-  }, [task, resolveTargetEntityId, getArrayFieldData, documentFiles, computedFieldsPreview, resolvedValues, resolveVariableValue, cleanFormData, deriveAutomationType, pollSupabaseJob]);
+  }, [task, resolveTargetEntityId, getArrayFieldData, mergeArrayOverrides, documentFiles, computedFieldsPreview, resolvedValues, resolveVariableValue, cleanFormData, deriveAutomationType, pollSupabaseJob]);
 
   const getFileUrl = (filePath: string) => {
     if (!filePath) return '';
@@ -926,7 +1013,7 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
                       const fieldKey = field.variableName || field.name || field.field_name
                       const arrayExpandKey = `${automation.id}-${fieldKey}`
                       const isArrayExpanded = isArray && expandedArrayFields.has(arrayExpandKey)
-                      const arrayRows = isArrayExpanded ? getArrayFieldData(field) : []
+                      const arrayRows = isArrayExpanded ? mergeArrayOverrides(field, getArrayFieldData(field)) : []
 
                       return (
                       <React.Fragment key={field.id || fIdx}>
@@ -983,10 +1070,19 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
                                     {isResolving ? (
                                       <Loader2 className="h-5 w-5 animate-spin text-purple-500" />
                                     ) : isDocument ? (
-                                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 shadow-sm text-blue-600">
-                                        <Database className="h-3 w-3" />
-                                        <span className="text-[9px] font-semibold uppercase tracking-wider">Storage</span>
-                                      </div>
+                                      <button
+                                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 shadow-sm text-blue-600 hover:bg-blue-100 transition-colors disabled:opacity-60"
+                                        onClick={() => handlePreviewDocumentField(field, col)}
+                                        disabled={docPreviewLoading === `${field.variableName || field.name}-${col.id}`}
+                                        title="Preview linked document"
+                                      >
+                                        {docPreviewLoading === `${field.variableName || field.name}-${col.id}` ? (
+                                          <Loader2 className="h-3 w-3 animate-spin" />
+                                        ) : (
+                                          <Eye className="h-3 w-3" />
+                                        )}
+                                        <span className="text-[9px] font-semibold uppercase tracking-wider">Preview</span>
+                                      </button>
                                     ) : isComputed ? (
                                       <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 shadow-sm text-amber-600">
                                         <Zap className="h-3 w-3" />
@@ -996,6 +1092,22 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
                                       <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 shadow-sm text-indigo-600">
                                         <Database className="h-3 w-3" />
                                         <span className="text-[9px] font-semibold uppercase tracking-wider">Array</span>
+                                      </div>
+                                    ) : isEditing ? (
+                                      <div className="flex gap-1.5 items-center justify-between w-full">
+                                        <Input
+                                          value={editValue}
+                                          onChange={(e) => setEditValue(e.target.value)}
+                                          className="h-8 text-sm"
+                                          autoFocus
+                                          onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }}
+                                        />
+                                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-green-600 hover:bg-green-50 rounded-full shrink-0" onClick={saveEdit}>
+                                          <Check className="h-3.5 w-3.5" />
+                                        </Button>
+                                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-full shrink-0" onClick={cancelEditing}>
+                                          <X className="h-3.5 w-3.5" />
+                                        </Button>
                                       </div>
                                     ) : val !== undefined ? (
                                       isMissing ? (
@@ -1048,13 +1160,13 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
                                 {arrayRows.length === 0 ? (
                                   <p className="text-sm text-slate-400 italic px-2">No array data resolved for this field.</p>
                                 ) : (
-                                  <div className="border rounded-lg overflow-hidden bg-white">
-                                    <table className="w-full text-sm">
+                                  <div className="border rounded-lg overflow-auto bg-white max-w-full">
+                                    <table className="w-full text-sm min-w-max">
                                       <thead className="bg-slate-50">
                                         <tr>
-                                          <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase text-slate-500">Entity</th>
+                                          <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase text-slate-500 whitespace-nowrap">Entity</th>
                                           {(field.arrayItems || []).map((item: any) => (
-                                            <th key={item.variableName} className="px-3 py-2 text-left text-[10px] font-semibold uppercase text-slate-500">
+                                            <th key={item.variableName} className="px-3 py-2 text-left text-[10px] font-semibold uppercase text-slate-500 whitespace-nowrap">
                                               {getFieldLabel(item)}
                                             </th>
                                           ))}
@@ -1062,13 +1174,47 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
                                       </thead>
                                       <tbody>
                                         {arrayRows.map((row: any, rIdx: number) => (
-                                          <tr key={rIdx} className="border-t">
-                                            <td className="px-3 py-2 text-xs font-medium text-slate-600">{getEntityLabelById(row.entityId)}</td>
-                                            {(field.arrayItems || []).map((item: any) => (
-                                              <td key={item.variableName} className="px-3 py-2 text-xs text-slate-700">
-                                                {row[item.variableName] ?? '-'}
-                                              </td>
-                                            ))}
+                                          <tr key={rIdx} className="border-t hover:bg-slate-50/50">
+                                            <td className="px-3 py-2 text-xs font-medium text-slate-600 whitespace-nowrap">{getEntityLabelById(row.entityId)}</td>
+                                            {(field.arrayItems || []).map((item: any) => {
+                                              const overrideKey = getArrayOverrideKey(field, row.entityId)
+                                              const isCellEditing = editingArrayCell?.overrideKey === overrideKey && editingArrayCell?.itemVar === item.variableName
+                                              const cellVal = row[item.variableName]
+                                              const isOverridden = arrayOverrides[overrideKey]?.[item.variableName] !== undefined
+                                              return (
+                                                <td key={item.variableName} className="px-3 py-2 text-xs text-slate-700 whitespace-nowrap">
+                                                  {isCellEditing ? (
+                                                    <div className="flex items-center gap-1">
+                                                      <Input
+                                                        value={arrayEditValue}
+                                                        onChange={(e) => setArrayEditValue(e.target.value)}
+                                                        className="h-7 text-xs w-32"
+                                                        autoFocus
+                                                        onKeyDown={(e) => { if (e.key === 'Enter') saveArrayCellEdit(); if (e.key === 'Escape') cancelEditingArrayCell(); }}
+                                                      />
+                                                      <button onClick={saveArrayCellEdit} className="text-green-600 hover:text-green-700 shrink-0">
+                                                        <Check className="h-3.5 w-3.5" />
+                                                      </button>
+                                                      <button onClick={cancelEditingArrayCell} className="text-slate-400 hover:text-red-500 shrink-0">
+                                                        <X className="h-3.5 w-3.5" />
+                                                      </button>
+                                                    </div>
+                                                  ) : (
+                                                    <button
+                                                      className={cn(
+                                                        "group/cell inline-flex items-center gap-1 hover:bg-slate-100 rounded px-1.5 py-0.5 -mx-1.5",
+                                                        isOverridden && "text-amber-700 font-semibold"
+                                                      )}
+                                                      onClick={() => startEditingArrayCell(field, row.entityId, item.variableName, cellVal)}
+                                                      title="Click to edit"
+                                                    >
+                                                      <span>{cellVal ?? '-'}</span>
+                                                      <Edit3 className="h-3 w-3 opacity-0 group-hover/cell:opacity-40 shrink-0" />
+                                                    </button>
+                                                  )}
+                                                </td>
+                                              )
+                                            })}
                                           </tr>
                                         ))}
                                       </tbody>
@@ -1143,6 +1289,28 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
             </TableBody>
           </Table>
         </div>
+      )}
+
+      {/* Document Field Preview Modal */}
+      {docPreviewData && (
+        <Dialog open={docPreviewOpen} onOpenChange={setDocPreviewOpen}>
+          <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden">
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+              {docPreviewData.documents.map((doc: any) => (
+                <ExtractionPreview
+                  key={doc.id}
+                  documentName={doc.name}
+                  extractedData={doc.extractedData}
+                  fields={doc.fields}
+                  fileUrl={doc.fileUrl}
+                  expanded={true}
+                  showSaveButton={false}
+                  onDialogClose={() => setDocPreviewOpen(false)}
+                />
+              ))}
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
 
       {/* Screenshot Preview Modal */}
