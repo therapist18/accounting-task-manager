@@ -1668,13 +1668,14 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       const currentStatusKey = normalizeStatus(currentStatusRaw);
       const potentialNewStatus = STAGE_STATUS_MAPPING[stageId.toLowerCase()];
       const isSkipped = updatedExtractedDetails?.status === 'skipped';
+      const isCleared = updatedExtractedDetails?.isCleared === true;
 
       let taskStatusUpdate = {};
       const timestamp = new Date().toISOString();
 
 
-      // 4. Determine if Status Should Update (only for completed stages, not skipped)
-      if (potentialNewStatus && !isSkipped) {
+      // 4. Determine if Status Should Update (only for completed stages, not skipped/cleared)
+      if (potentialNewStatus && !isSkipped && !isCleared) {
         const currentPriority = STATUS_PRIORITY[currentStatusKey] ?? 0;
         const newPriority = STATUS_PRIORITY[potentialNewStatus] ?? 0;
 
@@ -1718,10 +1719,16 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         stageUpdate.completedAt = timestamp;
       }
 
-      const updatedStages = {
-        ...task.stages,
-        [stageId]: stageUpdate
-      };
+      // Clearing removes the stage's entry entirely rather than leaving a stub with
+      // status: 'in_progress' - a leftover stub is picked up as-is by getCurrentStageStatus
+      // (overall-view/tableUtils.tsx) and rendered as the stage's status, so a "cleared"
+      // stage would still show "In Progress" instead of looking untouched.
+      const updatedStages = { ...task.stages };
+      if (isCleared) {
+        delete updatedStages[stageId];
+      } else {
+        updatedStages[stageId] = stageUpdate;
+      }
 
       // Calculate current stage for metadata
       const currentStage = determineCurrentStage({ ...task, stages: updatedStages }, stages);
@@ -1742,7 +1749,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       if (error) throw error;
 
       // 7b. Snapshot Processing/Issuance requirement documents when their gating stage completes
-      if (!isSkipped) {
+      if (!isSkipped && !isCleared) {
         const normalizedStageId = stageId.toLowerCase();
         if (normalizedStageId === REQUIREMENTS_LOCK_STAGE_IDS.PROCESSING || normalizedStageId === REQUIREMENTS_LOCK_STAGE_IDS.ISSUANCE) {
           await captureRequirementsDocumentsSnapshot({ ...task, stages: updatedStages }, normalizedStageId);
@@ -1759,9 +1766,11 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
 
       const successMessage = isSkipped
         ? 'Stage marked as skipped'
-        : ('status' in taskStatusUpdate)
-          ? `Stage completed & Status updated to ${taskStatusUpdate.status?.replace(/_/g, ' ')}`
-          : 'Stage completed';
+        : isCleared
+          ? 'Stage cleared'
+          : ('status' in taskStatusUpdate)
+            ? `Stage completed & Status updated to ${taskStatusUpdate.status?.replace(/_/g, ' ')}`
+            : 'Stage completed';
 
       toast({ title: "Success", description: successMessage });
 

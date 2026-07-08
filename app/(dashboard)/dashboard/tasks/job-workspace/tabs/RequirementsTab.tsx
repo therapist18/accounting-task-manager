@@ -427,7 +427,7 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
     const borderColorClass = status.color ? status.color.replace('text-', 'border-') : 'border-gray-200'
 
     return (
-      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-sm ${status.bgColor} ${borderColorClass}`}>
+      <div className={`inline-flex items-center gap-1.5 shadow-sm ${borderColorClass}`}>
         <Icon className={`h-3.5 w-3.5 shrink-0 ${status.color}`} />
         <span className={`text-[10px] font-medium uppercase tracking-wider ${status.color}`}>
           {status.label}
@@ -688,11 +688,11 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
                             const statusKey = latestDocId ? `${task.id}-${latestDocId}-${col.type}-${col.id}` : null
                             const docStatus = statusKey ? documentStatusCache.get(statusKey) : null
 
-                            return (
+                            return (  
                               <TableCell key={col.id} className="p-0 border-b border-r align-middle bg-white group-hover:bg-slate-50/70 transition-colors">
                                 {status.type === "na" ? (
                                   <div className="flex h-full items-center justify-center p-3">
-                                    <span className="text-[10px] font-medium text-slate-400 bg-slate-100 rounded-full px-4 py-1.5 uppercase tracking-wide italic border border-slate-200">N/A</span>
+                                    <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wide italic">N/A</span>
                                   </div>
                                 ) : (
                                   <div className="grid grid-cols-[90px_120px_1fr] h-full">
@@ -704,12 +704,12 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
                                         docStatus ? renderStatusBadge(docStatus) : <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
                                       ) : (
                                         isLocked ? (
-                                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 border border-red-200 shadow-sm">
+                                          <div className="inline-flex items-center gap-1.5 shadow-sm">
                                             <AlertCircle className="h-3.5 w-3.5 text-red-500" />
                                             <span className="text-[9px] font-semibold uppercase text-red-600 tracking-wider">Missing</span>
                                           </div>
                                         ) : (
-                                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 shadow-sm">
+                                          <div className="inline-flex items-center gap-1.5 shadow-sm">
                                             <span className="text-[9px] font-semibold uppercase text-amber-600 tracking-wider">Pending</span>
                                           </div>
                                         )

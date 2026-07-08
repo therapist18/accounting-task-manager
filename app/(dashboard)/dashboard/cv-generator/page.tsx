@@ -64,6 +64,58 @@ const EMPTY_CV_DATA = {
   verifiedBadge: false
 };
 
+function mapSkillsFromExtractedDetails(ed: any): { category: string; items: string }[] {
+  const rawSkills = ed?.['Skills'] || ed?.skills;
+  if (!Array.isArray(rawSkills) || rawSkills.length === 0) return [];
+  return rawSkills.map((s: any) => {
+    // Handle format: {Skill: "...", Proficiency Level: "..."}
+    if (s.Skill || s.skill) {
+      return { category: "", items: s.Skill || s.skill || "" };
+    }
+    // Handle format: {category: "...", items: "..."}
+    if (s.category !== undefined || s.items !== undefined) {
+      return { category: s.category || "", items: Array.isArray(s.items) ? s.items.join(", ") : String(s.items || "") };
+    }
+    // Fallback: try to extract any string value
+    const val = Object.values(s).find((v) => typeof v === 'string') || "";
+    return { category: "", items: String(val) };
+  });
+}
+
+function mapCertificationsFromExtractedDetails(ed: any, qualificationsText?: string | null): { name: string; issuer: string; date: string; url: string }[] {
+  // Handle both array format (from extraction) and text format (from database qualifications column)
+  const certsFromExtraction = ed?.['Professional Qualifications'] || ed?.certifications || ed?.['Certifications'];
+  if (Array.isArray(certsFromExtraction) && certsFromExtraction.length > 0) {
+    return certsFromExtraction.map((c: any) => {
+      // Handle format: {Qualification: "..."}
+      if (c.Qualification || c.qualification) {
+        return { name: c.Qualification || c.qualification || "", issuer: "", date: "", url: "" };
+      }
+      // Handle format: {name: "...", issuer: "...", date: "...", url: "..."}
+      return {
+        name: c.name || c.Name || "",
+        issuer: c.issuer || c.Issuer || c.institution || "",
+        date: c.date || c.Date || c.year || "",
+        url: c.url || ""
+      };
+    });
+  }
+  // Fall back to text-based qualifications from database
+  const text = qualificationsText || ed?.['Qualifications'] || ed?.qualifications || "";
+  if (text && typeof text === 'string') {
+    return text.split('\n').filter(Boolean).map((q: string) => ({ name: q.trim(), issuer: '', date: '', url: '' }));
+  }
+  return [];
+}
+
+function isSkillsBlank(skills: any[]): boolean {
+  return !Array.isArray(skills) || skills.length === 0 || skills.every((s) => !s?.category && !s?.items);
+}
+
+function isCertificationsBlank(certs: any[]): boolean {
+  return !Array.isArray(certs) || certs.length === 0 || certs.every((c) => !c?.name && !c?.issuer && !c?.date && !c?.url);
+}
+
 const COMMON_LANGUAGES = [
   'English', 'Swahili', 'French', 'Arabic', 'Mandarin', 'Spanish', 'Portuguese',
   'German', 'Italian', 'Dutch', 'Hindi', 'Urdu', 'Japanese', 'Korean', 'Russian',
@@ -738,6 +790,25 @@ export default function CVGeneratorPage() {
   // Client Portal Navigation / Steps
   const [portalStep, setPortalStep] = useState<number>(1);
   const [clientEdits, setClientEdits] = useState<any>(null); // For temporary edits inside client portal
+  
+  // Track which sections were initially missing so they don't disappear when filled
+  const [initiallyMissingSections, setInitiallyMissingSections] = useState<Record<string, boolean>>({
+    skills: false,
+    education: false,
+    summary: false,
+    languages: false,
+    references: false,
+    nationality: false,
+    dob: false,
+    maritalStatus: false,
+    companyDesc: false,
+    dates: false,
+    responsibilities: false,
+    kenyaStatus: false,
+    linkedin: false,
+    github: false,
+    initiallyNonKenyan: false // Track if user was initially non-Kenyan
+  });
 
   // Data-protection consent gate — applicant must accept before the portal form is shown
   const [portalConsentAccepted, setPortalConsentAccepted] = useState(false);
@@ -781,6 +852,28 @@ export default function CVGeneratorPage() {
     if (workflowStep === 'client-portal' && !clientEdits) {
       setClientEdits(JSON.parse(JSON.stringify(cvData)));
       setPortalStep(1);
+      
+      // Capture which sections are initially missing
+      const data = cvData;
+      const initiallyNonKenyan = !(data.personalDetails?.nationality || '').toLowerCase().includes('kenyan') && !(data.personalDetails?.nationality || '').toLowerCase().includes('kenya');
+      
+      setInitiallyMissingSections({
+        skills: !data.skills || data.skills.length === 0,
+        education: !data.education || data.education.length === 0,
+        summary: !data.summary || data.summary.trim().length < 10,
+        languages: !data.languages || data.languages.length === 0,
+        references: !data.references || data.references.length === 0,
+        nationality: !data.personalDetails?.nationality,
+        dob: !data.personalDetails?.dateOfBirth,
+        maritalStatus: !data.personalDetails?.maritalStatus,
+        companyDesc: (data.experience || []).some((e: any) => !e.companyDesc || e.companyDesc.trim().length < 5),
+        dates: (data.experience || []).some((e: any) => isJustYear(e.startDate) || isJustYear(e.endDate)),
+        responsibilities: (data.experience || []).some((e: any) => !e.responsibilities || e.responsibilities.length === 0),
+        kenyaStatus: false, // Will be set based on country and nationality
+        linkedin: !data.contactInfo?.linkedin,
+        github: !data.contactInfo?.github,
+        initiallyNonKenyan: initiallyNonKenyan
+      });
     }
   }, [workflowStep, cvData, clientEdits]);
 
@@ -869,14 +962,22 @@ export default function CVGeneratorPage() {
               personalInfo: { ...EMPTY_CV_DATA.personalInfo, ...(snapshotData.personalInfo || {}) },
               personalDetails: { ...EMPTY_CV_DATA.personalDetails, ...(snapshotData.personalDetails || {}) },
               skills: (() => {
-                if (!Array.isArray(snapshotData.skills)) return EMPTY_CV_DATA.skills;
-                return snapshotData.skills.map((s: any) => {
-                  // Normalize format: {Skill: "..."} -> {category: "", items: "..."}
-                  if (s.Skill || s.skill) {
-                    return { category: "", items: s.Skill || s.skill || "" };
-                  }
-                  return s;
-                });
+                const mappedSkills = Array.isArray(snapshotData.skills)
+                  ? snapshotData.skills.map((s: any) => {
+                      // Normalize format: {Skill: "..."} -> {category: "", items: "..."}
+                      if (s.Skill || s.skill) {
+                        return { category: "", items: s.Skill || s.skill || "" };
+                      }
+                      return s;
+                    })
+                  : EMPTY_CV_DATA.skills;
+                // Snapshot entries can exist but be entirely blank (placeholders) —
+                // fall back to the raw extracted_details in that case.
+                if (isSkillsBlank(mappedSkills)) {
+                  const fallback = mapSkillsFromExtractedDetails(record.extracted_details || {});
+                  if (fallback.length > 0) return fallback;
+                }
+                return mappedSkills;
               })(),
               experience: Array.isArray(snapshotData.experience) ? snapshotData.experience : EMPTY_CV_DATA.experience,
               internships: Array.isArray(snapshotData.internships) ? snapshotData.internships : EMPTY_CV_DATA.internships,
@@ -885,14 +986,22 @@ export default function CVGeneratorPage() {
               references: Array.isArray(snapshotData.references) ? snapshotData.references : EMPTY_CV_DATA.references,
               languages: Array.isArray(snapshotData.languages) ? snapshotData.languages : EMPTY_CV_DATA.languages,
               certifications: (() => {
-                if (!Array.isArray(snapshotData.certifications)) return EMPTY_CV_DATA.certifications;
-                return snapshotData.certifications.map((c: any) => {
-                  // Normalize format: {Qualification: "..."} -> {name: "...", issuer: "", date: "", url: ""}
-                  if (c.Qualification || c.qualification) {
-                    return { name: c.Qualification || c.qualification || "", issuer: "", date: "", url: "" };
-                  }
-                  return c;
-                });
+                const mappedCerts = Array.isArray(snapshotData.certifications)
+                  ? snapshotData.certifications.map((c: any) => {
+                      // Normalize format: {Qualification: "..."} -> {name: "...", issuer: "", date: "", url: ""}
+                      if (c.Qualification || c.qualification) {
+                        return { name: c.Qualification || c.qualification || "", issuer: "", date: "", url: "" };
+                      }
+                      return c;
+                    })
+                  : EMPTY_CV_DATA.certifications;
+                // Snapshot entries can exist but be entirely blank (placeholders) —
+                // fall back to the raw extracted_details in that case.
+                if (isCertificationsBlank(mappedCerts)) {
+                  const fallback = mapCertificationsFromExtractedDetails(record.extracted_details || {}, record.qualifications);
+                  if (fallback.length > 0) return fallback;
+                }
+                return mappedCerts;
               })(),
               achievements: Array.isArray(snapshotData.achievements) ? snapshotData.achievements : EMPTY_CV_DATA.achievements,
               additionalInfo: Array.isArray(snapshotData.additionalInfo) ? snapshotData.additionalInfo : EMPTY_CV_DATA.additionalInfo,
@@ -952,42 +1061,7 @@ export default function CVGeneratorPage() {
                 drivingExperience: ed['Driving License'] || ed.driving_license || ""
               },
               summary: ed['Professional Summary'] || ed['Summary'] || ed.summary || "",
-              skills: (() => {
-                const rawSkills = ed['Skills'] || ed.skills;
-                console.log('[CV Builder] Raw skills data:', rawSkills);
-                if (!Array.isArray(rawSkills) || rawSkills.length === 0) {
-                  console.log('[CV Builder] No skills found in extracted details');
-                  return [];
-                }
-                const mapped = rawSkills.map((s: any) => {
-                  console.log('[CV Builder] Processing skill item:', s);
-                  // Handle format: {Skill: "...", Proficiency Level: "..."}
-                  if (s.Skill || s.skill) {
-                    const result = {
-                      category: "",
-                      items: s.Skill || s.skill || ""
-                    };
-                    console.log('[CV Builder] Mapped skill (Skill format):', result);
-                    return result;
-                  }
-                  // Handle format: {category: "...", items: "..."}
-                  if (s.category !== undefined || s.items !== undefined) {
-                    const result = {
-                      category: s.category || "",
-                      items: Array.isArray(s.items) ? s.items.join(", ") : String(s.items || "")
-                    };
-                    console.log('[CV Builder] Mapped skill (category format):', result);
-                    return result;
-                  }
-                  // Fallback: try to extract any string value
-                  const val = Object.values(s).find(v => typeof v === 'string') || "";
-                  const result = { category: "", items: String(val) };
-                  console.log('[CV Builder] Mapped skill (fallback):', result);
-                  return result;
-                });
-                console.log('[CV Builder] Final mapped skills:', mapped);
-                return mapped;
-              })(),
+              skills: mapSkillsFromExtractedDetails(ed),
               experience: Array.isArray(ed['Work Experience'] || ed.experience)
                 ? (ed['Work Experience'] || ed.experience).map((exp: any) => {
                     // Handle responsibilities - can be string or array
@@ -1042,50 +1116,7 @@ export default function CVGeneratorPage() {
                   proficiency: l.proficiency || l.Proficiency || ""
                 }));
               })(),
-              certifications: (() => {
-                // Handle both array format (from extraction) and text format (from database qualifications column)
-                const certsFromExtraction = ed['Professional Qualifications'] || ed.certifications || ed['Certifications'];
-                console.log('[CV Builder] Raw certifications data:', certsFromExtraction);
-                if (Array.isArray(certsFromExtraction) && certsFromExtraction.length > 0) {
-                  const mapped = certsFromExtraction.map((c: any) => {
-                    console.log('[CV Builder] Processing certification item:', c);
-                    // Handle format: {Qualification: "..."}
-                    if (c.Qualification || c.qualification) {
-                      const result = {
-                        name: c.Qualification || c.qualification || "",
-                        issuer: "",
-                        date: "",
-                        url: ""
-                      };
-                      console.log('[CV Builder] Mapped certification (Qualification format):', result);
-                      return result;
-                    }
-                    // Handle format: {name: "...", issuer: "...", date: "...", url: "..."}
-                    const result = {
-                      name: c.name || c.Name || "",
-                      issuer: c.issuer || c.Issuer || c.institution || "",
-                      date: c.date || c.Date || c.year || "",
-                      url: c.url || ""
-                    };
-                    console.log('[CV Builder] Mapped certification (name format):', result);
-                    return result;
-                  });
-                  console.log('[CV Builder] Final mapped certifications:', mapped);
-                  return mapped;
-                }
-                // Fall back to text-based qualifications from database
-                const qualificationsText = record.qualifications || ed['Qualifications'] || ed.qualifications || "";
-                console.log('[CV Builder] Text qualifications:', qualificationsText);
-                if (qualificationsText && typeof qualificationsText === 'string') {
-                  return qualificationsText.split('\n').filter(Boolean).map((q: string) => ({
-                    name: q.trim(),
-                    issuer: '',
-                    date: '',
-                    url: ''
-                  }));
-                }
-                return [];
-              })(),
+              certifications: mapCertificationsFromExtractedDetails(ed, record.qualifications),
               achievements: (() => {
                 const rawAchievements = ed['Achievements'] || ed.achievements;
                 if (!Array.isArray(rawAchievements) || rawAchievements.length === 0) return [];
@@ -1224,7 +1255,7 @@ export default function CVGeneratorPage() {
     }
   }, []);
 
-  const handleMergeUpdates = () => {
+  const handleMergeUpdates = async () => {
     const diffs = getCVDiffs(cvData, clientSubmission);
     const updatedData = JSON.parse(JSON.stringify(cvData));
 
@@ -1259,6 +1290,30 @@ export default function CVGeneratorPage() {
         }
       }
     });
+
+    // Save merged data to database
+    if (applicantId) {
+      try {
+        const snapshotPayload = {
+          ...updatedData,
+          cvSettings,
+          selectedLayout,
+        };
+        const { error } = await supabase
+          .from('job_applicant_cvs')
+          .update({
+            bcl_cv_snapshot: snapshotPayload,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('applicant_id', applicantId);
+        
+        if (error) {
+          console.error('Failed to save merged data to database:', error);
+        }
+      } catch (e) {
+        console.error('Database save failed:', e);
+      }
+    }
 
     setCvData(updatedData);
     setHasClientSubmission(false);
@@ -1382,7 +1437,7 @@ export default function CVGeneratorPage() {
       // Then try to save to storage (backup) - catch errors gracefully
       try {
         const payload = JSON.stringify(newDraft);
-        const blob = new Blob([payload], { type: 'application/json' });
+        const blob = new Blob([payload], { type: 'text/plain' });
 
         if (applicantId) {
           console.log('[CV Builder] Saving draft to storage:', `cv-builder/${applicantId}/draft.json`);
@@ -1390,13 +1445,13 @@ export default function CVGeneratorPage() {
           try {
             await supabase.storage.from('kyc-documents').remove([`cv-builder/${applicantId}/draft.json`]);
           } catch { /* ignore if file doesn't exist */ }
-          await supabase.storage.from('kyc-documents').upload(`cv-builder/${applicantId}/draft.json`, blob);
+          await supabase.storage.from('kyc-documents').upload(`cv-builder/${applicantId}/draft.json`, blob, { contentType: 'text/plain' });
         } else {
           // Fallback to cv-drafts/{id}/draft.json for portal drafts / standalone use
           try {
             await supabase.storage.from('kyc-documents').remove([`cv-drafts/${id}/draft.json`]);
           } catch { /* ignore if file doesn't exist */ }
-          await supabase.storage.from('kyc-documents').upload(`cv-drafts/${id}/draft.json`, blob);
+          await supabase.storage.from('kyc-documents').upload(`cv-drafts/${id}/draft.json`, blob, { contentType: 'text/plain' });
         }
         console.log('[CV Builder] Draft saved to storage successfully');
       } catch (storageErr) {
@@ -1472,18 +1527,66 @@ export default function CVGeneratorPage() {
   };
 
   const checkForClientSubmission = async () => {
-    if (!currentPortalDraftId) { toast.info('No portal draft linked yet.'); return; }
+    if (!currentPortalDraftId) { 
+      // Try to find any submission from database if no portal draft ID
+      if (applicantId) {
+        try {
+          const { data: record, error } = await supabase
+            .from('job_applicant_cvs')
+            .select('raw_cv_extracted_details')
+            .eq('applicant_id', applicantId)
+            .single();
+          
+          if (!error && record?.raw_cv_extracted_details?.clientEdits) {
+            setClientSubmission(record.raw_cv_extracted_details.clientEdits);
+            setHasClientSubmission(true);
+            toast.success('Client submission loaded from database!');
+            return;
+          }
+        } catch (e) {
+          console.error('Failed to load submission from database:', e);
+        }
+      }
+      toast.info('No portal draft linked yet.'); 
+      return; 
+    }
+    
+    // Try storage first
     try {
       const { data, error } = await supabase.storage.from('kyc-documents').download(`cv-drafts/${currentPortalDraftId}/client-submission.json`);
-      if (error || !data) { toast.info('No client submission found yet.'); return; }
-      const text = await data.text();
-      const submission = JSON.parse(text);
-      setClientSubmission(submission.clientEdits || submission);
-      setHasClientSubmission(true);
-      toast.success('Client submission loaded from database!');
+      if (!error && data) {
+        const text = await data.text();
+        const submission = JSON.parse(text);
+        setClientSubmission(submission.clientEdits || submission);
+        setHasClientSubmission(true);
+        toast.success('Client submission loaded from storage!');
+        return;
+      }
     } catch (e) {
-      toast.info('No client submission found yet.');
+      // Storage load failed, try database
     }
+    
+    // Fallback to database
+    if (applicantId) {
+      try {
+        const { data: record, error } = await supabase
+          .from('job_applicant_cvs')
+          .select('raw_cv_extracted_details')
+          .eq('applicant_id', applicantId)
+          .single();
+        
+        if (!error && record?.raw_cv_extracted_details?.clientEdits) {
+          setClientSubmission(record.raw_cv_extracted_details.clientEdits);
+          setHasClientSubmission(true);
+          toast.success('Client submission loaded from database!');
+          return;
+        }
+      } catch (e) {
+        console.error('Failed to load submission from database:', e);
+      }
+    }
+    
+    toast.info('No client submission found yet.');
   };
 
   const handlePersonalDetailsChange = (field: string, value: any) => {
@@ -1782,11 +1885,62 @@ export default function CVGeneratorPage() {
             education: Array.isArray(parsedData.education) ? parsedData.education : initialCVData.education,
             references: Array.isArray(parsedData.references) ? parsedData.references : initialCVData.references,
             languages: Array.isArray(parsedData.languages) ? parsedData.languages : initialCVData.languages,
+            certifications: Array.isArray(parsedData.certifications) ? parsedData.certifications : initialCVData.certifications,
           };
 
           setCvData(cleanedData);
           const enhancedLabel = enhancementLevel !== "none" ? ` (${enhancementLevel} enhancement applied)` : "";
           toast.success(`CV parsed successfully!${enhancedLabel}`);
+
+          // Persist the raw file + extracted data into job_applicant_cvs so the
+          // upload isn't lost if the user navigates away before saving a draft.
+          setExtractionProgress("Saving to database...");
+          try {
+            const finalApplicantId = applicantId || crypto.randomUUID();
+            const filePath = `cv-builder/${finalApplicantId}/raw-cv-${Date.now()}-${file.name}`;
+            const { error: uploadError } = await supabase.storage
+              .from('kyc-documents')
+              .upload(filePath, file, { upsert: true, contentType: file.type });
+            if (uploadError) throw uploadError;
+
+            const rawDob = cleanedData.personalDetails?.dateOfBirth || "";
+            const parsedDob = rawDob && !isNaN(Date.parse(rawDob)) ? new Date(rawDob).toISOString().split('T')[0] : null;
+
+            const cvRecordData = {
+              full_name: cleanedData.personalInfo?.fullName || 'Unknown Applicant',
+              email: cleanedData.personalInfo?.email || '',
+              phone_number: cleanedData.personalInfo?.phone || '',
+              position_applied: cleanedData.personalInfo?.title || null,
+              date_of_birth: parsedDob,
+              file_path: filePath,
+              extracted_details: parsedData,
+              raw_cv_file_path: filePath,
+              raw_cv_extracted_details: parsedData,
+              bcl_cv_snapshot: { ...cleanedData, cvSettings, selectedLayout },
+              updated_at: new Date().toISOString(),
+            };
+
+            if (applicantId) {
+              const { error: updateError } = await supabase
+                .from('job_applicant_cvs')
+                .update(cvRecordData)
+                .eq('applicant_id', applicantId);
+              if (updateError) throw updateError;
+            } else {
+              const { error: insertError } = await supabase
+                .from('job_applicant_cvs')
+                .insert([{ ...cvRecordData, applicant_id: finalApplicantId, created_at: new Date().toISOString() }]);
+              if (insertError) throw insertError;
+              setApplicantId(finalApplicantId);
+              const url = new URL(window.location.href);
+              url.searchParams.set('applicantId', finalApplicantId);
+              window.history.replaceState({}, '', url.toString());
+            }
+            toast.success('CV saved to database.');
+          } catch (dbErr: any) {
+            console.error('[CV Builder] Failed to save uploaded CV to database:', dbErr);
+            toast.error(`CV parsed but failed to save to database: ${dbErr.message || 'Unknown error'}`);
+          }
         } catch (err: any) {
           console.error(err);
           toast.error(`Extraction failed: ${err.message || "Unknown error"}`);
@@ -2017,7 +2171,7 @@ export default function CVGeneratorPage() {
     try {
       console.log('[CV Builder] saveCVToDb called:', { applicantId, selectedIndividual: selectedIndividual?.id, linkedIndividualId });
       const cvJson = JSON.stringify(cvData, null, 2);
-      const blob = new Blob([cvJson], { type: 'application/json' });
+      const blob = new Blob([cvJson], { type: 'text/plain' });
 
       // Path A: Save to client's acc_portal_directors_documents (if selectedIndividual)
       if (selectedIndividual) {
@@ -2025,7 +2179,7 @@ export default function CVGeneratorPage() {
         const filePath = `individual-documents/${selectedIndividual.id}/${CV_DOCUMENT_ID}/cv_${Date.now()}.json`;
         const { error: uploadError } = await supabase.storage
           .from('kyc-documents')
-          .upload(filePath, blob, { upsert: true, contentType: 'application/json' });
+          .upload(filePath, blob, { upsert: true, contentType: 'text/plain' });
         if (uploadError) throw uploadError;
         await supabase.from('acc_portal_directors_documents').upsert({
           director_id: selectedIndividual.id,
@@ -2099,9 +2253,42 @@ export default function CVGeneratorPage() {
     try {
       const html2canvas = (await import("html2canvas")).default;
       const { jsPDF } = await import("jspdf");
-      const originalStyle = element.style.transform;
+      
+      // Store original styles
+      const originalTransform = element.style.transform;
+      const originalWidth = element.style.width;
+      const originalMinHeight = element.style.minHeight;
+      const originalOverflow = element.style.overflow;
+      
+      // Reset transform for accurate capture
       element.style.transform = "none";
+      element.style.width = "210mm";
+      element.style.overflow = "visible";
+      
+      // Add pdf-mode class to hide UI elements
+      document.body.classList.add("pdf-mode");
+      
+      // Wait for layout to settle
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Get actual content dimensions
+      const contentWidth = element.scrollWidth;
+      const contentHeight = element.scrollHeight;
+      
+      // Calculate A4 dimensions at 96dpi
+      const A4_WIDTH_MM = 210;
+      const A4_HEIGHT_MM = 297;
+      const MM_TO_PX = 96 / 25.4; // 96dpi / 25.4mm per inch
+      const A4_HEIGHT_PX = Math.floor(A4_HEIGHT_MM * MM_TO_PX);
+      
+      // Set minimum height for proper capture
+      const pages = Math.ceil(contentHeight / A4_HEIGHT_PX);
+      element.style.minHeight = `${pages * A4_HEIGHT_PX}px`;
+      
+      // Wait for resize
+      await new Promise(resolve => setTimeout(resolve, 100));
 
+      // Capture with high quality settings
       const canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,
@@ -2109,30 +2296,58 @@ export default function CVGeneratorPage() {
         backgroundColor: "#ffffff",
         scrollX: 0,
         scrollY: 0,
+        width: contentWidth,
+        height: Math.max(contentHeight, A4_HEIGHT_PX),
+        windowWidth: contentWidth,
+        windowHeight: Math.max(contentHeight, A4_HEIGHT_PX),
+        onclone: (clonedDoc) => {
+          // Ensure the cloned element has proper dimensions
+          const clonedElement = clonedDoc.getElementById('cv-preview-container');
+          if (clonedElement) {
+            clonedElement.style.width = '210mm';
+            clonedElement.style.minHeight = `${pages * A4_HEIGHT_PX}px`;
+            clonedElement.style.overflow = 'visible';
+            clonedElement.style.transform = 'none';
+          }
+        }
       });
-      element.style.transform = originalStyle;
+      
+      // Restore original styles
+      element.style.transform = originalTransform;
+      element.style.width = originalWidth;
+      element.style.minHeight = originalMinHeight;
+      element.style.overflow = originalOverflow;
+      document.body.classList.remove("pdf-mode");
 
-      const imgData = canvas.toDataURL("image/jpeg", 1.0);
+      // Create PDF
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
       const pdf = new jsPDF("p", "mm", "a4");
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
+      
+      // Calculate image dimensions to fit A4 width
       const canvasWidth = canvas.width;
       const canvasHeight = canvas.height;
+      const imgWidth = pageWidth;
       const imgHeight = (canvasHeight * pageWidth) / canvasWidth;
-
-      let heightLeft = imgHeight;
-      let position = 0;
-
-      pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
-      heightLeft -= pageHeight;
-
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
-        heightLeft -= pageHeight;
+      
+      // Calculate number of pages needed
+      const totalPages = Math.ceil(imgHeight / pageHeight);
+      
+      // Add pages with proper slicing
+      for (let i = 0; i < totalPages; i++) {
+        if (i > 0) {
+          pdf.addPage();
+        }
+        
+        // Calculate position for this page slice
+        const position = -(i * pageHeight);
+        
+        // Add the image slice for this page
+        pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
       }
 
+      // Generate filename
       const age = cvData.personalDetails?.dateOfBirth
         ? (() => { const dob = cvData.personalDetails.dateOfBirth; const [d, m, y] = dob.includes('/') ? dob.split('/').map(Number) : [0, 0, Number(dob.split('-')[0])]; const birth = new Date(y, m ? m - 1 : 0, d || 1); return `${Math.floor((Date.now() - birth.getTime()) / (365.25 * 24 * 3600 * 1000))}`; })()
         : '';
@@ -2140,10 +2355,13 @@ export default function CVGeneratorPage() {
       const prof = (cvData.personalInfo?.title || '').replace(/\s+/g, '_').slice(0, 30);
       const applicantName = (cvData.personalInfo.fullName || 'CV').replace(/\s+/g, '_');
       const fileName = [applicantName, age, 'REF', rec, prof].filter(Boolean).join('_') + '.pdf';
+      
       pdf.save(fileName);
       toast.success("PDF downloaded successfully!");
     } catch (error: any) {
       console.error("PDF generation failed", error);
+      // Ensure pdf-mode is removed on error
+      document.body.classList.remove("pdf-mode");
       toast.error("PDF generation failed. Please try again.");
     } finally {
       setIsDownloadingPdf(false);
@@ -2231,11 +2449,15 @@ export default function CVGeneratorPage() {
             <div>
               <div style={{ color: acc, borderColor: `${acc}55` }} className="text-sm font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Core Competencies</div>
               {skills.length > 0 ? (
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {skills.map((grp: any, idx: number) => (
                     <div key={idx}>
-                      <div className="text-white font-bold text-sm underline underline-offset-4 mb-1.5">{grp.category}</div>
-                      <div className="text-sm leading-relaxed opacity-90">{grp.items}</div>
+                      <div className="text-white font-bold text-xs uppercase tracking-wider mb-1">{grp.category}</div>
+                      <div className="flex flex-wrap gap-1">
+                        {(grp.items || '').split(',').map((item: string, i: number) => (
+                          <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/90">{item.trim()}</span>
+                        ))}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -2534,11 +2756,15 @@ export default function CVGeneratorPage() {
               <section>
                 <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3">Core Competencies</h2>
                 {skills.length > 0 ? (
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     {skills.map((grp: any, idx: number) => (
                       <div key={idx}>
-                        <div className="font-bold text-sm text-slate-800 mb-1">{grp.category}</div>
-                        <div className="text-[10.5px] leading-relaxed text-slate-500">{grp.items}</div>
+                        <div className="font-bold text-xs text-slate-800 mb-1">{grp.category}</div>
+                        <div className="flex flex-wrap gap-1">
+                          {(grp.items || '').split(',').map((item: string, i: number) => (
+                            <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{item.trim()}</span>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -2713,11 +2939,15 @@ export default function CVGeneratorPage() {
             <section>
               <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-3 font-sans">Skills</h2>
               {skills.length > 0 ? (
-                <div className="space-y-2 font-sans text-sm">
+                <div className="space-y-3 font-sans">
                   {skills.map((grp: any, idx: number) => (
-                    <div key={idx} className="grid grid-cols-[180px_1fr] gap-4">
-                      <strong className="text-slate-800">{grp.category}</strong>
-                      <span className="text-slate-600">{grp.items}</span>
+                    <div key={idx}>
+                      <div className="font-bold text-xs text-slate-800 mb-1">{grp.category}</div>
+                      <div className="flex flex-wrap gap-1">
+                        {(grp.items || '').split(',').map((item: string, i: number) => (
+                          <span key={i} className="text-[10px] px-2 py-0.5 rounded-full border border-slate-200 text-slate-600">{item.trim()}</span>
+                        ))}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -2833,8 +3063,12 @@ export default function CVGeneratorPage() {
               <p style={{ color: acc }} className="text-xs font-black uppercase tracking-widest mb-2">Skills</p>
               {skills.length > 0 ? skills.map((g: any, i: number) => (
                 <div key={i} className="mb-2">
-                  <div style={{ color: acc }} className="text-xs font-bold">{g.category}</div>
-                  <div className="text-xs opacity-80 mt-0.5">{g.items}</div>
+                  <div style={{ color: acc }} className="text-xs font-bold mb-0.5">{g.category}</div>
+                  <div className="flex flex-wrap gap-0.5">
+                    {(g.items || '').split(',').map((item: string, j: number) => (
+                      <span key={j} className="text-[9px] px-1 py-0.5 rounded bg-white/10 text-white/80">{item.trim()}</span>
+                    ))}
+                  </div>
                 </div>
               )) : <p className="text-xs italic opacity-50">No skills.</p>}
             </div>
@@ -2990,7 +3224,14 @@ export default function CVGeneratorPage() {
               <div>
                 <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider border-b border-slate-200 pb-1 mb-2">Competencies</h3>
                 {skills.length > 0 ? skills.map((g: any, i: number) => (
-                  <div key={i} className="mb-1.5"><div className="text-xs font-bold text-slate-700">{g.category}</div><div className="text-xs text-slate-500">{g.items}</div></div>
+                  <div key={i} className="mb-2">
+                    <div className="text-xs font-bold text-slate-700 mb-0.5">{g.category}</div>
+                    <div className="flex flex-wrap gap-0.5">
+                      {(g.items || '').split(',').map((item: string, j: number) => (
+                        <span key={j} className="text-[9px] px-1 py-0.5 rounded bg-slate-100 text-slate-600">{item.trim()}</span>
+                      ))}
+                    </div>
+                  </div>
                 )) : <p className="text-xs italic text-slate-400">No skills.</p>}
               </div>
               <div>
@@ -3098,7 +3339,14 @@ export default function CVGeneratorPage() {
               <div>
                 <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider mb-2 border-b border-slate-200 pb-1">Skills</h3>
                 {skills.length > 0 ? skills.map((g: any, i: number) => (
-                  <div key={i} className="mb-2"><div className="text-xs font-bold text-slate-700">{g.category}</div><div className="text-xs text-slate-500 mt-0.5">{g.items}</div></div>
+                  <div key={i} className="mb-2">
+                    <div className="text-xs font-bold text-slate-700 mb-0.5">{g.category}</div>
+                    <div className="flex flex-wrap gap-0.5">
+                      {(g.items || '').split(',').map((item: string, j: number) => (
+                        <span key={j} className="text-[9px] px-1 py-0.5 rounded bg-slate-100 text-slate-600">{item.trim()}</span>
+                      ))}
+                    </div>
+                  </div>
                 )) : <p className="text-xs italic text-slate-400">No skills.</p>}
               </div>
               <div>
@@ -3212,7 +3460,14 @@ export default function CVGeneratorPage() {
               <div>
                 <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">Core Competencies</h3>
                 {skills.length > 0 ? skills.map((grp: any, idx: number) => (
-                  <div key={idx} className="mb-2"><div className="text-sm font-bold text-slate-700">{grp.category}</div><div className="text-sm text-slate-500">{grp.items}</div></div>
+                  <div key={idx} className="mb-2">
+                    <div className="text-xs font-bold text-slate-700 mb-0.5">{grp.category}</div>
+                    <div className="flex flex-wrap gap-1">
+                      {(grp.items || '').split(',').map((item: string, i: number) => (
+                        <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{item.trim()}</span>
+                      ))}
+                    </div>
+                  </div>
                 )) : <p className="text-sm italic text-slate-400">No skills.</p>}
               </div>
 
@@ -3305,12 +3560,27 @@ export default function CVGeneratorPage() {
       );
     }
 
-    const { gaps } = analyzeCVCompleteness(clientEdits);
+    const { gaps, checklist } = analyzeCVCompleteness(clientEdits);
     const missingPhoto = !clientEdits.personalInfo?.photoUrl;
-    const missingLinkedIn = !clientEdits.personalInfo?.linkedin;
-    const missingGitHub = !clientEdits.personalInfo?.github;
+    const isKenyan = (clientEdits.personalDetails?.nationality || '').toLowerCase().includes('kenyan') || (clientEdits.personalDetails?.nationality || '').toLowerCase().includes('kenya');
     const jobsMissingDesc = (clientEdits.experience || []).filter((e: any) => !e.companyDesc || e.companyDesc.trim().length < 5);
     const jobsMissingMonths = (clientEdits.experience || []).filter((e: any) => isJustYear(e.startDate) || isJustYear(e.endDate));
+    const jobsMissingResponsibilities = (clientEdits.experience || []).filter((e: any) => !e.responsibilities || e.responsibilities.length === 0);
+    
+    // Use initial missing state so sections don't disappear when filled
+    const missingSkills = initiallyMissingSections.skills;
+    const missingEducation = initiallyMissingSections.education;
+    const missingSummary = initiallyMissingSections.summary;
+    const missingLanguages = initiallyMissingSections.languages;
+    const missingReferences = initiallyMissingSections.references;
+    const missingNationality = initiallyMissingSections.nationality;
+    const missingDOB = initiallyMissingSections.dob;
+    const missingMaritalStatus = initiallyMissingSections.maritalStatus;
+    
+    // For job-specific sections, keep showing if they were initially missing
+    const showJobsMissingDesc = initiallyMissingSections.companyDesc;
+    const showJobsMissingMonths = initiallyMissingSections.dates;
+    const showJobsMissingResponsibilities = initiallyMissingSections.responsibilities;
 
     const isSubmitted = portalStep === 7;
 
@@ -3387,29 +3657,24 @@ export default function CVGeneratorPage() {
                   </div>
                 )}
 
-                {/* ── Online Presence ── */}
-                {(missingLinkedIn || missingGitHub) && (
-                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Globe className="h-4 w-4 text-custom-blue" /> Online Profiles</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {missingLinkedIn && (
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-bold text-slate-500 uppercase">LinkedIn URL</Label>
-                          <Input placeholder="linkedin.com/in/username" value={clientEdits.personalInfo?.linkedin || ''} onChange={(e) => handleClientPersonalInfoChange('linkedin', e.target.value)} className="h-9 text-xs" />
-                        </div>
-                      )}
-                      {missingGitHub && (
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-bold text-slate-500 uppercase">GitHub / Portfolio URL</Label>
-                          <Input placeholder="github.com/username" value={clientEdits.personalInfo?.github || ''} onChange={(e) => handleClientPersonalInfoChange('github', e.target.value)} className="h-9 text-xs" />
-                        </div>
-                      )}
+                {/* ── Online Presence (Optional) ── */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Globe className="h-4 w-4 text-custom-blue" /> Online Profiles <span className="text-xs font-normal text-slate-400">(Optional)</span></h4>
+                  <p className="text-xs text-slate-500">If you have professional profiles, add them below. This section is optional.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-slate-500 uppercase">LinkedIn URL</Label>
+                      <Input placeholder="linkedin.com/in/username" value={clientEdits.personalInfo?.linkedin || ''} onChange={(e) => handleClientPersonalInfoChange('linkedin', e.target.value)} className="h-9 text-xs" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-slate-500 uppercase">GitHub / Portfolio URL</Label>
+                      <Input placeholder="github.com/username" value={clientEdits.personalInfo?.github || ''} onChange={(e) => handleClientPersonalInfoChange('github', e.target.value)} className="h-9 text-xs" />
                     </div>
                   </div>
-                )}
+                </div>
 
                 {/* ── Company Descriptions ── */}
-                {jobsMissingDesc.length > 0 && (
+                {showJobsMissingDesc && (
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
                     <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Briefcase className="h-4 w-4 text-slate-500" /> Company Specializations</h4>
                     <p className="text-xs text-slate-500">Briefly describe what each company does / specializes in.</p>
@@ -3426,7 +3691,7 @@ export default function CVGeneratorPage() {
                 )}
 
                 {/* ── Dates needing months ── */}
-                {jobsMissingMonths.length > 0 && (
+                {showJobsMissingMonths && (
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
                     <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><AlertCircle className="h-4 w-4 text-amber-500" /> Employment Dates — Add Month</h4>
                     <p className="text-xs text-slate-500">Some dates only have a year. Please provide the month too (e.g. Jan 2021).</p>
@@ -3464,6 +3729,221 @@ export default function CVGeneratorPage() {
                   </div>
                 )}
 
+                {/* ── Missing Skills ── */}
+                {missingSkills && (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Sparkles className="h-4 w-4 text-purple-500" /> Skills & Competencies</h4>
+                    <p className="text-xs text-slate-500">Please list your key skills grouped by category. This helps showcase your expertise.</p>
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Technical Skills</Label>
+                        <Input placeholder="e.g. Python, JavaScript, SQL, Excel, QuickBooks" className="h-9 text-xs" onChange={(e) => {
+                          const existingTechnical = (clientEdits.skills || []).find((s: any) => s.category === 'Technical Skills');
+                          const otherSkills = (clientEdits.skills || []).filter((s: any) => s.category !== 'Technical Skills');
+                          if (existingTechnical) {
+                            // Update existing
+                            setClientEdits((prev: any) => ({
+                              ...prev,
+                              skills: prev.skills.map((s: any) => s.category === 'Technical Skills' ? { ...s, items: e.target.value } : s)
+                            }));
+                          } else {
+                            // Add new
+                            setClientEdits((prev: any) => ({
+                              ...prev,
+                              skills: [...otherSkills, { category: 'Technical Skills', items: e.target.value }]
+                            }));
+                          }
+                        }} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Soft Skills</Label>
+                        <Input placeholder="e.g. Communication, Team Leadership, Problem Solving" className="h-9 text-xs" onChange={(e) => {
+                          const existingSoft = (clientEdits.skills || []).find((s: any) => s.category === 'Soft Skills');
+                          const otherSkills = (clientEdits.skills || []).filter((s: any) => s.category !== 'Soft Skills');
+                          if (existingSoft) {
+                            // Update existing
+                            setClientEdits((prev: any) => ({
+                              ...prev,
+                              skills: prev.skills.map((s: any) => s.category === 'Soft Skills' ? { ...s, items: e.target.value } : s)
+                            }));
+                          } else {
+                            // Add new
+                            setClientEdits((prev: any) => ({
+                              ...prev,
+                              skills: [...otherSkills, { category: 'Soft Skills', items: e.target.value }]
+                            }));
+                          }
+                        }} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Missing Education ── */}
+                {missingEducation && (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><GraduationCap className="h-4 w-4 text-blue-500" /> Education Background</h4>
+                    <p className="text-xs text-slate-500">Please provide your highest qualification details.</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Degree / Certificate</Label>
+                        <Input placeholder="e.g. Bachelor of Commerce" className="h-9 text-xs" onChange={(e) => {
+                          const existingEdu = clientEdits.education?.[0] || {};
+                          setClientEdits((prev: any) => ({
+                            ...prev,
+                            education: [{ ...existingEdu, degree: e.target.value }]
+                          }));
+                        }} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Institution</Label>
+                        <Input placeholder="e.g. University of Nairobi" className="h-9 text-xs" onChange={(e) => {
+                          const existingEdu = clientEdits.education?.[0] || {};
+                          setClientEdits((prev: any) => ({
+                            ...prev,
+                            education: [{ ...existingEdu, institution: e.target.value }]
+                          }));
+                        }} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Year of Completion</Label>
+                        <Input placeholder="e.g. 2020" className="h-9 text-xs" onChange={(e) => {
+                          const existingEdu = clientEdits.education?.[0] || {};
+                          setClientEdits((prev: any) => ({
+                            ...prev,
+                            education: [{ ...existingEdu, year: e.target.value }]
+                          }));
+                        }} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Missing Summary ── */}
+                {missingSummary && (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><BookOpen className="h-4 w-4 text-green-500" /> Professional Summary</h4>
+                    <p className="text-xs text-slate-500">Write 2-3 sentences about your professional background and career goals.</p>
+                    <Textarea
+                      placeholder="e.g. Results-driven accountant with 5+ years of experience in financial reporting and audit. Seeking to leverage expertise in a challenging role..."
+                      rows={3}
+                      className="text-xs"
+                      onChange={(e) => setClientEdits((prev: any) => ({ ...prev, summary: e.target.value }))}
+                    />
+                  </div>
+                )}
+
+                {/* ── Missing Languages ── */}
+                {missingLanguages && (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Globe className="h-4 w-4 text-slate-500" /> Languages</h4>
+                    <p className="text-xs text-slate-500">Which languages do you speak? Select all that apply.</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {['English', 'Swahili', 'French', 'German', 'Hindi', 'Arabic', 'Spanish', 'Mandarin'].map(lang => {
+                        const isChecked = (clientEdits.languages || []).some((l: any) => l.language === lang);
+                        return (
+                          <label key={lang} className="flex items-center gap-2 text-xs font-semibold cursor-pointer text-slate-700">
+                            <Checkbox checked={isChecked} onCheckedChange={(checked) => {
+                              if (checked) {
+                                const langs = clientEdits.languages || [];
+                                if (!langs.some((l: any) => l.language === lang)) {
+                                  setClientEdits((prev: any) => ({
+                                    ...prev,
+                                    languages: [...langs, { language: lang, proficiency: lang === 'English' ? 'Professional' : 'Basic' }]
+                                  }));
+                                }
+                              } else {
+                                setClientEdits((prev: any) => ({
+                                  ...prev,
+                                  languages: (prev.languages || []).filter((l: any) => l.language !== lang)
+                                }));
+                              }
+                            }} />
+                            {lang}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Missing References ── */}
+                {missingReferences && (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><MessageSquare className="h-4 w-4 text-slate-500" /> Professional References</h4>
+                    <p className="text-xs text-slate-500">Please provide at least one professional reference (former manager, colleague, or client).</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Reference Name</Label>
+                        <Input placeholder="e.g. John Kamau" className="h-9 text-xs" onChange={(e) => {
+                          const existingRef = clientEdits.references?.[0] || {};
+                          setClientEdits((prev: any) => ({
+                            ...prev,
+                            references: [{ ...existingRef, name: e.target.value }]
+                          }));
+                        }} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Position / Title</Label>
+                        <Input placeholder="e.g. Finance Manager" className="h-9 text-xs" onChange={(e) => {
+                          const existingRef = clientEdits.references?.[0] || {};
+                          setClientEdits((prev: any) => ({
+                            ...prev,
+                            references: [{ ...existingRef, title: e.target.value }]
+                          }));
+                        }} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Company</Label>
+                        <Input placeholder="e.g. ABC Company Ltd" className="h-9 text-xs" onChange={(e) => {
+                          const existingRef = clientEdits.references?.[0] || {};
+                          setClientEdits((prev: any) => ({
+                            ...prev,
+                            references: [{ ...existingRef, company: e.target.value }]
+                          }));
+                        }} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Contact (Phone/Email)</Label>
+                        <Input placeholder="e.g. +254 700 123456" className="h-9 text-xs" onChange={(e) => {
+                          const existingRef = clientEdits.references?.[0] || {};
+                          setClientEdits((prev: any) => ({
+                            ...prev,
+                            references: [{ ...existingRef, contact: e.target.value }]
+                          }));
+                        }} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Job Responsibilities ── */}
+                {showJobsMissingResponsibilities && (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Briefcase className="h-4 w-4 text-slate-500" /> Key Responsibilities</h4>
+                    <p className="text-xs text-slate-500">Describe your main duties for each role. Use bullet points for clarity.</p>
+                    {jobsMissingResponsibilities.map((exp: any, idx: number) => (
+                      <div key={idx} className="space-y-2">
+                        <Label className="text-xs font-semibold text-slate-600">{exp.company || `Position #${idx + 1}`} — {exp.role}</Label>
+                        <Textarea
+                          placeholder="e.g. Managed monthly financial reporting, Prepared audit documentation, Supervised junior accountants"
+                          rows={2}
+                          className="text-xs"
+                          onChange={(e) => {
+                            const responsibilities = e.target.value.split('\n').filter((r: string) => r.trim());
+                            const updated = [...clientEdits.experience];
+                            const expIdx = clientEdits.experience.findIndex((e: any) => e.company === exp.company && e.role === exp.role);
+                            if (expIdx > -1) {
+                              updated[expIdx] = { ...updated[expIdx], responsibilities };
+                            }
+                            setClientEdits((prev: any) => ({ ...prev, experience: updated }));
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {/* ── Languages ── */}
                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
                   <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Globe className="h-4 w-4 text-slate-500" /> Languages Spoken</h4>
@@ -3483,8 +3963,30 @@ export default function CVGeneratorPage() {
                   </div>
                 </div>
 
-                {/* ── Kenya / Regional Details ── */}
-                {collabTargetCountry === 'kenya' && (
+                {/* ── Personal Details ── */}
+                {(missingNationality || missingDOB || missingMaritalStatus) && (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><User className="h-4 w-4 text-slate-500" /> Personal Details</h4>
+                    <p className="text-xs text-slate-500">Please provide your personal details.</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Nationality</Label>
+                        <Input placeholder="e.g. Kenyan" value={clientEdits.personalDetails?.nationality || ''} onChange={(e) => handleClientPersonalDetailsChange('nationality', e.target.value)} className="h-9 text-xs" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Date of Birth</Label>
+                        <Input placeholder="e.g. 15/03/1990" value={clientEdits.personalDetails?.dateOfBirth || ''} onChange={(e) => handleClientPersonalDetailsChange('dateOfBirth', e.target.value)} className="h-9 text-xs" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Marital Status</Label>
+                        <Input placeholder="e.g. Single, Married" value={clientEdits.personalDetails?.maritalStatus || ''} onChange={(e) => handleClientPersonalDetailsChange('maritalStatus', e.target.value)} className="h-9 text-xs" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Kenya / Regional Details (Only for non-Kenyans) ── */}
+                {collabTargetCountry === 'kenya' && initiallyMissingSections.initiallyNonKenyan && (
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
                     <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Globe className="h-4 w-4 text-custom-blue" /> Kenya / East Africa Details</h4>
                     <div className="grid grid-cols-2 gap-4">
@@ -3543,17 +4045,61 @@ export default function CVGeneratorPage() {
                   <Button
                     className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-10 gap-2"
                     onClick={async () => {
+                      const submissionPayload = {
+                        clientEdits,
+                        submittedAt: new Date().toISOString(),
+                        consent: { given: portalConsentAccepted, version: CONSENT_VERSION, timestamp: portalConsentTimestamp },
+                      };
+                      
+                      // Save to Supabase Storage (backup)
                       if (portalDraftId) {
                         try {
-                          const payload = JSON.stringify({
-                            clientEdits,
-                            submittedAt: new Date().toISOString(),
-                            consent: { given: portalConsentAccepted, version: CONSENT_VERSION, timestamp: portalConsentTimestamp },
-                          });
-                          const blob = new Blob([payload], { type: 'application/json' });
-                          await supabase.storage.from('kyc-documents').upload(`cv-drafts/${portalDraftId}/client-submission.json`, blob, { upsert: true });
-                        } catch (e) { console.warn('Submission save failed:', e); }
+                          const payload = JSON.stringify(submissionPayload);
+                          const blob = new Blob([payload], { type: 'text/plain' });
+                          await supabase.storage.from('kyc-documents').upload(`cv-drafts/${portalDraftId}/client-submission.json`, blob, { upsert: true, contentType: 'text/plain' });
+                        } catch (e) { console.warn('Storage save failed:', e); }
                       }
+                      
+                      // Save to database as snapshot for recruiter verification
+                      if (portalDraftId) {
+                        try {
+                          // Try to find the applicant_id from cvData first
+                          let applicantId = cvData?.applicantId;
+                          
+                          // Fallback: try to download draft.json
+                           if (!applicantId) {
+                            const { data: draftData } = await supabase.storage
+                              .from('kyc-documents')
+                              .download(`cv-drafts/${portalDraftId}/draft.json`);
+                            
+                            if (draftData) {
+                              const draftText = await draftData.text();
+                              const draft = JSON.parse(draftText);
+                              applicantId = draft.applicantId || draft.data?.applicantId;
+                            }
+                          }
+                            
+                          if (applicantId) {
+                            // Update the job_applicant_cvs record with client submission snapshot
+                            const { error: updateError } = await supabase
+                              .from('job_applicant_cvs')
+                              .update({
+                                raw_cv_extracted_details: submissionPayload,
+                                updated_at: new Date().toISOString(),
+                              })
+                              .eq('applicant_id', applicantId);
+                            
+                            if (updateError) {
+                              console.error('Failed to save submission to database:', updateError);
+                            } else {
+                              console.log('Client submission saved to database for applicant:', applicantId);
+                            }
+                          }
+                        } catch (e) {
+                          console.error('Database save failed:', e);
+                        }
+                      }
+                      
                       setClientSubmission(clientEdits);
                       setHasClientSubmission(true);
                       setPortalStep(7);
@@ -3812,7 +4358,7 @@ export default function CVGeneratorPage() {
               </div>
               <div className="flex-1 overflow-auto p-6 flex items-start justify-center bg-slate-50 custom-scrollbar">
                 <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center', transition: 'transform 0.15s ease-out' }} className="shrink-0">
-                  <div ref={previewRef} id="cv-preview-container">{renderLayout()}</div>
+                  <div ref={previewRef} id="cv-preview-container" style={{ width: '210mm', minHeight: '297mm', background: 'white' }}>{renderLayout()}</div>
                 </div>
               </div>
             </Panel>
@@ -3899,11 +4445,11 @@ export default function CVGeneratorPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5 col-span-2">
                       <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Full Name</Label>
-                      <Input value={cvData.personalInfo?.fullName ?? ""} onChange={(e) => handlePersonalInfoChange("fullName", e.target.value)} />
+                      <Input value={cvData.personalInfo?.fullName ?? ""} onChange={(e) => handlePersonalInfoChange("fullName", e.target.value)} className={cvData.personalInfo?.fullName ? "field-has-data" : ""} />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Professional Title</Label>
-                      <Input value={cvData.personalInfo?.title ?? ""} onChange={(e) => handlePersonalInfoChange("title", e.target.value)} />
+                      <Input value={cvData.personalInfo?.title ?? ""} onChange={(e) => handlePersonalInfoChange("title", e.target.value)} className={cvData.personalInfo?.title ? "field-has-data" : ""} />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Photo</Label>
@@ -3944,31 +4490,31 @@ export default function CVGeneratorPage() {
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Email</Label>
-                      <Input value={cvData.personalInfo?.email ?? ""} onChange={(e) => handlePersonalInfoChange("email", e.target.value)} />
+                      <Input value={cvData.personalInfo?.email ?? ""} onChange={(e) => handlePersonalInfoChange("email", e.target.value)} className={cvData.personalInfo?.email ? "field-has-data" : ""} />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Phone</Label>
-                      <Input value={cvData.personalInfo?.phone ?? ""} onChange={(e) => handlePersonalInfoChange("phone", e.target.value)} />
+                      <Input value={cvData.personalInfo?.phone ?? ""} onChange={(e) => handlePersonalInfoChange("phone", e.target.value)} className={cvData.personalInfo?.phone ? "field-has-data" : ""} />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Location</Label>
-                      <Input value={cvData.personalInfo?.location ?? ""} onChange={(e) => handlePersonalInfoChange("location", e.target.value)} />
+                      <Input value={cvData.personalInfo?.location ?? ""} onChange={(e) => handlePersonalInfoChange("location", e.target.value)} className={cvData.personalInfo?.location ? "field-has-data" : ""} />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">LinkedIn</Label>
-                      <Input value={cvData.personalInfo?.linkedin ?? ""} onChange={(e) => handlePersonalInfoChange("linkedin", e.target.value)} />
+                      <Input value={cvData.personalInfo?.linkedin ?? ""} onChange={(e) => handlePersonalInfoChange("linkedin", e.target.value)} className={cvData.personalInfo?.linkedin ? "field-has-data" : ""} />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">GitHub</Label>
-                      <Input value={cvData.personalInfo?.github ?? ""} onChange={(e) => handlePersonalInfoChange("github", e.target.value)} />
+                      <Input value={cvData.personalInfo?.github ?? ""} onChange={(e) => handlePersonalInfoChange("github", e.target.value)} className={cvData.personalInfo?.github ? "field-has-data" : ""} />
                     </div>
                     <div className="space-y-1.5 col-span-2">
                       <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Personal Details</Label>
                       <div className="grid grid-cols-2 gap-3">
-                        <Input placeholder="Date of Birth" value={cvData.personalDetails?.dateOfBirth ?? ""} onChange={(e) => handlePersonalDetailsChange("dateOfBirth", e.target.value)} />
-                        <Input placeholder="Nationality" value={cvData.personalDetails?.nationality ?? ""} onChange={(e) => handlePersonalDetailsChange("nationality", e.target.value)} />
-                        <Input placeholder="Marital Status" value={cvData.personalDetails?.maritalStatus ?? ""} onChange={(e) => handlePersonalDetailsChange("maritalStatus", e.target.value)} />
-                        <Input placeholder="Residence" value={cvData.personalDetails?.residence ?? ""} onChange={(e) => handlePersonalDetailsChange("residence", e.target.value)} />
+                        <Input placeholder="Date of Birth" value={cvData.personalDetails?.dateOfBirth ?? ""} onChange={(e) => handlePersonalDetailsChange("dateOfBirth", e.target.value)} className={cvData.personalDetails?.dateOfBirth ? "field-has-data" : ""} />
+                        <Input placeholder="Nationality" value={cvData.personalDetails?.nationality ?? ""} onChange={(e) => handlePersonalDetailsChange("nationality", e.target.value)} className={cvData.personalDetails?.nationality ? "field-has-data" : ""} />
+                        <Input placeholder="Marital Status" value={cvData.personalDetails?.maritalStatus ?? ""} onChange={(e) => handlePersonalDetailsChange("maritalStatus", e.target.value)} className={cvData.personalDetails?.maritalStatus ? "field-has-data" : ""} />
+                        <Input placeholder="Residence" value={cvData.personalDetails?.residence ?? ""} onChange={(e) => handlePersonalDetailsChange("residence", e.target.value)} className={cvData.personalDetails?.residence ? "field-has-data" : ""} />
                       </div>
                     </div>
                   </div>
@@ -3981,7 +4527,7 @@ export default function CVGeneratorPage() {
                       <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Professional Summary</Label>
                       <Button size="sm" variant="ghost" onClick={() => setShowAiWriter(true)} className="h-6 text-sm text-purple-600 gap-1"><Sparkles className="h-3 w-3" /> AI Enhance</Button>
                     </div>
-                    <Textarea rows={6} value={cvData.summary ?? ""} onChange={(e) => setCvData({ ...cvData, summary: e.target.value })} placeholder="Write a compelling professional summary..." />
+                    <Textarea rows={6} value={cvData.summary ?? ""} onChange={(e) => setCvData({ ...cvData, summary: e.target.value })} placeholder="Write a compelling professional summary..." className={cvData.summary ? "field-has-data" : ""} />
                     <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
                       <div className="flex items-start gap-2">
                         <Sparkles className="h-4 w-4 text-custom-blue shrink-0 mt-0.5" />
@@ -4337,7 +4883,7 @@ export default function CVGeneratorPage() {
               </div>
               <div className="flex-1 overflow-auto p-6 flex items-start justify-center bg-slate-50 custom-scrollbar">
                 <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center', transition: 'transform 0.15s ease-out' }} className="shrink-0">
-                  <div ref={previewRef} id="cv-preview-container">{renderLayout()}</div>
+                  <div ref={previewRef} id="cv-preview-container" style={{ width: '210mm', minHeight: '297mm', background: 'white' }}>{renderLayout()}</div>
                 </div>
               </div>
             </Panel>
@@ -4455,9 +5001,11 @@ export default function CVGeneratorPage() {
 
               {/* Secure link box */}
               {(() => {
+                // Check for existing drafts - either currentPortalDraftId or any draft in cvDrafts
+                const existingDraft = currentPortalDraftId || (cvDrafts.length > 0 ? cvDrafts[0].id : null);
                 const getCollabPortalLink = () => {
                   const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
-                  const draftParam = currentPortalDraftId ? `&draftId=${currentPortalDraftId}` : '';
+                  const draftParam = existingDraft ? `&draftId=${existingDraft}` : '';
                   return `${origin}/dashboard/cv-generator?portal=true${draftParam}`;
                 };
                 const collabLink = getCollabPortalLink();
@@ -4465,28 +5013,30 @@ export default function CVGeneratorPage() {
                   <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-4 space-y-3.5 mt-auto">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-700">Secure Review URL</span>
-                      {currentPortalDraftId
-                        ? <span className="text-sm bg-emerald-50 text-emerald-600 font-extrabold uppercase px-1.5 py-0.5 rounded">Draft Saved</span>
+                      {existingDraft
+                        ? <span className="text-sm bg-emerald-50 text-emerald-600 font-extrabold uppercase px-1.5 py-0.5 rounded">Draft Ready</span>
                         : <span className="text-sm bg-amber-50 text-amber-600 font-extrabold uppercase px-1.5 py-0.5 rounded">Save Draft First</span>
                       }
                     </div>
                     <div className="flex gap-2">
                       <Input
                         readOnly
-                        value={currentPortalDraftId ? collabLink : 'Save draft first to generate secure link...'}
+                        value={existingDraft ? collabLink : 'Save draft first to generate secure link...'}
                         className="h-8 text-xs font-mono bg-white select-all text-slate-500"
                       />
                       <Button size="sm" onClick={async () => {
-                        if (!currentPortalDraftId) {
+                        if (!existingDraft) {
+                          // No draft exists - save one first
                           setDraftNameInput(`CV - ${cvData.personalInfo?.fullName || 'Draft'} - ${new Date().toLocaleDateString()}`);
                           setSavingDraftForPortal(true);
                           setShowSaveDraftModal(true);
                         } else {
+                          // Draft exists - just copy the link
                           navigator.clipboard.writeText(collabLink);
                           toast.success("Client review link copied to clipboard!");
                         }
                       }} className="text-xs h-8 px-3">
-                        {currentPortalDraftId ? 'Copy' : 'Save & Copy'}
+                        {existingDraft ? 'Copy' : 'Save & Copy'}
                       </Button>
                     </div>
                   </div>
@@ -4576,7 +5126,37 @@ export default function CVGeneratorPage() {
                       </h3>
                       <p className="text-sm text-slate-450 mt-0.5">GitHub-style comparison. Accept or reject modifications before updating registry.</p>
                     </div>
-                    <span className="text-sm bg-emerald-50 text-emerald-600 font-extrabold uppercase px-2 py-0.5 rounded">Ready for Merge</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm bg-emerald-50 text-emerald-600 font-extrabold uppercase px-2 py-0.5 rounded">Ready for Merge</span>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => {
+                          const diffs = getCVDiffs(cvData, clientSubmission);
+                          const allAccepted: Record<string, boolean> = {};
+                          diffs.forEach((d: any) => { allAccepted[d.path] = true; });
+                          setAcceptedFields(allAccepted);
+                          toast.success('All changes accepted');
+                        }}
+                        className="text-xs h-7 px-2 font-bold text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                      >
+                        Accept All
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => {
+                          const diffs = getCVDiffs(cvData, clientSubmission);
+                          const allRejected: Record<string, boolean> = {};
+                          diffs.forEach((d: any) => { allRejected[d.path] = false; });
+                          setAcceptedFields(allRejected);
+                          toast.success('All changes rejected');
+                        }}
+                        className="text-xs h-7 px-2 font-bold text-red-600 border-red-200 hover:bg-red-50"
+                      >
+                        Reject All
+                      </Button>
+                    </div>
                   </div>
 
                   {/* Diff Items Container */}
@@ -4959,7 +5539,7 @@ export default function CVGeneratorPage() {
                   <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Cover Letter / Message Body</h4>
                   <Textarea
                     rows={5}
-                    placeholder={`Dear Hiring Manager,\n\nI am pleased to submit the CV of ${cvData.personalInfo?.fullName || 'the applicant'} for the position of ${cvData.personalInfo?.title || 'the role in question'}.\n\n${recommender.name ? `This applicant was referred by ${recommender.name}${recommender.company ? ` of ${recommender.company}` : ''}.` : ''}\n\nKind regards,\nBCL Recruitment Team`}
+                    placeholder={`Dear Hiring Manager,\n\nI am pleased to submit the CV of ${cvData.personalInfo?.fullName || 'the applicant'} for the position of ${cvData.personalInfo?.title || 'the role in question'}.\n\n${thirdParties[0]?.name ? `This applicant was referred by ${thirdParties[0].name}${thirdParties[0]?.company ? ` of ${thirdParties[0].company}` : ''}.` : ''}\n\nKind regards,\nBCL Recruitment Team`}
                     value={coverLetterText}
                     onChange={e => setCoverLetterText(e.target.value)}
                     className="text-xs"

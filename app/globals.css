@@ -192,3 +192,58 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+/* ── PDF Mode Overrides ── */
+body.pdf-mode {
+  padding: 0 !important;
+  background: white !important;
+}
+
+body.pdf-mode .no-print,
+body.pdf-mode .toolbar,
+body.pdf-mode button,
+body.pdf-mode .fixed {
+  display: none !important;
+}
+
+body.pdf-mode #cv-preview-container {
+  transform: none !important;
+  width: 210mm !important;
+  overflow: visible !important;
+}
+
+body.pdf-mode #cv-preview-container > div {
+  margin: 0 !important;
+  box-shadow: none !important;
+  transform: none !important;
+  width: 210mm !important;
+  min-height: auto !important;
+}
+
+.html2pdf__page-break {
+  display: block;
+  height: 60px;
+}
+
+/* ── Form Field Highlight Styles ── */
+.field-has-data {
+  background-color: rgb(240 253 244) !important; /* green-50 */
+  border-color: rgb(187 247 208) !important; /* green-200 */
+}
+
+.field-has-data:focus {
+  border-color: rgb(74 222 128) !important; /* green-400 */
+  box-shadow: 0 0 0 2px rgb(74 222 128 / 0.2) !important; /* green-400 ring */
+}
+
+/* ── CV Preview Container for PDF ── */
+#cv-preview-container {
+  width: 210mm;
+  min-height: 297mm;
+  background: white;
+}
+
+#cv-preview-container > div {
+  width: 100% !important;
+  min-height: 297mm !important;
+}

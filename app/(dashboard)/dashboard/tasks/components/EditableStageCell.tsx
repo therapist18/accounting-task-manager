@@ -4,18 +4,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from "react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import {
-  Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap,
-  Loader2, SkipForward, Clock3, MoreHorizontal, CheckCircle2,
-  Timer, AlertCircle, User, UserPlus, List, Link2, Type, Hash,
-  Globe, Mail, Phone, AlignLeft, FileText as FileTextIcon
-} from "lucide-react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, Loader2, SkipForward, Clock3, MoreHorizontal, CheckCircle2, Timer, AlertCircle, User, UserPlus, List, Link2, Type, Hash, Globe, Mail, Phone, AlignLeft, FileText as FileTextIcon, RotateCcw } from "lucide-react"
 import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
@@ -27,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { calculateStageDate } from "../utils/dateUtils"
 import { cn } from "@/lib/utils"
 
-interface EditableStageCellProps {
+interface EditableStageCellProps { 
   stage: any
   stages?: any[]
   task: any
@@ -51,7 +41,6 @@ interface EditableStageCellProps {
   readOnly?: boolean
 }
 
-// Cache for document fields to avoid repeated API calls
 const documentFieldsCache = new Map<string, { fields: any[], timestamp: number }>();
 const CACHE_DURATION = 2 * 60 * 1000; // 2 minutes
 
@@ -86,29 +75,7 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[] = [])
   }
 };
 
-// Main Component
-export default function EditableStageCell({
-  stage,
-  stages = [],
-  task,
-  value,
-  onSave,
-  onDocumentUpload,
-  onShowDocuments,
-  allDocuments = [],
-  isDocumentRow = false,
-  linkedDocuments = [],
-  documentData = null,
-  departments,
-  renderMode = 'date',
-  taskName,
-  clientName,
-  getKycFields,
-  onFetchData,
-  officers = [],
-  onOfficerChange,
-  readOnly = false
-}: EditableStageCellProps) {
+export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, renderMode = 'date', taskName, clientName, getKycFields, onFetchData, officers = [], onOfficerChange, readOnly = false }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -381,6 +348,7 @@ export default function EditableStageCell({
     try {
       const resetData = {
         ...(linkedDocument?.extracted_details || {}),
+        isCleared: true,
         status: 'in_progress',
         skippedAt: null, skippedBy: null, reason: null, date: null, completedAt: null,
         documentsUploaded: requiresUpload ? false : undefined
@@ -393,6 +361,30 @@ export default function EditableStageCell({
       setIsLoading(false);
     }
   };
+
+  const handleClearStage = useCallback(async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!onSave || readOnly) return;
+    setIsLoading(true);
+    try {
+      const resetData = {
+        isCleared: true,
+        status: 'in_progress',
+        skippedAt: null, skippedBy: null, reason: null, date: null, completedAt: null,
+        documentsUploaded: requiresUpload ? false : undefined
+      };
+      await onSave(stage.id, task.id, '', resetData);
+      setEditValue('');
+      setCustomInputValue('');
+      setCustomMultiSelectValues([]);
+      setIsEditing(false);
+      if (onFetchData) await onFetchData();
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to clear stage", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [onSave, readOnly, stage?.id, task?.id, requiresUpload, onFetchData]);
 
   const handleDeleteDocument = useCallback(async (documentToDelete: any) => {
     if (!documentToDelete || readOnly) return;
@@ -410,8 +402,6 @@ export default function EditableStageCell({
       }
 
       const documentId = documentToDelete.id || documentToDelete.file?.id || documentToDelete.documentId || documentToDelete.document_id;
-      // "one_off" here is a KYC *document type* classification (see add-stage-dialog.tsx), not an
-      // indicator that this document instance lacks a DB row - always delete by real UUID when we have one.
       const isRealDocumentId = typeof documentId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(documentId);
       const docIdentifier = isRealDocumentId ? documentId : (documentToDelete.documentId || documentToDelete.fileUrl || documentToDelete.fileName || documentId);
 
@@ -830,7 +820,6 @@ export default function EditableStageCell({
     const stageStatus = stageData?.status;
     const isSkipped = stageStatus === 'skipped';
 
-    // In readOnly mode, show read-only display without edit capabilities
     if (readOnly) {
       if (isSkipped) {
         const skippedAt = stageData?.skippedAt;
@@ -928,13 +917,11 @@ export default function EditableStageCell({
     const isExplicitlyCompleted = stageStatus === 'completed';
     const isLegacyCompleted = !stageStatus && (!!value || stageData?.documentsUploaded === true);
 
-    // Handle custom input types (non-document, non-date)
     const inputType = stage.stageInputType;
     const isCustomInputType = inputType && inputType !== 'document' && inputType !== 'file' && !requiresUpload;
     const currentValue = value || stageData?.value || '';
 
     if (isCustomInputType && !isSkipped) {
-      // Completed state for custom input types
       if ((isExplicitlyCompleted || isLegacyCompleted) && !isEditing) {
         return (
           <div className="flex items-center gap-1 min-w-0">
@@ -943,20 +930,23 @@ export default function EditableStageCell({
               {currentValue || 'Completed'}
             </span>
             {!readOnly && (
-              <Button variant="ghost" size="sm" className="h-5 px-1 text-[10px] text-blue-600 hover:bg-blue-50 shrink-0" onClick={(e) => { e.stopPropagation(); setIsEditing(true); setCustomInputValue(currentValue); if (inputType === 'multiselect') setCustomMultiSelectValues(currentValue ? currentValue.split(', ') : []); }}>
-                Edit
-              </Button>
+              <>
+                <Button variant="ghost" size="sm" className="h-5 px-1 text-[10px] text-blue-600 hover:bg-blue-50 shrink-0" onClick={(e) => { e.stopPropagation(); setIsEditing(true); setCustomInputValue(currentValue); if (inputType === 'multiselect') setCustomMultiSelectValues(currentValue ? currentValue.split(', ') : []); }}>
+                  Edit
+                </Button>
+                <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 shrink-0" onClick={handleClearStage} disabled={isLoading} title="Clear">
+                  <RotateCcw className="h-3 w-3" />
+                </Button>
+              </>
             )}
           </div>
         );
       }
 
-      // In progress / not started - show input or button
       if (isEditing) {
         return renderCustomInputEditor(inputType, isCompact, currentValue);
       }
 
-      // Show input type icon and value or action button
       const inputIcon = getInputTypeIcon(inputType);
       if (currentValue) {
         return (
@@ -971,7 +961,6 @@ export default function EditableStageCell({
         );
       }
 
-      // No value yet - show add button
       return (
         <Button variant="ghost" size="sm" className={cn("text-gray-600 border border-dashed border-gray-300 hover:border-gray-400 shrink-0", isCompact ? "h-6 px-2 text-[10px]" : "h-7 px-3 text-xs")} onClick={() => { setIsEditing(true); setCustomInputValue(currentValue); if (inputType === 'multiselect') setCustomMultiSelectValues(currentValue ? currentValue.split(', ') : []); }}>
           {inputIcon} <span className="ml-1">{getInputTypeLabel(inputType)}</span>
@@ -1016,33 +1005,40 @@ export default function EditableStageCell({
       const borderColorClass = isCompletedOverdue ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-100";
 
       return (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div
-                className={`flex items-center gap-1 font-semibold text-xs ${textColorClass} cursor-pointer hover:underline select-none truncate`}
-                onClick={(e) => { e.stopPropagation(); if (!requiresUpload) setIsEditing(true); }}
-                onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-              >
-                {icon}
-                <span className="truncate" title={formatDateDisplay(stageDate)}>{formatDateDisplay(stageDate)}</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
-              <div className="space-y-2 p-1">
-                <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
-                  <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
+        <div className="flex items-center gap-1 min-w-0">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div
+                  className={`flex items-center gap-1 font-semibold text-xs ${textColorClass} cursor-pointer hover:underline select-none truncate`}
+                  onClick={(e) => { e.stopPropagation(); if (!requiresUpload) setIsEditing(true); }}
+                  onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+                >
+                  {icon}
+                  <span className="truncate" title={formatDateDisplay(stageDate)}>{formatDateDisplay(stageDate)}</span>
                 </div>
-                <div className="text-xs space-y-1">
-                  <div className="flex justify-between gap-4"><span className="text-slate-500">Completed:</span><span>{formatDateDisplay(stageDate)}</span></div>
-                  <div className="flex justify-between gap-4"><span className="text-slate-500">Duration:</span><span>{completionDuration}</span></div>
-                  {isCompletedOverdue && <p className="text-amber-600 font-bold">Overdue</p>}
-                  <p className="text-[10px] text-slate-400 pt-1 italic border-t border-slate-200 mt-1">Double-click to edit date</p>
+              </TooltipTrigger>
+              <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
+                <div className="space-y-2 p-1">
+                  <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
+                    <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
+                  </div>
+                  <div className="text-xs space-y-1">
+                    <div className="flex justify-between gap-4"><span className="text-slate-500">Completed:</span><span>{formatDateDisplay(stageDate)}</span></div>
+                    <div className="flex justify-between gap-4"><span className="text-slate-500">Duration:</span><span>{completionDuration}</span></div>
+                    {isCompletedOverdue && <p className="text-amber-600 font-bold">Overdue</p>}
+                    <p className="text-[10px] text-slate-400 pt-1 italic border-t border-slate-200 mt-1">Double-click to edit date</p>
+                  </div>
                 </div>
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          {!readOnly && !requiresUpload && (
+            <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 shrink-0" onClick={handleClearStage} disabled={isLoading} title="Clear">
+              <RotateCcw className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
       );
     }
 
@@ -1166,8 +1162,6 @@ export default function EditableStageCell({
 
     const btnSizeClass = isCompact ? "h-6 w-6" : "h-7 w-7";
     const iconSizeClass = isCompact ? "h-16 w-16" : "h-16 w-16";
-
-    // In readOnly mode, only show view button
     if (readOnly) {
       const viewBtn = linkedDocument && (
         <Dialog>
@@ -1355,15 +1349,12 @@ export default function EditableStageCell({
     if (renderMode === 'date') return renderDateContent(false);
     if (renderMode === 'actions') return renderActionsContent(false);
     
-    // NEW COMBINED INLINE LAYOUT
     if (renderMode === 'combined') {
       return (
         <div className="flex flex-row items-center justify-between w-full h-full px-0.5 gap-1 min-h-[30px]">
-          {/* Status/Date taking available space on left */}
           <div className="flex items-center min-w-0 flex-1 justify-start">
              {renderDateContent(true)}
           </div>
-          {/* Action icons packed tightly on the right */}
           <div className="flex items-center justify-end shrink-0">
              {renderActionsContent(true)}
           </div>

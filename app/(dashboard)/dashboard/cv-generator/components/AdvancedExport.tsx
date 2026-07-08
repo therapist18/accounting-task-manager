@@ -70,6 +70,8 @@ export default function AdvancedExport({ cvData, previewRef, onClose }: Advanced
 
     const originalOverflow = element.style.overflow;
     const originalStyle = element.style.transform;
+    const originalWidth = element.style.width;
+    const originalMinHeight = element.style.minHeight;
 
     if (opts.hidePhoto) {
       const photos = element.querySelectorAll('img[alt="Profile"]');
@@ -78,6 +80,17 @@ export default function AdvancedExport({ cvData, previewRef, onClose }: Advanced
 
     element.style.transform = "none";
     element.style.overflow = "visible";
+    element.style.width = "210mm";
+    
+    // Wait for layout
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    const contentHeight = element.scrollHeight;
+    const A4_HEIGHT_PX = 1122; // 297mm at 96dpi
+    const pages = Math.ceil(contentHeight / A4_HEIGHT_PX);
+    element.style.minHeight = `${pages * A4_HEIGHT_PX}px`;
+    
+    await new Promise(resolve => setTimeout(resolve, 50));
 
     const canvas = await html2canvas(element, {
       scale: opts.atsOptimized ? 1.5 : 2,
@@ -86,35 +99,48 @@ export default function AdvancedExport({ cvData, previewRef, onClose }: Advanced
       backgroundColor: "#ffffff",
       scrollX: 0,
       scrollY: 0,
+      width: element.scrollWidth,
+      height: Math.max(contentHeight, A4_HEIGHT_PX),
+      windowWidth: element.scrollWidth,
+      windowHeight: Math.max(contentHeight, A4_HEIGHT_PX),
+      onclone: (clonedDoc) => {
+        const clonedElement = clonedDoc.querySelector('[data-preview]') || clonedDoc.querySelector('#cv-preview-container > div');
+        if (clonedElement) {
+          (clonedElement as HTMLElement).style.width = '210mm';
+          (clonedElement as HTMLElement).style.minHeight = `${pages * A4_HEIGHT_PX}px`;
+          (clonedElement as HTMLElement).style.overflow = 'visible';
+          (clonedElement as HTMLElement).style.transform = 'none';
+        }
+      }
     });
 
     element.style.transform = originalStyle;
     element.style.overflow = originalOverflow;
+    element.style.width = originalWidth;
+    element.style.minHeight = originalMinHeight;
 
     if (opts.hidePhoto) {
       const photos = element.querySelectorAll('img[alt="Profile"]');
       photos.forEach(p => (p as HTMLElement).style.display = '');
     }
 
-    const imgData = canvas.toDataURL("image/jpeg", opts.atsOptimized ? 0.8 : 1.0);
+    const imgData = canvas.toDataURL("image/jpeg", opts.atsOptimized ? 0.8 : 0.95);
     const pdf = new jsPDF("p", "mm", "a4");
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
     const canvasWidth = canvas.width;
     const canvasHeight = canvas.height;
+    const imgWidth = pageWidth;
     const imgHeight = (canvasHeight * pageWidth) / canvasWidth;
-
-    let heightLeft = imgHeight;
-    let position = 0;
-
-    pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
-    heightLeft -= pageHeight;
-
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeight;
-      pdf.addPage();
-      pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
-      heightLeft -= pageHeight;
+    
+    const totalPages = Math.ceil(imgHeight / pageHeight);
+    
+    for (let i = 0; i < totalPages; i++) {
+      if (i > 0) {
+        pdf.addPage();
+      }
+      const position = -(i * pageHeight);
+      pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
     }
 
     const suffix = opts.atsOptimized ? '_ATS' : opts.printOptimized ? '_Print' : opts.hidePhoto ? '_NoPhoto' : '';
