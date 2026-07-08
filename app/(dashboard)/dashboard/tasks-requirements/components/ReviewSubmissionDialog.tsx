@@ -12,6 +12,17 @@ import { CheckCircle2, XCircle, AlertCircle, FileText, Database, HelpCircle, Che
 import supabase from "@/lib/supabase/client"
 import { resolveTargetEntityIdImpl, resolveVariableValueImpl } from "../../tasks/utils/fieldResolution"
 import { updateJsonValue } from "../../tasks/utils/AutomationMappingDialog"
+import type { FieldResolutionContext } from "../../tasks/utils/fieldResolution"
+
+function humanizeVariableName(name: string): string {
+  if (!name) return "Field"
+  return name
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
 
 interface ReviewSubmissionDialogProps {
   isOpen: boolean
@@ -46,18 +57,82 @@ export function ReviewSubmissionDialog({
 
   const draft = task?.registry_metadata?.client_requirements_draft
 
+  // Mirrors the relationshipData shape built in RequirementsTab/AutomationTab so target
+  // entities (director, dependant, sponsor, etc.) resolve the same way everywhere.
+  const relationshipData = useMemo(() => {
+    if (!task) return [null]
+    const participants = task.participants_details || []
+    const applicant = task.applicant_details || {}
+    const companyParticipant = participants.find((p: any) => p.type === 'company')
+    const isApplicantDependant = applicant.role === 'dependant' || (Array.isArray(applicant.role) && applicant.role.includes('dependant'))
+    let principal = participants.find((p: any) =>
+      p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
+    )
+    let dependants = participants
+      .filter((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant'))
+      .map((dep: any) => ({ id: dep.id, name: dep.name, relationship: dep.relationship || 'dependant' }))
+    if (isApplicantDependant) {
+      if (!dependants.find((d: any) => d.id === applicant.id)) {
+        dependants.push({ id: applicant.id || task?.individual_id, name: applicant.name, relationship: applicant.relationship || 'dependant' })
+      }
+    } else {
+      if (!principal) principal = { id: applicant.id || task?.individual_id, name: applicant.name, role: applicant.role }
+    }
+    return [{
+      company: { id: companyParticipant?.id || task?.company_id, name: companyParticipant?.name || task?.company_name || 'Company', type: 'company' },
+      principal: principal ? { id: principal.id, name: principal.name, role: principal.role } : null,
+      directors: participants
+        .filter((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? (p.role.includes('director') || p.role.includes('shareholder')) : (p.role === 'director' || p.role === 'shareholder')))
+        .map((d: any) => ({ id: d.id, name: d.name, role: d.role })),
+      dependants: dependants,
+      understudy: (() => {
+        const up = participants.find((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy'))
+        return up ? { id: up.id, name: up.name } : null
+      })(),
+      sponsor: (() => {
+        const sp = participants.find((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor'))
+        return sp ? { id: sp.id, name: sp.name } : null
+      })()
+    }]
+  }, [task])
+
+  const getEntityLabel = useCallback((entityId: any, entityType?: string) => {
+    if (!task) return String(entityId)
+    if (String(task.applicant_details?.id) === String(entityId)) return task.applicant_details?.name
+    const participant = (task.participants_details || []).find((p: any) => String(p.id) === String(entityId))
+    if (participant) return participant.name
+    if (entityType === 'company' || String(task.company_id) === String(entityId)) return task.company_name || 'Company'
+    return String(entityId)
+  }, [task])
+
   const submittedDocuments = useMemo(() => {
     if (!draft?.documents) return []
+    if (Array.isArray(draft.documents)) {
+      return draft.documents.map((data: any) => ({
+        documentId: data.document_id || data.documentId,
+        entityId: data.entity_id ?? data.entityId,
+        entityType: data.entity_type || data.entityType,
+        entityLabel: data.entity_label || data.entityLabel || getEntityLabel(data.entity_id ?? data.entityId, data.entity_type || data.entityType),
+        fileName: data.file_name || data.fileName || 'Document',
+        filePath: data.file_path || data.filePath,
+        extractedDetails: data.extracted_details || data.extractedDetails || {},
+        status: data.status || 'draft',
+        submittedAt: data.submitted_at || data.submittedAt,
+      }))
+    }
+    // Legacy object-map format (pre entity-tagged submissions)
     return Object.entries(draft.documents).map(([docId, data]: [string, any]) => ({
       documentId: docId,
+      entityId: undefined,
+      entityType: data.entity_type || data.entityType || (data.entity_types || data.entityTypes)?.[0],
+      entityLabel: '',
       fileName: data.file_name || data.fileName || 'Document',
       filePath: data.file_path || data.filePath,
       extractedDetails: data.extracted_details || data.extractedDetails || {},
-      entityType: data.entity_type || data.entityType,
       status: data.status || 'draft',
       submittedAt: data.submitted_at || data.submittedAt,
     }))
-  }, [draft])
+  }, [draft, getEntityLabel])
 
   const submittedQuestions = useMemo(() => {
     if (!draft?.questions) return []
@@ -95,7 +170,7 @@ export function ReviewSubmissionDialog({
       const variableName = parts.slice(1).join(':')
       const auto = automationWebdataMap[automationId]
       const field = auto?.webdata?.find((f: any) => f.variableName === variableName)
-      return field?.efnsDisplayName || field?.name || variableName
+      return field?.efnsDisplayName || field?.name || humanizeVariableName(variableName)
     }
     return fieldKey
   }, [automationWebdataMap])
@@ -108,16 +183,18 @@ export function ReviewSubmissionDialog({
     try {
       // 1. Upload submitted documents
       if (submittedDocuments.length > 0) {
+        const companyId = task.company_id || task.participants_details?.find((p: any) => p.type === 'company')?.id
+        const individualId = task.individual_id || task.applicant_details?.id
+
         for (const doc of submittedDocuments) {
           if (!doc.filePath) continue
 
-          const companyId = task.company_id || task.participants_details?.find((p: any) => p.type === 'company')?.id
-          const individualId = task.individual_id || task.applicant_details?.id
-
-          const isCompanyDoc = doc.entityType === 'company' || (!!companyId && !individualId)
+          const isCompanyDoc = doc.entityType === 'company'
           const targetTable = isCompanyDoc ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents'
           const idField = isCompanyDoc ? 'company_id' : 'director_id'
-          const entityId = isCompanyDoc ? companyId : individualId
+          // Prefer the specific entity the client uploaded against; fall back to the
+          // task's primary company/individual for legacy (non entity-tagged) drafts.
+          const entityId = doc.entityId ?? (isCompanyDoc ? companyId : individualId)
 
           if (!entityId) continue
 
@@ -161,13 +238,13 @@ export function ReviewSubmissionDialog({
           const automationId = parts[0]
           const variableName = parts.slice(1).join(':')
 
-          // Use metadata from new format, or fall back to webdata map
+          // Prefer the live automation definition (has dependantRelationships etc. needed
+          // for correct entity resolution); fall back to the metadata captured at submit time.
           const meta = field.metadata
-          let fieldDef = meta ? { variableName: meta.variableName, entityTypes: meta.entityTypes, masterFieldIds: meta.masterFieldIds } : null
-
-          if (!fieldDef) {
-            const auto = automationWebdataMap[automationId]
-            fieldDef = auto?.webdata?.find((f: any) => f.variableName === variableName)
+          const auto = automationWebdataMap[automationId]
+          let fieldDef = auto?.webdata?.find((f: any) => f.variableName === variableName)
+          if (!fieldDef && meta) {
+            fieldDef = { variableName: meta.variableName, entityTypes: meta.entityTypes, masterFieldIds: meta.masterFieldIds }
           }
 
           if (!fieldDef) continue
@@ -186,12 +263,14 @@ export function ReviewSubmissionDialog({
           const source = masterField.sources.find((s: any) => !s.is_computed && s.table && s.path) || masterField.sources[0]
           if (!source?.table || !source?.path) continue
 
-          // Determine entity ID for the record
-          let entityId = task.individual_id || task.applicant_details?.id
-          const entityTypes = fieldDef.entityTypes || (fieldDef.entityType ? [fieldDef.entityType] : [])
-          if (entityTypes.includes('company')) {
-            entityId = task.company_id || task.participants_details?.find((p: any) => p.type === 'company')?.id
-          }
+          // Determine entity ID for the record using the same resolution logic used
+          // everywhere else (AutomationTab, SendRequirementsDialog) so a field always
+          // lands on the same record it was read from.
+          const entityId = resolveTargetEntityIdImpl(fieldDef, {
+            relationshipData: relationshipData[0],
+            currentIndividualId: String(task.individual_id || task.applicant_details?.id || ''),
+            task,
+          } as FieldResolutionContext)
 
           if (!entityId) continue
 
@@ -306,7 +385,7 @@ export function ReviewSubmissionDialog({
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-4xl w-full max-h-[85vh] flex flex-col bg-white">
         <DialogHeader className="border-b pb-4">
-          <DialogTitle className="text-xl font-bold flex items-center gap-2 text-slate-800">
+          <DialogTitle className="text-lg font-bold flex items-center gap-2 text-slate-800">
             <CheckCircle2 className="h-5 w-5 text-blue-600" />
             Review Client Submission
           </DialogTitle>
@@ -339,7 +418,14 @@ export function ReviewSubmissionDialog({
                           <FileText className="h-4 w-4 text-blue-500" />
                           <div>
                             <p className="font-semibold text-slate-700">{getDocumentName(doc.documentId)}</p>
-                            <p className="text-xs text-slate-400">{doc.fileName}</p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <p className="text-xs text-slate-400">{doc.fileName}</p>
+                              {doc.entityLabel && (
+                                <Badge variant="secondary" className="text-[9px] font-medium uppercase tracking-wide px-1.5 py-0 bg-slate-100 text-slate-500 border-slate-200">
+                                  {doc.entityLabel}
+                                </Badge>
+                              )}
+                            </div>
                             {doc.submittedAt && (
                               <p className="text-[10px] text-slate-400 mt-0.5">
                                 Submitted: {new Date(doc.submittedAt).toLocaleString()}

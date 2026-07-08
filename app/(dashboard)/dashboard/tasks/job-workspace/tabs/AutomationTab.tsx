@@ -5,7 +5,7 @@ import React, { useState, useMemo, useCallback, useEffect } from "react"
 import {
   ChevronDown, ChevronRight, FileText, User, Loader2, RefreshCw,
   CheckCircle2, AlertCircle, Eye, Briefcase, UserCheck, HeartPulse, ArrowUpDown, ArrowUp, ArrowDown, Users2,
-  Database, Zap, Search, Play, X, StopCircle, Terminal
+  Database, Zap, Search, Play, X, StopCircle, Terminal, Calendar, Edit3
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -81,11 +81,25 @@ function getEntityTypeConfig(type: string) {
     case "company": return { bgColor: "bg-slate-700", Icon: Briefcase }
     case "director": return { bgColor: "bg-indigo-600", Icon: UserCheck }
     case "dependant": return { bgColor: "bg-blue-500", Icon: Users2 }
-    case "principal": return { bgColor: "bg-blue-700", Icon: UserCheck }
+    case "principal": return { bgColor: "bg-custom-blue", Icon: UserCheck }
     case "sponsor": return { bgColor: "bg-green-600", Icon: HeartPulse }
     case "understudy": return { bgColor: "bg-cyan-600", Icon: User }
-    default: return { bgColor: "bg-blue-600", Icon: User }
+    default: return { bgColor: "bg-custom-blue", Icon: User }
   }
+}
+
+function humanizeVariableName(name: string): string {
+  if (!name) return "Field"
+  return name
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function getFieldLabel(field: any): string {
+  return field?.efnsDisplayName || field?.name || humanizeVariableName(field?.variableName) || "Field"
 }
 
 function isFieldApplicable(field: any, col: ColDef): boolean {
@@ -123,6 +137,7 @@ function isFieldApplicable(field: any, col: ColDef): boolean {
 export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
   const { task, automations } = data
   const [expandedAutomations, setExpandedAutomations] = useState<Set<number>>(new Set(automations?.map(a => a.id) || []))
+  const [expandedArrayFields, setExpandedArrayFields] = useState<Set<string>>(new Set())
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
 
@@ -206,16 +221,16 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
   // Load job fields
   useEffect(() => {
     const linkedFieldIds = new Set<string>()
-    ;(automations || []).forEach(auto => {
-      if (auto.webdata && auto.webdata.length > 0) {
-        auto.webdata.forEach((field: any) => {
-          ;(field.linkedMasterFields || field.masterFieldIds || []).forEach((id: any) => linkedFieldIds.add(String(id)))
-          ;(field.arrayItems || []).forEach((item: any) => {
-            ;(item.linkedMasterFields || item.masterFieldIds || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : [])).forEach((id: any) => linkedFieldIds.add(String(id)))
+      ; (automations || []).forEach(auto => {
+        if (auto.webdata && auto.webdata.length > 0) {
+          auto.webdata.forEach((field: any) => {
+            ; (field.linkedMasterFields || field.masterFieldIds || []).forEach((id: any) => linkedFieldIds.add(String(id)))
+              ; (field.arrayItems || []).forEach((item: any) => {
+                ; (item.linkedMasterFields || item.masterFieldIds || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : [])).forEach((id: any) => linkedFieldIds.add(String(id)))
+              })
           })
-        })
-      }
-    })
+        }
+      })
     if (linkedFieldIds.size === 0) return
     const fetchJobFields = async () => {
       const { data: fields } = await supabase.from('tm_job_fields').select('*').in('id', Array.from(linkedFieldIds))
@@ -237,28 +252,28 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
       const mergedComputed: Record<string, any> = {}
       const calls: Promise<void>[] = []
 
-      ;(automations || []).forEach(auto => {
-        if (!expandedAutomations.has(auto.id) || !auto.webdata?.length) return
-        relationshipData.forEach((relData: any) => {
-          calls.push(
-            fetchSourceDataImpl({
-              selectedAutomationId: String(auto.id),
-              webData: [{ automationId: String(auto.id), fields: auto.webdata }],
-              jobFields: jobFieldsRecord,
-              relationshipData: relData,
-              taskId: String(task?.id || ""),
-              currentIndividualId: String(task?.individual_id || ""),
-              task
-            }).then(({ sourceData: sd, masterFieldComputedValues: mc }) => {
-              Object.entries(sd).forEach(([table, records]) => {
-                if (!mergedSource[table]) mergedSource[table] = {}
-                Object.assign(mergedSource[table], records)
-              })
-              if (mc) Object.assign(mergedComputed, mc)
-            }).catch(err => console.error('Error resolving field values', err))
-          )
+        ; (automations || []).forEach(auto => {
+          if (!expandedAutomations.has(auto.id) || !auto.webdata?.length) return
+          relationshipData.forEach((relData: any) => {
+            calls.push(
+              fetchSourceDataImpl({
+                selectedAutomationId: String(auto.id),
+                webData: [{ automationId: String(auto.id), fields: auto.webdata }],
+                jobFields: jobFieldsRecord,
+                relationshipData: relData,
+                taskId: String(task?.id || ""),
+                currentIndividualId: String(task?.individual_id || ""),
+                task
+              }).then(({ sourceData: sd, masterFieldComputedValues: mc }) => {
+                Object.entries(sd).forEach(([table, records]) => {
+                  if (!mergedSource[table]) mergedSource[table] = {}
+                  Object.assign(mergedSource[table], records)
+                })
+                if (mc) Object.assign(mergedComputed, mc)
+              }).catch(err => console.error('Error resolving field values', err))
+            )
+          })
         })
-      })
       await Promise.all(calls)
       setFieldSourceDataCache(prev => {
         const next = { ...prev }
@@ -272,7 +287,7 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
 
   // Single field resolver
   const resolveFieldForCol = useCallback(async (field: any, col: ColDef) => {
-    const cacheKey = `${field.variableName || field.name}-${col.id}`
+    const cacheKey = `${field.variableName || field.name || field.field_name}-${col.id}`
     if (resolvedValues[cacheKey] !== undefined && !resolving[cacheKey]) return
     setResolving(prev => ({ ...prev, [cacheKey]: true }))
     try {
@@ -299,24 +314,22 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
   // Auto-resolve when source data is ready
   useEffect(() => {
     if (Object.keys(fieldSourceDataCache).length === 0) return
-    ;(automations || []).forEach(auto => {
-      if (!expandedAutomations.has(auto.id)) return
-      ;(auto.webdata || []).forEach((field: any) => {
-        columns.forEach(col => {
-          const cacheKey = `${field.variableName || field.name}-${col.id}`
-          if (resolvedValues[cacheKey] === undefined && !resolving[cacheKey] && isFieldApplicable(field, col)) {
-            resolveFieldForCol(field, col)
-          }
-        })
+      ; (automations || []).forEach(auto => {
+        if (!expandedAutomations.has(auto.id)) return
+          ; (auto.webdata || []).forEach((field: any) => {
+            columns.forEach(col => {
+              const cacheKey = `${field.variableName || field.name || field.field_name}-${col.id}`
+              if (resolvedValues[cacheKey] === undefined && !resolving[cacheKey] && isFieldApplicable(field, col)) {
+                resolveFieldForCol(field, col)
+              }
+            })
+          })
       })
-    })
   }, [fieldSourceDataCache, expandedAutomations, automations, columns, resolvedValues, resolving, resolveFieldForCol])
 
   const handleSort = (colKey: string) => {
     setSortCol(prev => prev === colKey ? (setSortDir(d => d === "asc" ? "desc" : "asc"), colKey) : (setSortDir("asc"), colKey))
   }
-
-  // ---- New functions from AutomationMappingDialog ----
 
   const deriveAutomationType = useCallback((automation: any): string => {
     if (automation?.automation_type) return automation.automation_type;
@@ -373,48 +386,15 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
         .select()
         .single();
       if (insertError) throw new Error(`DB insert failed: ${insertError.message}`);
-      console.log('✅ Screenshot saved to Supabase:', docRecord);
       return docRecord;
     } finally {
       setIsSavingScreenshot(false);
     }
   };
 
-  const getPrimaryEntityType = useCallback(() => {
-    return 'principal';
-  }, []);
-
   const getPrimaryTargetEntityId = useCallback((): string => {
     return task?.individual_id?.toString() || task?.applicant_details?.id || '';
   }, [task]);
-
-  const getEntityNameAndId = useCallback((entityType?: string, entityId?: string) => {
-    const targetId = entityId;
-    if (!entityType && !targetId) return { name: 'Not specified', id: 'Not specified' };
-    const relData = relationshipData[0];
-    const type = entityType?.toLowerCase();
-    if (type === 'company') {
-      return {
-        name: relData?.company?.company_name || task?.company_name || 'Not specified',
-        id: String(relData?.company?.id || task?.company_id || 'Not specified')
-      };
-    }
-    const allPeople = [
-      ...(relData?.directors || []),
-      ...(relData?.dependants || []),
-      relData?.understudy,
-      relData?.sponsor,
-      relData?.principal
-    ].filter(Boolean);
-    const person = allPeople.find(p => String(p.id) === String(targetId));
-    if (person) {
-      return {
-        name: person.full_name || person.name || (person.first_name ? `${person.first_name} ${person.last_name || ''}` : 'Not specified'),
-        id: String(person.id)
-      };
-    }
-    return { name: 'Not specified', id: 'Not specified' };
-  }, [relationshipData, task]);
 
   const handleCompletedJob = useCallback(async (job: any) => {
     const directorId = getPrimaryTargetEntityId();
@@ -476,7 +456,6 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
         .single();
 
       if (error || !job) {
-        console.log('Job not found - stopping polling');
         clearPolling();
         setRunningAutomationId(null);
         return;
@@ -525,9 +504,7 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
 
   useEffect(() => {
     return () => {
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-      }
+      if (pollingInterval) clearInterval(pollingInterval);
     };
   }, [pollingInterval]);
 
@@ -559,9 +536,10 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
     getArrayFieldDataImpl(field, buildFieldResolutionContextForAuto(field.automation_id || "", [field])),
     [buildFieldResolutionContextForAuto]);
 
-  const getFieldValue = useCallback((fieldIdOrVariable: string, entityId: string, sourceIdx: number = 0, extractionMode: string = 'latest', preserveArray: boolean = false) =>
-    getFieldValueImpl(fieldIdOrVariable, entityId, sourceIdx, extractionMode, preserveArray, buildFieldResolutionContextForAuto("", [])),
-    [buildFieldResolutionContextForAuto]);
+  const getEntityLabelById = useCallback((id: any) => {
+    const col = columns.find(c => String(c.id) === String(id))
+    return col?.label || String(id)
+  }, [columns]);
 
   const cleanFormData = (data: Record<string, any>): Record<string, any> => {
     const cleaned: Record<string, any> = {};
@@ -623,7 +601,6 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
       const fields = automation.webdata || [];
       const formData: Record<string, any> = {};
 
-      const ctx = buildFieldResolutionContextForAuto(String(automationId), fields);
       const currentTargetId = String(task?.individual_id || "");
 
       for (const f of fields) {
@@ -640,7 +617,8 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
         } else if (f.fieldType === 'computed') {
           formData[f.variableName] = computedFieldsPreview[f.variableName];
         } else {
-          const val = resolveVariableValue(f, targetId);
+          const cacheKey = `${f.variableName || f.name || f.field_name}-${targetId}`;
+          const val = resolvedValues[cacheKey] || resolveVariableValue(f, targetId);
           formData[f.variableName] = val === "Missing" ? null : cleanFieldValue(val);
         }
       }
@@ -692,7 +670,7 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
 
       toast({
         title: 'Automation Queued',
-        description: `Job submitted for ${automation.name || jobType}. The agent will pick it up shortly.`,
+        description: `Job submitted for ${automation.name || jobType}.`,
       });
 
     } catch (e) {
@@ -700,7 +678,7 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
       toast({ title: 'Automation Error', description: e.message || 'Unknown error', variant: 'destructive' });
       setRunningAutomationId(null);
     }
-  }, [task, buildFieldResolutionContextForAuto, resolveTargetEntityId, getArrayFieldData, documentFiles, computedFieldsPreview, resolveVariableValue, cleanFormData, deriveAutomationType, pollSupabaseJob]);
+  }, [task, resolveTargetEntityId, getArrayFieldData, documentFiles, computedFieldsPreview, resolvedValues, resolveVariableValue, cleanFormData, deriveAutomationType, pollSupabaseJob]);
 
   const getFileUrl = (filePath: string) => {
     if (!filePath) return '';
@@ -712,7 +690,7 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
     }
     const fullPath = `${bucketName}/${cleanPath}`;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!supabaseUrl) { console.error('NEXT_PUBLIC_SUPABASE_URL not set'); return ''; }
+    if (!supabaseUrl) return '';
     const encodedPath = encodeURIComponent(fullPath).replace(/%2F/g, '/');
     return `${supabaseUrl}/storage/v1/object/public/${encodedPath}`;
   };
@@ -726,23 +704,12 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
 
   const saveEdit = async () => {
     if (!editingCell) return;
-    const { col, currentVal } = editingCell;
-    const cacheKey = `${editingCell.field.variableName || editingCell.field.name}-${col.id}`;
+    const { col } = editingCell;
+    const cacheKey = `${editingCell.field.variableName || editingCell.field.name || editingCell.field.field_name}-${col.id}`;
     setResolvedValues(prev => ({ ...prev, [cacheKey]: editValue }));
     setEditingCell(null);
     setEditValue('');
-    toast({ title: 'Overridden', description: 'Value saved locally. It will be used for the next run.', variant: 'default' });
-  };
-
-  const handlePreviewDocument = (doc: any) => {
-    if (!doc) return;
-    setPreviewingDocuments({
-      document_display_name: doc.file_name || 'Document',
-      documents: [doc],
-      person_full_name: individualName || 'Unknown',
-      requirementId: doc.requirement_id || 'Unknown'
-    });
-    setShowPreviewModal(true);
+    toast({ title: 'Overridden', description: 'Value saved locally.' });
   };
 
   useEffect(() => {
@@ -752,13 +719,9 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
       const relData = relationshipData[0];
       if (relData?.principal?.full_name) { setIndividualName(relData.principal.full_name); return; }
       try {
-        const { data: individual } = await supabase.from('registry_individuals').select('first_name, last_name, full_name').eq('id', indId).single();
-        if (individual) {
-          setIndividualName(individual.full_name || `${individual.first_name || ''} ${individual.last_name || ''}`);
-        }
-      } catch (error) {
-        console.error('Error fetching individual name:', error);
-      }
+        const { data: individual } = await supabase.from('registry_individuals').select('full_name').eq('id', indId).single();
+        if (individual) setIndividualName(individual.full_name);
+      } catch (error) { console.error('Error fetching individual name:', error); }
     };
     fetchIndividualName();
   }, [task?.individual_id, relationshipData]);
@@ -793,7 +756,7 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
     return () => clearTimeout(timer);
   }, [task?.individual_id, automations, relationshipData, task]);
 
-  // Fetch documents when automation is expanded
+  // Fetch documents when needed
   useEffect(() => {
     if (!showConsole || !automationJobId) return;
     const loadDocs = async () => {
@@ -819,82 +782,72 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
             .neq('status', 'deleted');
           if (docs) setDocumentFiles(docs.map(d => ({ ...d, owner_type: 'person', owner_id: String(d.director_id) })));
         }
-      } catch (err) {
-        console.error('Error fetching documents:', err);
-      } finally {
-        setIsLoadingDocuments(false);
-      }
+      } catch (err) { console.error('Error fetching documents:', err); } finally { setIsLoadingDocuments(false); }
     };
     loadDocs();
   }, [showConsole, automationJobId, automations, runningAutomationId, task, resolveTargetEntityId]);
 
-  if (!task) return null
+  const totalCols = columns.length + 2
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-white">
+    <div className="h-full flex flex-col overflow-hidden bg-white px-6 py-4">
       {/* Header Bar */}
-      <div className="flex items-center justify-between px-6 py-3 border-b bg-white shrink-0 z-40">
-        <div className="flex items-center gap-3">
-          <h3 className="text-sm font-bold text-slate-800">Field Resolution Matrix</h3>
-          <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-[10px]">
+      <div className="flex items-center justify-between border-b pb-4 mb-3 bg-white shrink-0 z-40">
+        <div className="flex items-center gap-4">
+          <h3 className="text-xl font-medium text-slate-800 tracking-tight">Field Resolution Matrix</h3>
+          <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-sm rounded-full px-3 py-0.5">
             {automations?.length || 0} Automations
           </Badge>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           {automationJobId && showConsole && (
-            <Button variant="outline" size="sm" className="h-8 text-xs border-slate-200 text-slate-600 hover:bg-slate-50" onClick={() => setShowConsole(!showConsole)}>
-              <Terminal className="h-3.5 w-3.5 mr-1.5" /> {showConsole ? 'Hide Console' : 'Show Console'}
+            <Button variant="outline" className="h-10 px-5 text-sm font-semibold rounded-full border-slate-300 text-slate-700 bg-slate-50 hover:bg-slate-100 shadow-sm" onClick={() => setShowConsole(!showConsole)}>
+              <Terminal className="h-4 w-4 mr-2" /> {showConsole ? 'Hide Console' : 'Show Console'}
             </Button>
           )}
-          <Button variant="outline" size="sm" className="h-8 text-xs border-slate-200 text-slate-600 hover:bg-slate-50" onClick={onRefresh}>
-            <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Refresh
+          <Button variant="outline" className="h-10 px-5 text-sm font-medium rounded-full border-slate-300 text-slate-700 hover:bg-slate-50 shadow-sm" onClick={onRefresh}>
+            <RefreshCw className="h-4 w-4 mr-2" /> Refresh
           </Button>
         </div>
       </div>
 
       {(!automations || automations.length === 0) ? (
-        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-50/50">
-          <div className="bg-white p-4 rounded-full shadow-sm mb-3 border border-slate-100">
-            <Search className="h-8 w-8 text-slate-300" />
+        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
+          <div className="bg-white p-6 rounded-full shadow-md mb-4 border border-slate-100">
+            <Search className="h-10 w-10 text-slate-300" />
           </div>
-          <p className="text-sm font-bold text-slate-600">No Automations Configured</p>
-          <p className="text-[11px] font-medium text-slate-400 mt-1 max-w-xs">
+          <p className="text-lg font-medium text-slate-600">No Automations Configured</p>
+          <p className="text-sm font-medium text-slate-400 mt-2 max-w-sm leading-relaxed">
             This task does not have any web automation fields configured for mapping.
           </p>
         </div>
       ) : (
-        <div className="flex-1 overflow-auto relative custom-scrollbar">
+        <div className="flex-1 overflow-auto relative custom-scrollbar border rounded-lg bg-white shadow-sm">
           <Table className="border-separate border-spacing-0 min-w-full">
-            <TableHeader className="sticky top-0 z-30">
-              <TableRow className="bg-slate-50 hover:bg-slate-50">
-                <TableHead className="w-12 h-12 text-center border-b border-r sticky left-0 top-0 bg-slate-50 z-40 text-[10px] font-bold uppercase text-slate-500">#</TableHead>
-                <TableHead
-                  className="min-w-[280px] h-12 border-b border-r sticky left-12 top-0 bg-slate-50 z-40 text-[10px] font-bold uppercase text-slate-500 cursor-pointer hover:bg-slate-100 transition-colors"
-                  onClick={() => handleSort("field-name")}
-                >
-                  <div className="flex items-center justify-between">
-                    <span>Field Name & Type</span>
-                    {sortCol === "field-name" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-30" />}
+            <TableHeader className="sticky top-0 z-30 text-white">
+              <TableRow className="bg-custom-blue hover:bg-custom-blue">
+                <TableHead className="w-12 border-b border-r sticky left-0 top-0 bg-custom-blue z-40 p-0 text-white shadow-sm">
+                  <div className="flex items-center justify-center h-full text-sm font-medium uppercase tracking-wider">#</div>
+                </TableHead>
+                <TableHead className="w-[300px] border-b border-r sticky left-12 top-0 bg-custom-blue z-40 p-0 text-white shadow-sm">
+                  <div className="flex items-center h-full px-6 text-[11px] font-medium uppercase tracking-wider cursor-pointer hover:bg-blue-700 transition-colors" onClick={() => handleSort("field-name")}>
+                    Field Name & Type
+                    {sortCol === "field-name" && (sortDir === "asc" ? <ArrowUp className="ml-2 h-4 w-4" /> : <ArrowDown className="ml-2 h-4 w-4" />)}
                   </div>
                 </TableHead>
                 {columns.map(col => {
                   const { bgColor, Icon } = getEntityTypeConfig(col.type)
-                  const colKey = `col-${col.id}`
                   return (
-                    <TableHead
-                      key={col.id}
-                      className="min-w-[180px] h-12 border-b border-r top-0 bg-slate-50 p-0 cursor-pointer hover:bg-slate-100 transition-colors"
-                      onClick={() => handleSort(colKey)}
-                    >
-                      <div className="flex flex-col items-center justify-center gap-1 px-4">
-                        <div className={cn("flex items-center gap-1.5 px-2 py-0.5 rounded text-white text-[10px] font-bold shadow-sm", bgColor)}>
-                          <Icon className="h-3 w-3" />
-                          <span className="truncate max-w-[100px]">{col.label}</span>
+                    <TableHead key={col.id} className={cn("min-w-[340px] border-b border-r top-0 p-0 text-white align-top shadow-sm", bgColor)}>
+                      <div className="flex flex-col h-full w-full">
+                        <div className="flex flex-col items-center justify-center gap-1.5 p-4 border-b border-white/20 flex-1">
+                          <span className={cn("flex items-center gap-2 text-[11px] font-semibold tracking-wide")}>
+                            <Icon className="h-4 w-4 opacity-90" />
+                            <span className="truncate max-w-[200px]">{col.label}</span>
+                          </span>
+                          <span className="text-[10px] font-medium uppercase tracking-wide opacity-80">{col.subLabel}</span>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">{col.subLabel}</span>
-                          {sortCol === colKey ? (sortDir === "asc" ? <ArrowUp className="h-2.5 w-2.5 text-slate-400" /> : <ArrowDown className="h-2.5 w-2.5 text-slate-400" />) : null}
-                        </div>
+                        <div className="text-[10px] uppercase font-semibold tracking-wider bg-black/20 shrink-0 px-4 py-2.5 text-center">Action</div>
                       </div>
                     </TableHead>
                   )
@@ -904,36 +857,16 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
             <TableBody>
               {automations.map((automation: any) => {
                 const isExpanded = expandedAutomations.has(automation.id)
-                const fields = automation.webdata || automation.fields || automation.web_data_fields || automation.mapped_fields || []
+                const fields = automation.webdata || []
                 const isRunning = runningAutomationId === automation.id
-
-                // Sorting logic
-                let sortedFields = [...fields]
-                if (sortCol === "field-name") {
-                  sortedFields.sort((a, b) => {
-                    const aName = (a.efnsDisplayName || a.name || a.field_name || a.variableName || "").toLowerCase()
-                    const bName = (b.efnsDisplayName || b.name || b.field_name || b.variableName || "").toLowerCase()
-                    return sortDir === "asc" ? aName.localeCompare(bName) : bName.localeCompare(aName)
-                  })
-                } else if (sortCol?.startsWith("col-")) {
-                  const colId = sortCol.replace("col-", "")
-                  const col = columns.find(c => String(c.id) === colId)
-                  if (col) {
-                    sortedFields.sort((a, b) => {
-                      const aApp = isFieldApplicable(a, col) ? 1 : 0
-                      const bApp = isFieldApplicable(b, col) ? 1 : 0
-                      return sortDir === "asc" ? bApp - aApp : aApp - bApp
-                    })
-                  }
-                }
 
                 return (
                   <React.Fragment key={automation.id}>
-                    {/* Category Separator Row */}
+                    {/* Automation Header Row */}
                     <TableRow
                       className={cn(
-                        "hover:bg-slate-200/80 cursor-pointer transition-colors",
-                        isRunning ? "bg-purple-50/80" : "bg-slate-100/80"
+                        "hover:bg-slate-200/90 cursor-pointer transition-colors",
+                        isRunning ? "bg-purple-50/90 shadow-[inset_0_0_0_1px_rgba(147,51,234,0.1)]" : "bg-slate-100/90"
                       )}
                       onClick={() => setExpandedAutomations(prev => {
                         const next = new Set(prev)
@@ -942,41 +875,42 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
                         return next
                       })}
                     >
-                      <TableCell colSpan={columns.length + 2} className="h-10 py-0 px-4 border-b border-slate-200 sticky left-0 z-20">
+                      <TableCell colSpan={totalCols} className="py-3 px-5 border-b border-slate-300 sticky left-0 z-20">
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}
-                            {isRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-600" /> : <Zap className="h-3.5 w-3.5 text-purple-600" />}
-                            <span className="text-[11px] font-black uppercase tracking-widest text-slate-700">
-                              {automation.name || automation.automation_name || `Automation #${automation.id}`}
+                          <div className="flex items-center gap-3">
+                            {isExpanded ? <ChevronDown className="h-5 w-5 text-slate-500" /> : <ChevronRight className="h-5 w-5 text-slate-500" />}
+                            <div className={cn("p-1.5 rounded-md", isRunning ? "bg-purple-100 text-purple-600" : "bg-slate-200 text-slate-600")}>
+                              {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                            </div>
+                            <span className="text-[11px] font-medium uppercase tracking-wide text-slate-800">
+                              {automation.name || `Automation #${automation.id}`}
                             </span>
-                            <Badge variant="outline" className="text-[9px] h-4 px-1.5 bg-white border-slate-300 text-slate-500">
+                            <Badge variant="outline" className="text-[10px] font-semibold rounded-full px-3 py-0.5 bg-white border-slate-300 text-slate-600 shadow-sm">
                               {fields.length} Fields
                             </Badge>
                             {isRunning && (
-                              <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[9px]">
-                                Running...
+                              <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[10px] rounded-full animate-pulse px-3 py-0.5">
+                                Agent Active
                               </Badge>
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-3 pr-2">
                             {isRunning ? (
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-6 text-[10px] text-red-600 hover:bg-red-50 font-bold gap-1"
+                                className="h-9 px-5 text-xs font-medium text-red-600 hover:bg-red-50 hover:text-red-700 rounded-full border border-red-100"
                                 onClick={(e) => { e.stopPropagation(); stopAutomation(); }}
                               >
-                                <StopCircle className="h-3.5 w-3.5" /> Stop
+                                <StopCircle className="h-4 w-4 mr-2" /> Stop Agent
                               </Button>
                             ) : (
                               <Button
-                                variant="ghost"
                                 size="sm"
-                                className="h-6 text-[10px] text-green-600 hover:bg-green-50 font-bold gap-1"
+                                className="h-9 px-6 text-xs font-medium bg-custom-blue hover:bg-blue-700 rounded-full shadow-md transition-all active:scale-95"
                                 onClick={(e) => { e.stopPropagation(); handleRunAutomation(automation); }}
                               >
-                                <Play className="h-3.5 w-3.5" /> Run
+                                <Play className="h-4 w-4 mr-2" /> Run Automation
                               </Button>
                             )}
                           </div>
@@ -984,155 +918,221 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
                       </TableCell>
                     </TableRow>
 
-                    {/* Automation Fields Rows */}
-                    {isExpanded && sortedFields.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={columns.length + 2} className="h-16 text-center text-xs font-medium text-slate-400 bg-slate-50">
-                          No fields configured in this automation.
-                        </TableCell>
-                      </TableRow>
-                    )}
-
-                    {isExpanded && sortedFields.map((field: any, idx: number) => {
+                    {/* Field Rows */}
+                    {isExpanded && fields.map((field: any, fIdx: number) => {
                       const isDocument = field.fieldType === 'document'
                       const isComputed = field.fieldType === 'computed'
                       const isArray = field.fieldType === 'array'
+                      const fieldKey = field.variableName || field.name || field.field_name
+                      const arrayExpandKey = `${automation.id}-${fieldKey}`
+                      const isArrayExpanded = isArray && expandedArrayFields.has(arrayExpandKey)
+                      const arrayRows = isArrayExpanded ? getArrayFieldData(field) : []
 
                       return (
-                        <TableRow key={field.id || field.variableName || idx} className="group hover:bg-slate-50/50">
-                          <TableCell className="h-12 text-center text-[10px] font-mono text-slate-400 border-b border-r sticky left-0 bg-white group-hover:bg-slate-50/50 z-10">
-                            {idx + 1}
+                      <React.Fragment key={field.id || fIdx}>
+                        <TableRow className="group hover:bg-slate-50/70 transition-colors">
+                          <TableCell className="w-12 py-0 px-0 text-center text-xs font-mono text-slate-400 border-b border-r sticky left-0 bg-white group-hover:bg-slate-50 z-10 align-middle">
+                            <div className="flex items-center justify-center h-full font-medium">{fIdx + 1}</div>
                           </TableCell>
-                          <TableCell className="h-12 border-b border-r sticky left-12 bg-white group-hover:bg-slate-50/50 z-10 p-3">
-                            <div className="flex flex-col gap-1.5">
+
+                          <TableCell className="w-[400px] py-0 px-5 border-b border-r sticky left-12 bg-white group-hover:bg-slate-50 z-10 align-middle">
+                            <div className="flex gap-2 h-full justify-between py-3">
                               <div className="flex items-center gap-2">
-                                <FileText className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                                <span className="text-xs font-semibold text-slate-700 line-clamp-1">
-                                  {field.efnsDisplayName || field.name || field.field_name || field.variableName || `Field #${field.id}`}
+                                {isArray && (
+                                  <button
+                                    className="p-1 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors shrink-0 border border-slate-200"
+                                    onClick={() => setExpandedArrayFields(prev => {
+                                      const next = new Set(prev)
+                                      if (next.has(arrayExpandKey)) next.delete(arrayExpandKey)
+                                      else next.add(arrayExpandKey)
+                                      return next
+                                    })}
+                                    title="Expand array data"
+                                  >
+                                    {isArrayExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-600" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-600" />}
+                                  </button>
+                                )}
+                                <span className="text-[11px] font-semibold text-slate-800 line-clamp-2 leading-tight">
+                                  {getFieldLabel(field)}
                                 </span>
                               </div>
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                {field.fieldType && (
-                                  <span className="bg-slate-100 border border-slate-200 text-slate-500 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider">
-                                    {field.fieldType}
-                                  </span>
-                                )}
-                                {(field.entityTypes || (field.entityType ? [field.entityType] : [])).map((et: string) => (
-                                  <span key={et} className="bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider">
-                                    {et}
-                                  </span>
-                                ))}
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Badge variant="secondary" className="text-[9px] font-medium uppercase tracking-wider rounded-full px-2 py-0">
+                                  {field.fieldType || 'text'}
+                                </Badge>
                               </div>
                             </div>
                           </TableCell>
+
                           {columns.map(col => {
                             const applicable = isFieldApplicable(field, col)
-                            const cacheKey = `${field.variableName || field.name}-${col.id}`
+                            const cacheKey = `${field.variableName || field.name || field.field_name}-${col.id}`
                             const val = resolvedValues[cacheKey]
-                            const isResolving = resolving[cacheKey] || false
+                            const isResolving = resolving[cacheKey]
                             const isMissing = !isValidValue(val)
-                            const isEditing = editingCell?.field?.variableName === field.variableName && editingCell?.col?.id === col.id
+                            const isEditing = editingCell?.field?.variableName === (field.variableName || field.name || field.field_name) && editingCell?.col?.id === col.id
 
                             return (
-                              <TableCell
-                                key={`fv-${field.id || field.variableName}-${col.type}-${col.id}`}
-                                className="h-12 text-center border-b border-r p-2 align-middle transition-colors"
-                                onClick={() => {
-                                  if (isEditing) return;
-                                  if (val === undefined && !isResolving) resolveFieldForCol(field, col);
-                                }}
-                              >
+                              <TableCell key={col.id} className="p-0 border-b border-r align-middle bg-white group-hover:bg-slate-50/70 transition-colors">
                                 {!applicable ? (
-                                  <span className="text-[9px] font-bold text-slate-300 uppercase italic">N/A</span>
-                                ) : isDocument ? (
-                                  <div className="flex items-center justify-center gap-1 bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-100 w-fit mx-auto">
-                                    <Database className="h-3 w-3" />
-                                    <span className="text-[9px] font-bold uppercase tracking-wider">Doc Mapping</span>
-                                  </div>
-                                ) : isComputed ? (
-                                  <div className="flex items-center justify-center gap-1 bg-amber-50 text-amber-600 px-2 py-1 rounded border border-amber-100 w-fit mx-auto">
-                                    <Zap className="h-3 w-3" />
-                                    <span className="text-[9px] font-bold uppercase tracking-wider">Computed</span>
-                                  </div>
-                                ) : isArray ? (
-                                  <div className="flex items-center justify-center gap-1 bg-indigo-50 text-indigo-600 px-2 py-1 rounded border border-indigo-100 w-fit mx-auto">
-                                    <Database className="h-3 w-3" />
-                                    <span className="text-[9px] font-bold uppercase tracking-wider">Array Items</span>
-                                  </div>
-                                ) : isEditing ? (
-                                  <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                                    <Input
-                                      className="h-7 w-28 text-[10px] px-1.5"
-                                      value={editValue}
-                                      onChange={e => setEditValue(e.target.value)}
-                                      onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }}
-                                      autoFocus
-                                    />
-                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-green-600" onClick={(e) => { e.stopPropagation(); saveEdit(); }}>
-                                      <CheckCircle2 className="h-3 w-3" />
-                                    </Button>
-                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-400" onClick={(e) => { e.stopPropagation(); cancelEditing(); }}>
-                                      <X className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                ) : isResolving ? (
-                                  <Loader2 className="h-4 w-4 animate-spin text-purple-500 mx-auto" />
-                                ) : val !== undefined ? (
-                                  <div
-                                    className={cn(
-                                      "px-2 py-1 rounded border inline-block max-w-full cursor-pointer hover:ring-1 hover:ring-purple-300",
-                                      isMissing ? "bg-red-50 border-red-100" : "bg-green-50 border-green-100"
-                                    )}
-                                    onClick={(e) => { e.stopPropagation(); startEditing(field, col, val); }}
-                                  >
-                                    <span className={cn(
-                                      "text-[11px] font-bold truncate block w-full",
-                                      isMissing ? "text-red-500 uppercase text-[9px] tracking-wider" : "text-green-700"
-                                    )}>
-                                      {isMissing ? 'Missing' : cleanFieldValue(val)}
-                                    </span>
+                                  <div className="flex h-full items-center justify-center p-3">
+                                    <span className="text-[10px] font-medium text-slate-400 bg-slate-100 rounded-full px-4 py-1.5 uppercase tracking-wide italic border border-slate-200">N/A</span>
                                   </div>
                                 ) : (
-                                  <Button variant="ghost" size="sm" className="h-7 text-[10px] text-purple-600 hover:bg-purple-50 border border-transparent hover:border-purple-200 font-bold gap-1"
-                                    onClick={(e) => { e.stopPropagation(); resolveFieldForCol(field, col) }}>
-                                    <Eye className="h-3.5 w-3.5" /> Resolve
-                                  </Button>
+                                  <div className="flex items-center justify-center h-full px-3">
+                                    {isResolving ? (
+                                      <Loader2 className="h-5 w-5 animate-spin text-purple-500" />
+                                    ) : isDocument ? (
+                                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 shadow-sm text-blue-600">
+                                        <Database className="h-3 w-3" />
+                                        <span className="text-[9px] font-semibold uppercase tracking-wider">Storage</span>
+                                      </div>
+                                    ) : isComputed ? (
+                                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 shadow-sm text-amber-600">
+                                        <Zap className="h-3 w-3" />
+                                        <span className="text-[9px] font-semibold uppercase tracking-wider">Logic</span>
+                                      </div>
+                                    ) : isArray ? (
+                                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 shadow-sm text-indigo-600">
+                                        <Database className="h-3 w-3" />
+                                        <span className="text-[9px] font-semibold uppercase tracking-wider">Array</span>
+                                      </div>
+                                    ) : val !== undefined ? (
+                                      isMissing ? (
+                                        <div className="flex gap-1.5 items-center justify-between w-full">
+                                          <div className="text-sm font-semibold text-white bg-red-500 px-2.5 py-1 shadow-sm max-w-[140px] truncate">Missing</div>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 px-4 text-[10px] font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 rounded-full border border-slate-200 transition-all"
+                                            onClick={() => startEditing(field, col, val)}
+                                          >
+                                            <Edit3 className="h-3.5 w-3.5 mr-1.5" /> Edit
+                                          </Button>
+                                        </div>
+                                      ) : (
+                                        <div className="flex gap-1.5 items-center justify-between w-full">
+                                          <div className="text-sm font-semibold text-slate-800 bg-white px-2.5 py-1 shadow-sm max-w-[140px] truncate">{String(cleanFieldValue(val))}</div>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 px-4 text-[10px] font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 rounded-full border border-slate-200 transition-all"
+                                            onClick={() => startEditing(field, col, val)}
+                                          >
+                                            <Edit3 className="h-3.5 w-3.5 mr-1.5" /> Edit
+                                          </Button>
+                                        </div>
+                                      )
+                                    ) : val === undefined && applicable ? (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 px-5 text-sm font-semibold text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-full border border-purple-100"
+                                        onClick={() => resolveFieldForCol(field, col)}
+                                      >
+                                        <Eye className="h-4 w-4 mr-1.5" /> Resolve
+                                      </Button>
+                                    ) : null}
+                                  </div>
                                 )}
                               </TableCell>
                             )
                           })}
                         </TableRow>
+
+                        {/* Array Field Data */}
+                        {isArray && isArrayExpanded && (
+                          <TableRow className="bg-indigo-50/30">
+                            <TableCell colSpan={totalCols} className="p-0 border-b">
+                              <div className="p-4">
+                                {arrayRows.length === 0 ? (
+                                  <p className="text-sm text-slate-400 italic px-2">No array data resolved for this field.</p>
+                                ) : (
+                                  <div className="border rounded-lg overflow-hidden bg-white">
+                                    <table className="w-full text-sm">
+                                      <thead className="bg-slate-50">
+                                        <tr>
+                                          <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase text-slate-500">Entity</th>
+                                          {(field.arrayItems || []).map((item: any) => (
+                                            <th key={item.variableName} className="px-3 py-2 text-left text-[10px] font-semibold uppercase text-slate-500">
+                                              {getFieldLabel(item)}
+                                            </th>
+                                          ))}
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {arrayRows.map((row: any, rIdx: number) => (
+                                          <tr key={rIdx} className="border-t">
+                                            <td className="px-3 py-2 text-xs font-medium text-slate-600">{getEntityLabelById(row.entityId)}</td>
+                                            {(field.arrayItems || []).map((item: any) => (
+                                              <td key={item.variableName} className="px-3 py-2 text-xs text-slate-700">
+                                                {row[item.variableName] ?? '-'}
+                                              </td>
+                                            ))}
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </React.Fragment>
                       )
                     })}
 
-                    {/* Console/logs panel for this automation */}
-                    {isRunning && showConsole && automationProgress && (
-                      <TableRow>
-                        <TableCell colSpan={columns.length + 2} className="p-0 border-b">
-                          <div className="bg-slate-900 text-green-400 font-mono text-[10px] p-3 max-h-48 overflow-y-auto">
-                            <div className="flex items-center gap-2 mb-2 text-[9px] text-slate-400 uppercase tracking-wider font-bold">
-                              <Terminal className="h-3 w-3" />
-                              Console — {automationProgress.status || 'Running'}
-                              <span className="ml-auto">{automationProgress.progress || 0}%</span>
-                            </div>
-                            {(automationProgress.logs || []).map((log: any, i: number) => (
-                              <div key={i} className="flex gap-2 leading-5">
-                                <span className="text-slate-500 shrink-0">
-                                  {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : ''}
-                                </span>
-                                <span className={cn(
-                                  log.level === 'error' ? 'text-red-400' :
-                                  log.level === 'warn' ? 'text-yellow-400' :
-                                  log.level === 'success' ? 'text-green-300' : 'text-green-400'
-                                )}>
-                                  {log.message || JSON.stringify(log)}
-                                </span>
+                    {/* Automation Logs Section */}
+                    {isRunning && showConsole && (
+                      <TableRow className="bg-slate-900 border-y-0">
+                        <TableCell colSpan={totalCols} className="p-0 border-b-0">
+                          <div className="flex flex-col w-full">
+                            <div className="bg-black/40 border-y border-white/5 px-6 py-2 flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <Terminal className="h-4 w-4 text-green-500" />
+                                <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Execution Console</span>
+                                <div className="flex items-center gap-1.5 ml-4">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                                  <span className="text-[10px] font-medium text-green-500">{automationProgress?.status || 'RUNNING'}</span>
+                                </div>
                               </div>
-                            ))}
-                            {(automationProgress.logs || []).length === 0 && (
-                              <div className="text-slate-500 italic">Waiting for logs...</div>
-                            )}
-                            <div ref={logsEndRef} />
+                              <div className="flex items-center gap-4">
+                                <div className="flex flex-col items-end">
+                                  <span className="text-[9px] font-medium text-slate-500 uppercase">Progress</span>
+                                  <span className="text-xs font-mono font-medium text-white leading-none">{automationProgress?.progress || 0}%</span>
+                                </div>
+                                <div className="w-32 h-1.5 bg-white/10 rounded-full overflow-hidden border border-white/5">
+                                  <div className="h-full bg-green-500 transition-all duration-500" style={{ width: `${automationProgress?.progress || 0}%` }} />
+                                </div>
+                              </div>
+                            </div>
+                            <div className="p-6 font-mono text-sm leading-relaxed max-h-[300px] overflow-y-auto custom-scrollbar-dark selection:bg-green-500/30 selection:text-white">
+                              {automationProgress?.logs?.map((log: any, i: number) => (
+                                <div key={i} className="flex gap-4 group/log mb-1">
+                                  <span className="text-slate-600 select-none opacity-50 font-medium shrink-0">
+                                    {log.timestamp ? new Date(log.timestamp).toLocaleTimeString([], { hour12: false }) : '—'}
+                                  </span>
+                                  <span className={cn(
+                                    "flex-1 break-words font-medium",
+                                    log.level === 'error' ? 'text-red-400' :
+                                      log.level === 'warn' ? 'text-amber-300' :
+                                        log.level === 'success' ? 'text-green-400 font-medium' :
+                                          log.level === 'info' ? 'text-blue-300' : 'text-slate-300'
+                                  )}>
+                                    <span className="text-white/20 mr-2">❯</span>
+                                    {log.message}
+                                  </span>
+                                </div>
+                              ))}
+                              {(!automationProgress?.logs || automationProgress.logs.length === 0) && (
+                                <div className="text-slate-500 italic py-4 flex items-center justify-center gap-3">
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  <span>Initializing secure connection to agent...</span>
+                                </div>
+                              )}
+                              <div ref={logsEndRef} />
+                            </div>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -1147,33 +1147,47 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
 
       {/* Screenshot Preview Modal */}
       <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-bold">
-              {previewingDocuments?.document_display_name || 'Document Preview'}
-            </DialogTitle>
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0 overflow-hidden rounded-xl border-none shadow-2xl">
+          <DialogHeader className="p-6 bg-white border-b sticky top-0 z-10">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-green-50 text-green-600 rounded-lg">
+                <CheckCircle2 className="h-6 w-6" />
+              </div>
+              <div>
+                <DialogTitle className="text-lg font-medium text-slate-800 leading-none">
+                  {previewingDocuments?.document_display_name || 'Automation Result'}
+                </DialogTitle>
+                <p className="text-sm font-medium text-slate-400 uppercase tracking-wide mt-1">Proof of Execution</p>
+              </div>
+            </div>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
             {previewingDocuments?.documents?.map((doc: any, idx: number) => {
               const fileUrl = getFileUrl(doc.file_path);
               return (
-                <div key={idx} className="border rounded-lg overflow-hidden">
-                  <div className="bg-slate-50 px-3 py-2 border-b flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-600">{doc.file_name}</span>
+                <div key={idx} className="bg-white border rounded-xl overflow-hidden shadow-sm">
+                  <div className="px-4 py-3 bg-white border-b flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-slate-400" />
+                      <span className="text-xs font-medium text-slate-600 truncate max-w-[400px]">{doc.file_name}</span>
+                    </div>
                     {fileUrl && (
-                      <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-600 hover:underline">
-                        Open full size
-                      </a>
+                      <Button asChild variant="outline" size="sm" className="h-7 text-[10px] font-medium rounded-full">
+                        <a href={fileUrl} target="_blank" rel="noopener noreferrer">View Full Size</a>
+                      </Button>
                     )}
                   </div>
                   {fileUrl && (
-                    <div className="p-2 bg-slate-100/50 flex items-center justify-center">
-                      <img src={fileUrl} alt={doc.file_name} className="max-w-full max-h-[400px] object-contain rounded" />
+                    <div className="p-4 bg-slate-900 flex items-center justify-center min-h-[300px]">
+                      <img src={fileUrl} alt="Automation Evidence" className="max-w-full h-auto shadow-2xl rounded border border-white/10" />
                     </div>
                   )}
                 </div>
               );
             })}
+          </div>
+          <div className="p-4 bg-white border-t flex justify-end">
+            <Button className="rounded-full px-6 font-medium bg-custom-blue" onClick={() => setShowPreviewModal(false)}>Close Preview</Button>
           </div>
         </DialogContent>
       </Dialog>

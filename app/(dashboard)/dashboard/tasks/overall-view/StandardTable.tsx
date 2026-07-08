@@ -6,11 +6,10 @@ import Link from "next/link"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { FileText, Plus, Minus, Loader2, AlertTriangle, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Eye, CheckCircle2 } from "lucide-react"
+import { FileText, Plus, Minus, Loader2, AlertTriangle, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, CheckCircle2 } from "lucide-react"
 import { AutomationMappingDialog } from "../components/AutomationMappingDialog"
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
 import { cn } from "@/lib/utils"
-import { formatDateValue } from "../utils/taskManagerData"
 
 // --- INTERFACE ---
 interface StandardTableProps {
@@ -52,7 +51,8 @@ interface StandardTableProps {
   reportDocDefaults?: any[]
   allIndividualDocuments?: Record<number, any[]>
   allCompanyDocuments?: Record<number, any[]>
-  handleViewReportDocument?: (colRecords: any[], docMetadata: any, task: any) => void
+  expandedSections?: Set<string>
+  toggleSectionExpansion?: (sectionId: string) => void
 }
 
 const DEFAULT_COL_WIDTH = 180;
@@ -71,8 +71,10 @@ export const StandardTable: React.FC<StandardTableProps> = ({
   reportDocDefaults = [],
   allIndividualDocuments = {},
   allCompanyDocuments = {},
-  handleViewReportDocument
+  expandedSections = new Set(['report_docs']),
+  toggleSectionExpansion,
 }) => {
+  const isReportDocsExpanded = expandedSections.has('report_docs');
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
   const [selectedRequirement, setSelectedRequirement] = useState<any>(null);
   const [taskToDelete, setTaskToDelete] = useState<any>(null);
@@ -169,8 +171,8 @@ export const StandardTable: React.FC<StandardTableProps> = ({
       }
     });
 
-    // Add Report Doc columns
-    if (reportDocDefaults && reportDocDefaults.length > 0) {
+    // Add Report Doc columns (collapsible as its own independent section)
+    if (reportDocDefaults && reportDocDefaults.length > 0 && isReportDocsExpanded) {
       reportDocDefaults.forEach(doc => {
         cols.push({ id: `report-doc-${doc.id}`, type: 'report_doc', reportDoc: doc });
       });
@@ -178,7 +180,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
 
     cols.push({ id: 'actions', type: 'actions' });
     return cols;
-  }, [visibleCaseDetailHeaders, visibleStages, expandedStages, expandedDocuments, documentFields]);
+  }, [visibleCaseDetailHeaders, visibleStages, expandedStages, expandedDocuments, documentFields, reportDocDefaults, isReportDocsExpanded]);
 
   // Track the boundaries of the "Stages" section for distinctive borders
   const stageColsIndices = useMemo(() => {
@@ -334,18 +336,23 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                 </TableHead>
               ))}
 
-              {/* Report Doc Default Columns */}
+              {/* Report Doc Default Columns - independent collapsible section */}
               {reportDocDefaults && reportDocDefaults.length > 0 && (
-                <>
-                  <TableHead
-                    colSpan={reportDocDefaults.length}
-                    rowSpan={1}
-                    className="border-r border-b border-white/30 text-center px-2 py-2.5 bg-emerald-600 border-l-[3px] border-l-emerald-400"
-                    style={{ width: DEFAULT_COL_WIDTH * reportDocDefaults.length, minWidth: DEFAULT_COL_WIDTH * reportDocDefaults.length }}
-                  >
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-100">Report Documents</span>
-                  </TableHead>
-                </>
+                <TableHead
+                  colSpan={isReportDocsExpanded ? reportDocDefaults.length : 1}
+                  rowSpan={isReportDocsExpanded ? 1 : 3}
+                  className="border-r border-b border-white/30 text-center px-2 py-2.5 bg-emerald-600 border-l-[3px] border-l-emerald-400"
+                  style={!isReportDocsExpanded ? { width: DEFAULT_COL_WIDTH, minWidth: DEFAULT_COL_WIDTH, maxWidth: DEFAULT_COL_WIDTH } : { width: DEFAULT_COL_WIDTH * reportDocDefaults.length, minWidth: DEFAULT_COL_WIDTH * reportDocDefaults.length }}
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-100 whitespace-normal break-words leading-snug">
+                      Report Documents ({reportDocDefaults.length})
+                    </span>
+                    <button onClick={() => toggleSectionExpansion?.('report_docs')} className="shrink-0 rounded bg-emerald-700 hover:bg-emerald-800 text-white p-0.5">
+                      {isReportDocsExpanded ? <Minus size={12} /> : <Plus size={12} />}
+                    </button>
+                  </div>
+                </TableHead>
               )}
 
               <TableHead
@@ -397,7 +404,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                   );
                 });
               })}
-              {reportDocDefaults && reportDocDefaults.length > 0 && reportDocDefaults.map((doc: any) => (
+              {isReportDocsExpanded && reportDocDefaults && reportDocDefaults.length > 0 && reportDocDefaults.map((doc: any) => (
                 <TableHead
                   key={`report-doc-header-${doc.id}`}
                   rowSpan={2}
@@ -639,14 +646,12 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                       );
 
                       let colRecords = [];
-                      let isFromSnapshot = false;
 
                       if (entry) {
                         const pool = rowEntityType === 'company'
                           ? (allCompanyDocuments[entityId] || [])
                           : (allIndividualDocuments[entityId] || []);
                         colRecords = pool.filter((d: any) => (entry.documentRecordIds || []).includes(d.id));
-                        isFromSnapshot = true;
                       } else {
                         const pool = rowEntityType === 'company'
                           ? (allCompanyDocuments[entityId] || [])
@@ -654,24 +659,11 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                         colRecords = pool.filter((d: any) => d.document_id === col.reportDoc.documentId);
                       }
 
-                      const docMetadata = { display_name: col.reportDoc.documentName };
-                      const hasFiles = colRecords.length > 0;
-
-                      // NEW: Extract immigration date value if it exists
-                      let immigrationDateValue = null;
-                      if (hasFiles) {
-                        const docRecord = colRecords[0];
-                        const kycData = kycDocuments.get(col.reportDoc.documentId);
-                        if (kycData?.fields) {
-                          const immigrationField = kycData.fields.find((f: any) => f.isImmigrationDate);
-                          if (immigrationField) {
-                            const fieldName = immigrationField.fieldName || immigrationField.name || immigrationField.id;
-                            immigrationDateValue = docRecord.extracted_details?.[fieldName] ||
-                              docRecord.extracted_data?.[fieldName] ||
-                              docRecord.edited_details?.[fieldName];
-                          }
-                        }
-                      }
+                      const entityName = rowEntityType === 'company'
+                        ? (row.task.applicant_name || 'Company')
+                        : rowEntityType === 'dependant'
+                          ? (row.dependant?.full_name || row.dependant?.name || 'Dependant')
+                          : (row.task.applicant_name || 'Applicant');
 
                       return (
                         <TableCell
@@ -679,29 +671,14 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                           className={cn("text-center px-2 py-2 border-r border-b border-slate-200 bg-emerald-50/10")}
                           style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}
                         >
-                          {hasFiles ? (
-                            <div className="flex flex-col items-center justify-center gap-1">
-                              {/* NEW: Render the immigration date value */}
-                              {immigrationDateValue && (
-                                <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100/50 px-1.5 py-0.5 rounded border border-emerald-200">
-                                  {formatDateValue ? formatDateValue(immigrationDateValue) : immigrationDateValue}
-                                </span>
-                              )}
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-6 py-0 px-2 bg-white text-blue-600 border-blue-200 hover:bg-blue-50 shadow-sm flex items-center gap-1 text-[10px]"
-                                onClick={() => handleViewReportDocument?.(colRecords, docMetadata, row.task)}
-                              >
-                                <Eye className="h-3 w-3" />
-                                <span>View</span>
-                              </Button>
-                            </div>
-                          ) : (
-                            <Badge variant="outline" className="bg-slate-50 text-slate-400 border-slate-200 text-[9px] font-medium py-0 px-1.5">
-                              Not Uploaded
-                            </Badge>
-                          )}
+                          {renderCellContent({
+                            type: 'report_doc',
+                            reportDoc: col.reportDoc,
+                            entityType: rowEntityType,
+                            entityId,
+                            entityName,
+                            colRecords
+                          }, row.task, 'combined')}
                         </TableCell>
                       );
                     }

@@ -6,7 +6,7 @@ import {
   CheckCircle2, AlertCircle, UploadCloud, Eye, FileText, Lock, Loader2,
   ChevronDown, ChevronRight, Trash2, RefreshCw, FileUp, XCircle, User,
   Briefcase, UserCheck, Users2, HeartPulse, Send, Search, AlertTriangle, Check, X, ArrowUpDown, ArrowUp, ArrowDown, HelpCircle,
-  Calendar
+  Calendar, Plus, Minus, FileType
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,8 @@ import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { REQUIREMENTS_LOCK_STAGE_IDS } from "../../utils/taskManagerData"
+import { getLatestDocumentExpiryDate } from "../../utils/automationComputedFunctions"
+import { fetchSourceDataImpl, resolveTargetEntityIdImpl, resolveVariableValueImpl, type FieldResolutionContext } from "../../utils/fieldResolution"
 import { UploadModal } from "@/app/generic-components/UploadModal"
 import { ReviewSubmissionDialog } from "../../../tasks-requirements/components/ReviewSubmissionDialog"
 import { SendRequirementsDialog } from "../../../tasks-requirements/components/SendRequirementsDialog"
@@ -39,8 +41,8 @@ interface ColDef {
 const CATEGORY_ORDER = ["general", "processing", "issuance", "other"]
 const CATEGORY_LABELS: Record<string, string> = {
   general: "General Requirements",
-  processing: "Processing Phase",
-  issuance: "Issuance Phase",
+  processing: "Processing Requirements",
+  issuance: "Issuance Requirements",
   other: "Other Requirements",
 }
 
@@ -51,18 +53,6 @@ function getLockState(task: any) {
     processingLocked: done(REQUIREMENTS_LOCK_STAGE_IDS.PROCESSING) && !done(REQUIREMENTS_LOCK_STAGE_IDS.DEFERRED),
     issuanceLocked: done(REQUIREMENTS_LOCK_STAGE_IDS.ISSUANCE),
   }
-}
-
-function formatDocDate(doc: any): string | null {
-  if (!doc) return null
-  const d = doc.expiry_date || doc.created_at
-  if (!d) return null
-  const date = new Date(d)
-  if (isNaN(date.getTime())) return null
-  const day = String(date.getDate()).padStart(2, '0')
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const year = date.getFullYear()
-  return `${day}/${month}/${year}`
 }
 
 function getLatestDoc(docs: any[]) {
@@ -141,7 +131,7 @@ function buildParticipantColumns(task: any): ColDef[] {
 
 function getCellStatus(req: any, col: ColDef, docsByInd: Record<string, any[]>, allCompanyDocs: any[]) {
   if (!checkApplicability(col.type, req)) return { type: "na" as const, docs: [] }
-  
+
   const docIds = req.document_ids || (req.document_id ? [req.document_id] : [])
   if (!docIds.length) return { type: "na" as const, docs: [] }
 
@@ -151,13 +141,50 @@ function getCellStatus(req: any, col: ColDef, docsByInd: Record<string, any[]>, 
   } else {
     found = (docsByInd[col.id] || []).filter((d: any) => docIds.includes(d.document_id))
   }
-  
+
   return { type: found.length > 0 ? "view" as const : "upload" as const, docs: found }
+}
+
+function getDocTypeDisplay(req: any, kycDocsMap: Map<string, any>) {
+  const docIds = req.document_ids || (req.document_id ? [req.document_id] : [])
+  if (docIds.length === 0) return null
+
+  const docTypes = docIds.map((id: string) => kycDocsMap.get(id)).filter(Boolean)
+  if (docTypes.length === 0) return null
+
+  const uniqueNames = [...new Set(docTypes.map((d: any) => d.display_name || d.name))]
+  const isComposite = uniqueNames.length > 1
+
+  return {
+    primary: docTypes[0],
+    allNames: uniqueNames,
+    isComposite,
+    count: docIds.length
+  }
+}
+
+function getDocDataForReq(req: any, col: ColDef, docsByInd: Record<string, any[]>, allCompanyDocs: any[]) {
+  const docIds = req.document_ids || (req.document_id ? [req.document_id] : [])
+  if (!docIds.length) return null
+
+  let docs: any[] = []
+  if (col.type === "company") {
+    docs = (allCompanyDocs || []).filter((d: any) => docIds.includes(d.document_id))
+  } else {
+    docs = (docsByInd[col.id] || []).filter((d: any) => docIds.includes(d.document_id))
+  }
+
+  if (docs.length === 0) return null
+  return docs.reduce((prev, curr) =>
+    new Date(curr.created_at || 0) > new Date(prev.created_at || 0) ? curr : prev
+  )
 }
 
 export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
   const { task, kycDocsMap, documentsByIndividual, allDocuments, allCompanyDocuments } = data
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(CATEGORY_ORDER))
+  const [expandedRequirements, setExpandedRequirements] = useState<Set<string>>(new Set())
+  const [expandedComposites, setExpandedComposites] = useState<Set<string>>(new Set())
   const [uploadModalOpen, setUploadModalOpen] = useState(false)
   const [selectedDocForUpload, setSelectedDocForUpload] = useState<any>(null)
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
@@ -165,19 +192,17 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
   const [reviewOpen, setReviewOpen] = useState(false)
   const [isSendRequirementsOpen, setIsSendRequirementsOpen] = useState(false)
   const [jobFieldsRecord, setJobFieldsRecord] = useState<Record<string, any>>({})
-  const [sortCol, setSortCol] = useState<string | null>(null)
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
-
+  const [fieldSourceDataCache, setFieldSourceDataCache] = useState<Record<string, Record<string, any>>>({})
+  const [fieldMasterComputedCache, setFieldMasterComputedCache] = useState<Record<string, any>>({})
+  const [documentStatusCache, setDocumentStatusCache] = useState<Map<string, any>>(new Map())
   const lockState = useMemo(() => getLockState(task), [task])
   const columns = useMemo(() => buildParticipantColumns(task), [task])
   const clientDraft = task?.registry_metadata?.client_requirements_draft
-
-  // Map automations
   const automationWebdataMap = useMemo(() => {
     const map: Record<string, any> = {}
-    ;(data.automations || []).forEach(auto => {
-      if (auto.webdata?.length > 0) map[auto.id] = { name: auto.name || 'Unknown', webdata: auto.webdata }
-    })
+      ; (data.automations || []).forEach(auto => {
+        if (auto.webdata?.length > 0) map[auto.id] = { name: auto.name || 'Unknown', webdata: auto.webdata }
+      })
     return map
   }, [data.automations])
 
@@ -194,6 +219,245 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
     return map
   }, [allCompanyDocuments])
 
+  const relationshipData = useMemo(() => {
+    if (!task) return []
+    const participants = task.participants_details || []
+    const applicant = task.applicant_details || {}
+    const companyParticipant = participants.find((p: any) => p.type === 'company')
+    const isApplicantDependant = applicant.role === 'dependant' || (Array.isArray(applicant.role) && applicant.role.includes('dependant'))
+    let principal = participants.find((p: any) =>
+      p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
+    )
+    let dependants = participants
+      .filter((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant'))
+      .map((dep: any) => ({ id: dep.id, name: dep.name, relationship: dep.relationship || 'dependant' }))
+    if (isApplicantDependant) {
+      if (!dependants.find((d: any) => d.id === applicant.id)) {
+        dependants.push({ id: applicant.id || task?.individual_id, name: applicant.name, relationship: applicant.relationship || 'dependant' })
+      }
+    } else {
+      if (!principal) principal = { id: applicant.id || task?.individual_id, name: applicant.name, role: applicant.role }
+    }
+    return [{
+      company: { id: companyParticipant?.id || task?.company_id, name: companyParticipant?.name || task?.company_name || 'Company', type: 'company' },
+      principal: principal ? { id: principal.id, name: principal.name, role: principal.role } : null,
+      directors: participants
+        .filter((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? (p.role.includes('director') || p.role.includes('shareholder')) : (p.role === 'director' || p.role === 'shareholder')))
+        .map((d: any) => ({ id: d.id, name: d.name, role: d.role })),
+      dependants: dependants,
+      understudy: (() => {
+        const up = participants.find((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy'))
+        return up ? { id: up.id, name: up.name } : null
+      })(),
+      sponsor: (() => {
+        const sp = participants.find((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor'))
+        return sp ? { id: sp.id, name: sp.name } : null
+      })()
+    }]
+  }, [task])
+
+  useEffect(() => {
+    const linkedFieldIds = new Set<string>()
+      ; (data.automations || []).forEach((auto: any) => {
+        if (auto.webdata && auto.webdata.length > 0) {
+          auto.webdata.forEach((field: any) => {
+            ; (field.linkedMasterFields || field.masterFieldIds || []).forEach((id: any) => linkedFieldIds.add(String(id)))
+              ; (field.arrayItems || []).forEach((item: any) => {
+                ; (item.linkedMasterFields || item.masterFieldIds || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : [])).forEach((id: any) => linkedFieldIds.add(String(id)))
+              })
+          })
+        }
+      })
+    if (linkedFieldIds.size === 0) return
+    const fetchJobFields = async () => {
+      const { data: fields } = await supabase.from('tm_job_fields').select('*').in('id', Array.from(linkedFieldIds))
+      if (fields) {
+        setJobFieldsRecord(fields.reduce((acc: Record<string, any>, field: any) => {
+          acc[String(field.id)] = field
+          return acc
+        }, {}))
+      }
+    }
+    fetchJobFields()
+  }, [data.automations])
+
+  useEffect(() => {
+    if (Object.keys(jobFieldsRecord).length === 0 || relationshipData.length === 0) return
+    const loadAll = async () => {
+      const mergedSource: Record<string, Record<string, any>> = {}
+      const mergedComputed: Record<string, any> = {}
+      const calls: Promise<void>[] = []
+        ; (data.automations || []).forEach((auto: any) => {
+          if (!auto.webdata?.length) return
+          relationshipData.forEach((relData: any) => {
+            calls.push(
+              fetchSourceDataImpl({
+                selectedAutomationId: String(auto.id),
+                webData: [{ automationId: String(auto.id), fields: auto.webdata }],
+                jobFields: jobFieldsRecord,
+                relationshipData: relData,
+                taskId: String(task?.id || ""),
+                currentIndividualId: String(task?.individual_id || ""),
+                task
+              }).then(({ sourceData: sd, masterFieldComputedValues: mc }) => {
+                Object.entries(sd).forEach(([table, records]) => {
+                  if (!mergedSource[table]) mergedSource[table] = {}
+                  Object.assign(mergedSource[table], records)
+                })
+                if (mc) Object.assign(mergedComputed, mc)
+              }).catch(err => console.error('Error resolving field values', err))
+            )
+          })
+        })
+      await Promise.all(calls)
+      setFieldSourceDataCache(prev => {
+        const next = { ...prev }
+        Object.entries(mergedSource).forEach(([table, records]) => { next[table] = { ...(next[table] || {}), ...records } })
+        return next
+      })
+      setFieldMasterComputedCache(prev => ({ ...prev, ...mergedComputed }))
+    }
+    loadAll()
+  }, [jobFieldsRecord, relationshipData, task, data.automations])
+
+  const toggleRequirementExpansion = useCallback((reqId: string) => {
+    setExpandedRequirements(prev => {
+      const next = new Set(prev)
+      if (next.has(reqId)) next.delete(reqId)
+      else next.add(reqId)
+      return next
+    })
+  }, [])
+
+  const toggleCompositeExpansion = useCallback((reqId: string) => {
+    setExpandedComposites(prev => {
+      const next = new Set(prev)
+      if (next.has(reqId)) next.delete(reqId)
+      else next.add(reqId)
+      return next
+    })
+  }, [])
+
+  const getDocumentStatus = useCallback(async (task: any, docId: string, colType: string, colId: number | string, docs: any[]) => {
+    const cacheKey = `${task.id}-${docId}-${colType}-${colId}`
+
+    if (documentStatusCache.has(cacheKey)) {
+      return documentStatusCache.get(cacheKey)
+    }
+
+    try {
+      const docMetadata = kycDocsMap.get(docId)
+      if (!docMetadata) {
+        const result = { status: 'unknown', label: 'Unknown', color: 'text-gray-500', bgColor: 'bg-gray-100' }
+        setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)))
+        return result
+      }
+
+      const hasEffectiveToDate = docMetadata.fields?.some((f: any) => f.isEffectiveTo)
+      if (!hasEffectiveToDate) {
+        const result = { status: 'valid', label: 'Valid', color: 'text-green-600', bgColor: 'bg-green-50' }
+        setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)))
+        return result
+      }
+
+      const latestDoc = docs.reduce((prev, curr) =>
+        new Date(curr.created_at || 0) > new Date(prev.created_at || 0) ? curr : prev
+      )
+      const personId = colType === 'company' ? (task.company_id || colId) : colId
+      const expiryDate = await getLatestDocumentExpiryDate(
+        personId,
+        [docId],
+        undefined,
+        latestDoc ? { doc: latestDoc, type: docMetadata } : undefined
+      )
+
+      if (expiryDate.includes('Not Found')) {
+        const result = { status: 'unknown', label: 'No Expiry', color: 'text-gray-500', bgColor: 'bg-gray-100' }
+        setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)))
+        return result
+      }
+
+      const expiry = new Date(expiryDate)
+      if (isNaN(expiry.getTime())) {
+        const result = { status: 'unknown', label: 'No Expiry', color: 'text-gray-500', bgColor: 'bg-gray-100' }
+        setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)))
+        return result
+      }
+
+      const now = new Date()
+      const thirtyDaysFromNow = new Date()
+      thirtyDaysFromNow.setDate(now.getDate() + 30)
+
+      let status, label, color, bgColor
+      if (expiry < now) {
+        status = 'expired'; label = 'Expired'; color = 'text-red-600'; bgColor = 'bg-red-50'
+      } else if (expiry < thirtyDaysFromNow) {
+        status = 'expiring'; label = 'Expiring Soon'; color = 'text-amber-600'; bgColor = 'bg-amber-50'
+      } else {
+        status = 'valid'; label = 'Valid'; color = 'text-green-600'; bgColor = 'bg-green-50'
+      }
+
+      const day = String(expiry.getDate()).padStart(2, '0')
+      const month = String(expiry.getMonth() + 1).padStart(2, '0')
+      const year = expiry.getFullYear()
+      const formattedDate = `${day}/${month}/${year}`
+
+      const result = { status, label, color, bgColor, expiryDate: formattedDate }
+      setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)))
+      return result
+    } catch (error) {
+      const result = { status: 'error', label: 'Error', color: 'text-red-500', bgColor: 'bg-red-50' }
+      setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)))
+      return result
+    }
+  }, [documentStatusCache, kycDocsMap])
+
+  const renderStatusBadge = (status: any) => {
+    if (!status) return null
+
+    let Icon
+    switch (status.status) {
+      case 'valid': Icon = CheckCircle2; break
+      case 'expiring': Icon = AlertCircle; break
+      case 'expired': Icon = XCircle; break
+      case 'error': Icon = AlertTriangle; break
+      default: Icon = CheckCircle2; break
+    }
+
+    const borderColorClass = status.color ? status.color.replace('text-', 'border-') : 'border-gray-200'
+
+    return (
+      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-sm ${status.bgColor} ${borderColorClass}`}>
+        <Icon className={`h-3.5 w-3.5 shrink-0 ${status.color}`} />
+        <span className={`text-[10px] font-medium uppercase tracking-wider ${status.color}`}>
+          {status.label}
+        </span>
+      </div>
+    )
+  }
+
+  useEffect(() => {
+    const calculateAllStatuses = async () => {
+      if (!task?.requirements) return
+
+      for (const req of task.requirements) {
+        const docIds = req.document_ids || (req.document_id ? [req.document_id] : [])
+        for (const col of columns) {
+          for (const docId of docIds) {
+            const status = getCellStatus(req, col, documentsByIndividual, allCompanyDocuments)
+            if (status.type === 'na' || status.docs.length === 0) continue
+
+            const cacheKey = `${task.id}-${docId}-${col.type}-${col.id}`
+            if (!documentStatusCache.has(cacheKey)) {
+              await getDocumentStatus(task, docId, col.type, col.id, status.docs)
+            }
+          }
+        }
+      }
+    }
+    calculateAllStatuses()
+  }, [task?.requirements, columns, documentsByIndividual, allCompanyDocuments])
+
   const requirementMap = useMemo(() => {
     if (!task?.requirements) return {}
     const map: Record<string, any[]> = {}
@@ -205,16 +469,20 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
     return map
   }, [task])
 
-  const handleSort = (colKey: string) => {
-    setSortCol(prev => prev === colKey ? (setSortDir(d => d === "asc" ? "desc" : "asc"), colKey) : (setSortDir("asc"), colKey))
-  }
+  const handlePreview = useCallback(async (req: any, col: ColDef, locked?: boolean, specificDocId?: string) => {
+    const docIds = specificDocId ? [specificDocId] : (req.document_ids || (req.document_id ? [req.document_id] : []))
+    if (!docIds.length) return
 
-  const handlePreview = useCallback(async (req: any, col: ColDef, locked?: boolean) => {
-    const status = getCellStatus(req, col, documentsByIndividual, allCompanyDocuments)
-    if (status.docs.length === 0) return
+    let docs: any[] = []
+    if (col.type === "company") {
+      docs = (allCompanyDocuments || []).filter((d: any) => docIds.includes(d.document_id))
+    } else {
+      docs = (documentsByIndividual[col.id] || []).filter((d: any) => docIds.includes(d.document_id))
+    }
+    if (docs.length === 0) return
 
     try {
-      const documentPreviews = await Promise.all(status.docs.map(async (doc) => {
+      const documentPreviews = await Promise.all(docs.map(async (doc) => {
         const { data: signData } = await supabase.storage.from('kyc-documents').createSignedUrl(doc.file_path, 3600);
         let fields = [];
         if (doc.document_id) {
@@ -249,49 +517,67 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
 
   if (!task) return null
 
+  const totalCols = columns.length + 3 // # + DocType + Name + entity columns
+
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-white">
+    <div className="h-full flex flex-col overflow-hidden bg-white px-6 py-4">
       {/* Header Bar */}
-      <div className="flex items-center justify-between px-6 py-3 border-b bg-white shrink-0 z-40">
-        <div className="flex items-center gap-3">
-          <h3 className="text-sm font-bold text-slate-800">Requirements Matrix</h3>
-          <div className="flex gap-1.5">
-            {lockState.processingLocked && <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-[10px]"><Lock className="h-3 w-3 mr-1" />Processing Locked</Badge>}
-            {lockState.issuanceLocked && <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-[10px]"><Lock className="h-3 w-3 mr-1" />Issuance Locked</Badge>}
+      <div className="flex items-center justify-between border-b pb-4 mb-3 bg-white shrink-0 z-40">
+        <div className="flex items-center gap-4">
+          <h3 className="text-xl font-medium text-slate-800 tracking-tight">Requirements Matrix</h3>
+          <div className="flex gap-2">
+            {lockState.processingLocked && <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-sm rounded-full px-3 py-0.5"><Lock className="h-3.5 w-3.5 mr-1.5" />Processing Locked</Badge>}
+            {lockState.issuanceLocked && <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-sm rounded-full px-3 py-0.5"><Lock className="h-3.5 w-3.5 mr-1.5" />Issuance Locked</Badge>}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           {clientDraft && clientDraft.status !== "applied" && (
-            <Button variant="outline" size="sm" className="h-8 text-xs border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100" onClick={() => setReviewOpen(true)}>
-              <AlertTriangle className="h-3.5 w-3.5 mr-1.5" /> Review Draft
+            <Button variant="outline" className="h-10 px-5 text-sm font-semibold rounded-full border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 shadow-sm" onClick={() => setReviewOpen(true)}>
+              <AlertTriangle className="h-4 w-4 mr-2" /> Review Draft
             </Button>
           )}
-          <Button size="sm" className="h-8 text-xs bg-custom-blue hover:bg-blue-700" onClick={() => setIsSendRequirementsOpen(true)}>
-            <Send className="h-3.5 w-3.5 mr-1.5" /> Send Requirements
+          <Button className="h-10 px-6 text-sm font-medium rounded-full bg-custom-blue hover:bg-blue-700 shadow-sm" onClick={() => setIsSendRequirementsOpen(true)}>
+            <Send className="h-4 w-4 mr-2" /> Send Requirements
           </Button>
         </div>
       </div>
 
       {/* Main Table Container */}
-      <div className="flex-1 overflow-auto relative custom-scrollbar">
+      <div className="flex-1 overflow-auto relative custom-scrollbar border rounded-lg bg-white shadow-sm">
         <Table className="border-separate border-spacing-0 min-w-full">
           <TableHeader className="sticky top-0 z-30 text-white">
             <TableRow className="bg-custom-blue hover:bg-custom-blue">
-              <TableHead className="w-12 h-12 text-center border-b border-r sticky left-0 top-0 bg-custom-blue z-40 text-[10px] font-bold uppercase text-white">#</TableHead>
-              <TableHead className="min-w-[280px] h-12 border-b border-r sticky left-12 top-0 bg-custom-blue z-40 text-[10px] font-bold uppercase text-white">
-                Requirement Name
+              <TableHead className="w-12 border-b border-r sticky left-0 top-0 bg-custom-blue z-40 p-0 text-white shadow-sm">
+                <div className="flex items-center justify-center text-sm font-medium uppercase tracking-wider">#</div>
+              </TableHead>
+              <TableHead className="w-[300px] border-b border-r sticky left-12 top-0 bg-custom-blue z-40 p-0 text-white shadow-sm">
+                <div className="flex items-center px-6 text-[11px] font-medium uppercase tracking-wider">
+                  Requirement
+                </div>
+              </TableHead>
+              <TableHead className="min-w-[280px] border-b border-r sticky left-[348px] top-0 bg-custom-blue z-40 p-0 text-white shadow-sm">
+                <div className="flex items-center px-6 text-[11px] font-medium uppercase tracking-wider">
+                  Document Type
+                </div>
               </TableHead>
               {columns.map(col => {
                 const { bgColor, Icon } = getEntityTypeConfig(col.type)
                 return (
-                  <TableHead key={col.id} className={cn("min-w-[180px] h-12 border-b border-r top-0 bg-custom-blue p-0 text-white", bgColor)}>
-                    <span className="flex justify-between px-4">
-                      <span className={cn("flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-bold")}>
-                        <Icon className="h-3 w-3" />
-                        <span className="">{col.label}</span>
-                      </span>
-                      <span className="text-[9px] font-bold uppercase tracking-wider">{col.subLabel}</span>
-                    </span>
+                  <TableHead key={col.id} className={cn("min-w-[340px] border-b border-r top-0 p-0 text-white align-top shadow-sm", bgColor)}>
+                    <div className="flex flex-col h-full w-full">
+                      <div className="flex flex-col items-center justify-center gap-1.5 border-b border-white/20 flex-1 p-3">
+                        <span className={cn("flex items-center gap-2 text-[11px] font-semibold tracking-wide")}>
+                          <Icon className="h-4 w-4 opacity-90" />
+                          <span className="truncate max-w-[200px]">{col.label}</span>
+                        </span>
+                        <span className="text-[10px] font-medium uppercase tracking-wide opacity-80">{col.subLabel}</span>
+                      </div>
+                      <div className="grid grid-cols-[90px_120px_1fr] text-[10px] uppercase font-medium tracking-wider bg-black/20 shrink-0">
+                        <div className="py-2.5 px-2 text-center border-r border-white/10">Date</div>
+                        <div className="py-2.5 px-2 text-center border-r border-white/10">Status</div>
+                        <div className="py-2.5 px-2 text-center">Action</div>
+                      </div>
+                    </div>
                   </TableHead>
                 )
               })}
@@ -307,8 +593,8 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
               return (
                 <React.Fragment key={cat}>
                   {/* Category Separator Row */}
-                  <TableRow 
-                    className="bg-slate-100/80 hover:bg-slate-200/80 cursor-pointer transition-colors"
+                  <TableRow
+                    className="bg-slate-100/90 hover:bg-slate-200/90 cursor-pointer transition-colors"
                     onClick={() => setExpandedCategories(prev => {
                       const next = new Set(prev)
                       if (next.has(cat)) next.delete(cat)
@@ -316,15 +602,15 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
                       return next
                     })}
                   >
-                    <TableCell 
-                      colSpan={columns.length + 2} 
-                      className="h-10 py-0 px-4 border-b border-slate-200 sticky left-0 z-20"
+                    <TableCell
+                      colSpan={totalCols}
+                      className="py-3 px-5 border-b border-slate-300 sticky left-0 z-20 shadow-[inset_0_-1px_0_rgba(0,0,0,0.05)]"
                     >
-                      <div className="flex items-center gap-2">
-                        {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}
-                        <span className="text-sm font-black uppercase tracking-widest text-slate-700">{CATEGORY_LABELS[cat]}</span>
-                        <Badge variant="outline" className="text-[9px] h-4 px-1.5 bg-white border-slate-300 text-slate-500">{reqs.length}</Badge>
-                        {isLocked && <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-[9px] h-4"><Lock className="h-2.5 w-2.5 mr-1" />Locked</Badge>}
+                      <div className="flex items-center gap-3">
+                        {isExpanded ? <ChevronDown className="h-5 w-5 text-slate-500" /> : <ChevronRight className="h-5 w-5 text-slate-500" />}
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-800">{CATEGORY_LABELS[cat]}</span>
+                        <Badge variant="outline" className="text-sm font-medium rounded-full px-3 py-0.5 bg-white border-slate-300 text-slate-600 shadow-sm">{reqs.length}</Badge>
+                        {isLocked && <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-[10px] rounded-full px-2.5 py-0.5"><Lock className="h-3 w-3 mr-1" />Locked</Badge>}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -333,74 +619,217 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
                   {isExpanded && reqs.map((req, idx) => {
                     const docMeta = kycDocsMap.get(req.document_id || req.document_ids?.[0])
                     const docName = docMeta?.display_name || req.display_name || req.name || "Untitled"
+                    const docTypeInfo = getDocTypeDisplay(req, kycDocsMap)
+                    const isComposite = docTypeInfo?.isComposite && (req.document_ids?.length > 1)
+                    const reqId = req.id || `${cat}-${idx}`
+                    const isReqExpanded = expandedRequirements.has(reqId)
+                    const isCompExpanded = expandedComposites.has(reqId)
+                    const fieldsToRender = docMeta?.fields || []
 
                     return (
-                      <TableRow key={req.id || idx} className="group hover:bg-slate-50/50">
-                        <TableCell className="h-12 text-center text-[10px] font-mono text-slate-400 border-b border-r sticky left-0 bg-white group-hover:bg-slate-50/50 z-10">
-                          {idx + 1}
-                        </TableCell>
-                        <TableCell className="h-12 border-b border-r sticky left-12 bg-white group-hover:bg-slate-50/50 z-10">
-                          <div className="flex flex-col">
-                            <span className="text-xs font-semibold text-slate-700 line-clamp-1">{docName}</span>
-                            {req.description && <span className="text-[9px] text-slate-400 line-clamp-1">{req.description}</span>}
-                          </div>
-                        </TableCell>
-                        {columns.map(col => {
-                          const status = getCellStatus(req, col, documentsByIndividual, allCompanyDocuments)
-                          
-                          return (
-                            <TableCell key={col.id} className="h-12 text-center border-b border-r p-0">
-                              <div className="flex items-center justify-center h-full px-2">
-                                {status.type === "na" ? (
-                                  <span className="text-[9px] font-bold text-slate-300 uppercase italic">N/A</span>
-                                ) : status.type === "view" ? (
-                                  <div className="flex items-center gap-1">
-                                    <div className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-md border bg-green-50 border-green-200 shadow-sm">
-                                      <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
-                                      <span className="text-sm font-bold uppercase tracking-wider text-green-600">Valid</span>
-                                    </div>
-                                    {(() => {
-                                      const latestDoc = getLatestDoc(status.docs)
-                                      const dateStr = formatDocDate(latestDoc)
-                                      return dateStr ? (
-                                        <div className="inline-flex items-center justify-center gap-1 px-2 py-0.5 rounded text-[9.5px] font-medium text-green-600 bg-white border border-green-200 shadow-sm">
-                                          <Calendar className="h-3 w-3 opacity-70" />
-                                          {dateStr}
-                                        </div>
-                                      ) : null
-                                    })()}
-                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-blue-600" onClick={() => handlePreview(req, col, isLocked)}>
-                                      <Eye className="h-3.5 w-3.5" />
-                                    </Button>
-                                  </div>
-                                ) : (
-                                  // Missing / Not Provided State
-                                  <div className="flex flex-col items-center gap-1">
-                                    {isLocked ? (
-                                      <div className="flex items-center gap-1 text-red-500 bg-red-50 px-2 py-0.5 rounded border border-red-100">
-                                        <AlertCircle className="h-3 w-3" />
-                                        <span className="text-[10px] font-black uppercase">Missing</span>
-                                      </div>
-                                    ) : (
-                                      <Button 
-                                        variant="ghost" 
-                                        size="sm" 
-                                        className="h-7 text-[10px] font-bold text-blue-600 hover:bg-blue-50 border border-transparent hover:border-blue-200"
-                                        onClick={() => {
-                                          setSelectedDocForUpload({ ...req, person: { id: col.id, full_name: col.label } });
-                                          setUploadModalOpen(true);
-                                        }}
-                                      >
-                                        <UploadCloud className="h-3.5 w-3.5 mr-1" /> Upload
-                                      </Button>
-                                    )}
-                                  </div>
+                      <React.Fragment key={reqId}>
+                        {/* Main Requirement Row */}
+                        <TableRow className="group hover:bg-slate-50/70 transition-colors">
+                          <TableCell className="w-12 py-0 px-0 text-center text-xs font-mono text-slate-400 border-b border-r sticky left-0 bg-white group-hover:bg-slate-50 z-10 align-middle">
+                            <div className="flex items-center justify-center h-full font-medium">
+                              {idx + 1}
+                            </div>
+                          </TableCell>
+
+                          <TableCell className="w-[400px] py-0 px-4 border-b border-r sticky left-12 bg-white group-hover:bg-slate-50 z-10 align-middle">
+                            <div className="flex items-center gap-3 h-full py-3 justify-between">
+                              <div className="flex flex-col min-w-0">
+                                <span className="text-[11px] font-semibold text-slate-800 line-clamp-2 leading-tight">
+                                  {req.name || req.display_name || "Untitled Requirement"}
+                                </span>
+                                {isComposite && (
+                                  <span className="text-[10px] font-medium text-blue-600 mt-1 uppercase tracking-wide">
+                                    {docTypeInfo.count} Types
+                                  </span>
                                 )}
                               </div>
-                            </TableCell>
+                              {isComposite ? (
+                                <button
+                                  className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors shrink-0 shadow-sm border border-slate-200"
+                                  onClick={() => toggleCompositeExpansion(reqId)}
+                                  title="Expand document types"
+                                >
+                                  {isCompExpanded ? <ChevronDown className="h-4 w-4 text-slate-600" /> : <ChevronRight className="h-4 w-4 text-slate-600" />}
+                                </button>
+                              ) : fieldsToRender.length > 0 ? (
+                                <button
+                                  className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors shrink-0 shadow-sm border border-slate-200"
+                                  onClick={() => toggleRequirementExpansion(reqId)}
+                                  title="Expand fields"
+                                >
+                                  {isReqExpanded ? <Minus className="h-4 w-4 text-slate-600" /> : <Plus className="h-4 w-4 text-slate-600" />}
+                                </button>
+                              ) : (
+                                <div className="w-[30px] shrink-0" />
+                              )}
+
+                            </div>
+                          </TableCell>
+
+                          <TableCell className="min-w-[280px] py-0 px-5 border-b border-r sticky left-[348px] bg-white group-hover:bg-slate-50 z-10 align-middle">
+                            <div className="flex flex-col gap-1.5 h-full justify-center py-3">
+                              <span className="text-[11px] font-medium text-slate-700 line-clamp-2 leading-snug">
+                                {docTypeInfo?.primary?.display_name || docTypeInfo?.primary?.name || docName}
+                              </span>
+                              {req.description && <span className="text-sm font-medium text-slate-500 line-clamp-2 leading-relaxed">{req.description}</span>}
+                            </div>
+                          </TableCell>
+
+                          {columns.map(col => {
+                            const status = getCellStatus(req, col, documentsByIndividual, allCompanyDocuments)
+                            const docIds = req.document_ids || (req.document_id ? [req.document_id] : [])
+                            const latestDoc = status.docs.length > 0 ? getLatestDoc(status.docs) : null
+                            const latestDocId = latestDoc?.document_id || docIds[0]
+                            const statusKey = latestDocId ? `${task.id}-${latestDocId}-${col.type}-${col.id}` : null
+                            const docStatus = statusKey ? documentStatusCache.get(statusKey) : null
+
+                            return (
+                              <TableCell key={col.id} className="p-0 border-b border-r align-middle bg-white group-hover:bg-slate-50/70 transition-colors">
+                                {status.type === "na" ? (
+                                  <div className="flex h-full items-center justify-center p-3">
+                                    <span className="text-[10px] font-medium text-slate-400 bg-slate-100 rounded-full px-4 py-1.5 uppercase tracking-wide italic border border-slate-200">N/A</span>
+                                  </div>
+                                ) : (
+                                  <div className="grid grid-cols-[90px_120px_1fr] h-full">
+                                    <div className="p-3 border-r border-slate-100 flex items-center justify-center text-sm font-medium text-slate-600 text-center break-words">
+                                      {status.type === 'view' ? (docStatus?.expiryDate || 'NO EXPIRY') : '-'}
+                                    </div>
+                                    <div className="p-3 border-r border-slate-100 flex items-center justify-center text-center">
+                                      {status.type === 'view' ? (
+                                        docStatus ? renderStatusBadge(docStatus) : <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                                      ) : (
+                                        isLocked ? (
+                                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 border border-red-200 shadow-sm">
+                                            <AlertCircle className="h-3.5 w-3.5 text-red-500" />
+                                            <span className="text-[9px] font-semibold uppercase text-red-600 tracking-wider">Missing</span>
+                                          </div>
+                                        ) : (
+                                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 shadow-sm">
+                                            <span className="text-[9px] font-semibold uppercase text-amber-600 tracking-wider">Pending</span>
+                                          </div>
+                                        )
+                                      )}
+                                    </div>
+                                    <div className="p-3 flex items-center justify-center text-center">
+                                      {status.type === 'view' ? (
+                                        <Button variant="ghost" size="sm" className="h-8 px-4 text-sm font-medium text-blue-600 bg-blue-50/50 hover:bg-blue-100 hover:text-blue-700 rounded-full border border-transparent hover:border-blue-200 transition-all" onClick={() => handlePreview(req, col, isLocked)}>
+                                          <Eye className="h-4 w-4 mr-1.5" /> View
+                                        </Button>
+                                      ) : (
+                                        isLocked ? (
+                                          <span className="text-sm font-medium text-slate-400 uppercase tracking-wide">Locked</span>
+                                        ) : (
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-8 px-4 text-xs font-medium text-blue-600 bg-white hover:bg-blue-50 border-dashed border-blue-300 hover:border-blue-500 rounded-full shadow-sm transition-all"
+                                            onClick={() => {
+                                              setSelectedDocForUpload({ ...req, person: { id: col.id, full_name: col.label } });
+                                              setUploadModalOpen(true);
+                                            }}
+                                          >
+                                            <UploadCloud className="h-4 w-4 mr-1.5" /> Upload
+                                          </Button>
+                                        )
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </TableCell>
+                            )
+                          })}
+                        </TableRow>
+
+                        {/* Composite: Individual Document Type Sub-Rows */}
+                        {isComposite && isCompExpanded && req.document_ids?.map((docId: string, docIdx: number) => {
+                          const subDocMeta = kycDocsMap.get(docId)
+                          if (!subDocMeta) return null
+
+                          return (
+                            <TableRow key={`${reqId}-sub-${docIdx}`} className="bg-slate-50/60 hover:bg-slate-100/60 transition-colors">
+                              <TableCell className="w-12 py-3 text-center text-sm font-medium font-mono text-slate-400 border-b border-r sticky left-0 bg-slate-50/95 z-10 align-middle">
+                                {idx + 1}.{docIdx + 1}
+                              </TableCell>
+                              <TableCell className="w-[300px] py-3 border-b border-r sticky left-12 bg-slate-50/95 z-10 pl-14 pr-4 align-middle">
+                                <span className="flex items-center gap-2">
+                                  <FileText className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+                                  <span className="text-sm font-medium text-slate-700 leading-tight">{subDocMeta.display_name || subDocMeta.name}</span>
+                                </span>
+                              </TableCell>
+                              <TableCell className="min-w-[280px] py-3 px-5 border-b border-r sticky left-[348px] bg-slate-50/95 z-10 align-middle" />
+                              {columns.map(col => {
+                                const subDocs = col.type === "company"
+                                  ? (allCompanyDocuments || []).filter((d: any) => d.document_id === docId)
+                                  : (documentsByIndividual[col.id] || []).filter((d: any) => d.document_id === docId)
+                                const hasDocs = subDocs.length > 0
+                                const subLatestDoc = hasDocs ? getLatestDoc(subDocs) : null
+                                const subStatusKey = `${task.id}-${docId}-${col.type}-${col.id}`
+                                const subDocStatus = documentStatusCache.get(subStatusKey)
+
+                                return (
+                                  <TableCell key={`${docId}-${col.id}`} className="p-0 border-b border-r align-middle bg-slate-50/50">
+                                    {!checkApplicability(col.type, req) ? (
+                                      <div className="flex h-full items-center justify-center p-2">
+                                        <span className="text-sm font-medium text-slate-300">-</span>
+                                      </div>
+                                    ) : hasDocs ? (
+                                      <div className="grid grid-cols-[90px_120px_1fr] h-full">
+                                        <div className="p-2 border-r border-slate-200/60 flex items-center justify-center text-sm font-semibold text-slate-600 text-center break-words">
+                                          {subDocStatus?.expiryDate || 'NO EXPIRY'}
+                                        </div>
+                                        <div className="p-2 border-r border-slate-200/60 flex items-center justify-center">
+                                          {subDocStatus ? renderStatusBadge(subDocStatus) : <span className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />}
+                                        </div>
+                                        <div className="p-2 flex items-center justify-center">
+                                          <Button variant="ghost" size="sm" className="h-7 px-3 text-[10px] font-medium text-blue-600 hover:bg-blue-100 rounded-full" onClick={() => handlePreview(req, col, isLocked, docId)}>
+                                            <Eye className="h-3.5 w-3.5 mr-1.5" /> View
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="flex h-full items-center justify-center p-2">
+                                        <span className="text-sm font-medium text-slate-300">-</span>
+                                      </div>
+                                    )}
+                                  </TableCell>
+                                )
+                              })}
+                            </TableRow>
                           )
                         })}
-                      </TableRow>
+
+                        {/* Non-Composite: Expanded Field Rows */}
+                        {!isComposite && isReqExpanded && fieldsToRender.map((field: any, fIdx: number) => (
+                          <TableRow key={`${reqId}-field-${field.id || fIdx}`} className="bg-slate-50/60 hover:bg-slate-100/60 transition-colors">
+                            <TableCell className="w-12 py-2.5 text-center text-[10px] font-medium font-mono text-slate-400 border-b border-r sticky left-0 bg-slate-50/95 z-10 align-middle">
+                              {idx + 1}.{fIdx + 1}
+                            </TableCell>
+                            <TableCell className="w-[300px] py-2.5 border-b border-r sticky left-12 bg-slate-50/95 z-10 pl-14 pr-4 align-middle">
+                              <span className="text-sm font-medium text-slate-500 italic">{field.name}</span>
+                            </TableCell>
+                            <TableCell className="min-w-[280px] py-2.5 border-b border-r sticky left-[348px] bg-slate-50/95 z-10 align-middle" />
+                            {columns.map(col => {
+                              const isApplicable = checkApplicability(col.type, req)
+                              const docData = isApplicable ? getDocDataForReq(req, col, documentsByIndividual, allCompanyDocuments) : null
+                              return (
+                                <TableCell key={`${field.id || fIdx}-${col.id}`} className="py-2.5 px-3 text-center border-b border-r align-middle bg-slate-50/30">
+                                  {isApplicable ? (() => {
+                                    const val = docData?.extracted_details?.[field.name]
+                                    if (val === null || val === undefined) return <span className="text-sm text-slate-300 font-medium">-</span>
+                                    if (typeof val === 'object') return <span className="text-sm font-semibold text-slate-600 bg-white px-2.5 py-1 rounded border shadow-sm">{JSON.stringify(val)}</span>
+                                    return <span className="text-sm text-slate-800 font-medium bg-white px-3 py-1 rounded-md border shadow-sm inline-block max-w-full truncate">{String(val)}</span>
+                                  })() : <span className="text-sm text-slate-300 font-medium">-</span>}
+                                </TableCell>
+                              )
+                            })}
+                          </TableRow>
+                        ))}
+                      </React.Fragment>
                     )
                   })}
                 </React.Fragment>
@@ -454,8 +883,11 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
         automationWebdataMap={automationWebdataMap}
         allCompanyDocuments={allCompanyDocumentsMap}
         allIndividualDocuments={documentsByIndividual}
+        fieldSourceDataCache={fieldSourceDataCache}
+        fieldMasterComputedCache={fieldMasterComputedCache}
         jobFieldsRecord={jobFieldsRecord}
-        relationshipData={[]} 
+        relationshipData={relationshipData}
+        kycDocsMap={kycDocsMap}
       />
 
       <ReviewSubmissionDialog
@@ -466,6 +898,8 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
         automationWebdataMap={automationWebdataMap}
         allCompanyDocuments={allCompanyDocumentsMap}
         allIndividualDocuments={documentsByIndividual}
+        fieldSourceDataCache={fieldSourceDataCache}
+        fieldMasterComputedCache={fieldMasterComputedCache}
         jobFieldsRecord={jobFieldsRecord}
         onRefresh={onRefresh}
       />

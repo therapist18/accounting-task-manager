@@ -152,19 +152,30 @@ export const getPossibleDateFields = (
   
   // First check if we have document fields from the linked document
   if (documentFields && documentFields.length > 0) {
+    // Fields explicitly flagged as the immigration date take strict priority
+    // over other date-shaped fields (e.g. an issue date shouldn't win over expiry).
+    const immigrationDateFields = documentFields
+      .filter((field: any) => field.isImmigrationDate === true)
+      .map((field: any) => field.fieldName || field.name || field.key)
+      .filter(Boolean);
+
+    if (immigrationDateFields.length > 0) {
+      return immigrationDateFields;
+    }
+
     const docTypeDateFields = documentFields
       .filter((field: any) => {
-        // Check if field is marked as immigration date or has date in name/type
-        const isImmigrationDate = field.isImmigrationDate === true;
-        const isDateField = field.type === 'date' || 
-                          field.field_type === 'date' || 
+        const isDateField = field.fieldType === 'date' ||
+                          field.type === 'date' ||
+                          field.field_type === 'date' ||
                           field.data_type === 'date' ||
+                          (field.fieldName && field.fieldName.toLowerCase().includes('date')) ||
                           (field.name && field.name.toLowerCase().includes('date')) ||
                           (field.key && field.key.toLowerCase().includes('date'));
-        
-        return isImmigrationDate || isDateField;
+
+        return isDateField;
       })
-      .map((field: any) => field.name || field.key)
+      .map((field: any) => field.fieldName || field.name || field.key)
       .filter(Boolean); // Remove any undefined/null values
 
     if (docTypeDateFields.length > 0) {

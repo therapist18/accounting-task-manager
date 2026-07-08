@@ -177,13 +177,13 @@ export default function EditableStageCell({
 
   useEffect(() => {
     const fetchDocumentFields = async () => {
-      if (!linkedDocument?.document_type_id || !getKycFields) {
+      if (!linkedDocument?.document_id || !getKycFields) {
         setDocumentFields([]);
         setIsLoadingFields(false);
         return;
       }
 
-      const cacheKey = linkedDocument.document_type_id;
+      const cacheKey = linkedDocument.document_id;
       const cached = documentFieldsCache.get(cacheKey);
       const now = Date.now();
 
@@ -195,7 +195,7 @@ export default function EditableStageCell({
 
       try {
         setIsLoadingFields(true);
-        const fields = await getKycFields(linkedDocument.document_type_id);
+        const fields = await getKycFields({ kycId: linkedDocument.document_id });
         documentFieldsCache.set(cacheKey, { fields: fields || [], timestamp: now });
         setDocumentFields(fields || []);
       } catch (error) {
@@ -206,7 +206,7 @@ export default function EditableStageCell({
     };
 
     fetchDocumentFields();
-  }, [linkedDocument?.document_type_id, getKycFields]);
+  }, [linkedDocument?.document_id, getKycFields]);
 
   const hasLinkedDocument = useMemo(() => {
     if (!linkedDocument) return false;
@@ -335,8 +335,8 @@ export default function EditableStageCell({
       await onSave(stage.id, task.id, finalValue, updatedExtractedDetails);
       setIsEditing(false);
 
-      if (linkedDocument?.document_type_id) {
-        documentFieldsCache.delete(linkedDocument.document_type_id);
+      if (linkedDocument?.document_id) {
+        documentFieldsCache.delete(linkedDocument.document_id);
       }
     } catch (error) {
       toast({ title: "Error", description: "Failed to save stage.", variant: "destructive" });

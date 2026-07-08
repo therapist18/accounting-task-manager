@@ -6,11 +6,10 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileIcon, Eye, EyeOff, Edit, X } from "lucide-react"
+import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit, X } from "lucide-react"
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
 import { EnquiryDialog } from "../components/EnquiryDialog"
 import { userService, getOfficerDisplayName } from "@/lib/shared-user-assignment-service"
-import { formatDateValue } from "../utils/taskManagerData"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
@@ -170,7 +169,7 @@ const TableHeaderCell = React.memo(({ item, header, getCellContent }) => {
       const rawContent = getCellContent(item.task, header.id);
       if (header.id === 'applicant_name') {
         return (
-          <Link href={`/dashboard/tasks/${item.task.id}`} className="font-semibold text-blue-100 hover:text-white hover:underline truncate block">
+          <Link href={`/dashboard/tasks/${item.task.id}`} className="font-semibold text-white hover:text-white hover:underline truncate block">
             {rawContent}
           </Link>
         );
@@ -181,7 +180,7 @@ const TableHeaderCell = React.memo(({ item, header, getCellContent }) => {
     switch (header.id) {
       case 'applicant_name':
         return (
-          <Link href={`/dashboard/tasks/${item.task.id}`} className="flex flex-col text-blue-100 hover:text-white hover:underline">
+          <Link href={`/dashboard/tasks/${item.task.id}`} className="flex flex-col text-white hover:text-white hover:underline">
             <span>{dependant?.full_name || dependant?.name || 'N/A'}</span>
             <span className="text-xs text-blue-200 font-normal">
               {dependant?.relationship || 'Dependant'}
@@ -238,7 +237,6 @@ const MemoizedTableRow = React.memo(({
   readOnly,
   allIndividualDocuments = {},
   allCompanyDocuments = {},
-  handleViewReportDocument
 }: {
   row: any;
   rowIndex: number;
@@ -258,7 +256,6 @@ const MemoizedTableRow = React.memo(({
   readOnly?: boolean;
   allIndividualDocuments?: Record<number, any[]>;
   allCompanyDocuments?: Record<number, any[]>;
-  handleViewReportDocument?: (colRecords: any[], docMetadata: any, task: any) => void;
 }) => {
   const rowBg = row.isSubSubRow ? 'bg-slate-100/50' : row.isSubRow ? 'bg-slate-50/60' : 'bg-white';
   const hoverBg = 'hover:bg-blue-50/50';
@@ -346,14 +343,12 @@ const MemoizedTableRow = React.memo(({
           );
 
           let colRecords = [];
-          let isFromSnapshot = false;
 
           if (entry) {
             const pool = colEntityType === 'company'
               ? (allCompanyDocuments[entityId] || [])
               : (allIndividualDocuments[entityId] || []);
             colRecords = pool.filter((d: any) => (entry.documentRecordIds || []).includes(d.id));
-            isFromSnapshot = true;
           } else {
             const pool = colEntityType === 'company'
               ? (allCompanyDocuments[entityId] || [])
@@ -361,53 +356,28 @@ const MemoizedTableRow = React.memo(({
             colRecords = pool.filter((d: any) => d.document_id === doc?.documentId);
           }
 
-          const docMetadata = { display_name: doc?.documentName };
-          const hasFiles = colRecords.length > 0;
+          const entityName = colEntityType === 'company'
+            ? (item.task.applicant_name || 'Company')
+            : colEntityType === 'dependant'
+              ? (item.dependant?.full_name || item.dependant?.name || 'Dependant')
+              : (item.task.applicant_name || 'Applicant');
 
-          // NEW: Extract immigration date value if it exists
-          let immigrationDateValue = null;
-          if (hasFiles) {
-            const docRecord = colRecords[0];
-            const kycData = kycDocuments.get(doc?.documentId);
-            if (kycData?.fields) {
-              const immigrationField = kycData.fields.find((f: any) => f.isImmigrationDate);
-              if (immigrationField) {
-                const fieldName = immigrationField.fieldName || immigrationField.name || immigrationField.id;
-                immigrationDateValue = docRecord.extracted_details?.[fieldName] ||
-                  docRecord.extracted_data?.[fieldName] ||
-                  docRecord.edited_details?.[fieldName];
-              }
-            }
-          }
+          const reportDocRow = {
+            type: 'report_doc',
+            reportDoc: doc,
+            entityType: colEntityType,
+            entityId,
+            entityName,
+            colRecords
+          };
 
           return (
             <React.Fragment key={`${row.key}-${colIndex}`}>
               <TableCell className={cn("text-center text-sm py-1.5 px-2 align-middle border-l-4 border-t border-b border-gray-100 w-[150px] bg-emerald-50/10", item.type === 'dependant' ? 'bg-orange-50/30' : '')}>
-                {hasFiles ? (
-                  <div className="flex flex-col items-center justify-center gap-1">
-                    {immigrationDateValue && (
-                      <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100/50 px-1.5 py-0.5 rounded border border-emerald-200">
-                        {formatDateValue(immigrationDateValue)}
-                      </span>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-6 py-0 px-2 bg-white text-blue-600 border-blue-200 hover:bg-blue-50 shadow-sm flex items-center gap-1 text-[10px]"
-                      onClick={() => handleViewReportDocument?.(colRecords, docMetadata, item.task)}
-                    >
-                      <Eye className="h-3 w-3" />
-                      <span>View</span>
-                    </Button>
-                  </div>
-                ) : (
-                  <Badge variant="outline" className="bg-slate-50 text-slate-400 border-slate-200 text-[9px] font-medium py-0 px-1.5">
-                    Not Uploaded
-                  </Badge>
-                )}
+                {safeRender(renderCellContent(reportDocRow, item.task, 'date'))}
               </TableCell>
               <TableCell className={cn("text-center text-sm py-1 px-2 align-middle border-r-4 border-t border-b border-gray-100 w-[120px] bg-emerald-50/10", item.type === 'dependant' ? 'bg-orange-50/30' : '')}>
-                -
+                {safeRender(renderCellContent(reportDocRow, item.task, 'actions'))}
               </TableCell>
             </React.Fragment>
           );
@@ -515,7 +485,6 @@ interface EnhancedTableProps {
   reportDocDefaults?: any[];
   allIndividualDocuments?: Record<number, any[]>;
   allCompanyDocuments?: Record<number, any[]>;
-  handleViewReportDocument?: (colRecords: any[], docMetadata: any, task: any) => void;
 }
 
 export const EnhancedTable: React.FC<EnhancedTableProps> = ({
@@ -547,7 +516,6 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   reportDocDefaults = [],
   allIndividualDocuments = {},
   allCompanyDocuments = {},
-  handleViewReportDocument,
 }) => {
   const didLogRef = useRef(false);
   const getCellContentWithCancel = useCallback((task: any, headerId: string) => {
@@ -825,7 +793,6 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
                   readOnly={readOnly}
                   allIndividualDocuments={allIndividualDocuments}
                   allCompanyDocuments={allCompanyDocuments}
-                  handleViewReportDocument={handleViewReportDocument}
                 />
               ))
             )}

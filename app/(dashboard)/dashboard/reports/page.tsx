@@ -27,6 +27,7 @@ import { calculateStageDate } from "../tasks/utils/dateUtils";
 import { cn } from "@/lib/utils";
 import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
+import { MobileReportView } from "./components/MobileReportView";
 import { ReportsSidebar, ReportsHeader, PersonFilterStrip, StatusFilterBar } from "./components/ReportsHeader";
 
 const SPECIAL_STAGE_IDS = [
@@ -1086,51 +1087,69 @@ export default function ReportsPage() {
 
       return parts.join(' | ');
     }
-  if (col.type === 'report_doc') {
+    if (col.type === 'reference_requirement') {
+      const referenceDocs = task.referenceDocuments?.[col.requirementId] || [];
+      if (referenceDocs.length === 0) return 'No documents';
+      const latestDoc = referenceDocs.reduce((p: any, c: any) => new Date(c.created_at) > new Date(p.created_at) ? c : p);
+      const docId = latestDoc.document_id || latestDoc.kyc_document_id;
+      const effectiveToField = kycDocuments.get(docId)?.fields?.find((f: any) => f.isEffectiveTo);
+      const isEffectiveTo = effectiveToField
+        ? (latestDoc.extracted_details?.[effectiveToField.fieldName] || latestDoc.edited_details?.[effectiveToField.fieldName])
+        : (latestDoc.extracted_details?.isEffectiveTo || latestDoc.edited_details?.isEffectiveTo);
+      return isEffectiveTo ? String(isEffectiveTo) : '-';
+    }
+    if (col.type === 'report_doc') {
+      // Mirror the on-screen resolution in renderCellValue: resolve the correct
+      // entity (individual/company) rather than looking documents up by task id.
       const docDef = col.reportDoc;
-      const indDocs = allIndividualDocuments[task.id] || [];
-      const compDocs = allCompanyDocuments[task.id] || [];
 
-      let uploaded = [...indDocs, ...compDocs].find((d: any) =>
-        d.document_id?.toString() === docDef.documentId?.toString() ||
-        d.document_type_id?.toString() === docDef.documentId?.toString() ||
-        d.kyc_document_id?.toString() === docDef.documentId?.toString()
+      let entityType = 'principal';
+      let entityId: any = null;
+      if (docDef.docType === 'company') {
+        entityType = 'company';
+        entityId = task.company_id || task.applicant_details?.id;
+      } else {
+        entityId = task.individual_id || task.applicant_details?.id;
+      }
+
+      const snapshot = [
+        ...(task.processing_requirements_documents || []),
+        ...(task.issuance_requirements_documents || [])
+      ];
+      const entry = snapshot.find((s: any) =>
+        s.documentTypeId === docDef.documentId &&
+        s.entityType === entityType &&
+        Number(s.entityId) === Number(entityId)
       );
 
-      if (!uploaded && task.stages) {
-        for (const stageId of Object.keys(task.stages)) {
-          const stageData = task.stages[stageId];
-          if (stageData.documents) {
-            const docs = Object.values(stageData.documents);
-            const found = docs.find((d: any) =>
-              d.document_id?.toString() === docDef.documentId?.toString() ||
-              d.document_type_id?.toString() === docDef.documentId?.toString() ||
-              d.kyc_document_id?.toString() === docDef.documentId?.toString()
-            );
-            if (found) { uploaded = found; break; }
-          }
-        }
+      let colRecords: any[] = [];
+      if (entry) {
+        const pool = entityType === 'company' ? (allCompanyDocuments[entityId] || []) : (allIndividualDocuments[entityId] || []);
+        colRecords = pool.filter((d: any) => (entry.documentRecordIds || []).includes(d.id));
+      } else {
+        const pool = entityType === 'company' ? (allCompanyDocuments[entityId] || []) : (allIndividualDocuments[entityId] || []);
+        colRecords = pool.filter((d: any) => d.document_id === docDef.documentId);
       }
 
-      // --- NEW: Add date extraction mapping for Excel/PDF exports ---
+      if (colRecords.length === 0) return 'Pending';
+
+      const docRecord = colRecords[0];
       let dateString = '';
-      if (uploaded) {
-        const kycData = kycDocuments.get(docDef.documentId?.toString());
-        if (kycData?.fields) {
-          const immigrationField = kycData.fields.find((f: any) => f.isImmigrationDate);
-          if (immigrationField) {
-            const fieldName = immigrationField.fieldName || immigrationField.name || immigrationField.id;
-            const dateVal = uploaded.extracted_details?.[fieldName] ||
-                            uploaded.extracted_data?.[fieldName] ||
-                            uploaded.edited_details?.[fieldName];
-            if (dateVal) {
-              dateString = formatDate(dateVal, false) || String(dateVal);
-            }
+      const kycData = kycDocuments.get(docDef.documentId?.toString());
+      if (kycData?.fields) {
+        const immigrationField = kycData.fields.find((f: any) => f.isImmigrationDate);
+        if (immigrationField) {
+          const fieldName = immigrationField.fieldName || immigrationField.name || immigrationField.id;
+          const dateVal = docRecord.extracted_details?.[fieldName] ||
+                          docRecord.extracted_data?.[fieldName] ||
+                          docRecord.edited_details?.[fieldName];
+          if (dateVal) {
+            dateString = formatDate(dateVal, false) || String(dateVal);
           }
         }
       }
 
-      return uploaded ? (dateString ? `Uploaded (${dateString})` : 'Uploaded') : 'Pending';
+      return dateString ? `Uploaded (${dateString})` : 'Uploaded';
     }
 
     return '';
@@ -1646,21 +1665,38 @@ export default function ReportsPage() {
             <div className="h-full flex flex-col items-center justify-center bg-white rounded-lg mx-4 shadow-sm border border-slate-200">
               <Loader2 className="h-8 w-8 animate-spin text-blue-500 mb-3" />
             </div>
-          ) : view === 'standard' ? (
-            <StandardReportView
-              allTasks={filteredByNARows} filteredColumns={filteredColumns} sortConfig={sortConfig}
-              expandedStageColumns={expandedStageColumns} renderCellValue={renderCellValue} safeRender={safeRender}
-              handleSort={handleSort} toggleStageColumns={toggleStageColumns} isStageApplicableToCurrentFilter={isStageApplicableToCurrentFilter}
-              departments={departments} stages={stages} showTime={showTime} showDelta={showDelta} showOfficers={showOfficers} activeDeptId={activeDeptId}
-              onSaveStageDate={handleSaveStageDate} reportDocDefaults={reportDocDefaults}
-            />
           ) : (
-            <TransposedReportView
-              paginatedTasks={filteredByNARows} transposedRows={[]} currentPage={1} itemsPerPage={filteredByNARows.length}
-              expandedSections={expandedSections} renderCellValue={renderCellValue} toggleSection={() => { }}
-              userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
-              departments={departments} reportDocDefaults={reportDocDefaults}
-            />
+            <>
+              {/* Mobile: card-per-task layout - a wide table (of either kind) doesn't work on a phone */}
+              <div className="h-full md:hidden">
+                <MobileReportView
+                  allTasks={filteredByNARows} filteredColumns={filteredColumns}
+                  renderCellValue={renderCellValue} safeRender={safeRender}
+                  showTime={showTime} showOfficers={showOfficers} activeDeptId={activeDeptId}
+                  onSaveStageDate={handleSaveStageDate}
+                />
+              </div>
+
+              {/* Desktop/tablet: existing wide table views */}
+              <div className="hidden md:block h-full">
+                {view === 'standard' ? (
+                  <StandardReportView
+                    allTasks={filteredByNARows} filteredColumns={filteredColumns} sortConfig={sortConfig}
+                    expandedStageColumns={expandedStageColumns} renderCellValue={renderCellValue} safeRender={safeRender}
+                    handleSort={handleSort} toggleStageColumns={toggleStageColumns} isStageApplicableToCurrentFilter={isStageApplicableToCurrentFilter}
+                    departments={departments} stages={stages} showTime={showTime} showDelta={showDelta} showOfficers={showOfficers} activeDeptId={activeDeptId}
+                    onSaveStageDate={handleSaveStageDate} reportDocDefaults={reportDocDefaults}
+                  />
+                ) : (
+                  <TransposedReportView
+                    paginatedTasks={filteredByNARows} transposedRows={[]} currentPage={1} itemsPerPage={filteredByNARows.length}
+                    expandedSections={expandedSections} renderCellValue={renderCellValue} toggleSection={() => { }}
+                    userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
+                    departments={departments} reportDocDefaults={reportDocDefaults}
+                  />
+                )}
+              </div>
+            </>
           )}
         </div>
       </div>

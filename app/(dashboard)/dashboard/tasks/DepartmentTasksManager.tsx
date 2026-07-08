@@ -15,6 +15,7 @@ import { supabase } from "@/lib/supabase/client"
 import { fetchDepartments } from "../departments/departments/database"
 import { DepartmentTasksManagerProps } from "./components/types"
 import { StageUploadDialog } from "./components/StageUploadDialog"
+import { UploadModal } from "@/app/generic-components/UploadModal"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -61,6 +62,13 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [isOtherDialogOpen, setIsOtherDialogOpen] = useState(false)
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null)
   const [isStageUploadDialogOpen, setIsStageUploadDialogOpen] = useState(false)
+  const [reportDocUpload, setReportDocUpload] = useState<{
+    task: any;
+    reportDoc: any;
+    entityType: 'principal' | 'dependant' | 'company';
+    entityId: number | string;
+    entityName: string;
+  } | null>(null)
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null)
   const [isPushingCase, setIsPushingCase] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
@@ -772,7 +780,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   }, []);
 
   const expandAll = () => {
-    setExpandedSections(new Set(['case_details', 'stages', 'stats']));
+    setExpandedSections(new Set(['case_details', 'stages', 'stats', 'report_docs', 'actions']));
     const allStageIds = stages.map(s => s.id);
     setExpandedStages(new Set(allStageIds));
     const allDocIds = stages.flatMap(s => s.documents?.map(d => d.id) || []);
@@ -2032,6 +2040,15 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     setIsStageUploadDialogOpen(true)
   }, [departments])
 
+  const handleReportDocUpload = useCallback((task: any, reportDoc: any, entityType: 'principal' | 'dependant' | 'company', entityId: number | string, entityName: string) => {
+    setReportDocUpload({ task, reportDoc, entityType, entityId, entityName });
+  }, []);
+
+  const handleReportDocUploadSuccess = useCallback(async () => {
+    setReportDocUpload(null);
+    await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true);
+  }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData]);
+
   const handleDeleteDocument = useCallback(async (documentId: string) => {
     try {
       toast({
@@ -2166,73 +2183,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       });
     }
   }, [getDocumentForTaskStage, kycDocuments]);
-
-  const handleViewReportDocument = useCallback(async (colRecords: any[], docMetadata: any, task: any) => {
-    if (!colRecords || colRecords.length === 0) return;
-    try {
-      const docRecord = colRecords[0];
-      const kycId = docRecord.document_id;
-      let kycData = kycDocuments.get(kycId);
-      if (!kycData && kycId) {
-        kycData = await fetchKycDocument(kycId);
-        if (kycData) {
-          setKycDocuments(prev => new Map(prev.set(kycId, kycData)));
-        }
-      }
-
-      const documentName = docMetadata?.display_name || docMetadata?.name || kycData?.display_name || kycData?.name || 'Document';
-      const kycFields = kycData?.fields || [];
-      const fields = kycFields.map((field: any) => ({
-        id: field.id || field.fieldName,
-        name: field.fieldName,
-        type: field.fieldType,
-        required: field.isRequired,
-        description: field.description,
-        isArray: field.isArray,
-        arrayConfig: field.arrayConfig
-      }));
-
-      const extractedData = { ...(docRecord.extracted_details || {}) };
-      fields.forEach((field: any) => {
-        if (extractedData[field.id] === undefined) {
-          extractedData[field.id] = '';
-        }
-      });
-
-      const bucketName = 'kyc-documents';
-      const filePath = docRecord.file_path?.startsWith(bucketName)
-        ? docRecord.file_path
-        : `${bucketName}/${docRecord.file_path}`;
-      const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
-      const fileName = docRecord.file_path?.split('/').pop() || documentName;
-
-      const previewData = {
-        id: docRecord.id,
-        documentId: docRecord.id,
-        documentName,
-        fileUrl,
-        fileName,
-        extractedData,
-        fields,
-        type: kycData?.documentType || 'document',
-        file: {
-          name: fileName,
-          type: fileName.split('.').pop()?.toLowerCase() || 'pdf',
-          url: fileUrl
-        },
-        taskId: task?.id,
-        task
-      };
-      setPreviewDocument(previewData);
-    } catch (error) {
-      console.error('Error preparing report document for view:', error);
-      toast({
-        title: 'Error',
-        description: `Failed to load document: ${error.message}`,
-        variant: 'destructive',
-      });
-    }
-  }, [kycDocuments]);
 
   const handleTaskEdit = (task: UtilTask) => {
     console.log('[handleTaskEdit] Opening edit for task:', {
@@ -2513,6 +2463,10 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     if (row.type === 'stage' && row.stage) {
       return renderEditableStageCell(row, task, columnType || 'date');
     }
+    // Handle report document cells (uses EditableStageCell for a uniform look/feel with stages)
+    if (row.type === 'report_doc') {
+      return renderReportDocCell(row, task, columnType || 'combined');
+    }
     // Handle field type
     if (row.type === 'field') {
       return renderFieldContent(row, value);
@@ -2544,8 +2498,41 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     handleDownloadZip,
     isPushingCase,
     isDownloading,
-    getKycFields
+    getKycFields,
+    handleReportDocUpload
   ]);
+
+  const renderReportDocCell = (row: any, task: any, renderMode: 'date' | 'actions' | 'combined' = 'combined') => {
+    const { reportDoc, entityType, entityId, entityName, colRecords = [] } = row;
+
+    // Synthetic "stage" so EditableStageCell can render report docs identically to task stages
+    const reportDocStage = {
+      id: `report-doc-${reportDoc.documentId}-${entityType}-${entityId}`,
+      name: reportDoc.documentName,
+      documents: [{ id: reportDoc.documentId, kycId: reportDoc.documentId, name: reportDoc.documentName }],
+      follow_up: null,
+      estimated_time: 0,
+    };
+
+    return (
+      <EditableStageCell
+        key={reportDocStage.id}
+        stage={reportDocStage}
+        task={task}
+        value={colRecords.length > 0 ? 'uploaded' : ''}
+        onSave={async () => {}}
+        onDocumentUpload={isReadOnly ? undefined : () => handleReportDocUpload(task, reportDoc, entityType, entityId, entityName)}
+        departments={departments}
+        getKycFields={getKycFields}
+        linkedDocuments={colRecords}
+        renderMode={renderMode}
+        taskName={task.applicant_name}
+        clientName={task.client_name || task.clientName}
+        onFetchData={() => loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true)}
+        readOnly={isReadOnly}
+      />
+    );
+  };
 
   const renderEditableStageCell = (row: any, task: any, renderMode: 'date' | 'actions' = 'date') => {
     const requiresUpload = row.stage?.requires_upload !== false;
@@ -3814,7 +3801,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                 reportDocDefaults={reportDocDefaults}
                 allIndividualDocuments={allIndividualDocuments}
                 allCompanyDocuments={allCompanyDocuments}
-                handleViewReportDocument={handleViewReportDocument}
                 onDocumentPreview={async (doc) => {
                   setPreviewDocument(doc);
                   if (doc.document_id) {
@@ -3916,7 +3902,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                 reportDocDefaults={reportDocDefaults}
                 allIndividualDocuments={allIndividualDocuments}
                 allCompanyDocuments={allCompanyDocuments}
-                handleViewReportDocument={handleViewReportDocument}
+                expandedSections={expandedSections}
+                toggleSectionExpansion={toggleSectionExpansion}
               />
             )}
           </div>
