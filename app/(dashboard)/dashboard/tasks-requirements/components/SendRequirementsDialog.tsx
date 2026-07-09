@@ -117,6 +117,18 @@ export function SendRequirementsDialog({
           }
         }
       })
+
+      // Fallback: If no client requirements found, show all requirements (for backward compatibility)
+      if (docs.length === 0 && classReqs.requirements?.length > 0) {
+        classReqs.requirements.forEach((req: any) => {
+          docs.push({ ...req, task, groupIndex })
+        })
+      }
+      if (questions.length === 0 && classReqs.job_specific_questions?.length > 0) {
+        classReqs.job_specific_questions.forEach((q: any) => {
+          questions.push({ ...q, task, groupIndex })
+        })
+      }
     })
 
     return { docs, questions, fields }

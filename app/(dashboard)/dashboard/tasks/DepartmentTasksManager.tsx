@@ -38,6 +38,7 @@ import { NewCompanyInquiryDialog } from "./components/NewCompanyInquiryDialog"
 import { ExtractionPreviewDialog } from "./components/ExtractionPreviewDialog"
 import { ClassSelectionDialog } from "./components/ClassSelectionDialog"
 import { AssignOfficersDialog } from "./components/AssignOfficersDialog"
+import { SendRequirementsDialog } from "../tasks-requirements/components/SendRequirementsDialog"
 import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "./utils/workflowBundleHelpers"
 import { determineCurrentStage, getStageProgress } from './utils/stageUtils'
 import { calculateStageDate } from './utils/dateUtils'
@@ -146,6 +147,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     bundle?: any;
   } | null>(null);
   const [availableClasses, setAvailableClasses] = useState<any[]>([]);
+  const [requirementsDialogTask, setRequirementsDialogTask] = useState<any>(null);
+  const [automationWebdataMapState, setAutomationWebdataMapState] = useState<Record<string, { name: string; webdata: any[] }>>({});
   const [tableRows, setTableRows] = useState([]);
   const [taskDependants, setTaskDependants] = useState<Map<string, any[]>>(new Map());
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
@@ -2615,6 +2618,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         officers={realOfficers}
         onOfficerChange={isReadOnly ? undefined : updateTaskOfficer}
         readOnly={isReadOnly}
+        onOpenRequirements={handleOpenRequirements}
       />
     );
   };
@@ -2838,6 +2842,68 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       setAutomationDialogOpen(true);
     }
   };
+
+  const handleOpenRequirements = useCallback(async (task: any) => {
+    try {
+      // Fetch all class requirements and filter in JS (matches fetchJobWorkspaceData approach)
+      const { data: requirementsData, error } = await supabase
+        .from('tm_class_requirements')
+        .select('*');
+      
+      if (error) {
+        console.error('Error fetching requirements:', error);
+      }
+      
+      // Filter requirements matching this task's job level
+      const taskDeptId = task.department_id || task.department?.id;
+      const taskSubdeptId = task.subdepartment_id || task.subdepartment?.id;
+      const taskClassId = task.class_id || task.class?.id;
+      
+      const matchingReq = (requirementsData || []).find((req: any) => {
+        const rjl = req.job_level || {};
+        if (String(rjl.department_id) === String(taskDeptId) &&
+          String(rjl.subdepartment_id) === String(taskSubdeptId) &&
+          String(rjl.class_id || 'null') === String(taskClassId || 'null')) {
+          return true;
+        }
+        return false;
+      });
+
+      // Fetch automations for this job level
+      const automationIds = new Set<string>();
+      (matchingReq?.requirements || []).forEach((req: any) => {
+        if (req.web_automation?.automationId) automationIds.add(req.web_automation.automationId);
+      });
+      
+      let automationWebdataMap: Record<string, { name: string; webdata: any[] }> = {};
+      if (automationIds.size > 0) {
+        const { data: autos } = await supabase
+          .from('tm_automations')
+          .select('*')
+          .in('id', Array.from(automationIds));
+        
+        (autos || []).forEach((auto: any) => {
+          if (auto.webdata?.length > 0) {
+            automationWebdataMap[auto.id] = { name: auto.name || 'Unknown', webdata: auto.webdata };
+          }
+        });
+      }
+      
+      // Enrich task with requirements data
+      const enrichedTask = {
+        ...task,
+        requirements: matchingReq?.requirements || [],
+        job_level: matchingReq?.job_level || null,
+        job_specific_questions: matchingReq?.job_specific_questions || [],
+      };
+      
+      setRequirementsDialogTask(enrichedTask);
+      setAutomationWebdataMapState(automationWebdataMap);
+    } catch (err) {
+      console.error('Error in handleOpenRequirements:', err);
+      setRequirementsDialogTask(task);
+    }
+  }, []);
 
   const loadRows = useCallback(async (tasks: any[]) => {
     if (!tasks || tasks.length === 0) return;
@@ -4116,6 +4182,29 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         setSelectedTaskForPush={setSelectedTaskForPush}
         executePushCase={executePushCase}
       />
+
+      {requirementsDialogTask && (
+        <SendRequirementsDialog
+          isOpen={!!requirementsDialogTask}
+          onClose={() => setRequirementsDialogTask(null)}
+          selectedApplicant={requirementsDialogTask.applicant_name || requirementsDialogTask.client_name || ''}
+          tasks={[requirementsDialogTask]}
+          taskClassRequirements={{ [requirementsDialogTask.id]: { requirements: requirementsDialogTask.requirements, job_level: requirementsDialogTask.job_level, job_specific_questions: requirementsDialogTask.job_specific_questions } }}
+          automationWebdataMap={automationWebdataMapState}
+          allCompanyDocuments={allCompanyDocuments}
+          allIndividualDocuments={allIndividualDocuments}
+          fieldSourceDataCache={{}}
+          fieldMasterComputedCache={{}}
+          jobFieldsRecord={{}}
+          relationshipData={[{
+            company: requirementsDialogTask.participants_details?.find((p: any) => p.type === 'company') || (requirementsDialogTask.applicant_details?.type === 'company' ? requirementsDialogTask.applicant_details : null),
+            principal: requirementsDialogTask.participants_details?.find((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')),
+            directors: requirementsDialogTask.participants_details?.filter((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('director') : p.role === 'director')) || [],
+            dependants: requirementsDialogTask.participants_details?.filter((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant')) || [],
+          }]}
+          kycDocsMap={kycDocuments}
+        />
+      )}
     </div >
   )
 }

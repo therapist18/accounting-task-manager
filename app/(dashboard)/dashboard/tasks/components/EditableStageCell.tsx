@@ -41,6 +41,7 @@ interface EditableStageCellProps {
   officers?: any[]
   onOfficerChange?: (taskId: string, officerId: string | null) => Promise<void>
   readOnly?: boolean
+  onOpenRequirements?: (task: any) => void
 }
 
 const documentFieldsCache = new Map<string, { fields: any[], timestamp: number }>();
@@ -77,7 +78,7 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[] = [])
   }
 };
 
-export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, renderMode = 'date', taskName, clientName, getKycFields, onFetchData, officers = [], onOfficerChange, readOnly = false }: EditableStageCellProps) {
+export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, renderMode = 'date', taskName, clientName, getKycFields, onFetchData, officers = [], onOfficerChange, readOnly = false, onOpenRequirements }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -1219,17 +1220,16 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       if (isCompact) {
         return (
           <div className="flex items-center gap-0.5 shrink-0 bg-slate-50/50 rounded p-0.5 border border-slate-100">
+            {stageLinkBtn}
             {viewBtn}
           </div>
         );
       }
 
       return (
-        <div className="grid grid-cols-4 items-center justify-items-center w-full">
-          <div className="flex items-center justify-center w-8 h-8">{viewBtn}</div>
-          <div className="flex items-center justify-center w-8 h-8"></div>
-          <div className="flex items-center justify-center w-8 h-8"></div>
-          <div className="flex items-center justify-center w-8 h-8"></div>
+        <div className="flex items-center gap-1 shrink-0">
+          {stageLinkBtn}
+          {viewBtn}
         </div>
       );
     }
@@ -1262,6 +1262,32 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         );
       }
     }
+
+    const stageLinkBtn = (() => {
+      if (!stageLink) return null;
+      if (stageLink.tab === 'billing') {
+        return (
+          <Button variant="ghost" size="icon" className={cn("text-blue-600 hover:bg-blue-50", btnSizeClass)} title="Preview bill" onClick={(e) => { e.stopPropagation(); setBillPreviewOpen(true); }}>
+            <CreditCard className={iconSizeClass} />
+          </Button>
+        );
+      }
+      if (stageLink.tab === 'requirements') {
+        return (
+          <Button variant="ghost" size="icon" className={cn("text-indigo-600 hover:bg-indigo-50", btnSizeClass)} title="Open requirements checklist" onClick={(e) => { e.stopPropagation(); onOpenRequirements?.(task); }}>
+            <ClipboardList className={iconSizeClass} />
+          </Button>
+        );
+      }
+      if (stageLink.tab === 'automation' && currentAutomationConfig) {
+        return (
+          <Button variant="ghost" size="icon" className={cn("text-purple-600 hover:bg-purple-50", btnSizeClass)} title={`Open automation: ${currentAutomationConfig.docName}`} onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/tasks/${task.id}?tab=automation&automationId=${currentAutomationConfig.automationId}`); }}>
+            <Zap className={iconSizeClass} />
+          </Button>
+        );
+      }
+      return null;
+    })();
 
     const viewBtn = linkedDocument && (
       <Dialog>
@@ -1339,6 +1365,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       return (
         <div className="flex items-center gap-0.5 shrink-0 bg-slate-50/50 rounded p-0.5 border border-slate-100">
           {officerContent}
+          {stageLinkBtn}
           {viewBtn}
           {uploadBtn}
           {menuBtn}
@@ -1347,11 +1374,12 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     }
 
     return (
-      <div className="grid grid-cols-4 items-center justify-items-center w-full">
-        <div className="flex items-center justify-center w-8 h-8">{officerContent}</div>
-        <div className="flex items-center justify-center w-8 h-8">{viewBtn}</div>
-        <div className="flex items-center justify-center w-8 h-8">{uploadBtn}</div>
-        <div className="flex items-center justify-center w-8 h-8">{menuBtn}</div>
+      <div className="flex items-center gap-1 shrink-0">
+        {officerContent}
+        {stageLinkBtn}
+        {viewBtn}
+        {uploadBtn}
+        {menuBtn}
       </div>
     );
   };
@@ -1377,80 +1405,33 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     return <span className="text-sm text-gray-500 italic">-</span>;
   };
 
-  const renderStageLink = () => {
-    if (!stageLink || !isStageApplicable) return null;
-
-    if (stageLink.tab === 'billing') {
-      return (
-        <>
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); setBillPreviewOpen(true); }}
-            className="ml-1 inline-flex items-center gap-0.5 text-[9px] font-bold text-blue-600 hover:text-blue-700 hover:underline shrink-0"
-            title="Preview bill"
-          >
-            <CreditCard className="h-3 w-3" /> {latestBillingItem ? latestBillingItem.status : 'Bill'}
-          </button>
-          <Dialog open={billPreviewOpen} onOpenChange={setBillPreviewOpen}>
-            <DialogContent className="max-w-md" onClick={(e) => e.stopPropagation()}>
-              <DialogHeader><DialogTitle>Quotation Preview</DialogTitle></DialogHeader>
-              {latestBillingItem ? (
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between"><span className="text-muted-foreground">Invoice #</span><span className="font-semibold">{latestBillingItem.invoiceNumber}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Amount</span><span className="font-semibold">${Number(latestBillingItem.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span className="font-semibold capitalize">{latestBillingItem.status}</span></div>
-                  {latestBillingItem.description && <p className="text-muted-foreground">{latestBillingItem.description}</p>}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">No bill has been raised yet.</p>
-              )}
-              <DialogFooter>
-                <Button variant="outline" size="sm" onClick={() => setBillPreviewOpen(false)}>Close</Button>
-                <Button size="sm" onClick={() => router.push(`/dashboard/tasks/${task.id}?tab=billing`)}>
-                  Open Billing Tab <ArrowUpRight className="h-3.5 w-3.5 ml-1" />
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </>
-      );
-    }
-
-    if (stageLink.tab === 'requirements') {
-      return (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/tasks/${task.id}?tab=requirements&openSendDialog=1`); }}
-          className="ml-1 inline-flex items-center gap-0.5 text-[9px] font-bold text-indigo-600 hover:text-indigo-700 hover:underline shrink-0"
-          title="Open requirements checklist"
-        >
-          <ClipboardList className="h-3 w-3" /> Checklist
-        </button>
-      );
-    }
-
-    if (stageLink.tab === 'automation') {
-      if (!currentAutomationConfig) return null;
-      return (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/tasks/${task.id}?tab=automation&automationId=${currentAutomationConfig.automationId}`); }}
-          className="ml-1 inline-flex items-center gap-0.5 text-[9px] font-bold text-purple-600 hover:text-purple-700 hover:underline shrink-0"
-          title={`Open automation: ${currentAutomationConfig.docName}`}
-        >
-          <Zap className="h-3 w-3" /> Automation
-        </button>
-      );
-    }
-
-    return null;
-  };
-
   return (
     <>
       <SkipStageDialog />
       {renderCellContent()}
-      {renderStageLink()}
+      {stageLink?.tab === 'billing' && (
+        <Dialog open={billPreviewOpen} onOpenChange={setBillPreviewOpen}>
+          <DialogContent className="max-w-md" onClick={(e) => e.stopPropagation()}>
+            <DialogHeader><DialogTitle>Quotation Preview</DialogTitle></DialogHeader>
+            {latestBillingItem ? (
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-muted-foreground">Invoice #</span><span className="font-semibold">{latestBillingItem.invoiceNumber}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Amount</span><span className="font-semibold">${Number(latestBillingItem.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span className="font-semibold capitalize">{latestBillingItem.status}</span></div>
+                {latestBillingItem.description && <p className="text-muted-foreground">{latestBillingItem.description}</p>}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No bill has been raised yet.</p>
+            )}
+            <DialogFooter>
+              <Button variant="outline" size="sm" onClick={() => setBillPreviewOpen(false)}>Close</Button>
+              <Button size="sm" onClick={() => router.push(`/dashboard/tasks/${task.id}?tab=billing`)}>
+                Open Billing Tab <ArrowUpRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }

@@ -130,6 +130,14 @@ export function RequirementsTable({
   const [isSendRequirementsOpen, setIsSendRequirementsOpen] = useState(false);
   const [isReviewSubmissionOpen, setIsReviewSubmissionOpen] = useState(false);
 
+  const kycDocsMap = useMemo(() => {
+    const map = new Map<string, any>();
+    documents.forEach(doc => {
+      if (doc.id) map.set(doc.id, doc);
+    });
+    return map;
+  }, [documents]);
+
   const parseSelectionId = useCallback((selectionId: string) => {
     const cleanId = selectionId.replace(/_\d+_\d+$/, '');
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId);
@@ -1304,7 +1312,7 @@ export function RequirementsTable({
               companyData={companyData}
               getCurrentRequirements={getCurrentRequirements}
               fuzzyMatch={fuzzyMatch}
-              kycDocuments={new Map()}
+              kycDocuments={kycDocsMap}
               documentTypes={documents}
               searchQuery={searchQuery}
               onSaveDocument={handleSaveDocument}
@@ -1449,6 +1457,7 @@ export function RequirementsTable({
         automationWebdataMap={automationWebdataMap}
         allCompanyDocuments={allCompanyDocuments}
         allIndividualDocuments={allIndividualDocuments}
+        kycDocsMap={kycDocsMap}
         fieldSourceDataCache={fieldSourceDataCache}
         fieldMasterComputedCache={fieldMasterComputedCache}
         jobFieldsRecord={jobFieldsRecord}

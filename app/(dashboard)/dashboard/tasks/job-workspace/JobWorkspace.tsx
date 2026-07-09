@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useMemo } from "react"
+import React, { useState, useMemo, useEffect } from "react"
 import { ArrowLeft, Briefcase, CheckCircle2, Clock, FileText, User, Zap, History, MessageSquare, CreditCard, FileType, Building2, ChevronRight, LayoutList, Calendar, Globe, Hash } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -62,6 +62,13 @@ const TAB_DEFINITIONS = [
 export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutomationId, initialOpenSendDialog }: JobWorkspaceProps) {
   const { task, department, subdepartment, stages, individual } = data
   const [activeTab, setActiveTab] = useState(initialTab || "workflow")
+
+  // Sync activeTab when URL-driven initialTab prop changes (e.g. from zap icon redirect)
+  useEffect(() => {
+    if (initialTab && initialTab !== activeTab) {
+      setActiveTab(initialTab)
+    }
+  }, [initialTab])
 
   const stageProgress = useMemo(() => getStageProgress(task, stages), [task, stages])
   const currentStage = useMemo(() => getCurrentStage(task, stages), [task, stages])
