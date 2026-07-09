@@ -25,6 +25,8 @@ export async function exportToDocx(cvData: any, cvSettings?: { primaryColor?: st
     education = [],
     references = [],
     declaration = "",
+    includeDeclaration = true,
+    verifiedBadge = false,
   } = cvData;
 
   // Convert hex color to docx format (remove # prefix)
@@ -479,7 +481,7 @@ export async function exportToDocx(cvData: any, cvSettings?: { primaryColor?: st
           }),
 
           // DECLARATION
-          declaration
+          includeDeclaration && declaration
             ? new Paragraph({
                 spacing: { before: 400, after: 100 },
                 border: {
@@ -503,6 +505,16 @@ export async function exportToDocx(cvData: any, cvSettings?: { primaryColor?: st
                     size: 18,
                     color: "777777",
                   }),
+                  ...(verifiedBadge
+                    ? [
+                        new TextRun({
+                          text: `\nCV Verified & Up-to-date ${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}`,
+                          bold: true,
+                          size: 18,
+                          color: accentColor,
+                        }),
+                      ]
+                    : []),
                 ],
               })
             : new Paragraph({ text: "" }),

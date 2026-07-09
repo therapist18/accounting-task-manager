@@ -9,9 +9,11 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Progress } from "@/components/ui/progress"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandGroup, CommandItem, CommandList } from "@/components/ui/command"
 import { toast } from "sonner"
-import { 
-  CheckCircle2, AlertCircle, Copy, Check, ExternalLink, 
+import {
+  CheckCircle2, AlertCircle, Copy, Check, ExternalLink,
   Printer, FileText, Send, Database, Link as LinkIcon,
   CheckSquare, ClipboardList, Eye, LayoutDashboard,
   ArrowRight, ShieldCheck, HelpCircle
@@ -132,7 +134,9 @@ export function SendRequirementsDialog({
 
   const getDocStatus = (docRequirement: any, task: any) => {
     const docIds = docRequirement.document_ids || (docRequirement.document_id ? [docRequirement.document_id] : [])
-    if (docIds.length === 0) return { label: 'Action Required', color: 'text-red-600', bgColor: 'bg-red-50', status: 'missing', icon: AlertCircle, date: '-' }
+    const requiredCount = docRequirement.requiredDocumentCount || 1
+    const missing = { label: 'Action Required', color: 'text-red-600', bgColor: 'bg-red-50', status: 'missing', icon: AlertCircle, date: '-', satisfiedCount: 0, requiredCount }
+    if (docIds.length === 0) return missing
 
     let foundDocs: any[] = []
     const companyId = task.company_id
@@ -144,21 +148,33 @@ export function SendRequirementsDialog({
       foundDocs.push(...allIndividualDocuments[individualId].filter(doc => docIds.includes(doc.document_id) && doc.status !== 'deleted'))
     }
 
-    if (foundDocs.length === 0) return { label: 'Action Required', color: 'text-red-600', bgColor: 'bg-red-50', status: 'missing', icon: AlertCircle, date: '-' }
+    if (foundDocs.length === 0) return missing
 
     const activeDocs = foundDocs.filter(d => d.status === 'active')
     const latestDoc = (activeDocs.length > 0 ? activeDocs : foundDocs).reduce((prev, curr) => new Date(curr.created_at) > new Date(prev.created_at) ? curr : prev)
     const formattedDate = new Date(latestDoc.created_at).toLocaleDateString('en-GB')
 
-    if (activeDocs.length === 0) {
-      const draftDocs = foundDocs.filter(d => d.status === 'draft')
-      if (draftDocs.length > 0) {
-        return { label: 'In Progress', color: 'text-amber-600', bgColor: 'bg-amber-50', status: 'draft', icon: ClipboardList, date: formattedDate }
+    // A requirement can accept any of several document types (document_ids is the pool);
+    // requiredDocumentCount says how many of the pool must be present, e.g. count=1 means "any one of these".
+    if (activeDocs.length >= requiredCount) {
+      return {
+        label: requiredCount > 1 ? `Verified (${activeDocs.length}/${requiredCount})` : 'Verified',
+        color: 'text-green-600', bgColor: 'bg-green-50', status: 'valid', icon: ShieldCheck, date: formattedDate, satisfiedCount: activeDocs.length, requiredCount
       }
-      return { label: 'Action Required', color: 'text-red-600', bgColor: 'bg-red-50', status: 'missing', icon: AlertCircle, date: '-' }
     }
 
-    return { label: 'Verified', color: 'text-green-600', bgColor: 'bg-green-50', status: 'valid', icon: ShieldCheck, date: formattedDate }
+    if (activeDocs.length > 0) {
+      return {
+        label: `${activeDocs.length}/${requiredCount} Provided`,
+        color: 'text-amber-600', bgColor: 'bg-amber-50', status: 'partial', icon: ClipboardList, date: formattedDate, satisfiedCount: activeDocs.length, requiredCount
+      }
+    }
+
+    const draftDocs = foundDocs.filter(d => d.status === 'draft')
+    if (draftDocs.length > 0) {
+      return { label: 'In Progress', color: 'text-amber-600', bgColor: 'bg-amber-50', status: 'draft', icon: ClipboardList, date: formattedDate, satisfiedCount: 0, requiredCount }
+    }
+    return missing
   }
 
   const getDocTypeNames = (docRequirement: any): string[] => {
@@ -168,6 +184,11 @@ export function SendRequirementsDialog({
       const docType = kycDocsMap.get(id)
       return docType?.display_name || docType?.name || 'Document'
     })
+  }
+
+  const getAcceptedTypesLabel = (docTypeNames: string[], requiredCount: number): string => {
+    if (docTypeNames.length <= 1) return docTypeNames[0] || 'Document'
+    return requiredCount > 1 ? `Any ${requiredCount} of ${docTypeNames.length}` : `Any 1 of ${docTypeNames.length}`
   }
 
   const getFieldVal = (field: any, task: any, groupIndex: number) => {
@@ -227,6 +248,7 @@ export function SendRequirementsDialog({
   const handlePrint = async () => {
     const getStatusClass = (statusObj: any) => {
       if (statusObj.status === 'valid') return 'status-valid'
+      if (statusObj.status === 'partial') return 'status-partial'
       if (statusObj.status === 'draft') return 'status-draft'
       return 'status-missing'
     }
@@ -236,32 +258,40 @@ export function SendRequirementsDialog({
     const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
     const refNo = `REQ-${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}-${Math.random().toString(36).substring(2,6).toUpperCase()}`
 
+    const formatAcceptedTypes = (docTypeNames: string[], requiredCount: number) => {
+      if (docTypeNames.length <= 1) return docTypeNames[0] || 'Document'
+      const label = getAcceptedTypesLabel(docTypeNames, requiredCount)
+      const preview = docTypeNames.slice(0, 3).join(' &bull; ') + (docTypeNames.length > 3 ? ` &bull; +${docTypeNames.length - 3} more` : '')
+      return `<strong style="color:#1e293b;">${label}</strong><br/><span style="color:#94a3b8; font-size:9px;">${preview}</span>`
+    }
+
     const docRows = clientRequirements.docs.map((doc, idx) => {
       const status = getDocStatus(doc, doc.task)
-      const docTypeNames = getDocTypeNames(doc).join(', ')
+      const docTypeNames = getDocTypeNames(doc)
+      const requiredCount = doc.requiredDocumentCount || 1
       return `<tr>
-        <td style="text-align:center; color:#94a3b8; font-family:monospace; font-size:10px;">${String(idx + 1).padStart(2,'0')}</td>
+        <td style="text-align:center; color:#94a3b8; font-family:monospace; font-size:9px;">${String(idx + 1).padStart(2,'0')}</td>
         <td style="font-weight:600; color:#1e293b;">${doc.name}</td>
-        <td style="color:#64748b; font-size:10px;">${docTypeNames}</td>
-        <td style="text-align:center; color:#64748b; font-size:10px; white-space:nowrap;">${status.date}</td>
+        <td style="color:#64748b; font-size:9.5px;">${formatAcceptedTypes(docTypeNames, requiredCount)}</td>
+        <td style="text-align:center; color:#64748b; font-size:9.5px; white-space:nowrap;">${status.date}</td>
         <td style="text-align:center;">
           <span class="status-badge ${getStatusClass(status)}">${status.label}</span>
         </td>
       </tr>`
     }).join('')
 
-    const fieldRows = [
+    const fieldCards = [
       ...clientRequirements.questions.map((q, idx) => {
         const val = q.task.job_specific_answers?.[q.id]
         const isMissing = !val
-        return `<tr>
-          <td style="text-align:center; color:#94a3b8; font-family:monospace; font-size:10px;">${String(idx + 1).padStart(2,'0')}</td>
-          <td style="font-weight:600; color:#1e293b;">${q.label}</td>
-          <td style="color:#475569; font-size:10px;">${val || '<span style="color:#cbd5e1;font-style:italic;">Pending Input</span>'}</td>
-          <td style="text-align:center;">
-            <span class="status-badge ${isMissing ? 'status-missing' : 'status-valid'}">${isMissing ? 'Action Required' : 'Populated'}</span>
-          </td>
-        </tr>`
+        return `<div class="field-card ${isMissing ? 'field-missing' : 'field-ok'}">
+          <div class="field-card-top">
+            <span class="field-num">${String(idx + 1).padStart(2,'0')}</span>
+            <span class="field-name">${q.label}</span>
+            <span class="status-dot ${isMissing ? 'dot-missing' : 'dot-valid'}"></span>
+          </div>
+          <div class="field-value">${val || '<span style="color:#cbd5e1;font-style:italic;">Pending Input</span>'}</div>
+        </div>`
       }),
       ...clientRequirements.fields.map((f, idx) => {
         const isArray = f.fieldType === 'array'
@@ -273,10 +303,10 @@ export function SendRequirementsDialog({
           if (isMissing) {
             displayVal = '<span style="color:#cbd5e1;font-style:italic;">Pending Input</span>'
           } else {
-            displayVal = `<ul style="margin:0; padding-left: 16px; color:#475569; font-size:10px;">` + arrayRows.map((row: any) => {
+            displayVal = `<ul style="margin:0; padding-left: 14px;">` + arrayRows.map((row: any) => {
               const label = getEntityLabelForRow(f.task, row.entityId)
               const items = (f.arrayItems || []).map((item: any) => `<strong>${getFieldLabel(item)}:</strong> ${row[item.variableName] ?? '-'}`).join(', ')
-              return `<li style="margin-bottom:4px;"><strong style="color:#1e293b;">${label}</strong> &rarr; ${items}</li>`
+              return `<li style="margin-bottom:3px;"><strong style="color:#1e293b;">${label}</strong> &rarr; ${items}</li>`
             }).join('') + `</ul>`
           }
         } else {
@@ -284,113 +314,102 @@ export function SendRequirementsDialog({
           isMissing = isFieldMissingVal(val)
           displayVal = val || '<span style="color:#cbd5e1;font-style:italic;">Pending Input</span>'
         }
-        return `<tr>
-          <td style="text-align:center; color:#94a3b8; font-family:monospace; font-size:10px;">${String(clientRequirements.questions.length + idx + 1).padStart(2,'0')}</td>
-          <td style="font-weight:600; color:#1e293b;">${getFieldLabel(f)}</td>
-          <td style="color:#475569; font-size:10px; max-width:280px; word-break:break-word;">${displayVal}</td>
-          <td style="text-align:center;">
-            <span class="status-badge ${isMissing ? 'status-missing' : 'status-valid'}">${isMissing ? 'Action Required' : 'Populated'}</span>
-          </td>
-        </tr>`
+        return `<div class="field-card ${isMissing ? 'field-missing' : 'field-ok'} ${isArray ? 'field-wide' : ''}">
+          <div class="field-card-top">
+            <span class="field-num">${String(clientRequirements.questions.length + idx + 1).padStart(2,'0')}</span>
+            <span class="field-name">${getFieldLabel(f)}</span>
+            <span class="status-dot ${isMissing ? 'dot-missing' : 'dot-valid'}"></span>
+          </div>
+          <div class="field-value">${displayVal}</div>
+        </div>`
       })
     ].join('')
 
     const htmlContent = `
       <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #0f172a; line-height: 1.5; background: #ffffff; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; color: #0f172a; line-height: 1.4; background: #ffffff; }
 
-        /* COVER / HEADER */
-        .cover { position: relative; padding: 48px 48px 36px; border-bottom: 4px solid #2563eb; margin-bottom: 0; }
-        .cover::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 6px; background: linear-gradient(90deg, #2563eb 0%, #7c3aed 50%, #2563eb 100%); }
-        .cover-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; }
-        .cover-brand { display: flex; flex-direction: column; gap: 4px; }
-        .cover-logo { font-size: 11px; font-weight: 800; color: #2563eb; text-transform: uppercase; letter-spacing: 0.2em; }
-        .cover-subtitle { font-size: 10px; color: #94a3b8; font-weight: 500; letter-spacing: 0.05em; }
-        .cover-ref { text-align: right; }
-        .cover-ref-label { font-size: 8px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.15em; }
-        .cover-ref-value { font-size: 11px; font-weight: 600; color: #475569; font-family: 'Courier New', monospace; }
-        .cover-title { font-size: 32px; font-weight: 900; color: #0f172a; letter-spacing: -0.04em; line-height: 1.1; margin-bottom: 8px; }
-        .cover-desc { font-size: 13px; color: #64748b; font-weight: 400; line-height: 1.5; max-width: 480px; }
-        .cover-meta { display: flex; gap: 32px; margin-top: 28px; padding-top: 20px; border-top: 1px solid #e2e8f0; }
-        .cover-meta-item { display: flex; flex-direction: column; gap: 2px; }
-        .cover-meta-label { font-size: 8px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.12em; }
-        .cover-meta-value { font-size: 12px; font-weight: 600; color: #1e293b; }
+        /* HEADER: brand + title + progress in one compact band */
+        .header { position: relative; padding: 20px 36px 16px; border-bottom: 3px solid #2563eb; }
+        .header-top { display: flex; justify-content: space-between; align-items: flex-start; }
+        .brand { display: flex; flex-direction: column; gap: 2px; }
+        .brand-logo { font-size: 10px; font-weight: 800; color: #2563eb; text-transform: uppercase; letter-spacing: 0.18em; }
+        .brand-title { font-size: 16px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; margin-top: 2px; }
+        .header-meta { text-align: right; display: flex; gap: 18px; }
+        .meta-item { display: flex; flex-direction: column; gap: 1px; }
+        .meta-label { font-size: 7px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.1em; }
+        .meta-value { font-size: 10.5px; font-weight: 600; color: #334155; }
 
-        /* PROGRESS BAR */
-        .progress-section { padding: 24px 48px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
-        .progress-bar-bg { height: 10px; background: #e2e8f0; border-radius: 99px; overflow: hidden; position: relative; }
-        .progress-bar-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, #2563eb, #7c3aed); position: relative; }
-        .progress-bar-fill::after { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%); }
-        .progress-stats { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
-        .progress-label { font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; }
-        .progress-value { font-size: 20px; font-weight: 800; color: #0f172a; }
-        .progress-count { font-size: 11px; color: #64748b; font-weight: 500; }
+        .progress-row { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
+        .progress-bar-bg { flex: 1; height: 7px; background: #e2e8f0; border-radius: 99px; overflow: hidden; }
+        .progress-bar-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, #2563eb, #7c3aed); }
+        .progress-summary { font-size: 10px; color: #64748b; font-weight: 600; white-space: nowrap; }
+        .progress-percent { font-size: 15px; font-weight: 800; color: #0f172a; white-space: nowrap; }
 
         /* CONTENT */
-        .content { padding: 32px 48px; }
-        .section-header { display: flex; align-items: center; gap: 12px; margin: 36px 0 16px; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0; }
-        .section-number { width: 28px; height: 28px; background: #2563eb; color: white; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; flex-shrink: 0; }
-        .section-title { font-size: 13px; font-weight: 800; color: #1e293b; text-transform: uppercase; letter-spacing: 0.08em; }
-        .section-count { font-size: 10px; font-weight: 600; color: #94a3b8; background: #f1f5f9; padding: 2px 8px; border-radius: 99px; }
+        .content { padding: 18px 36px 8px; }
+        .section-header { display: flex; align-items: center; gap: 10px; margin: 18px 0 8px; padding-bottom: 6px; border-bottom: 2px solid #e2e8f0; }
+        .section-header:first-child { margin-top: 0; }
+        .section-number { width: 20px; height: 20px; background: #2563eb; color: white; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; flex-shrink: 0; }
+        .section-title { font-size: 11px; font-weight: 800; color: #1e293b; text-transform: uppercase; letter-spacing: 0.06em; }
+        .section-count { font-size: 9px; font-weight: 600; color: #94a3b8; background: #f1f5f9; padding: 1px 7px; border-radius: 99px; }
 
-        /* TABLES */
-        table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 11px; }
-        th { background-color: #f1f5f9; padding: 10px 14px; text-align: left; font-weight: 700; color: #475569; border-bottom: 2px solid #e2e8f0; text-transform: uppercase; font-size: 9px; letter-spacing: 0.06em; }
-        td { padding: 12px 14px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; color: #334155; }
+        /* DOCUMENT TABLE */
+        table { width: 100%; border-collapse: collapse; margin-bottom: 6px; font-size: 10px; }
+        th { background-color: #f1f5f9; padding: 6px 10px; text-align: left; font-weight: 700; color: #475569; border-bottom: 2px solid #e2e8f0; text-transform: uppercase; font-size: 8px; letter-spacing: 0.05em; }
+        td { padding: 6px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; color: #334155; page-break-inside: avoid; }
         tr:nth-child(even) td { background-color: #fafbfc; }
         tr:last-child td { border-bottom: none; }
-        tr:hover td { background-color: #f8fafc; }
+
+        /* FIELD CARD GRID */
+        .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px; margin-bottom: 10px; }
+        .field-card { border: 1px solid #eef2f7; border-radius: 5px; padding: 5px 9px; background: #fafbfc; page-break-inside: avoid; }
+        .field-card.field-wide { grid-column: 1 / -1; }
+        .field-card.field-missing { background: #fef7f7; border-color: #fbdcdc; }
+        .field-card-top { display: flex; align-items: center; gap: 5px; margin-bottom: 1px; }
+        .field-num { font-size: 7px; color: #94a3b8; font-family: 'Courier New', monospace; }
+        .field-name { font-size: 9.5px; font-weight: 700; color: #1e293b; flex: 1; }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+        .dot-valid { background: #16a34a; }
+        .dot-missing { background: #dc2626; }
+        .field-value { font-size: 9.5px; color: #475569; padding-left: 11px; word-break: break-word; }
+        .field-value ul { list-style: none; }
 
         /* STATUS BADGES */
-        .status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 9999px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+        .status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
         .status-missing { background-color: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
         .status-valid { background-color: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+        .status-partial { background-color: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
         .status-draft { background-color: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
 
         /* FOOTER */
-        .footer { margin-top: 48px; padding: 20px 48px; border-top: 2px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; }
-        .footer-left { font-size: 9px; color: #94a3b8; font-weight: 500; }
-        .footer-right { font-size: 9px; color: #94a3b8; font-weight: 500; }
+        .footer { margin-top: 20px; padding: 12px 36px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; }
+        .footer-left { font-size: 8px; color: #94a3b8; font-weight: 500; }
+        .footer-right { font-size: 8px; color: #94a3b8; font-weight: 500; }
         .footer-brand { font-weight: 700; color: #64748b; }
 
         /* WATERMARK */
-        .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-35deg); font-size: 80px; font-weight: 900; color: rgba(37, 99, 235, 0.03); letter-spacing: 0.1em; text-transform: uppercase; pointer-events: none; white-space: nowrap; z-index: 0; }
+        .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-35deg); font-size: 70px; font-weight: 900; color: rgba(37, 99, 235, 0.025); letter-spacing: 0.1em; text-transform: uppercase; pointer-events: none; white-space: nowrap; z-index: 0; }
       </style>
       <div class="watermark">CONFIDENTIAL</div>
 
-      <div class="cover">
-        <div class="cover-top">
-          <div class="cover-brand">
-            <div class="cover-logo">Accounting Task Manager</div>
-            <div class="cover-subtitle">Compliance & Onboarding Platform</div>
+      <div class="header">
+        <div class="header-top">
+          <div class="brand">
+            <div class="brand-logo">Accounting Task Manager</div>
+            <div class="brand-title">Requirement Checklist Report &middot; ${selectedApplicant}</div>
           </div>
-          <div class="cover-ref">
-            <div class="cover-ref-label">Reference No.</div>
-            <div class="cover-ref-value">${refNo}</div>
+          <div class="header-meta">
+            <div class="meta-item"><span class="meta-label">Ref No.</span><span class="meta-value">${refNo}</span></div>
+            <div class="meta-item"><span class="meta-label">Generated</span><span class="meta-value">${dateStr}, ${timeStr}</span></div>
+            <div class="meta-item"><span class="meta-label">Classification</span><span class="meta-value">Confidential</span></div>
           </div>
         </div>
-        <div class="cover-title">Requirement Checklist<br/>Dashboard Report</div>
-        <div class="cover-desc">A comprehensive overview of all client onboarding requirements, document statuses, and outstanding action items for the specified applicant.</div>
-        <div class="cover-meta">
-          <div class="cover-meta-item"><span class="cover-meta-label">Applicant</span><span class="cover-meta-value">${selectedApplicant}</span></div>
-          <div class="cover-meta-item"><span class="cover-meta-label">Report Generated</span><span class="cover-meta-value">${dateStr} at ${timeStr}</span></div>
-          <div class="cover-meta-item"><span class="cover-meta-label">Document Ref</span><span class="cover-meta-value">${refNo}</span></div>
-          <div class="cover-meta-item"><span class="cover-meta-label">Classification</span><span class="cover-meta-value">Confidential</span></div>
-        </div>
-      </div>
-
-      <div class="progress-section">
-        <div class="progress-bar-bg">
-          <div class="progress-bar-fill" style="width: ${stats.percent}%"></div>
-        </div>
-        <div class="progress-stats">
-          <div>
-            <div class="progress-label">Overall Completion</div>
-            <div class="progress-count">${stats.completed} of ${stats.total} items addressed</div>
-          </div>
-          <div class="progress-value">${stats.percent}%</div>
+        <div class="progress-row">
+          <div class="progress-bar-bg"><div class="progress-bar-fill" style="width: ${stats.percent}%"></div></div>
+          <span class="progress-summary">${stats.completed} of ${stats.total} items addressed</span>
+          <span class="progress-percent">${stats.percent}%</span>
         </div>
       </div>
 
@@ -403,11 +422,11 @@ export function SendRequirementsDialog({
         <table>
           <thead>
             <tr>
-              <th style="width:44px; text-align:center;">#</th>
+              <th style="width:32px; text-align:center;">#</th>
               <th>Requirement</th>
-              <th style="width:160px">Accepted Types</th>
-              <th style="width:100px; text-align:center;">Date</th>
-              <th style="width:130px; text-align:center;">Status</th>
+              <th style="width:190px">Accepted Types</th>
+              <th style="width:80px; text-align:center;">Date</th>
+              <th style="width:120px; text-align:center;">Status</th>
             </tr>
           </thead>
           <tbody>${docRows}</tbody>
@@ -418,22 +437,12 @@ export function SendRequirementsDialog({
           <div class="section-title">Information & Context Fields</div>
           <div class="section-count">${clientRequirements.questions.length + clientRequirements.fields.length} items</div>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th style="width:44px; text-align:center;">#</th>
-              <th>Requested Field</th>
-              <th>Current Value</th>
-              <th style="width:130px; text-align:center;">Status</th>
-            </tr>
-          </thead>
-          <tbody>${fieldRows}</tbody>
-        </table>
+        <div class="field-grid">${fieldCards}</div>
       </div>
 
       <div class="footer">
         <div class="footer-left"><span class="footer-brand">Accounting Task Manager</span> &mdash; Automated Compliance Report</div>
-        <div class="footer-right">Page 1 of 1 &nbsp;&bull;&nbsp; ${dateStr} &nbsp;&bull;&nbsp; ${refNo}</div>
+        <div class="footer-right">${dateStr} &nbsp;&bull;&nbsp; ${refNo}</div>
       </div>
     `
 
@@ -586,16 +595,26 @@ export function SendRequirementsDialog({
                                     </TableCell>
                                     <TableCell className="text-center">
                                       {docTypeNames.length > 1 ? (
-                                        <div className="relative w-full max-w-[180px] mx-auto">
-                                          <select className="h-8 w-full appearance-none rounded-lg border border-slate-200 bg-slate-50 px-3 pr-7 text-[10px] font-bold uppercase tracking-wider text-slate-600 shadow-sm focus:outline-none focus:border-blue-500 transition-colors">
-                                            {docTypeNames.map((name, i) => (
-                                              <option key={i} value={name}>{name}</option>
-                                            ))}
-                                          </select>
-                                          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
-                                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                                          </div>
-                                        </div>
+                                        <Popover>
+                                          <PopoverTrigger asChild>
+                                            <button type="button" className="mx-auto">
+                                              <Badge variant="secondary" className="text-[10px] font-semibold bg-blue-50 text-blue-700 border-blue-200 cursor-pointer hover:bg-blue-100 transition-colors">
+                                                {getAcceptedTypesLabel(docTypeNames, doc.requiredDocumentCount || 1)}
+                                              </Badge>
+                                            </button>
+                                          </PopoverTrigger>
+                                          <PopoverContent className="w-64 p-0" align="center">
+                                            <Command>
+                                              <CommandList>
+                                                <CommandGroup heading="Accepted document types">
+                                                  {docTypeNames.map((name, i) => (
+                                                    <CommandItem key={i} className="text-xs">{name}</CommandItem>
+                                                  ))}
+                                                </CommandGroup>
+                                              </CommandList>
+                                            </Command>
+                                          </PopoverContent>
+                                        </Popover>
                                       ) : (
                                         <Badge variant="secondary" className="text-[10px] font-semibold bg-slate-100 text-slate-600 border-slate-200">
                                           {docTypeNames[0] || 'Document'}

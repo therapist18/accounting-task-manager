@@ -6,7 +6,7 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit, X } from "lucide-react"
+import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit, X, ExternalLink } from "lucide-react"
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
 import { EnquiryDialog } from "../components/EnquiryDialog"
 import { userService, getOfficerDisplayName } from "@/lib/shared-user-assignment-service"
@@ -166,15 +166,15 @@ const safeRender = (content: any) => {
 const TableHeaderCell = React.memo(({ item, header, getCellContent }) => {
   const renderContent = () => {
     if (item.type === 'principal') {
-      const rawContent = getCellContent(item.task, header.id);
       if (header.id === 'applicant_name') {
         return (
-          <Link href={`/dashboard/tasks/${item.task.id}`} className="font-semibold text-white hover:text-white hover:underline truncate block">
-            {rawContent}
+          <Link href={`/dashboard/tasks/${item.task.id}`} className="font-semibold text-white hover:text-white hover:underline flex items-center gap-1 justify-center">
+            <span className="truncate">{item.task.applicant_name || 'N/A'}</span>
+            <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
           </Link>
         );
       }
-      return rawContent;
+      return getCellContent(item.task, header.id);
     }
     const dependant = item.dependant;
     switch (header.id) {

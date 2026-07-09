@@ -35,6 +35,7 @@ const getTaskName = (task: any) => {
 }
 
 const normalizeDocIds = (req: any) => req?.document_ids || (req?.document_id ? [req.document_id] : [])
+const getRequiredCount = (req: any) => req?.requiredDocumentCount || 1
 
 function humanizeVariableName(name: string): string {
   if (!name) return "Field"
@@ -171,7 +172,7 @@ function ClientFillRequirementsContent() {
   // MODIFIED: arrayFieldValues maps slotKey to an Array of Objects representing multiple rows
   const [arrayFieldValues, setArrayFieldValues] = useState<Record<string, Array<Record<string, any>>>>({})
   
-  const [docFiles, setDocFiles] = useState<Record<string, { file: File, docId: string } | null>>({})
+  const [docFiles, setDocFiles] = useState<Record<string, Array<{ file: File, docId: string }>>>({})
   const [selectedReqDocs, setSelectedReqDocs] = useState<Record<string, string>>({})
   
   const [submitted, setSubmitted] = useState(false)
@@ -406,11 +407,15 @@ function ClientFillRequirementsContent() {
     loadExistingDocs()
   }, [task, columns, requirements])
 
-  const getExistingDocForReq = (docIds: string[], col: ColDef) => {
+  const getExistingDocsForReq = (docIds: string[], col: ColDef) => {
     const docs = existingDocsByEntity[String(col.id)] || []
-    const matches = docs.filter((d: any) => docIds.includes(d.document_id))
-    if (matches.length === 0) return null
-    return matches.reduce((prev: any, curr: any) => new Date(curr.created_at || 0) > new Date(prev.created_at || 0) ? curr : prev)
+    return docs
+      .filter((d: any) => docIds.includes(d.document_id))
+      .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+  }
+
+  const getExistingDocForReq = (docIds: string[], col: ColDef) => {
+    return getExistingDocsForReq(docIds, col)[0] || null
   }
 
   const handleDocPreview = async (docIds: string[], col: ColDef) => {
@@ -516,7 +521,11 @@ function ClientFillRequirementsContent() {
     let completed = 0
 
     total += requirementRows.length
-    requirementRows.forEach(row => { if (docFiles[row.slotKey] || getExistingDocForReq(row.docIds, row.col)) completed++ })
+    requirementRows.forEach(row => {
+      const requiredCount = getRequiredCount(row.req)
+      const uploadedCount = (docFiles[row.slotKey] || []).length + getExistingDocsForReq(row.docIds, row.col).length
+      if (uploadedCount >= requiredCount) completed++
+    })
 
     total += clientFields.length
     clientFields.forEach(f => { if (isValidExistingValue(fieldValues[f.key])) completed++ })
@@ -551,26 +560,30 @@ function ClientFillRequirementsContent() {
     try {
       const documents: any[] = []
 
-      for (const [slotKey, data] of Object.entries(docFiles)) {
-        if (!data?.file || !data?.docId) continue
+      for (const [slotKey, files] of Object.entries(docFiles)) {
+        if (!files || files.length === 0) continue
         const [reqId, colId] = slotKey.split("::")
         const col = columns.find((c: ColDef) => String(c.id) === String(colId))
-        const safeName = data.file.name.replace(/[^a-zA-Z0-9._-]/g, "_")
-        const filePath = `client-requirements/${taskId}/${Date.now()}-${safeName}`
-        
-        const { error: uploadError } = await supabase.storage.from("kyc-documents").upload(filePath, data.file, { upsert: true })
-        if (uploadError) throw uploadError
-        
-        documents.push({
-          document_id: data.docId,
-          entity_id: col?.id ?? colId,
-          entity_type: col?.type || "individual",
-          entity_label: col?.label || "",
-          file_name: data.file.name,
-          file_path: filePath,
-          status: "submitted",
-          submitted_at: new Date().toISOString()
-        })
+
+        for (const data of files) {
+          if (!data?.file || !data?.docId) continue
+          const safeName = data.file.name.replace(/[^a-zA-Z0-9._-]/g, "_")
+          const filePath = `client-requirements/${taskId}/${Date.now()}-${safeName}`
+
+          const { error: uploadError } = await supabase.storage.from("kyc-documents").upload(filePath, data.file, { upsert: true })
+          if (uploadError) throw uploadError
+
+          documents.push({
+            document_id: data.docId,
+            entity_id: col?.id ?? colId,
+            entity_type: col?.type || "individual",
+            entity_label: col?.label || "",
+            file_name: data.file.name,
+            file_path: filePath,
+            status: "submitted",
+            submitted_at: new Date().toISOString()
+          })
+        }
       }
 
       const fieldMetadata: Record<string, any> = {}
@@ -721,15 +734,21 @@ function ClientFillRequirementsContent() {
               <div className="space-y-2">
                 {requirementRows.map(({ req, docIds, col, slotKey }) => {
                   const activeDocId = selectedReqDocs[slotKey] || docIds[0]
-                  const existingDoc = getExistingDocForReq(docIds, col)
-                  const isReplacing = !!docFiles[slotKey]
-                  const hasData = isReplacing || !!existingDoc
+                  const requiredCount = getRequiredCount(req)
+                  const isMultiCount = requiredCount > 1
+                  const existingDocs = getExistingDocsForReq(docIds, col)
+                  const existingDoc = existingDocs[0] || null
+                  const newFiles = docFiles[slotKey] || []
+                  const uploadedCount = existingDocs.length + newFiles.length
+                  const isReplacing = !isMultiCount && newFiles.length > 0
+                  const hasData = isMultiCount ? uploadedCount >= requiredCount : (isReplacing || !!existingDoc)
                   const isMultiDoc = docIds.length > 1
                   const isExpanded = expandedMultiDocs.has(slotKey)
+                  const acceptedLabel = isMultiCount ? `Any ${requiredCount} of ${docIds.length} accepted` : `Any 1 of ${docIds.length} accepted`
 
                   const handleDocTypeChange = (newDocId: string) => {
                     setSelectedReqDocs(prev => ({ ...prev, [slotKey]: newDocId }))
-                    if (docFiles[slotKey]) setDocFiles(prev => { const next = {...prev}; delete next[slotKey]; return next; })
+                    if (!isMultiCount && docFiles[slotKey]) setDocFiles(prev => { const next = {...prev}; delete next[slotKey]; return next; })
                   }
 
                   return (
@@ -753,15 +772,25 @@ function ClientFillRequirementsContent() {
                               <div className="flex flex-wrap items-center gap-2 mt-1.5">
                                 <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md uppercase tracking-wider">{col.label}</span>
                                 {isMultiDoc && (
-                                  <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">{docIds.length} Types Available</span>
+                                  <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">{acceptedLabel}</span>
                                 )}
-                                {existingDoc && (
+                                {isMultiCount ? (
+                                  <span className={cn(
+                                    "text-[10px] font-bold px-2 py-0.5 rounded-md",
+                                    hasData ? "text-emerald-600 bg-emerald-50" : "text-amber-600 bg-amber-50"
+                                  )}>{uploadedCount}/{requiredCount} uploaded</span>
+                                ) : existingDoc && (
                                   <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
                                     <Calendar className="h-3 w-3" />
                                     {new Date(existingDoc.created_at).toLocaleDateString('en-GB')}
                                   </span>
                                 )}
                               </div>
+                              {!hasData && isMultiDoc && (
+                                <p className="text-[11px] text-slate-400 mt-1">
+                                  Upload {isMultiCount ? `any ${requiredCount}` : '1'} of the accepted document types below
+                                </p>
+                              )}
                             </div>
                           </div>
 
@@ -813,7 +842,7 @@ function ClientFillRequirementsContent() {
 
                         {/* Right side: Status + Actions */}
                         <div className="flex items-center gap-2 shrink-0">
-                          {hasData && existingDoc && signedUrls[String(existingDoc.id)] && (
+                          {!isMultiCount && hasData && existingDoc && signedUrls[String(existingDoc.id)] && (
                             <button
                               onClick={() => handleDocPreview(docIds, col)}
                               className="h-9 px-3 rounded-lg text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-all flex items-center gap-1.5"
@@ -822,31 +851,39 @@ function ClientFillRequirementsContent() {
                             </button>
                           )}
                           <input type="file" className="hidden" ref={el => fileInputRefs.current[slotKey] = el} onChange={(e) => {
-                            if (e.target.files?.[0]) setDocFiles(prev => ({ ...prev, [slotKey]: { file: e.target.files![0], docId: activeDocId } }))
+                            const file = e.target.files?.[0]
+                            if (!file) return
+                            if (isMultiCount) {
+                              setDocFiles(prev => ({ ...prev, [slotKey]: [...(prev[slotKey] || []), { file, docId: activeDocId }] }))
+                            } else {
+                              setDocFiles(prev => ({ ...prev, [slotKey]: [{ file, docId: activeDocId }] }))
+                            }
+                            e.target.value = ''
                           }}/>
                           <Button
                             variant={hasData ? "outline" : "default"}
                             size="sm"
+                            disabled={isMultiCount && uploadedCount >= requiredCount}
                             className={cn("h-9 px-4 rounded-lg text-xs font-bold shadow-sm transition-all", hasData ? "text-slate-600 border-slate-300 hover:bg-slate-100" : "bg-blue-600 text-white hover:bg-blue-700 shadow-blue-200")}
                             onClick={() => fileInputRefs.current[slotKey]?.click()}
                           >
                             <UploadCloud className="h-3.5 w-3.5 mr-1.5" />
-                            {hasData ? 'Replace' : 'Upload'}
+                            {isMultiCount ? (uploadedCount >= requiredCount ? 'Complete' : 'Add File') : (hasData ? 'Replace' : 'Upload')}
                           </Button>
                         </div>
                       </div>
 
                       {/* Status Bar */}
-                      {docFiles[slotKey] && (
+                      {!isMultiCount && newFiles[0] && (
                         <div className="px-5 py-2.5 bg-emerald-50 border-t border-emerald-100 flex items-center gap-2 rounded-b-xl">
                           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                          <span className="text-xs font-bold text-emerald-700 truncate">{docFiles[slotKey].file.name}</span>
+                          <span className="text-xs font-bold text-emerald-700 truncate">{newFiles[0].file.name}</span>
                           <button onClick={() => setDocFiles(prev => { const next = {...prev}; delete next[slotKey]; return next; })} className="ml-auto hover:text-red-600 rounded-full p-0.5 transition-colors">
                             <X className="h-3.5 w-3.5 text-emerald-500 hover:text-red-500" />
                           </button>
                         </div>
                       )}
-                      {existingDoc && !docFiles[slotKey] && (
+                      {!isMultiCount && existingDoc && newFiles.length === 0 && (
                         <div className="px-5 py-2.5 bg-slate-50 border-t border-slate-100 flex items-center gap-2 rounded-b-xl">
                           <FileCheck2 className="h-3.5 w-3.5 text-emerald-600" />
                           <span className="text-xs font-medium text-slate-600 truncate">{existingDoc.file_name || 'Uploaded file'}</span>
@@ -856,6 +893,26 @@ function ClientFillRequirementsContent() {
                               existingDoc.status === 'active' ? "text-emerald-600 bg-emerald-100" : existingDoc.status === 'draft' ? "text-amber-600 bg-amber-100" : "text-slate-500 bg-slate-100"
                             )}>{existingDoc.status}</span>
                           )}
+                        </div>
+                      )}
+                      {isMultiCount && (existingDocs.length > 0 || newFiles.length > 0) && (
+                        <div className="px-5 py-2.5 bg-slate-50 border-t border-slate-100 space-y-1.5 rounded-b-xl">
+                          {existingDocs.map((d: any) => (
+                            <div key={d.id} className="flex items-center gap-2">
+                              <FileCheck2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                              <span className="text-xs font-medium text-slate-600 truncate">{d.file_name || 'Uploaded file'}</span>
+                              <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ml-auto bg-emerald-100 text-emerald-600 shrink-0">Saved</span>
+                            </div>
+                          ))}
+                          {newFiles.map((f, i) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                              <span className="text-xs font-bold text-emerald-700 truncate">{f.file.name}</span>
+                              <button onClick={() => setDocFiles(prev => { const next = { ...prev }; next[slotKey] = (next[slotKey] || []).filter((_, idx) => idx !== i); return next; })} className="ml-auto hover:text-red-600 rounded-full p-0.5 transition-colors shrink-0">
+                                <X className="h-3.5 w-3.5 text-emerald-500 hover:text-red-500" />
+                              </button>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>

@@ -24,10 +24,13 @@ import ResumeAnalytics from "./components/ResumeAnalytics";
 import AdvancedExport from "./components/AdvancedExport";
 import { CreatableCombobox, type ComboOption } from "./components/CreatableCombobox";
 import { RecommenderSelect, type Recommender } from "./components/RecommenderSelect";
+import { CVLayout, COLOR_PRESETS, getVerifiedDateLabel } from "./components/cv-designs";
 
 const PASSPORT_PHOTO_ID = '48f48255-e5db-4944-8864-6f35b3af4696';
 const CLEAR_PHOTO_ID = 'fa74ff82-09ce-418d-8985-174158d73316';
 const CV_DOCUMENT_ID = 'd615e776-7d32-4704-b510-62287d459fae';
+
+const DEFAULT_DECLARATION_TEXT = "DECLARATION: I hereby declare that the above information is accurate to the best of my knowledge and reflects my professional qualifications, experience, and readiness for international employment opportunities.";
 
 const EMPTY_CV_DATA = {
   personalInfo: {
@@ -60,8 +63,9 @@ const EMPTY_CV_DATA = {
   certifications: [] as { name: string; issuer: string; date: string; url: string }[],
   achievements: [] as { title: string; description: string; date: string }[],
   additionalInfo: [] as { label: string; value: string }[],
-  declaration: "",
-  verifiedBadge: false
+  declaration: DEFAULT_DECLARATION_TEXT,
+  includeDeclaration: true,
+  verifiedBadge: true
 };
 
 function mapSkillsFromExtractedDetails(ed: any): { category: string; items: string }[] {
@@ -91,7 +95,7 @@ function mapCertificationsFromExtractedDetails(ed: any, qualificationsText?: str
       if (c.Qualification || c.qualification) {
         return { name: c.Qualification || c.qualification || "", issuer: "", date: "", url: "" };
       }
-      // Handle format: {name: "...", issuer: "...", date: "...", url: "..."}
+      // Handle format: {name: "...", issuer: "...", date: "...", url: "..."} 
       return {
         name: c.name || c.Name || "",
         issuer: c.issuer || c.Issuer || c.institution || "",
@@ -124,17 +128,6 @@ const COMMON_LANGUAGES = [
   'Shona', 'Oromo', 'Tigrinya', 'Lingala', 'Wolof'
 ];
 const PROFICIENCY_LEVELS = ['Native', 'Fluent', 'Professional', 'Conversational', 'Basic'];
-
-const COLOR_PRESETS = [
-  { name: 'Ocean Blue',   primary: '#2c3e50', accent: '#3498db' },
-  { name: 'Forest',       primary: '#1a3d2e', accent: '#27ae60' },
-  { name: 'Royal Purple', primary: '#2c1654', accent: '#9b59b6' },
-  { name: 'Crimson',      primary: '#4a1515', accent: '#e74c3c' },
-  { name: 'Slate',        primary: '#2d3748', accent: '#64748b' },
-  { name: 'Teal',         primary: '#164e4e', accent: '#0d9488' },
-  { name: 'Midnight',     primary: '#0f172a', accent: '#6366f1' },
-  { name: 'Copper',       primary: '#3d1f10', accent: '#d97706' },
-];
 
 // Initial Ajay Yadav data for interactive demo and first-load preview
 const initialCVData = {
@@ -272,7 +265,8 @@ const initialCVData = {
   additionalInfo: [
     { label: "Availability", value: "Immediate" },
   ],
-  declaration: "I hereby declare that the above information is accurate to the best of my knowledge and reflects my professional qualifications, experience, and readiness for international employment opportunities.",
+  declaration: DEFAULT_DECLARATION_TEXT,
+  includeDeclaration: true,
   verifiedBadge: true
 };
 
@@ -941,9 +935,9 @@ export default function CVGeneratorPage() {
           console.log('[CV Builder] Fetched CV record:', {
             id: record.id,
             full_name: record.full_name,
-            has_extracted_details: !!record.extracted_details,
+            has_extracted_details: !!record.raw_cv_extracted_details,
             has_bcl_cv_snapshot: !!record.bcl_cv_snapshot,
-            extracted_details_keys: record.extracted_details ? Object.keys(record.extracted_details) : [],
+            extracted_details_keys: record.raw_cv_extracted_details ? Object.keys(record.raw_cv_extracted_details) : [],
             individual_id: record.individual_id,
             qualifications: record.qualifications,
           });
@@ -954,6 +948,12 @@ export default function CVGeneratorPage() {
           if (record.bcl_cv_snapshot && Object.keys(record.bcl_cv_snapshot).length > 0) {
             console.log('[CV Builder] Loading from bcl_cv_snapshot (existing CV data)');
             const snapshotData = record.bcl_cv_snapshot;
+
+            // A snapshot already exists in the database for this applicant, so the
+            // Secure Review URL can be generated immediately without forcing another
+            // "Save Draft" step.
+            setHasSavedDraft(true);
+            setLastDraftName(record.full_name ? `CV - ${record.full_name}` : 'Saved CV');
 
             // Merge snapshot with EMPTY_CV_DATA to ensure all fields exist
             const mergedData = {
@@ -972,9 +972,9 @@ export default function CVGeneratorPage() {
                     })
                   : EMPTY_CV_DATA.skills;
                 // Snapshot entries can exist but be entirely blank (placeholders) —
-                // fall back to the raw extracted_details in that case.
+                // fall back to the raw raw_cv_extracted_details in that case.
                 if (isSkillsBlank(mappedSkills)) {
-                  const fallback = mapSkillsFromExtractedDetails(record.extracted_details || {});
+                  const fallback = mapSkillsFromExtractedDetails(record.raw_cv_extracted_details || {});
                   if (fallback.length > 0) return fallback;
                 }
                 return mappedSkills;
@@ -996,9 +996,9 @@ export default function CVGeneratorPage() {
                     })
                   : EMPTY_CV_DATA.certifications;
                 // Snapshot entries can exist but be entirely blank (placeholders) —
-                // fall back to the raw extracted_details in that case.
+                // fall back to the raw raw_cv_extracted_details in that case.
                 if (isCertificationsBlank(mappedCerts)) {
-                  const fallback = mapCertificationsFromExtractedDetails(record.extracted_details || {}, record.qualifications);
+                  const fallback = mapCertificationsFromExtractedDetails(record.raw_cv_extracted_details || {}, record.qualifications);
                   if (fallback.length > 0) return fallback;
                 }
                 return mappedCerts;
@@ -1034,9 +1034,9 @@ export default function CVGeneratorPage() {
             setLastDraftName(`CV - ${record.full_name || 'Applicant'}`);
             toast.success('Loaded existing CV data from database.');
           } else {
-            // No bcl_cv_snapshot, build from extracted_details
-            console.log('[CV Builder] No bcl_cv_snapshot found, building from extracted_details');
-            const ed = record.extracted_details || {};
+            // No bcl_cv_snapshot, build from raw_cv_extracted_details
+            console.log('[CV Builder] No bcl_cv_snapshot found, building from raw_cv_extracted_details');
+            const ed = record.raw_cv_extracted_details || {};
             console.log('[CV Builder] Extracted details keys:', Object.keys(ed));
             console.log('[CV Builder] Extracted details:', ed);
 
@@ -1144,8 +1144,9 @@ export default function CVGeneratorPage() {
                   value: info.value || info.Value || info.description || ""
                 }));
               })(),
-              declaration: ed['Declaration'] || ed.declaration || "",
-              verifiedBadge: false
+              declaration: ed['Declaration'] || ed.declaration || DEFAULT_DECLARATION_TEXT,
+              includeDeclaration: true,
+              verifiedBadge: true
             };
 
             console.log('[CV Builder] Built prefilledData:', {
@@ -1178,7 +1179,7 @@ export default function CVGeneratorPage() {
                 if (draft.selectedLayout) setSelectedLayout(draft.selectedLayout);
               } else {
                 // No draft found, use prefilled data from extraction
-                console.log('[CV Builder] No draft found, using prefilled data from extracted_details');
+                console.log('[CV Builder] No draft found, using prefilled data from raw_cv_extracted_details');
                 setCvData(prefilledData);
                 toast.success('CV pre-filled from applicant data. You can now edit and build the CV.');
               }
@@ -1242,8 +1243,9 @@ export default function CVGeneratorPage() {
           certifications: Array.isArray(prefill.certifications) ? prefill.certifications : [],
           achievements: Array.isArray(prefill.achievements) ? prefill.achievements : [],
           additionalInfo: Array.isArray(prefill.additionalInfo) ? prefill.additionalInfo : [],
-          declaration: prefill.declaration || "",
-          verifiedBadge: false
+          declaration: prefill.declaration || DEFAULT_DECLARATION_TEXT,
+          includeDeclaration: true,
+          verifiedBadge: true
         };
         try { localStorage.removeItem('cv_generator_cvData'); } catch {}
         setCvData(prefilledData);
@@ -1303,6 +1305,7 @@ export default function CVGeneratorPage() {
           .from('job_applicant_cvs')
           .update({
             bcl_cv_snapshot: snapshotPayload,
+            bcl_cv_extracted_details: updatedData,
             updated_at: new Date().toISOString(),
           })
           .eq('applicant_id', applicantId);
@@ -1383,6 +1386,22 @@ export default function CVGeneratorPage() {
     }));
   };
 
+  // Employment-gap answers get their own keyed bucket so they never overwrite
+  // unrelated fields like personalDetails.kenyaStatus (Kenya work-permit status),
+  // which is rendered directly on the CV.
+  const handleClientGapNoteChange = (gapKey: string, field: 'reason' | 'detail', value: string) => {
+    setClientEdits((prev: any) => ({
+      ...prev,
+      personalDetails: {
+        ...prev.personalDetails,
+        employmentGapNotes: {
+          ...(prev.personalDetails?.employmentGapNotes || {}),
+          [gapKey]: { ...(prev.personalDetails?.employmentGapNotes?.[gapKey] || {}), [field]: value },
+        },
+      },
+    }));
+  };
+
   // Draft functions — all drafts persisted to Supabase storage + bcl_cv_snapshot in database
   const saveDraft = async (name: string, forPortal: boolean = false): Promise<string> => {
     setIsSavingDraft(true);
@@ -1395,6 +1414,7 @@ export default function CVGeneratorPage() {
       isPortalDraft: forPortal,
       cvSettings,
       selectedLayout,
+      applicantId,
     };
     setCvDrafts(prev => { const filtered = prev.filter(d => d.id !== id); return [newDraft, ...filtered]; });
     if (forPortal) setCurrentPortalDraftId(id);
@@ -1416,6 +1436,7 @@ export default function CVGeneratorPage() {
           .from('job_applicant_cvs')
           .update({
             bcl_cv_snapshot: snapshotPayload,
+            bcl_cv_extracted_details: cvData,
             updated_at: new Date().toISOString()
           })
           .eq('applicant_id', applicantId);
@@ -1912,8 +1933,6 @@ export default function CVGeneratorPage() {
               phone_number: cleanedData.personalInfo?.phone || '',
               position_applied: cleanedData.personalInfo?.title || null,
               date_of_birth: parsedDob,
-              file_path: filePath,
-              extracted_details: parsedData,
               raw_cv_file_path: filePath,
               raw_cv_extracted_details: parsedData,
               bcl_cv_snapshot: { ...cleanedData, cvSettings, selectedLayout },
@@ -2201,7 +2220,7 @@ export default function CVGeneratorPage() {
           .upload(builderPath, blob, { upsert: true });
         if (uploadError) throw uploadError;
 
-        // 2. Update bcl_cv_snapshot in job_applicant_cvs (include cvSettings and selectedLayout)
+        // 2. Update bcl_cv_snapshot, bcl_cv_file_path, bcl_cv_extracted_details in job_applicant_cvs (include cvSettings and selectedLayout)
         console.log('[CV Builder] Updating bcl_cv_snapshot in job_applicant_cvs');
         const snapshotPayload = {
           ...cvData,
@@ -2210,7 +2229,12 @@ export default function CVGeneratorPage() {
         };
         const { error: snapshotError } = await supabase
           .from('job_applicant_cvs')
-          .update({ bcl_cv_snapshot: snapshotPayload, updated_at: new Date().toISOString() })
+          .update({
+            bcl_cv_snapshot: snapshotPayload,
+            bcl_cv_file_path: builderPath,
+            bcl_cv_extracted_details: cvData,
+            updated_at: new Date().toISOString(),
+          })
           .eq('applicant_id', applicantId);
         if (snapshotError) throw snapshotError;
 
@@ -2253,14 +2277,22 @@ export default function CVGeneratorPage() {
     try {
       const html2canvas = (await import("html2canvas")).default;
       const { jsPDF } = await import("jspdf");
-      
+
+      // The preview is wrapped in a zoom container (`transform: scale(zoomLevel)`).
+      // That transform doesn't affect layout metrics (scrollWidth/scrollHeight), so if it's
+      // left in place html2canvas paints at the zoomed-out size while we force it to render
+      // into the full unscaled dimensions below — the mismatch is what squishes/overlaps the text.
+      const zoomWrapper = element.parentElement;
+      const originalWrapperTransform = zoomWrapper?.style.transform;
+
       // Store original styles
       const originalTransform = element.style.transform;
       const originalWidth = element.style.width;
       const originalMinHeight = element.style.minHeight;
       const originalOverflow = element.style.overflow;
-      
+
       // Reset transform for accurate capture
+      if (zoomWrapper) zoomWrapper.style.transform = "none";
       element.style.transform = "none";
       element.style.width = "210mm";
       element.style.overflow = "visible";
@@ -2313,6 +2345,7 @@ export default function CVGeneratorPage() {
       });
       
       // Restore original styles
+      if (zoomWrapper) zoomWrapper.style.transform = originalWrapperTransform ?? "";
       element.style.transform = originalTransform;
       element.style.width = originalWidth;
       element.style.minHeight = originalMinHeight;
@@ -2360,8 +2393,13 @@ export default function CVGeneratorPage() {
       toast.success("PDF downloaded successfully!");
     } catch (error: any) {
       console.error("PDF generation failed", error);
-      // Ensure pdf-mode is removed on error
+      // Ensure pdf-mode and inline capture styles are removed on error
       document.body.classList.remove("pdf-mode");
+      if (element.parentElement) element.parentElement.style.transform = `scale(${zoomLevel})`;
+      element.style.transform = "";
+      element.style.width = "";
+      element.style.minHeight = "";
+      element.style.overflow = "";
       toast.error("PDF generation failed. Please try again.");
     } finally {
       setIsDownloadingPdf(false);
@@ -2378,1140 +2416,6 @@ export default function CVGeneratorPage() {
     }
   };
 
-  const renderLayout = () => {
-    const {
-      personalInfo = {},
-      personalDetails = {},
-      summary = "",
-      skills = [],
-      experience = [],
-      internships = [],
-      projects = [],
-      education = [],
-      references = [],
-      languages = [],
-      certifications = [],
-      achievements = [],
-      additionalInfo = [],
-      declaration = "",
-      verifiedBadge = false
-    } = cvData;
-
-    const photoShapeStyle: React.CSSProperties = {
-      borderRadius: cvSettings.photoShape === 'circle' ? '50%' : cvSettings.photoShape === 'rounded' ? '12px' : '0',
-    };
-    const fontScaleStyle: React.CSSProperties = { fontSize: `${cvSettings.fontScale}em`, fontFamily: (cvSettings as any).fontFamily || 'Inter, sans-serif' };
-
-    if (selectedLayout === "theme1") {
-      const acc = cvSettings.accentColor;
-      const pri = cvSettings.primaryColor;
-      return (
-        <div className="w-[210mm] min-h-[297mm] bg-white text-[#333] grid grid-cols-[280px_1fr] relative shadow-2xl text-left font-sans leading-normal" style={fontScaleStyle}>
-          {/* Sidebar */}
-          <aside style={{ backgroundColor: pri }} className="text-[#ecf0f1] p-[20px_15px] flex flex-col gap-6">
-            {(cvSettings as any).showPhoto !== false && (
-              <div
-                style={{ width: cvSettings.photoSize, height: cvSettings.photoSize, borderColor: acc, ...photoShapeStyle }}
-                className="bg-white border-[3px] mx-auto flex items-center justify-center overflow-hidden"
-              >
-                <img
-                  src={personalInfo.photoUrl || "https://via.placeholder.com/150x150?text=Photo"}
-                  alt="Profile"
-                  style={{ objectFit: cvSettings.photoFit, width: '100%', height: '100%' }}
-                />
-              </div>
-            )}
-
-            <div>
-              <div style={{ color: acc, borderColor: `${acc}55` }} className="text-sm font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Contact Information</div>
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold">📍</span> <span className={!personalInfo.location ? "italic opacity-50" : ""}>{personalInfo.location || "Location"}</span></div>
-                <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold">📞</span> <span className={!personalInfo.phone ? "italic opacity-50" : ""}>{personalInfo.phone || "Phone"}</span></div>
-                <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold">✉️</span> <span className={!personalInfo.email ? "italic opacity-50" : ""}>{personalInfo.email || "Email"}</span></div>
-                <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold">🐙</span> <span className={`break-all ${!personalInfo.github ? "italic opacity-50" : ""}`}>{personalInfo.github || "GitHub"}</span></div>
-                <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold">🔗</span> <span className={`break-all ${!personalInfo.linkedin ? "italic opacity-50" : ""}`}>{personalInfo.linkedin || "LinkedIn"}</span></div>
-              </div>
-            </div>
-
-            <div>
-              <div style={{ color: acc, borderColor: `${acc}55` }} className="text-sm font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Personal Details</div>
-              <div className="space-y-2 text-sm">
-                <div><strong style={{ color: acc }}>Date of Birth:</strong> <span className={!personalDetails.dateOfBirth ? "italic opacity-50" : ""}>{personalDetails.dateOfBirth || "—"}</span></div>
-                <div><strong style={{ color: acc }}>Nationality:</strong> <span className={!personalDetails.nationality ? "italic opacity-50" : ""}>{personalDetails.nationality || "—"}</span></div>
-                <div><strong style={{ color: acc }}>Marital Status:</strong> <span className={!personalDetails.maritalStatus ? "italic opacity-50" : ""}>{personalDetails.maritalStatus || "—"}</span></div>
-                <div><strong style={{ color: acc }}>Residence:</strong> <span className={!personalDetails.residence ? "italic opacity-50" : ""}>{personalDetails.residence || "—"}</span></div>
-                <div><strong style={{ color: acc }}>Kenya Status:</strong> <span className={!personalDetails.kenyaStatus ? "italic opacity-50" : ""}>{personalDetails.kenyaStatus || "—"}</span></div>
-                <div><strong style={{ color: acc }}>Nairobi Res:</strong> <span className={!personalDetails.nairobiRes ? "italic opacity-50" : ""}>{personalDetails.nairobiRes || "—"}</span></div>
-                <div><strong style={{ color: acc }}>Driving:</strong> <span className={!personalDetails.drivingExperience ? "italic opacity-50" : ""}>{personalDetails.drivingExperience || "—"}</span></div>
-              </div>
-            </div>
-
-            <div>
-              <div style={{ color: acc, borderColor: `${acc}55` }} className="text-sm font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Core Competencies</div>
-              {skills.length > 0 ? (
-                <div className="space-y-3">
-                  {skills.map((grp: any, idx: number) => (
-                    <div key={idx}>
-                      <div className="text-white font-bold text-xs uppercase tracking-wider mb-1">{grp.category}</div>
-                      <div className="flex flex-wrap gap-1">
-                        {(grp.items || '').split(',').map((item: string, i: number) => (
-                          <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/90">{item.trim()}</span>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm italic opacity-60">No skills added yet.</p>
-              )}
-            </div>
-
-            <div>
-              <div style={{ color: acc, borderColor: `${acc}55` }} className="text-sm font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Languages</div>
-              {languages.length > 0 ? (
-                <div className="space-y-1.5 text-sm">
-                  {languages.map((l: any, idx: number) => (
-                    <div key={idx}>{l.language} {l.proficiency ? `(${l.proficiency})` : ""}</div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm italic opacity-60">No languages added yet.</p>
-              )}
-            </div>
-
-            {additionalInfo.length > 0 && (
-              <div>
-                <div style={{ color: acc, borderColor: `${acc}55` }} className="text-sm font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Additional Info</div>
-                <div className="space-y-1.5 text-sm">
-                  {additionalInfo.map((info: any, idx: number) => (
-                    <div key={idx}><strong>{info.label}:</strong> {info.value}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </aside>
-
-          {/* Main Area */}
-          <main className="p-8 flex flex-col gap-6">
-            <div style={{ borderColor: pri }} className="border-b-4 pb-5">
-              <h1 style={{ color: pri }} className="text-4xl font-extrabold uppercase tracking-tight">{personalInfo.fullName || "Your Name"}</h1>
-              <div style={{ color: acc }} className="text-lg font-bold uppercase tracking-wide mt-1.5">{personalInfo.title || "Professional Title"}</div>
-            </div>
-
-            <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Professional Profile</div>
-              {summary ? (
-                <p className="text-sm leading-relaxed text-justify">{summary}</p>
-              ) : (
-                <p className="text-sm italic text-gray-400">No profile summary added yet.</p>
-              )}
-            </div>
-
-            <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-4">Professional Experience</div>
-              {experience.length > 0 ? (
-                <div className="space-y-5">
-                  {experience.map((exp: any, idx: number) => (
-                    <div key={idx}>
-                      <div className="flex justify-between font-extrabold text-sm text-black">
-                        <span>{exp.company}</span>
-                        <span>{exp.startDate} – {exp.endDate}</span>
-                      </div>
-                      <div style={{ color: acc }} className="text-sm font-semibold mt-0.5">{exp.role} {exp.location ? `| ${exp.location}` : ""}</div>
-                      {exp.companyDesc && <span className="text-[10.5px] text-gray-500 italic block mt-1 mb-2">{exp.companyDesc}</span>}
-                      <ul className="list-disc pl-5 text-[11.5px] leading-relaxed text-gray-700 mt-2 space-y-1">
-                        {Array.isArray(exp.responsibilities) ? exp.responsibilities.map((resp: string, rIdx: number) => (
-                          <li key={rIdx}>{resp}</li>
-                        )) : <li>{exp.responsibilities}</li>}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm italic text-gray-400">No work experience added yet.</p>
-              )}
-            </div>
-
-            <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-4">Internships</div>
-              {internships.length > 0 ? (
-                <div className="space-y-4">
-                  {internships.map((intern: any, idx: number) => (
-                    <div key={idx}>
-                      <div className="flex justify-between font-extrabold text-sm text-black">
-                        <span>{intern.company}</span>
-                        <span>{intern.startDate} – {intern.endDate}</span>
-                      </div>
-                      <div style={{ color: acc }} className="text-sm font-semibold mt-0.5">{intern.role} {intern.location ? `| ${intern.location}` : ""}</div>
-                      {intern.companyDesc && <span className="text-[10.5px] text-gray-500 italic block mt-1 mb-1">{intern.companyDesc}</span>}
-                      <ul className="list-disc pl-5 text-[11.5px] leading-relaxed text-gray-700 mt-1 space-y-1">
-                        {Array.isArray(intern.responsibilities) ? intern.responsibilities.map((resp: string, rIdx: number) => (
-                          <li key={rIdx}>{resp}</li>
-                        )) : <li>{intern.responsibilities}</li>}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm italic text-gray-400">No internships added yet.</p>
-              )}
-            </div>
-
-            <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Key Projects</div>
-              {projects.length > 0 ? (
-                <div className="grid grid-cols-2 gap-3.5">
-                  {projects.map((proj: any, idx: number) => (
-                    <div key={idx} className="border border-gray-100 p-3 rounded shadow-sm bg-white">
-                      <strong style={{ color: pri }} className="text-sm block mb-1">{proj.title} {proj.year ? `(${proj.year})` : ""}</strong>
-                      <p className="text-[10.5px] text-gray-600 leading-normal">{proj.description}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm italic text-gray-400">No projects added yet.</p>
-              )}
-            </div>
-
-            <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Education</div>
-              {education.length > 0 ? (
-                <div className="space-y-2">
-                  {education.map((edu: any, idx: number) => (
-                    <div key={idx} className="text-[11.5px]">
-                      <strong>{edu.degree}</strong> – {edu.institution} ({edu.year})
-                      {edu.details && <p className="text-[10.5px] text-gray-500 mt-0.5">{edu.details}</p>}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm italic text-gray-400">No education added yet.</p>
-              )}
-            </div>
-
-            {certifications.length > 0 && (
-              <div>
-                <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Certifications</div>
-                <div className="space-y-2">
-                  {certifications.map((cert: any, idx: number) => (
-                    <div key={idx} className="text-[11.5px]">
-                      <strong>{cert.name}</strong> – {cert.issuer} {cert.date ? `(${cert.date})` : ""}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {achievements.length > 0 && (
-              <div>
-                <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Achievements</div>
-                <div className="space-y-2">
-                  {achievements.map((ach: any, idx: number) => (
-                    <div key={idx} className="text-[11.5px]">
-                      <strong>{ach.title}</strong> {ach.date ? `(${ach.date})` : ""}
-                      {ach.description && <p className="text-[10.5px] text-gray-500 mt-0.5">{ach.description}</p>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">References</div>
-              {references.length > 0 ? (
-                <div className="grid grid-cols-2 gap-4">
-                  {references.map((ref: any, idx: number) => (
-                    <div key={idx} className="text-sm text-gray-700 leading-relaxed">
-                      <strong className="text-black text-sm block">{ref.name}</strong>
-                      {ref.title} | {ref.company}<br />
-                      {ref.address && <span>{ref.address}<br /></span>}
-                      <span style={{ color: acc }}>{ref.contact}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm italic text-gray-400">No references added yet.</p>
-              )}
-            </div>
-
-            {declaration && (
-              <div className="border-t border-gray-100 pt-4 mt-4">
-                <p className="text-sm italic text-gray-500 leading-relaxed">{declaration}</p>
-                {verifiedBadge && (
-                  <div style={{ backgroundColor: acc }} className="inline-flex items-center gap-1.5 text-white p-1 px-3 rounded text-sm font-extrabold uppercase mt-3">
-                    ✓ CV Verified & Up-to-date 2026
-                  </div>
-                )}
-              </div>
-            )}
-          </main>
-        </div>
-      );
-    } else if (selectedLayout === "theme2") {
-      // THEME 2: Modern Top-Header Layout
-      const acc2 = cvSettings.accentColor;
-      const pri2 = cvSettings.primaryColor;
-      return (
-        <div className="w-[210mm] min-h-[297mm] bg-white text-slate-800 relative shadow-2xl text-left font-sans leading-normal" style={fontScaleStyle}>
-          {/* Elegant Top Header with dynamic colors */}
-          <header style={{ background: `linear-gradient(to right, ${pri2}, ${pri2}dd)`, borderBottomColor: acc2 }} className="text-white p-8 border-b-4 flex justify-between items-center">
-            <div>
-              <h1 className="text-4xl font-extrabold tracking-tight">{personalInfo.fullName || "Your Name"}</h1>
-              <div style={{ color: acc2 }} className="text-lg font-bold uppercase tracking-wider mt-1">{personalInfo.title || "Professional Title"}</div>
-            </div>
-            <div className="text-right text-xs space-y-1 text-slate-300">
-              <div>✉️ <span className={!personalInfo.email ? "italic opacity-50" : ""}>{personalInfo.email || "Email"}</span></div>
-              <div>📞 <span className={!personalInfo.phone ? "italic opacity-50" : ""}>{personalInfo.phone || "Phone"}</span></div>
-              <div>📍 <span className={!personalInfo.location ? "italic opacity-50" : ""}>{personalInfo.location || "Location"}</span></div>
-              <div style={{ color: acc2 }} className="flex gap-2 justify-end mt-1">
-                <span className={`underline break-all ${!personalInfo.linkedin ? "italic opacity-50" : ""}`}>{personalInfo.linkedin || "LinkedIn"}</span>
-                <span className={`underline break-all ${!personalInfo.github ? "italic opacity-50" : ""}`}>{personalInfo.github || "GitHub"}</span>
-              </div>
-            </div>
-          </header>
-
-          <div className="grid grid-cols-[2fr_1fr] gap-6 p-8">
-            {/* Left Area (Core details) */}
-            <div className="space-y-6">
-              <section>
-                <h2 className="text-base font-bold text-slate-900 uppercase border-b-2 border-slate-200 pb-1.5 mb-3">Professional Profile</h2>
-                {summary ? (
-                  <p className="text-sm leading-relaxed text-slate-600 text-justify">{summary}</p>
-                ) : (
-                  <p className="text-sm italic text-slate-400">No profile summary added yet.</p>
-                )}
-              </section>
-
-              <section>
-                <h2 className="text-base font-bold text-slate-900 uppercase border-b-2 border-slate-200 pb-1.5 mb-4">Professional Experience</h2>
-                {experience.length > 0 ? (
-                  <div className="space-y-5">
-                    {experience.map((exp: any, idx: number) => (
-                      <div key={idx} className="relative pl-4 border-l border-slate-200">
-                        <div style={{ backgroundColor: acc2 }} className="absolute -left-1.5 top-1.5 w-3 h-3 rounded-full" />
-                        <div className="flex justify-between font-bold text-sm text-slate-900">
-                          <span>{exp.company}</span>
-                          <span className="text-slate-500 font-semibold">{exp.startDate} – {exp.endDate}</span>
-                        </div>
-                        <div style={{ color: acc2 }} className="text-sm font-semibold mt-0.5">{exp.role} {exp.location ? `| ${exp.location}` : ""}</div>
-                        {exp.companyDesc && <p className="text-[10.5px] text-slate-400 italic mt-0.5">{exp.companyDesc}</p>}
-                        <ul className="list-disc pl-4 text-[11.5px] text-slate-600 mt-2 space-y-1">
-                          {Array.isArray(exp.responsibilities) ? exp.responsibilities.map((resp: string, rIdx: number) => (
-                            <li key={rIdx}>{resp}</li>
-                          )) : <li>{exp.responsibilities}</li>}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm italic text-slate-400">No work experience added yet.</p>
-                )}
-              </section>
-
-              <section>
-                <h2 className="text-base font-bold text-slate-900 uppercase border-b-2 border-slate-200 pb-1.5 mb-4">Internships</h2>
-                {internships.length > 0 ? (
-                  <div className="space-y-4">
-                    {internships.map((intern: any, idx: number) => (
-                      <div key={idx} className="relative pl-4 border-l border-slate-200">
-                        <div className="absolute -left-1.5 top-1.5 w-3 h-3 rounded-full bg-slate-400" />
-                        <div className="flex justify-between font-bold text-sm text-slate-900">
-                          <span>{intern.company}</span>
-                          <span className="text-slate-500 font-semibold">{intern.startDate} – {intern.endDate}</span>
-                        </div>
-                        <div className="text-slate-600 text-sm font-semibold mt-0.5">{intern.role} {intern.location ? `| ${intern.location}` : ""}</div>
-                        {intern.companyDesc && <p className="text-[10.5px] text-slate-400 italic mt-0.5">{intern.companyDesc}</p>}
-                        <ul className="list-disc pl-4 text-[11.5px] text-slate-600 mt-1 space-y-1">
-                          {Array.isArray(intern.responsibilities) ? intern.responsibilities.map((resp: string, rIdx: number) => (
-                            <li key={rIdx}>{resp}</li>
-                          )) : <li>{intern.responsibilities}</li>}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm italic text-slate-400">No internships added yet.</p>
-                )}
-              </section>
-
-              <section>
-                <h2 className="text-base font-bold text-slate-900 uppercase border-b-2 border-slate-200 pb-1.5 mb-3">Key Projects</h2>
-                {projects.length > 0 ? (
-                  <div className="space-y-3">
-                    {projects.map((proj: any, idx: number) => (
-                      <div key={idx} className="text-[11.5px]">
-                        <strong className="text-slate-800 text-sm">{proj.title} {proj.year ? `(${proj.year})` : ""}</strong>
-                        <p className="text-slate-500 mt-0.5">{proj.description}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm italic text-slate-400">No projects added yet.</p>
-                )}
-              </section>
-            </div>
-
-            {/* Right Area (Sidebar / Meta) */}
-            <div className="space-y-6 bg-slate-50 p-5 rounded border border-slate-100">
-              <section>
-                <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3">Core Competencies</h2>
-                {skills.length > 0 ? (
-                  <div className="space-y-3">
-                    {skills.map((grp: any, idx: number) => (
-                      <div key={idx}>
-                        <div className="font-bold text-xs text-slate-800 mb-1">{grp.category}</div>
-                        <div className="flex flex-wrap gap-1">
-                          {(grp.items || '').split(',').map((item: string, i: number) => (
-                            <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{item.trim()}</span>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm italic text-slate-400">No skills added yet.</p>
-                )}
-              </section>
-
-              <section>
-                <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3">Personal Details</h2>
-                <div className="space-y-2 text-[10.5px] text-slate-600">
-                  <div><strong>D.O.B:</strong> <span className={!personalDetails.dateOfBirth ? "italic text-slate-400" : ""}>{personalDetails.dateOfBirth || "—"}</span></div>
-                  <div><strong>Nationality:</strong> <span className={!personalDetails.nationality ? "italic text-slate-400" : ""}>{personalDetails.nationality || "—"}</span></div>
-                  <div><strong>Status:</strong> <span className={!personalDetails.maritalStatus ? "italic text-slate-400" : ""}>{personalDetails.maritalStatus || "—"}</span></div>
-                  <div><strong>Residence:</strong> <span className={!personalDetails.residence ? "italic text-slate-400" : ""}>{personalDetails.residence || "—"}</span></div>
-                  <div><strong>Kenya Work Status:</strong> <span className={!personalDetails.kenyaStatus ? "italic text-slate-400" : ""}>{personalDetails.kenyaStatus || "—"}</span></div>
-                  <div><strong>Nairobi Res:</strong> <span className={!personalDetails.nairobiRes ? "italic text-slate-400" : ""}>{personalDetails.nairobiRes || "—"}</span></div>
-                  <div><strong>Driving:</strong> <span className={!personalDetails.drivingExperience ? "italic text-slate-400" : ""}>{personalDetails.drivingExperience || "—"}</span></div>
-                </div>
-              </section>
-
-              <section>
-                <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3">Education</h2>
-                {education.length > 0 ? (
-                  <div className="space-y-3">
-                    {education.map((edu: any, idx: number) => (
-                      <div key={idx} className="text-sm text-slate-600">
-                        <strong className="text-slate-800 block">{edu.degree}</strong>
-                        {edu.institution} ({edu.year})
-                        {edu.details && <p className="text-[9.5px] text-slate-400 mt-0.5">{edu.details}</p>}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm italic text-slate-400">No education added yet.</p>
-                )}
-              </section>
-
-              {certifications.length > 0 && (
-                <section>
-                  <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3">Certifications</h2>
-                  <div className="space-y-2 text-[10.5px] text-slate-600">
-                    {certifications.map((cert: any, idx: number) => (
-                      <div key={idx}><strong className="text-slate-800">{cert.name}</strong> – {cert.issuer} {cert.date ? `(${cert.date})` : ""}</div>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {achievements.length > 0 && (
-                <section>
-                  <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3">Achievements</h2>
-                  <div className="space-y-2 text-[10.5px] text-slate-600">
-                    {achievements.map((ach: any, idx: number) => (
-                      <div key={idx}><strong className="text-slate-800">{ach.title}</strong> {ach.date ? `(${ach.date})` : ""}{ach.description ? `: ${ach.description}` : ""}</div>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {additionalInfo.length > 0 && (
-                <section>
-                  <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3">Additional Info</h2>
-                  <div className="space-y-1 text-[10.5px] text-slate-600">
-                    {additionalInfo.map((info: any, idx: number) => (
-                      <div key={idx}><strong className="text-slate-800">{info.label}:</strong> {info.value}</div>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              <section>
-                <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-2">Languages</h2>
-                {languages.length > 0 ? (
-                  <div className="text-[10.5px] text-slate-600 space-y-1">
-                    {languages.map((l: any, idx: number) => (
-                      <div key={idx} className="flex justify-between">
-                        <span className="font-semibold">{l.language}</span>
-                        <span className="text-slate-400">{l.proficiency}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm italic text-slate-400">No languages added yet.</p>
-                )}
-              </section>
-
-              <section>
-                <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3">References</h2>
-                {references.length > 0 ? (
-                  <div className="space-y-3 text-[10.5px] text-slate-600">
-                    {references.map((ref: any, idx: number) => (
-                      <div key={idx}>
-                        <strong className="text-slate-800 block">{ref.name}</strong>
-                        <span className="block italic text-[9.5px]">{ref.title} | {ref.company}</span>
-                        <span style={{ color: acc2 }} className="break-all">{ref.contact}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm italic text-slate-400">No references added yet.</p>
-                )}
-              </section>
-            </div>
-          </div>
-
-          {declaration && (
-            <div className="p-8 pt-0 border-t border-slate-100 mt-4 text-sm italic text-slate-400">
-              <p>{declaration}</p>
-              {verifiedBadge && (
-                <div style={{ backgroundColor: acc2 }} className="inline-flex items-center gap-1.5 text-white p-0.5 px-2.5 rounded text-xs font-extrabold uppercase mt-2">
-                  Verified CV
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      );
-    } else if (selectedLayout === "theme3") {
-      // THEME 3: Minimalist Single Column Layout
-      return (
-        <div className="w-[210mm] min-h-[297mm] bg-white text-slate-800 p-12 relative shadow-2xl text-left font-serif leading-relaxed" style={fontScaleStyle}>
-          {/* Centered Minimal Header */}
-          <div className="text-center border-b border-slate-900 pb-6 mb-8">
-            <h1 className="text-4xl font-normal tracking-wide text-slate-900">{personalInfo.fullName || "Your Name"}</h1>
-            <div className="text-sm font-semibold tracking-widest text-slate-500 uppercase mt-2">{personalInfo.title || "Professional Title"}</div>
-
-            <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-slate-600 mt-4 font-sans">
-              {personalInfo.location && <span>📍 {personalInfo.location}</span>}
-              {personalInfo.phone && <span>• 📞 {personalInfo.phone}</span>}
-              {personalInfo.email && <span>• ✉️ {personalInfo.email}</span>}
-              {personalInfo.github && <span>• 🐙 {personalInfo.github}</span>}
-              {personalInfo.linkedin && <span>• 🔗 {personalInfo.linkedin}</span>}
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            <section>
-              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-2 font-sans">Profile</h2>
-              {summary ? (
-                <p className="text-sm leading-relaxed text-slate-700 text-justify font-sans">{summary}</p>
-              ) : (
-                <p className="text-sm italic text-slate-400 font-sans">No profile summary added yet.</p>
-              )}
-            </section>
-
-            <section>
-              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-3 font-sans">Experience</h2>
-              {experience.length > 0 ? (
-                <div className="space-y-4">
-                  {experience.map((exp: any, idx: number) => (
-                    <div key={idx} className="font-sans">
-                      <div className="flex justify-between font-bold text-sm text-slate-900">
-                        <span>{exp.company} {exp.location ? `(${exp.location})` : ""}</span>
-                        <span className="font-normal text-slate-500">{exp.startDate} – {exp.endDate}</span>
-                      </div>
-                      <div className="text-[11.5px] italic text-slate-600 mt-0.5">{exp.role}</div>
-                      {exp.companyDesc && <p className="text-sm text-slate-400 italic mt-0.5">{exp.companyDesc}</p>}
-                      <ul className="list-disc pl-5 text-sm text-slate-600 mt-1.5 space-y-1">
-                        {Array.isArray(exp.responsibilities) ? exp.responsibilities.map((resp: string, rIdx: number) => (
-                          <li key={rIdx}>{resp}</li>
-                        )) : <li>{exp.responsibilities}</li>}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm italic text-slate-400 font-sans">No work experience added yet.</p>
-              )}
-            </section>
-
-            <section>
-              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-3 font-sans">Skills</h2>
-              {skills.length > 0 ? (
-                <div className="space-y-3 font-sans">
-                  {skills.map((grp: any, idx: number) => (
-                    <div key={idx}>
-                      <div className="font-bold text-xs text-slate-800 mb-1">{grp.category}</div>
-                      <div className="flex flex-wrap gap-1">
-                        {(grp.items || '').split(',').map((item: string, i: number) => (
-                          <span key={i} className="text-[10px] px-2 py-0.5 rounded-full border border-slate-200 text-slate-600">{item.trim()}</span>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm italic text-slate-400 font-sans">No skills added yet.</p>
-              )}
-            </section>
-
-            <section>
-              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-2 font-sans">Education</h2>
-              {education.length > 0 ? (
-                <div className="space-y-2 font-sans">
-                  {education.map((edu: any, idx: number) => (
-                    <div key={idx} className="text-[11.5px] flex justify-between">
-                      <div>
-                        <strong>{edu.degree}</strong> – <span className="text-slate-600">{edu.institution}</span>
-                        {edu.details && <p className="text-sm text-slate-400 mt-0.5">{edu.details}</p>}
-                      </div>
-                      <span className="text-slate-500">{edu.year}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm italic text-slate-400 font-sans">No education added yet.</p>
-              )}
-            </section>
-
-            {certifications.length > 0 && (
-              <section>
-                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-2 font-sans">Certifications</h2>
-                <div className="font-sans text-[11.5px] space-y-1 text-slate-600">
-                  {certifications.map((cert: any, idx: number) => (
-                    <div key={idx}><strong>{cert.name}</strong> – {cert.issuer} {cert.date ? `(${cert.date})` : ""}</div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {achievements.length > 0 && (
-              <section>
-                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-2 font-sans">Achievements</h2>
-                {achievements.map((ach: any, idx: number) => (
-                  <div key={idx} className="font-sans text-[11.5px] text-slate-600">
-                    <strong>{ach.title}</strong> {ach.date ? `(${ach.date})` : ""}
-                    {ach.description && <p className="text-sm text-slate-400">{ach.description}</p>}
-                  </div>
-                ))}
-              </section>
-            )}
-
-            {additionalInfo.length > 0 && (
-              <section>
-                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-2 font-sans">Additional Info</h2>
-                <div className="font-sans text-[11.5px] space-y-1 text-slate-600">
-                  {additionalInfo.map((info: any, idx: number) => (
-                    <div key={idx}><strong>{info.label}:</strong> {info.value}</div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            <section>
-              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest border-b border-slate-200 pb-1 mb-2 font-sans">References</h2>
-              {references.length > 0 ? (
-                <div className="grid grid-cols-2 gap-4 font-sans text-sm text-slate-600">
-                  {references.map((ref: any, idx: number) => (
-                    <div key={idx}>
-                      <strong className="text-slate-900 block">{ref.name}</strong>
-                      {ref.title} | {ref.company}<br />
-                      <span className="text-slate-400">{ref.contact}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm italic text-slate-400 font-sans">No references added yet.</p>
-              )}
-            </section>
-
-            {declaration && (
-              <div className="pt-4 border-t border-slate-100 mt-6 font-sans text-sm text-slate-400 text-center italic">
-                <p>{declaration}</p>
-              </div>
-            )}
-          </div>
-        </div>
-      );
-    } else if (selectedLayout === "theme5") {
-      // THEME 5: Creative Split – Bold left accent strip with colorful header
-      const acc = cvSettings.accentColor;
-      const pri = cvSettings.primaryColor;
-      return (
-        <div className="w-[210mm] min-h-[297mm] bg-white text-[#333] flex relative shadow-2xl text-left font-sans leading-normal" style={fontScaleStyle}>
-          {/* Thin accent strip */}
-          <div style={{ backgroundColor: acc }} className="w-2 shrink-0" />
-          {/* Left sidebar */}
-          <aside style={{ backgroundColor: pri }} className="w-[200px] shrink-0 text-white p-5 flex flex-col gap-5">
-            {(cvSettings as any).showPhoto !== false && (
-              <div style={{ width: 90, height: 90, borderRadius: cvSettings.photoShape === 'circle' ? '50%' : '10px', borderColor: acc }} className="border-[3px] mx-auto overflow-hidden bg-white">
-                <img src={personalInfo.photoUrl || 'https://via.placeholder.com/90'} alt="Profile" style={{ objectFit: cvSettings.photoFit, width: '100%', height: '100%' }} />
-              </div>
-            )}
-            <div>
-              <p style={{ color: acc }} className="text-xs font-black uppercase tracking-widest mb-2">Contact</p>
-              <div className="space-y-1.5 text-xs opacity-90">
-                {personalInfo.location && <div>📍 {personalInfo.location}</div>}
-                {personalInfo.phone && <div>📞 {personalInfo.phone}</div>}
-                {personalInfo.email && <div className="break-all">✉️ {personalInfo.email}</div>}
-                {personalInfo.linkedin && <div className="break-all">🔗 {personalInfo.linkedin}</div>}
-                {personalInfo.github && <div className="break-all">🐙 {personalInfo.github}</div>}
-              </div>
-            </div>
-            <div>
-              <p style={{ color: acc }} className="text-xs font-black uppercase tracking-widest mb-2">Skills</p>
-              {skills.length > 0 ? skills.map((g: any, i: number) => (
-                <div key={i} className="mb-2">
-                  <div style={{ color: acc }} className="text-xs font-bold mb-0.5">{g.category}</div>
-                  <div className="flex flex-wrap gap-0.5">
-                    {(g.items || '').split(',').map((item: string, j: number) => (
-                      <span key={j} className="text-[9px] px-1 py-0.5 rounded bg-white/10 text-white/80">{item.trim()}</span>
-                    ))}
-                  </div>
-                </div>
-              )) : <p className="text-xs italic opacity-50">No skills.</p>}
-            </div>
-            <div>
-              <p style={{ color: acc }} className="text-xs font-black uppercase tracking-widest mb-2">Languages</p>
-              {languages.length > 0 ? languages.map((l: any, i: number) => (
-                <div key={i} className="text-xs opacity-90">{l.language}{l.proficiency ? ` · ${l.proficiency}` : ''}</div>
-              )) : <p className="text-xs italic opacity-50">No languages.</p>}
-            </div>
-            <div>
-              <p style={{ color: acc }} className="text-xs font-black uppercase tracking-widest mb-2">Details</p>
-              <div className="space-y-1 text-xs opacity-80">
-                {personalDetails.dateOfBirth && <div><strong>DOB:</strong> {personalDetails.dateOfBirth}</div>}
-                {personalDetails.nationality && <div><strong>Nationality:</strong> {personalDetails.nationality}</div>}
-                {personalDetails.maritalStatus && <div><strong>Status:</strong> {personalDetails.maritalStatus}</div>}
-                {personalDetails.kenyaStatus && <div><strong>Kenya:</strong> {personalDetails.kenyaStatus}</div>}
-              </div>
-            </div>
-          </aside>
-          {/* Main */}
-          <main className="flex-1 p-6 flex flex-col gap-5 overflow-hidden">
-            <div style={{ borderBottomColor: acc }} className="border-b-2 pb-3">
-              <h1 style={{ color: pri }} className="text-3xl font-black uppercase tracking-tight leading-tight">{personalInfo.fullName || 'Your Name'}</h1>
-              <div style={{ color: acc }} className="text-sm font-bold uppercase tracking-wide mt-1">{personalInfo.title || 'Professional Title'}</div>
-            </div>
-            {summary && (
-              <div>
-                <h2 style={{ color: pri }} className="text-xs font-black uppercase tracking-widest mb-1.5">Profile</h2>
-                <p className="text-xs leading-relaxed text-slate-600 text-justify">{summary}</p>
-              </div>
-            )}
-            <div>
-              <h2 style={{ color: pri }} className="text-xs font-black uppercase tracking-widest mb-2">Experience</h2>
-              {experience.length > 0 ? experience.map((exp: any, idx: number) => (
-                <div key={idx} className="mb-3 pl-3" style={{ borderLeftColor: acc, borderLeftWidth: 2 }}>
-                  <div className="flex justify-between items-start">
-                    <div><div className="text-sm font-bold text-slate-900">{exp.role}</div><div className="text-xs text-slate-500 font-semibold">{exp.company}{exp.location ? ` · ${exp.location}` : ''}</div></div>
-                    <div style={{ color: acc }} className="text-xs font-bold whitespace-nowrap">{exp.startDate}–{exp.endDate}</div>
-                  </div>
-                  {exp.companyDesc && <p className="text-xs italic text-slate-400 mt-0.5">{exp.companyDesc}</p>}
-                  <ul className="list-disc pl-4 text-xs text-slate-600 mt-1 space-y-0.5">
-                    {(Array.isArray(exp.responsibilities) ? exp.responsibilities : [exp.responsibilities]).filter(Boolean).map((r: string, ri: number) => <li key={ri}>{r}</li>)}
-                  </ul>
-                </div>
-              )) : <p className="text-xs italic text-slate-400">No experience added.</p>}
-            </div>
-            <div>
-              <h2 style={{ color: pri }} className="text-xs font-black uppercase tracking-widest mb-2">Education</h2>
-              {education.length > 0 ? education.map((edu: any, idx: number) => (
-                <div key={idx} className="mb-1.5 text-xs"><strong className="text-slate-800">{edu.degree}</strong> — {edu.institution} ({edu.year})</div>
-              )) : <p className="text-xs italic text-slate-400">No education.</p>}
-            </div>
-            {certifications.length > 0 && (
-              <div>
-                <h2 style={{ color: pri }} className="text-xs font-black uppercase tracking-widest mb-2">Certifications</h2>
-                {certifications.map((c: any, i: number) => <div key={i} className="text-xs text-slate-600"><strong>{c.name}</strong> — {c.issuer} ({c.date})</div>)}
-              </div>
-            )}
-            {achievements.length > 0 && (
-              <div>
-                <h2 style={{ color: pri }} className="text-xs font-black uppercase tracking-widest mb-2">Achievements</h2>
-                {achievements.map((a: any, i: number) => <div key={i} className="text-xs text-slate-600 mb-1"><strong>{a.title}</strong>{a.date ? ` (${a.date})` : ''} — {a.description}</div>)}
-              </div>
-            )}
-            {references.length > 0 && (
-              <div>
-                <h2 style={{ color: pri }} className="text-xs font-black uppercase tracking-widest mb-2">References</h2>
-                <div className="grid grid-cols-2 gap-3">
-                  {references.map((ref: any, i: number) => <div key={i} className="text-xs"><strong>{ref.name}</strong><br />{ref.title} · {ref.company}<br /><span style={{ color: acc }}>{ref.contact}</span></div>)}
-                </div>
-              </div>
-            )}
-            {declaration && <div className="mt-auto pt-2 text-xs italic text-slate-400 border-t border-slate-100">{declaration}</div>}
-          </main>
-        </div>
-      );
-    } else if (selectedLayout === "theme6") {
-      // THEME 6: Academic – clean serif-inspired scholarly layout
-      const acc = cvSettings.accentColor;
-      const pri = cvSettings.primaryColor;
-      return (
-        <div className="w-[210mm] min-h-[297mm] bg-white text-[#222] flex flex-col relative shadow-2xl text-left font-serif leading-normal" style={{ ...fontScaleStyle, fontFamily: (cvSettings as any).fontFamily || 'Georgia, serif' }}>
-          {/* Top header band */}
-          <header className="px-10 pt-8 pb-5 flex items-center gap-6" style={{ borderBottomColor: pri, borderBottomWidth: 3 }}>
-            {(cvSettings as any).showPhoto !== false && (
-              <div style={{ width: 100, height: 100, borderRadius: cvSettings.photoShape === 'circle' ? '50%' : '8px', borderColor: pri }} className="border-2 overflow-hidden shrink-0 bg-slate-100">
-                <img src={personalInfo.photoUrl || 'https://via.placeholder.com/100'} alt="Profile" style={{ objectFit: cvSettings.photoFit, width: '100%', height: '100%' }} />
-              </div>
-            )}
-            <div className="flex-1">
-              <h1 style={{ color: pri }} className="text-3xl font-bold tracking-tight">{personalInfo.fullName || 'Your Name'}</h1>
-              <div style={{ color: acc }} className="text-base italic mt-0.5">{personalInfo.title || 'Academic Title'}</div>
-              <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-2 text-xs text-slate-500 font-sans">
-                {personalInfo.email && <span>✉ {personalInfo.email}</span>}
-                {personalInfo.phone && <span>☏ {personalInfo.phone}</span>}
-                {personalInfo.location && <span>⌖ {personalInfo.location}</span>}
-                {personalInfo.linkedin && <span>🔗 {personalInfo.linkedin}</span>}
-              </div>
-            </div>
-          </header>
-          <div className="flex-1 px-10 py-6 flex gap-8">
-            {/* Main column */}
-            <div className="flex-1 space-y-5">
-              {summary && (
-                <section>
-                  <h2 style={{ color: pri, borderBottomColor: `${acc}88` }} className="text-sm font-bold uppercase tracking-widest border-b pb-1 mb-2">Research Profile</h2>
-                  <p className="text-xs leading-relaxed text-justify">{summary}</p>
-                </section>
-              )}
-              <section>
-                <h2 style={{ color: pri, borderBottomColor: `${acc}88` }} className="text-sm font-bold uppercase tracking-widest border-b pb-1 mb-2">Professional Experience</h2>
-                {experience.length > 0 ? experience.map((exp: any, idx: number) => (
-                  <div key={idx} className="mb-3">
-                    <div className="flex justify-between items-baseline">
-                      <div className="font-bold text-sm">{exp.role}</div>
-                      <div style={{ color: acc }} className="text-xs font-sans">{exp.startDate} – {exp.endDate}</div>
-                    </div>
-                    <div className="text-xs italic text-slate-500">{exp.company}{exp.location ? `, ${exp.location}` : ''}</div>
-                    <ul className="list-disc pl-5 text-xs mt-1 space-y-0.5 text-slate-700">
-                      {(Array.isArray(exp.responsibilities) ? exp.responsibilities : [exp.responsibilities]).filter(Boolean).map((r: string, ri: number) => <li key={ri}>{r}</li>)}
-                    </ul>
-                  </div>
-                )) : <p className="text-xs italic text-slate-400">No experience.</p>}
-              </section>
-              <section>
-                <h2 style={{ color: pri, borderBottomColor: `${acc}88` }} className="text-sm font-bold uppercase tracking-widest border-b pb-1 mb-2">Education</h2>
-                {education.length > 0 ? education.map((edu: any, idx: number) => (
-                  <div key={idx} className="mb-2">
-                    <div className="font-bold text-sm">{edu.degree}</div>
-                    <div className="text-xs italic text-slate-500">{edu.institution} — <span className="font-sans not-italic">{edu.year}</span></div>
-                    {edu.details && <p className="text-xs text-slate-600 mt-0.5">{edu.details}</p>}
-                  </div>
-                )) : <p className="text-xs italic text-slate-400">No education.</p>}
-              </section>
-              {projects.length > 0 && (
-                <section>
-                  <h2 style={{ color: pri, borderBottomColor: `${acc}88` }} className="text-sm font-bold uppercase tracking-widest border-b pb-1 mb-2">Publications & Projects</h2>
-                  {projects.map((p: any, i: number) => <div key={i} className="mb-1.5 text-xs"><strong>{p.title}</strong>{p.year ? ` (${p.year})` : ''} — {p.description}</div>)}
-                </section>
-              )}
-            </div>
-            {/* Right sidebar */}
-            <aside className="w-[170px] shrink-0 space-y-4 font-sans">
-              <div>
-                <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider border-b border-slate-200 pb-1 mb-2">Personal</h3>
-                <div className="space-y-1 text-xs text-slate-600">
-                  {personalDetails.dateOfBirth && <div><strong>DOB:</strong> {personalDetails.dateOfBirth}</div>}
-                  {personalDetails.nationality && <div><strong>Nat:</strong> {personalDetails.nationality}</div>}
-                  {personalDetails.maritalStatus && <div><strong>Status:</strong> {personalDetails.maritalStatus}</div>}
-                  {personalDetails.kenyaStatus && <div><strong>Kenya:</strong> {personalDetails.kenyaStatus}</div>}
-                </div>
-              </div>
-              <div>
-                <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider border-b border-slate-200 pb-1 mb-2">Competencies</h3>
-                {skills.length > 0 ? skills.map((g: any, i: number) => (
-                  <div key={i} className="mb-2">
-                    <div className="text-xs font-bold text-slate-700 mb-0.5">{g.category}</div>
-                    <div className="flex flex-wrap gap-0.5">
-                      {(g.items || '').split(',').map((item: string, j: number) => (
-                        <span key={j} className="text-[9px] px-1 py-0.5 rounded bg-slate-100 text-slate-600">{item.trim()}</span>
-                      ))}
-                    </div>
-                  </div>
-                )) : <p className="text-xs italic text-slate-400">No skills.</p>}
-              </div>
-              <div>
-                <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider border-b border-slate-200 pb-1 mb-2">Languages</h3>
-                {languages.length > 0 ? languages.map((l: any, i: number) => (
-                  <div key={i} className="text-xs text-slate-600">{l.language} — {l.proficiency}</div>
-                )) : <p className="text-xs italic text-slate-400">No languages.</p>}
-              </div>
-              {certifications.length > 0 && (
-                <div>
-                  <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider border-b border-slate-200 pb-1 mb-2">Certifications</h3>
-                  {certifications.map((c: any, i: number) => <div key={i} className="text-xs text-slate-600 mb-1"><strong>{c.name}</strong><br />{c.issuer}</div>)}
-                </div>
-              )}
-              {references.length > 0 && (
-                <div>
-                  <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider border-b border-slate-200 pb-1 mb-2">References</h3>
-                  {references.map((ref: any, i: number) => <div key={i} className="text-xs text-slate-600 mb-1.5"><strong>{ref.name}</strong><br /><span className="italic">{ref.title}</span><br />{ref.company}<br /><span style={{ color: acc }}>{ref.contact}</span></div>)}
-                </div>
-              )}
-            </aside>
-          </div>
-          {declaration && <div className="px-10 pb-4 text-xs italic text-slate-400 font-sans border-t border-slate-100 pt-2">{declaration}</div>}
-        </div>
-      );
-    } else if (selectedLayout === "theme7") {
-      // THEME 7: Timeline – vertical chronological timeline layout
-      const acc = cvSettings.accentColor;
-      const pri = cvSettings.primaryColor;
-      return (
-        <div className="w-[210mm] min-h-[297mm] bg-white relative shadow-2xl text-left font-sans leading-normal" style={fontScaleStyle}>
-          {/* Top header */}
-          <header style={{ background: `linear-gradient(135deg, ${pri} 0%, ${acc} 100%)` }} className="text-white px-10 py-7">
-            <div className="flex items-center gap-5">
-              {(cvSettings as any).showPhoto !== false && (
-                <div style={{ width: 90, height: 90, borderRadius: cvSettings.photoShape === 'circle' ? '50%' : '10px' }} className="border-2 border-white/50 overflow-hidden shrink-0 bg-white/20">
-                  <img src={personalInfo.photoUrl || 'https://via.placeholder.com/90'} alt="Profile" style={{ objectFit: cvSettings.photoFit, width: '100%', height: '100%' }} />
-                </div>
-              )}
-              <div>
-                <h1 className="text-3xl font-extrabold tracking-tight leading-tight">{personalInfo.fullName || 'Your Name'}</h1>
-                <div className="text-base font-medium opacity-90 mt-0.5">{personalInfo.title || 'Professional Title'}</div>
-                <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-2 text-xs opacity-80">
-                  {personalInfo.email && <span>✉ {personalInfo.email}</span>}
-                  {personalInfo.phone && <span>☏ {personalInfo.phone}</span>}
-                  {personalInfo.location && <span>📍 {personalInfo.location}</span>}
-                  {personalInfo.linkedin && <span>🔗 {personalInfo.linkedin}</span>}
-                </div>
-              </div>
-            </div>
-          </header>
-          <div className="px-10 py-6 flex gap-8">
-            {/* Left: timeline content */}
-            <div className="flex-1 space-y-5">
-              {summary && (
-                <section>
-                  <h2 style={{ color: pri }} className="text-sm font-extrabold uppercase tracking-widest mb-2">About</h2>
-                  <p className="text-xs leading-relaxed text-slate-600">{summary}</p>
-                </section>
-              )}
-              <section>
-                <h2 style={{ color: pri }} className="text-sm font-extrabold uppercase tracking-widest mb-3">Career Timeline</h2>
-                <div className="relative pl-5" style={{ borderLeftColor: acc, borderLeftWidth: 2 }}>
-                  {experience.length > 0 ? experience.map((exp: any, idx: number) => (
-                    <div key={idx} className="relative mb-4">
-                      <div style={{ backgroundColor: acc, left: -22 }} className="absolute top-1 w-3.5 h-3.5 rounded-full border-2 border-white shadow" />
-                      <div style={{ color: acc }} className="text-xs font-bold mb-0.5">{exp.startDate} – {exp.endDate}</div>
-                      <div className="font-bold text-sm text-slate-900">{exp.role}</div>
-                      <div className="text-xs text-slate-500 font-semibold">{exp.company}{exp.location ? ` · ${exp.location}` : ''}</div>
-                      {exp.companyDesc && <p className="text-xs italic text-slate-400 mt-0.5">{exp.companyDesc}</p>}
-                      <ul className="list-disc pl-4 text-xs text-slate-600 mt-1 space-y-0.5">
-                        {(Array.isArray(exp.responsibilities) ? exp.responsibilities : [exp.responsibilities]).filter(Boolean).map((r: string, ri: number) => <li key={ri}>{r}</li>)}
-                      </ul>
-                    </div>
-                  )) : <p className="text-xs italic text-slate-400">No experience added.</p>}
-                </div>
-              </section>
-              <section>
-                <h2 style={{ color: pri }} className="text-sm font-extrabold uppercase tracking-widest mb-3">Education</h2>
-                <div className="relative pl-5" style={{ borderLeftColor: acc, borderLeftWidth: 2 }}>
-                  {education.length > 0 ? education.map((edu: any, idx: number) => (
-                    <div key={idx} className="relative mb-3">
-                      <div style={{ backgroundColor: acc, left: -22 }} className="absolute top-1 w-3.5 h-3.5 rounded-full border-2 border-white shadow" />
-                      <div style={{ color: acc }} className="text-xs font-bold">{edu.year}</div>
-                      <div className="font-bold text-sm text-slate-900">{edu.degree}</div>
-                      <div className="text-xs text-slate-500">{edu.institution}</div>
-                    </div>
-                  )) : <p className="text-xs italic text-slate-400">No education.</p>}
-                </div>
-              </section>
-            </div>
-            {/* Right sidebar */}
-            <aside className="w-[180px] shrink-0 space-y-4">
-              <div>
-                <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider mb-2 border-b border-slate-200 pb-1">Personal</h3>
-                <div className="space-y-1 text-xs text-slate-600">
-                  {personalDetails.dateOfBirth && <div><strong>DOB:</strong> {personalDetails.dateOfBirth}</div>}
-                  {personalDetails.nationality && <div><strong>Nat:</strong> {personalDetails.nationality}</div>}
-                  {personalDetails.maritalStatus && <div><strong>Status:</strong> {personalDetails.maritalStatus}</div>}
-                  {personalDetails.kenyaStatus && <div><strong>Kenya:</strong> {personalDetails.kenyaStatus}</div>}
-                  {personalDetails.nairobiRes && <div><strong>Nairobi:</strong> {personalDetails.nairobiRes}</div>}
-                  {personalDetails.drivingExperience && <div><strong>Driving:</strong> {personalDetails.drivingExperience}</div>}
-                </div>
-              </div>
-              <div>
-                <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider mb-2 border-b border-slate-200 pb-1">Skills</h3>
-                {skills.length > 0 ? skills.map((g: any, i: number) => (
-                  <div key={i} className="mb-2">
-                    <div className="text-xs font-bold text-slate-700 mb-0.5">{g.category}</div>
-                    <div className="flex flex-wrap gap-0.5">
-                      {(g.items || '').split(',').map((item: string, j: number) => (
-                        <span key={j} className="text-[9px] px-1 py-0.5 rounded bg-slate-100 text-slate-600">{item.trim()}</span>
-                      ))}
-                    </div>
-                  </div>
-                )) : <p className="text-xs italic text-slate-400">No skills.</p>}
-              </div>
-              <div>
-                <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider mb-2 border-b border-slate-200 pb-1">Languages</h3>
-                {languages.length > 0 ? languages.map((l: any, i: number) => (
-                  <div key={i} className="text-xs text-slate-600">{l.language}{l.proficiency ? ` — ${l.proficiency}` : ''}</div>
-                )) : <p className="text-xs italic text-slate-400">No languages.</p>}
-              </div>
-              {achievements.length > 0 && (
-                <div>
-                  <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider mb-2 border-b border-slate-200 pb-1">Achievements</h3>
-                  {achievements.map((a: any, i: number) => <div key={i} className="text-xs text-slate-600 mb-1"><strong>{a.title}</strong> — {a.description}</div>)}
-                </div>
-              )}
-              {references.length > 0 && (
-                <div>
-                  <h3 style={{ color: acc }} className="text-xs font-bold uppercase tracking-wider mb-2 border-b border-slate-200 pb-1">References</h3>
-                  {references.map((ref: any, i: number) => <div key={i} className="text-xs text-slate-600 mb-1.5"><strong className="block">{ref.name}</strong>{ref.title} · {ref.company}<br /><span style={{ color: acc }}>{ref.contact}</span></div>)}
-                </div>
-              )}
-            </aside>
-          </div>
-          {declaration && <div className="px-10 pb-4 text-xs italic text-slate-400 border-t border-slate-100 pt-2">{declaration}</div>}
-        </div>
-      );
-    } else {
-      // THEME 4: Executive Layout
-      const acc = cvSettings.accentColor;
-      const pri = cvSettings.primaryColor;
-      return (
-        <div className="w-[210mm] min-h-[297mm] bg-white relative shadow-2xl text-left font-sans leading-normal" style={fontScaleStyle}>
-          {/* Bold top banner */}
-          <header style={{ backgroundColor: pri, borderBottomColor: acc }} className="text-white border-b-4">
-            <div className="p-8 pb-4">
-              <h1 className="text-4xl font-extrabold tracking-tight">{personalInfo.fullName || "Your Name"}</h1>
-              <div style={{ color: acc }} className="text-lg font-semibold tracking-wide mt-1 uppercase">{personalInfo.title || "Professional Title"}</div>
-            </div>
-            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs px-8 pb-4 text-slate-300" style={{ backgroundColor: `${pri}dd` }}>
-              {personalInfo.email && <span>✉ {personalInfo.email}</span>}
-              {personalInfo.phone && <span>📞 {personalInfo.phone}</span>}
-              {personalInfo.location && <span>📍 {personalInfo.location}</span>}
-              {personalInfo.linkedin && <span>🔗 {personalInfo.linkedin}</span>}
-              {personalInfo.github && <span>🐙 {personalInfo.github}</span>}
-            </div>
-          </header>
-
-          <div className="p-8 grid grid-cols-[1fr_280px] gap-8">
-            <div className="space-y-6">
-              <section>
-                <h2 style={{ borderBottomColor: acc, color: pri }} className="text-lg font-extrabold uppercase border-b-2 pb-1 mb-3">Executive Profile</h2>
-                {summary ? <p className="text-sm leading-relaxed text-slate-700 text-justify">{summary}</p> : <p className="text-sm italic text-slate-400">No profile summary.</p>}
-              </section>
-
-              <section>
-                <h2 style={{ borderBottomColor: acc, color: pri }} className="text-lg font-extrabold uppercase border-b-2 pb-1 mb-4">Leadership Experience</h2>
-                {experience.length > 0 ? (
-                  <div className="space-y-5">
-                    {experience.map((exp: any, idx: number) => (
-                      <div key={idx} className="border-l-2 pl-4" style={{ borderLeftColor: acc }}>
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <div className="font-bold text-[14px] text-slate-900">{exp.role}</div>
-                            <div className="text-sm text-slate-500 font-semibold">{exp.company} {exp.location ? `— ${exp.location}` : ""}</div>
-                          </div>
-                          <div style={{ color: acc }} className="text-sm font-bold whitespace-nowrap">{exp.startDate} – {exp.endDate}</div>
-                        </div>
-                        {exp.companyDesc && <p className="text-[10.5px] text-slate-400 italic mt-1">{exp.companyDesc}</p>}
-                        <ul className="list-disc pl-5 text-[11.5px] text-slate-600 mt-2 space-y-1">
-                          {Array.isArray(exp.responsibilities) ? exp.responsibilities.map((resp: string, rIdx: number) => (
-                            <li key={rIdx}>{resp}</li>
-                          )) : <li>{exp.responsibilities}</li>}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                ) : <p className="text-sm italic text-slate-400">No experience added.</p>}
-              </section>
-
-              <section>
-                <h2 style={{ borderBottomColor: acc, color: pri }} className="text-lg font-extrabold uppercase border-b-2 pb-1 mb-3">Key Projects & Impact</h2>
-                {projects.length > 0 ? (
-                  <div className="space-y-3">
-                    {projects.map((proj: any, idx: number) => (
-                      <div key={idx} className="text-sm"><strong className="text-slate-800">{proj.title}</strong> {proj.year ? `(${proj.year})` : ""} — <span className="text-slate-600">{proj.description}</span></div>
-                    ))}
-                  </div>
-                ) : <p className="text-sm italic text-slate-400">No projects added.</p>}
-              </section>
-
-              <section>
-                <h2 style={{ borderBottomColor: acc, color: pri }} className="text-lg font-extrabold uppercase border-b-2 pb-1 mb-3">Education</h2>
-                {education.length > 0 ? (
-                  <div className="space-y-2">
-                    {education.map((edu: any, idx: number) => (
-                      <div key={idx} className="text-sm"><strong>{edu.degree}</strong> — {edu.institution} ({edu.year}){edu.details ? ` — ${edu.details}` : ""}</div>
-                    ))}
-                  </div>
-                ) : <p className="text-sm italic text-slate-400">No education added.</p>}
-              </section>
-            </div>
-
-            <aside className="space-y-5">
-              <div className="text-center">
-                {(cvSettings as any).showPhoto !== false && (
-                  <div style={{ width: 120, height: 120, borderRadius: '50%', borderColor: acc, objectFit: cvSettings.photoFit }} className="mx-auto border-2 overflow-hidden mb-3">
-                    <img src={personalInfo.photoUrl || "https://via.placeholder.com/120"} alt="Profile" className="w-full h-full" style={{ objectFit: cvSettings.photoFit }} />
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">Core Competencies</h3>
-                {skills.length > 0 ? skills.map((grp: any, idx: number) => (
-                  <div key={idx} className="mb-2">
-                    <div className="text-xs font-bold text-slate-700 mb-0.5">{grp.category}</div>
-                    <div className="flex flex-wrap gap-1">
-                      {(grp.items || '').split(',').map((item: string, i: number) => (
-                        <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{item.trim()}</span>
-                      ))}
-                    </div>
-                  </div>
-                )) : <p className="text-sm italic text-slate-400">No skills.</p>}
-              </div>
-
-              <div>
-                <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">Languages</h3>
-                {languages.length > 0 ? languages.map((l: any, idx: number) => (
-                  <div key={idx} className="text-sm text-slate-600">{l.language} — {l.proficiency}</div>
-                )) : <p className="text-sm italic text-slate-400">No languages.</p>}
-              </div>
-
-              {certifications.length > 0 && (
-                <div>
-                  <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">Certifications</h3>
-                  {certifications.map((c: any, idx: number) => (
-                    <div key={idx} className="text-sm text-slate-600"><strong>{c.name}</strong> — {c.issuer}</div>
-                  ))}
-                </div>
-              )}
-
-              {additionalInfo.length > 0 && (
-                <div>
-                  <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">Details</h3>
-                  {additionalInfo.map((info: any, idx: number) => (
-                    <div key={idx} className="text-sm text-slate-600"><strong>{info.label}:</strong> {info.value}</div>
-                  ))}
-                </div>
-              )}
-
-              <div>
-                <h3 style={{ color: acc, borderBottomColor: acc }} className="text-xs font-extrabold uppercase tracking-wider border-b pb-1 mb-2">References</h3>
-                {references.length > 0 ? references.map((ref: any, idx: number) => (
-                  <div key={idx} className="text-sm text-slate-600 mb-2"><strong>{ref.name}</strong><br />{ref.title} | {ref.company}<br /><span style={{ color: acc }}>{ref.contact}</span></div>
-                )) : <p className="text-sm italic text-slate-400">No references.</p>}
-              </div>
-
-              {declaration && (
-                <div className="text-xs italic text-slate-400 border-t border-slate-200 pt-2 mt-4">{declaration}</div>
-              )}
-            </aside>
-          </div>
-        </div>
-      );
-    }
-  };
 
   const renderClientPortal = () => {
     if (!clientEdits) return null;
@@ -3715,17 +2619,21 @@ export default function CVGeneratorPage() {
                 {gaps.length > 0 && (
                   <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-5 space-y-3">
                     <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><AlertCircle className="h-4 w-4 text-amber-500" /> Employment Gap</h4>
-                    {gaps.map((gap: any, idx: number) => (
-                      <div key={idx} className="space-y-2">
-                        <p className="text-xs text-slate-600">There's a <strong>{gap.gapYears}-year gap</strong> between <strong>{gap.prevCompany}</strong> and <strong>{gap.currCompany}</strong>. What were you doing during this time?</p>
-                        <div className="flex flex-wrap gap-2">
-                          {['Studying', 'Freelancing', 'Running Business', 'Career Break', 'Family reasons'].map(ans => (
-                            <button key={ans} type="button" onClick={() => handleClientPersonalDetailsChange('kenyaStatus', `Gap: ${ans}`)} className={`text-xs px-3 py-1.5 rounded-full border font-semibold transition-all ${(clientEdits.personalDetails?.kenyaStatus || '').includes(ans) ? 'bg-custom-blue text-white border-custom-blue' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{ans}</button>
-                          ))}
+                    {gaps.map((gap: any, idx: number) => {
+                      const gapKey = `${gap.prevCompany || 'prev'}__${gap.currCompany || 'curr'}__${idx}`;
+                      const gapNote = clientEdits.personalDetails?.employmentGapNotes?.[gapKey] || {};
+                      return (
+                        <div key={idx} className="space-y-2">
+                          <p className="text-xs text-slate-600">There's a <strong>{gap.gapYears}-year gap</strong> between <strong>{gap.prevCompany}</strong> and <strong>{gap.currCompany}</strong>. What were you doing during this time?</p>
+                          <div className="flex flex-wrap gap-2">
+                            {['Studying', 'Freelancing', 'Running Business', 'Career Break', 'Family reasons'].map(ans => (
+                              <button key={ans} type="button" onClick={() => handleClientGapNoteChange(gapKey, 'reason', ans)} className={`text-xs px-3 py-1.5 rounded-full border font-semibold transition-all ${gapNote.reason === ans ? 'bg-custom-blue text-white border-custom-blue' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{ans}</button>
+                            ))}
+                          </div>
+                          <Input placeholder="Add more detail..." className="h-9 text-xs" value={gapNote.detail || ''} onChange={(e) => handleClientGapNoteChange(gapKey, 'detail', e.target.value)} />
                         </div>
-                        <Input placeholder="Add more detail..." className="h-9 text-xs" onChange={(e) => handleClientPersonalDetailsChange('kenyaStatus', `Gap explanation: ${e.target.value}`)} />
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
@@ -4063,23 +2971,25 @@ export default function CVGeneratorPage() {
                       // Save to database as snapshot for recruiter verification
                       if (portalDraftId) {
                         try {
-                          // Try to find the applicant_id from cvData first
-                          let applicantId = cvData?.applicantId;
-                          
-                          // Fallback: try to download draft.json
-                           if (!applicantId) {
+                          // The Secure Review URL carries applicantId as a query param (see
+                          // getCollabPortalLink) which populates the `applicantId` state on
+                          // mount. Only fall back to the draft.json lookup for older links
+                          // that were generated before that param existed.
+                          let targetApplicantId = applicantId;
+
+                          if (!targetApplicantId) {
                             const { data: draftData } = await supabase.storage
                               .from('kyc-documents')
                               .download(`cv-drafts/${portalDraftId}/draft.json`);
-                            
+
                             if (draftData) {
                               const draftText = await draftData.text();
                               const draft = JSON.parse(draftText);
-                              applicantId = draft.applicantId || draft.data?.applicantId;
+                              targetApplicantId = draft.applicantId || draft.data?.applicantId;
                             }
                           }
-                            
-                          if (applicantId) {
+
+                          if (targetApplicantId) {
                             // Update the job_applicant_cvs record with client submission snapshot
                             const { error: updateError } = await supabase
                               .from('job_applicant_cvs')
@@ -4087,12 +2997,12 @@ export default function CVGeneratorPage() {
                                 raw_cv_extracted_details: submissionPayload,
                                 updated_at: new Date().toISOString(),
                               })
-                              .eq('applicant_id', applicantId);
-                            
+                              .eq('applicant_id', targetApplicantId);
+
                             if (updateError) {
                               console.error('Failed to save submission to database:', updateError);
                             } else {
-                              console.log('Client submission saved to database for applicant:', applicantId);
+                              console.log('Client submission saved to database for applicant:', targetApplicantId);
                             }
                           }
                         } catch (e) {
@@ -4358,7 +3268,7 @@ export default function CVGeneratorPage() {
               </div>
               <div className="flex-1 overflow-auto p-6 flex items-start justify-center bg-slate-50 custom-scrollbar">
                 <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center', transition: 'transform 0.15s ease-out' }} className="shrink-0">
-                  <div ref={previewRef} id="cv-preview-container" style={{ width: '210mm', minHeight: '297mm', background: 'white' }}>{renderLayout()}</div>
+                  <div ref={previewRef} id="cv-preview-container" style={{ width: '210mm', minHeight: '297mm', background: 'white' }}><CVLayout cvData={cvData} cvSettings={cvSettings} selectedLayout={selectedLayout} /></div>
                 </div>
               </div>
             </Panel>
@@ -4848,13 +3758,17 @@ export default function CVGeneratorPage() {
                 {/* Declaration Editor */}
                 {activeSection === 'declaration' && (
                   <div className="space-y-4">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox id="includeDeclaration" checked={cvData.includeDeclaration !== false} onCheckedChange={(checked) => setCvData({ ...cvData, includeDeclaration: !!checked })} />
+                      <Label htmlFor="includeDeclaration" className="text-xs text-slate-600 cursor-pointer">Include Declaration section on the CV</Label>
+                    </div>
                     <div className="space-y-2">
                       <Label className="text-sm font-bold uppercase tracking-wider text-slate-500">Declaration Statement</Label>
-                      <Textarea rows={3} value={cvData.declaration || ""} onChange={(e) => setCvData({ ...cvData, declaration: e.target.value })} />
+                      <Textarea rows={3} disabled={cvData.includeDeclaration === false} value={cvData.declaration || ""} onChange={(e) => setCvData({ ...cvData, declaration: e.target.value })} />
                     </div>
                     <div className="flex items-center space-x-2">
-                      <Checkbox id="verifiedBadge" checked={cvData.verifiedBadge} onCheckedChange={(checked) => setCvData({ ...cvData, verifiedBadge: !!checked })} />
-                      <Label htmlFor="verifiedBadge" className="text-xs text-slate-600 cursor-pointer">Include "Verified & Up-to-date" badge</Label>
+                      <Checkbox id="verifiedBadge" disabled={cvData.includeDeclaration === false} checked={cvData.verifiedBadge} onCheckedChange={(checked) => setCvData({ ...cvData, verifiedBadge: !!checked })} />
+                      <Label htmlFor="verifiedBadge" className="text-xs text-slate-600 cursor-pointer">Include "CV Verified & Up-to-date {getVerifiedDateLabel()}" line</Label>
                     </div>
                   </div>
                 )}
@@ -4883,7 +3797,7 @@ export default function CVGeneratorPage() {
               </div>
               <div className="flex-1 overflow-auto p-6 flex items-start justify-center bg-slate-50 custom-scrollbar">
                 <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center', transition: 'transform 0.15s ease-out' }} className="shrink-0">
-                  <div ref={previewRef} id="cv-preview-container" style={{ width: '210mm', minHeight: '297mm', background: 'white' }}>{renderLayout()}</div>
+                  <div ref={previewRef} id="cv-preview-container" style={{ width: '210mm', minHeight: '297mm', background: 'white' }}><CVLayout cvData={cvData} cvSettings={cvSettings} selectedLayout={selectedLayout} /></div>
                 </div>
               </div>
             </Panel>
@@ -5001,19 +3915,25 @@ export default function CVGeneratorPage() {
 
               {/* Secure link box */}
               {(() => {
-                // Check for existing drafts - either currentPortalDraftId or any draft in cvDrafts
-                const existingDraft = currentPortalDraftId || (cvDrafts.length > 0 ? cvDrafts[0].id : null);
+                // A portal-specific draft blob (currentPortalDraftId / cvDrafts) is only
+                // needed to resolve the storage backup path. Whether we can actually share
+                // a link is broader: it's also true whenever this applicant already has a
+                // bcl_cv_snapshot saved in the database (hasSavedDraft is set on load in
+                // that case), so we don't force a redundant "Save Draft" step.
+                const draftId = currentPortalDraftId || (cvDrafts.length > 0 ? cvDrafts[0].id : null);
+                const canShareLink = hasSavedDraft || !!draftId;
                 const getCollabPortalLink = () => {
                   const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
-                  const draftParam = existingDraft ? `&draftId=${existingDraft}` : '';
-                  return `${origin}/dashboard/cv-generator?portal=true${draftParam}`;
+                  const draftParam = draftId ? `&draftId=${draftId}` : '';
+                  const applicantParam = applicantId ? `&applicantId=${applicantId}` : '';
+                  return `${origin}/dashboard/cv-generator?portal=true${draftParam}${applicantParam}`;
                 };
                 const collabLink = getCollabPortalLink();
                 return (
                   <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-4 space-y-3.5 mt-auto">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-700">Secure Review URL</span>
-                      {existingDraft
+                      {canShareLink
                         ? <span className="text-sm bg-emerald-50 text-emerald-600 font-extrabold uppercase px-1.5 py-0.5 rounded">Draft Ready</span>
                         : <span className="text-sm bg-amber-50 text-amber-600 font-extrabold uppercase px-1.5 py-0.5 rounded">Save Draft First</span>
                       }
@@ -5021,22 +3941,22 @@ export default function CVGeneratorPage() {
                     <div className="flex gap-2">
                       <Input
                         readOnly
-                        value={existingDraft ? collabLink : 'Save draft first to generate secure link...'}
+                        value={canShareLink ? collabLink : 'Save draft first to generate secure link...'}
                         className="h-8 text-xs font-mono bg-white select-all text-slate-500"
                       />
                       <Button size="sm" onClick={async () => {
-                        if (!existingDraft) {
-                          // No draft exists - save one first
+                        if (!canShareLink) {
+                          // No draft/snapshot exists yet - save one first
                           setDraftNameInput(`CV - ${cvData.personalInfo?.fullName || 'Draft'} - ${new Date().toLocaleDateString()}`);
                           setSavingDraftForPortal(true);
                           setShowSaveDraftModal(true);
                         } else {
-                          // Draft exists - just copy the link
+                          // Draft/snapshot already exists - just copy the link
                           navigator.clipboard.writeText(collabLink);
                           toast.success("Client review link copied to clipboard!");
                         }
                       }} className="text-xs h-8 px-3">
-                        {existingDraft ? 'Copy' : 'Save & Copy'}
+                        {canShareLink ? 'Copy' : 'Save & Copy'}
                       </Button>
                     </div>
                   </div>

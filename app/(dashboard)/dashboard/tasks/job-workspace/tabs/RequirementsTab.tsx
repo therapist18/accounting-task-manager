@@ -555,7 +555,7 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
                   Requirement
                 </div>
               </TableHead>
-              <TableHead className="min-w-[280px] border-b border-r sticky left-[348px] top-0 bg-custom-blue z-40 p-0 text-white shadow-sm">
+              <TableHead className="max-w-[280px] border-b border-r sticky left-[348px] top-0 bg-custom-blue z-40 p-0 text-white shadow-sm">
                 <div className="flex items-center px-6 text-[11px] font-medium uppercase tracking-wider">
                   Document Type
                 </div>
@@ -671,7 +671,7 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
                             </div>
                           </TableCell>
 
-                          <TableCell className="min-w-[280px] py-0 px-5 border-b border-r sticky left-[348px] bg-white group-hover:bg-slate-50 z-10 align-middle">
+                          <TableCell className="max-w-[280px] py-0 px-5 border-b border-r sticky left-[348px] bg-white group-hover:bg-slate-50 z-10 align-middle">
                             <div className="flex flex-col gap-1.5 h-full justify-center py-3">
                               <span className="text-[11px] font-medium text-slate-700 line-clamp-2 leading-snug">
                                 {docTypeInfo?.primary?.display_name || docTypeInfo?.primary?.name || docName}
