@@ -5,13 +5,15 @@ import React, { useState, useMemo, useCallback, useEffect } from "react"
 import {
   ChevronDown, ChevronRight, FileText, User, Loader2, RefreshCw,
   CheckCircle2, AlertCircle, Eye, Briefcase, UserCheck, HeartPulse, ArrowUpDown, ArrowUp, ArrowDown, Users2,
-  Database, Zap, Search, Play, X, StopCircle, Terminal, Calendar, Edit3, Check
+  Database, Zap, Search, Play, X, StopCircle, Terminal, Calendar, Edit3, Check, Link2
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandGroup, CommandItem, CommandList } from "@/components/ui/command"
 import { cn } from "@/lib/utils"
 import { resolveVariableValueImpl, resolveTargetEntityIdImpl, fetchSourceDataImpl, getArrayFieldDataImpl, getFieldValueImpl, type FieldResolutionContext } from "../../utils/fieldResolution"
 import { isValidValue, cleanFieldValue, ETA_SCREENSHOT_DOCUMENT_ID } from "../../utils/AutomationMappingDialog"
@@ -24,6 +26,7 @@ import { ExtractionPreview } from "@/components/ExtractionPreview"
 interface AutomationTabProps {
   data: JobWorkspaceData
   onRefresh?: () => void
+  highlightAutomationId?: string | number
 }
 
 interface ColDef {
@@ -135,9 +138,11 @@ function isFieldApplicable(field: any, col: ColDef): boolean {
   return false
 }
 
-export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
-  const { task, automations } = data
+export function AutomationTab({ data, onRefresh, highlightAutomationId }: AutomationTabProps) {
+  const { task, automations, automationLinkSources = {} } = data
   const [expandedAutomations, setExpandedAutomations] = useState<Set<number>>(new Set(automations?.map(a => a.id) || []))
+  const [highlightedRowId, setHighlightedRowId] = useState<string | number | null>(null)
+  const automationRowRefs = React.useRef<Record<string, HTMLTableRowElement | null>>({})
   const [expandedArrayFields, setExpandedArrayFields] = useState<Set<string>>(new Set())
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
@@ -520,6 +525,20 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [automationProgress?.logs?.length]);
+
+  // Scroll to and highlight a specific automation when deep-linked from a stage cell
+  useEffect(() => {
+    if (!highlightAutomationId) return
+    const match = (automations || []).find(a => String(a.id) === String(highlightAutomationId))
+    if (!match) return
+    setExpandedAutomations(prev => new Set(prev).add(match.id))
+    const timer = setTimeout(() => {
+      automationRowRefs.current[String(match.id)]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setHighlightedRowId(match.id)
+    }, 150)
+    const clearTimer = setTimeout(() => setHighlightedRowId(null), 3000)
+    return () => { clearTimeout(timer); clearTimeout(clearTimer) }
+  }, [highlightAutomationId, automations]);
 
   const buildFieldResolutionContextForAuto = useCallback((automationId: string, fields: any[]): FieldResolutionContext => ({
     sourceData: fieldSourceDataCache,
@@ -946,14 +965,18 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
                 const isExpanded = expandedAutomations.has(automation.id)
                 const fields = automation.webdata || []
                 const isRunning = runningAutomationId === automation.id
+                const linkSources = automationLinkSources[String(automation.id)] || { stages: [], requirements: [] }
+                const linkSourceCount = linkSources.stages.length + linkSources.requirements.length
 
                 return (
                   <React.Fragment key={automation.id}>
                     {/* Automation Header Row */}
                     <TableRow
+                      ref={(el) => { automationRowRefs.current[String(automation.id)] = el }}
                       className={cn(
                         "hover:bg-slate-200/90 cursor-pointer transition-colors",
-                        isRunning ? "bg-purple-50/90 shadow-[inset_0_0_0_1px_rgba(147,51,234,0.1)]" : "bg-slate-100/90"
+                        isRunning ? "bg-purple-50/90 shadow-[inset_0_0_0_1px_rgba(147,51,234,0.1)]" : "bg-slate-100/90",
+                        highlightedRowId === automation.id && "ring-2 ring-inset ring-blue-500 bg-blue-50/90 animate-pulse"
                       )}
                       onClick={() => setExpandedAutomations(prev => {
                         const next = new Set(prev)
@@ -975,6 +998,40 @@ export function AutomationTab({ data, onRefresh }: AutomationTabProps) {
                             <Badge variant="outline" className="text-[10px] font-semibold rounded-full px-3 py-0.5 bg-white border-slate-300 text-slate-600 shadow-sm">
                               {fields.length} Fields
                             </Badge>
+                            <Badge variant="outline" className="text-[10px] font-semibold rounded-full px-3 py-0.5 bg-indigo-50 border-indigo-200 text-indigo-600 shadow-sm">
+                              {deriveAutomationType(automation)}
+                            </Badge>
+                            {linkSourceCount > 0 && (
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <button type="button" onClick={(e) => e.stopPropagation()}>
+                                    <Badge variant="outline" className="text-[10px] font-semibold rounded-full px-3 py-0.5 bg-emerald-50 border-emerald-200 text-emerald-700 shadow-sm cursor-pointer hover:bg-emerald-100 transition-colors">
+                                      <Link2 className="h-3 w-3 mr-1" /> Linked from {linkSourceCount}
+                                    </Badge>
+                                  </button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-72 p-0" align="start" onClick={(e) => e.stopPropagation()}>
+                                  <Command>
+                                    <CommandList>
+                                      {linkSources.stages.length > 0 && (
+                                        <CommandGroup heading="Stage document">
+                                          {linkSources.stages.map((s: any) => (
+                                            <CommandItem key={s.id} className="text-xs">{s.name}</CommandItem>
+                                          ))}
+                                        </CommandGroup>
+                                      )}
+                                      {linkSources.requirements.length > 0 && (
+                                        <CommandGroup heading="Requirement">
+                                          {linkSources.requirements.map((r: any) => (
+                                            <CommandItem key={r.id} className="text-xs">{r.name}</CommandItem>
+                                          ))}
+                                        </CommandGroup>
+                                      )}
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                            )}
                             {isRunning && (
                               <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[10px] rounded-full animate-pulse px-3 py-0.5">
                                 Agent Active

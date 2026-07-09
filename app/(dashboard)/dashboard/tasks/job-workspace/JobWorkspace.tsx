@@ -20,6 +20,9 @@ interface JobWorkspaceProps {
   data: JobWorkspaceData
   onBack: () => void
   onRefresh?: () => void
+  initialTab?: string
+  initialAutomationId?: string
+  initialOpenSendDialog?: boolean
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -56,12 +59,23 @@ const TAB_DEFINITIONS = [
   { value: "notes", label: "Notes", icon: MessageSquare },
 ]
 
-export function JobWorkspace({ data, onBack, onRefresh }: JobWorkspaceProps) {
+export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutomationId, initialOpenSendDialog }: JobWorkspaceProps) {
   const { task, department, subdepartment, stages, individual } = data
-  const [activeTab, setActiveTab] = useState("workflow")
+  const [activeTab, setActiveTab] = useState(initialTab || "workflow")
 
   const stageProgress = useMemo(() => getStageProgress(task, stages), [task, stages])
   const currentStage = useMemo(() => getCurrentStage(task, stages), [task, stages])
+
+  const jobLevelLabel = useMemo(() => {
+    const jobLevel = task?.job_level
+    if (!jobLevel) return null
+    if (jobLevel.class_id) {
+      const classItem = subdepartment?.classes?.find((c: any) => c.id == jobLevel.class_id)
+      return classItem?.name || `Class ${jobLevel.class_id}`
+    }
+    if (jobLevel.subclass_id) return `Subclass ${jobLevel.subclass_id}`
+    return null
+  }, [task?.job_level, subdepartment])
 
   const jobTitle = task?.job_description || subdepartment?.name || department?.name || "Job Workspace"
   const applicantName = task?.applicant_name || individual?.full_name || "Unknown"
@@ -98,6 +112,11 @@ export function JobWorkspace({ data, onBack, onRefresh }: JobWorkspaceProps) {
                     {statusLabel}
                   </Badge>
                   <span className="text-[10px] text-slate-400 font-mono bg-slate-100 px-1.5 py-0.5 rounded">#{task?.id}</span>
+                  {jobLevelLabel && (
+                    <Badge variant="outline" className="text-xs font-bold px-2 py-0.5 bg-indigo-50 text-indigo-700 border-indigo-200">
+                      {jobLevelLabel}
+                    </Badge>
+                  )}
                 </div>
                 <p className="text-sm text-slate-500 mt-0.5">{jobTitle}</p>
               </div>
@@ -118,7 +137,7 @@ export function JobWorkspace({ data, onBack, onRefresh }: JobWorkspaceProps) {
 
             <div className="flex items-center gap-5 text-xs text-slate-500 shrink-0 ml-4">
               <span className="flex items-center gap-1.5"><User className="h-3.5 w-3.5 text-slate-400" /> {task?.officer?.name || "Unassigned"}</span>
-              <span className="flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5 text-slate-400" /> {department?.name}{subdepartment ? <><span className="text-slate-300 mx-0.5">/</span>{subdepartment.name}</> : ""}</span>
+              <span className="flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5 text-slate-400" /> {department?.name}{subdepartment ? <><span className="text-slate-300 mx-0.5">/</span>{subdepartment.name}</> : ""}{jobLevelLabel ? <><span className="text-slate-300 mx-0.5">/</span>{jobLevelLabel}</> : ""}</span>
               {task?.created_at && (
                 <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5 text-slate-400" /> {new Date(task.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</span>
               )}
@@ -163,7 +182,7 @@ export function JobWorkspace({ data, onBack, onRefresh }: JobWorkspaceProps) {
           <WorkflowTab task={task} stages={stages} allDocuments={data.allDocuments} />
         </div>
         <div className={cn("h-full overflow-y-auto", activeTab !== "requirements" && "hidden")}>
-          <RequirementsTab data={data} onRefresh={onRefresh} />
+          <RequirementsTab data={data} onRefresh={onRefresh} autoOpenSendDialog={activeTab === "requirements" ? initialOpenSendDialog : undefined} />
         </div>
         <div className={cn("h-full overflow-y-auto", activeTab !== "templates" && "hidden")}>
           <TemplatesTab data={data} />
@@ -174,7 +193,7 @@ export function JobWorkspace({ data, onBack, onRefresh }: JobWorkspaceProps) {
           </div>
         </div>
         <div className={cn("h-full overflow-y-auto", activeTab !== "automation" && "hidden")}>
-          <AutomationTab data={data} onRefresh={onRefresh} />
+          <AutomationTab data={data} onRefresh={onRefresh} highlightAutomationId={activeTab === "automation" ? initialAutomationId : undefined} />
         </div>
         <div className={cn("h-full overflow-y-auto", activeTab !== "history" && "hidden")}>
           <div className="p-6">

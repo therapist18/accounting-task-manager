@@ -2,10 +2,11 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, Loader2, SkipForward, Clock3, MoreHorizontal, CheckCircle2, Timer, AlertCircle, User, UserPlus, List, Link2, Type, Hash, Globe, Mail, Phone, AlignLeft, FileText as FileTextIcon, RotateCcw } from "lucide-react"
+import { Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, Loader2, SkipForward, Clock3, MoreHorizontal, CheckCircle2, Timer, AlertCircle, User, UserPlus, List, Link2, Type, Hash, Globe, Mail, Phone, AlignLeft, FileText as FileTextIcon, RotateCcw, ArrowUpRight, CreditCard, ClipboardList } from "lucide-react"
 import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
@@ -15,6 +16,7 @@ import { parseDate } from "@/app/generic-functions/dateUtils"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { calculateStageDate } from "../utils/dateUtils"
+import { STAGE_TAB_LINKS } from "../utils/taskManagerData"
 import { cn } from "@/lib/utils"
 
 interface EditableStageCellProps { 
@@ -93,6 +95,16 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   const [isOfficerSelectOpen, setIsOfficerSelectOpen] = useState(false);
   const [customInputValue, setCustomInputValue] = useState('');
   const [customMultiSelectValues, setCustomMultiSelectValues] = useState<string[]>([]);
+  const [billPreviewOpen, setBillPreviewOpen] = useState(false);
+  const router = useRouter();
+
+  // Deep-links this stage cell into the matching JobWorkspace tab (Billing/Requirements/Automation)
+  const stageLink = useMemo(() => Object.values(STAGE_TAB_LINKS).find(l => l.stageId === stage?.id), [stage?.id]);
+
+  const latestBillingItem = useMemo(() => {
+    const billing = task?.registry_metadata?.billing || [];
+    return billing[billing.length - 1] || null;
+  }, [task?.registry_metadata?.billing]);
 
   const currentAutomationConfig = useMemo(() => {
     const jl = task?.job_level;
@@ -1365,10 +1377,80 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     return <span className="text-sm text-gray-500 italic">-</span>;
   };
 
+  const renderStageLink = () => {
+    if (!stageLink || !isStageApplicable) return null;
+
+    if (stageLink.tab === 'billing') {
+      return (
+        <>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setBillPreviewOpen(true); }}
+            className="ml-1 inline-flex items-center gap-0.5 text-[9px] font-bold text-blue-600 hover:text-blue-700 hover:underline shrink-0"
+            title="Preview bill"
+          >
+            <CreditCard className="h-3 w-3" /> {latestBillingItem ? latestBillingItem.status : 'Bill'}
+          </button>
+          <Dialog open={billPreviewOpen} onOpenChange={setBillPreviewOpen}>
+            <DialogContent className="max-w-md" onClick={(e) => e.stopPropagation()}>
+              <DialogHeader><DialogTitle>Quotation Preview</DialogTitle></DialogHeader>
+              {latestBillingItem ? (
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between"><span className="text-muted-foreground">Invoice #</span><span className="font-semibold">{latestBillingItem.invoiceNumber}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Amount</span><span className="font-semibold">${Number(latestBillingItem.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span className="font-semibold capitalize">{latestBillingItem.status}</span></div>
+                  {latestBillingItem.description && <p className="text-muted-foreground">{latestBillingItem.description}</p>}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No bill has been raised yet.</p>
+              )}
+              <DialogFooter>
+                <Button variant="outline" size="sm" onClick={() => setBillPreviewOpen(false)}>Close</Button>
+                <Button size="sm" onClick={() => router.push(`/dashboard/tasks/${task.id}?tab=billing`)}>
+                  Open Billing Tab <ArrowUpRight className="h-3.5 w-3.5 ml-1" />
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>
+      );
+    }
+
+    if (stageLink.tab === 'requirements') {
+      return (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/tasks/${task.id}?tab=requirements&openSendDialog=1`); }}
+          className="ml-1 inline-flex items-center gap-0.5 text-[9px] font-bold text-indigo-600 hover:text-indigo-700 hover:underline shrink-0"
+          title="Open requirements checklist"
+        >
+          <ClipboardList className="h-3 w-3" /> Checklist
+        </button>
+      );
+    }
+
+    if (stageLink.tab === 'automation') {
+      if (!currentAutomationConfig) return null;
+      return (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/tasks/${task.id}?tab=automation&automationId=${currentAutomationConfig.automationId}`); }}
+          className="ml-1 inline-flex items-center gap-0.5 text-[9px] font-bold text-purple-600 hover:text-purple-700 hover:underline shrink-0"
+          title={`Open automation: ${currentAutomationConfig.docName}`}
+        >
+          <Zap className="h-3 w-3" /> Automation
+        </button>
+      );
+    }
+
+    return null;
+  };
+
   return (
     <>
       <SkipStageDialog />
       {renderCellContent()}
+      {renderStageLink()}
     </>
   );
 }

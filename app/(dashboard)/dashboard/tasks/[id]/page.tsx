@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button"
 import { JobWorkspace } from "../job-workspace/JobWorkspace"
 import { fetchJobWorkspaceData, type JobWorkspaceData } from "../job-workspace/fetchJobWorkspaceData"
 
-export default function TaskWorkspacePage({ params }: { params: Promise<{ id: string }> }) {
+export default function TaskWorkspacePage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams: Promise<{ tab?: string; automationId?: string; openSendDialog?: string }> }) {
   const { id } = use(params)
+  const { tab, automationId, openSendDialog } = use(searchParams)
   const router = useRouter()
   const [data, setData] = useState<JobWorkspaceData | null>(null)
 
@@ -36,7 +37,7 @@ export default function TaskWorkspacePage({ params }: { params: Promise<{ id: st
       <div className="h-full flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <p className="text-destructive font-medium">{data.error || "Task not found"}</p>
-          <Button variant="outline" onClick={() => router.push("/dashboard/tasks")}>
+          <Button variant="outline" onClick={() => router.back()}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Task Manager
           </Button>
@@ -45,5 +46,5 @@ export default function TaskWorkspacePage({ params }: { params: Promise<{ id: st
     )
   }
 
-  return <JobWorkspace data={data} onRefresh={load} onBack={() => router.push("/dashboard/tasks")} />
+  return <JobWorkspace data={data} onRefresh={load} onBack={() => router.back()} initialTab={tab} initialAutomationId={automationId} initialOpenSendDialog={openSendDialog === '1'} />
 }

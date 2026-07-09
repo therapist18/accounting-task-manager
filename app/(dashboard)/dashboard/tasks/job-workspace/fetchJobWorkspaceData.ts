@@ -18,8 +18,10 @@ export interface JobWorkspaceData {
   documentsByIndividual: Record<number, any[]>
   /** Company KYC uploads */
   allCompanyDocuments: any[]
-  /** Automations for this job level */
+  /** Automations for this job level (sourced from requirement web_automation AND stage/document targetEntities) */
   automations: any[]
+  /** For each automation id, which stages/requirements reference it - lets the Automation tab show where each one is linked from */
+  automationLinkSources: Record<string, { stages: { id: string; name: string }[]; requirements: { id: string; name: string }[] }>
   /** Templates for this task's job level */
   templates: any[]
   loading: boolean
@@ -39,6 +41,7 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
     documentsByIndividual: {},
     allCompanyDocuments: [],
     automations: [],
+    automationLinkSources: {},
     templates: [],
     loading: true,
     error: null,
@@ -60,9 +63,13 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
     }
 
     // 2. Fetch departments to resolve the job level hierarchy
+    // tm_subdepartments must be explicitly embedded - a plain select('*') never
+    // returns related tables (PostgREST requires the explicit embed syntax below).
+    // subdepartment.classes is a plain jsonb column on tm_subdepartments, already
+    // included once the embed is present - no need to list it separately.
     const { data: deptData } = await supabase
       .from('tm_departments')
-      .select('*')
+      .select('*, tm_subdepartments(*)')
 
     const departments: Department[] = (deptData || []).map((d: any) => ({
       ...d,
@@ -136,11 +143,26 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
       } catch {}
     }
 
-    // 7. Fetch company KYC uploads
-    const { data: kycUploadData } = await supabase
-      .from('acc_portal_kyc_uploads')
-      .select('*')
-    const allCompanyDocuments = kycUploadData || []
+    // 7. Fetch company KYC uploads - scoped to this task's company id(s) only, otherwise
+    // every company's uploads across the whole system get pulled in and requirement
+    // previews/statuses can end up showing a *different* company's document.
+    const taskCompanyIds = new Set<number>()
+    if (taskData.applicant_details?.type === 'company' && taskData.applicant_details?.id) {
+      taskCompanyIds.add(Number(taskData.applicant_details.id))
+    }
+    ;(taskData.participants_details || []).forEach((p: any) => {
+      if (p.type === 'company' && p.id) taskCompanyIds.add(Number(p.id))
+    })
+    if (taskData.company_id) taskCompanyIds.add(Number(taskData.company_id))
+
+    let allCompanyDocuments: any[] = []
+    if (taskCompanyIds.size > 0) {
+      const { data: kycUploadData } = await supabase
+        .from('acc_portal_kyc_uploads')
+        .select('*')
+        .in('company_id', Array.from(taskCompanyIds))
+      allCompanyDocuments = kycUploadData || []
+    }
 
     // 8. Fetch KYC fields
     const { data: kycData } = await supabase
@@ -188,12 +210,31 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
       if (req.requirements) allReqs.push(...req.requirements)
     })
 
-    // 11. Fetch automations referenced by matching requirements
-    const autoIds = new Set(
-      allReqs
-        .filter((r: any) => r.web_automation?.automationId)
-        .map((r: any) => r.web_automation.automationId)
-    )
+    // 11. Fetch automations referenced by matching requirements (requirement-level linkage)
+    // AND by this task's stage/document targetEntities (stage-level linkage) - same job_level
+    // matching EditableStageCell's currentAutomationConfig uses for the stage-cell redirect.
+    const jlKey = (jl: any) => `${jl?.subdepartment_id}:${jl?.class_id || 0}:${jl?.subclass_id || 0}`
+    const taskJobLevelKey = jlKey(jobLevel)
+
+    const requirementAutomationLinks: { automationId: string; requirementId: string; requirementName: string }[] = allReqs
+      .filter((r: any) => r.web_automation?.automationId)
+      .map((r: any) => ({ automationId: r.web_automation.automationId, requirementId: r.id, requirementName: r.name }))
+
+    const stageAutomationLinks: { automationId: string; stageId: string; stageName: string }[] = []
+    ;(stages || []).forEach((stage: any) => {
+      ;(stage.documents || []).forEach((doc: any) => {
+        ;(doc.targetEntities || []).forEach((te: any) => {
+          if (te.automationId && te.job_level && jlKey(te.job_level) === taskJobLevelKey) {
+            stageAutomationLinks.push({ automationId: te.automationId, stageId: stage.id, stageName: stage.name })
+          }
+        })
+      })
+    })
+
+    const autoIds = new Set([
+      ...requirementAutomationLinks.map(l => l.automationId),
+      ...stageAutomationLinks.map(l => l.automationId),
+    ])
     let automations: any[] = []
     if (autoIds.size > 0) {
       try {
@@ -207,6 +248,17 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
         automations = []
       }
     }
+
+    const automationLinkSources: JobWorkspaceData['automationLinkSources'] = {}
+    autoIds.forEach(id => { automationLinkSources[id] = { stages: [], requirements: [] } })
+    stageAutomationLinks.forEach(l => {
+      const bucket = automationLinkSources[l.automationId]
+      if (bucket && !bucket.stages.some(s => s.id === l.stageId)) bucket.stages.push({ id: l.stageId, name: l.stageName })
+    })
+    requirementAutomationLinks.forEach(l => {
+      const bucket = automationLinkSources[l.automationId]
+      if (bucket && !bucket.requirements.some(r => r.id === l.requirementId)) bucket.requirements.push({ id: l.requirementId, name: l.requirementName })
+    })
 
     // 12. Fetch templates for requirements that have hasTemplate
     const reqDocIds = allReqs
@@ -259,6 +311,7 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
       documentsByIndividual,
       allCompanyDocuments,
       automations,
+      automationLinkSources,
       templates,
       loading: false,
       error: null,

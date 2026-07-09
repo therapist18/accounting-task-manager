@@ -2,11 +2,12 @@
 "use client"
 
 import React, { useState, useMemo, useCallback, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import {
   CheckCircle2, AlertCircle, UploadCloud, Eye, FileText, Lock, Loader2,
   ChevronDown, ChevronRight, Trash2, RefreshCw, FileUp, XCircle, User,
   Briefcase, UserCheck, Users2, HeartPulse, Send, Search, AlertTriangle, Check, X, ArrowUpDown, ArrowUp, ArrowDown, HelpCircle,
-  Calendar, Plus, Minus, FileType
+  Calendar, Plus, Minus, FileType, Zap
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -27,6 +28,7 @@ import type { JobWorkspaceData } from "../fetchJobWorkspaceData"
 interface RequirementsTabProps {
   data: JobWorkspaceData
   onRefresh?: () => void
+  autoOpenSendDialog?: boolean
 }
 
 interface ColDef {
@@ -129,15 +131,17 @@ function buildParticipantColumns(task: any): ColDef[] {
   return cols.sort((a, b) => a.priority - b.priority)
 }
 
-function getCellStatus(req: any, col: ColDef, docsByInd: Record<string, any[]>, allCompanyDocs: any[]) {
+function getCellStatus(req: any, col: ColDef, docsByInd: Record<string, any[]>, allCompanyDocs: Record<string, any[]>) {
   if (!checkApplicability(col.type, req)) return { type: "na" as const, docs: [] }
 
   const docIds = req.document_ids || (req.document_id ? [req.document_id] : [])
   if (!docIds.length) return { type: "na" as const, docs: [] }
 
+  // Always scope by entity id first (company_id for companies, director_id for any individual
+  // role - principal/director/dependant/understudy/sponsor), then narrow by document type.
   let found: any[] = []
   if (col.type === "company") {
-    found = (allCompanyDocs || []).filter((d: any) => docIds.includes(d.document_id))
+    found = (allCompanyDocs[col.id] || []).filter((d: any) => docIds.includes(d.document_id))
   } else {
     found = (docsByInd[col.id] || []).filter((d: any) => docIds.includes(d.document_id))
   }
@@ -163,13 +167,13 @@ function getDocTypeDisplay(req: any, kycDocsMap: Map<string, any>) {
   }
 }
 
-function getDocDataForReq(req: any, col: ColDef, docsByInd: Record<string, any[]>, allCompanyDocs: any[]) {
+function getDocDataForReq(req: any, col: ColDef, docsByInd: Record<string, any[]>, allCompanyDocs: Record<string, any[]>) {
   const docIds = req.document_ids || (req.document_id ? [req.document_id] : [])
   if (!docIds.length) return null
 
   let docs: any[] = []
   if (col.type === "company") {
-    docs = (allCompanyDocs || []).filter((d: any) => docIds.includes(d.document_id))
+    docs = (allCompanyDocs[col.id] || []).filter((d: any) => docIds.includes(d.document_id))
   } else {
     docs = (docsByInd[col.id] || []).filter((d: any) => docIds.includes(d.document_id))
   }
@@ -180,8 +184,9 @@ function getDocDataForReq(req: any, col: ColDef, docsByInd: Record<string, any[]
   )
 }
 
-export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
+export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: RequirementsTabProps) {
   const { task, kycDocsMap, documentsByIndividual, allDocuments, allCompanyDocuments } = data
+  const router = useRouter()
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(CATEGORY_ORDER))
   const [expandedRequirements, setExpandedRequirements] = useState<Set<string>>(new Set())
   const [expandedComposites, setExpandedComposites] = useState<Set<string>>(new Set())
@@ -191,6 +196,10 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
   const [previewDocument, setPreviewDocument] = useState<any>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [isSendRequirementsOpen, setIsSendRequirementsOpen] = useState(false)
+
+  useEffect(() => {
+    if (autoOpenSendDialog) setIsSendRequirementsOpen(true)
+  }, [autoOpenSendDialog])
   const [jobFieldsRecord, setJobFieldsRecord] = useState<Record<string, any>>({})
   const [fieldSourceDataCache, setFieldSourceDataCache] = useState<Record<string, Record<string, any>>>({})
   const [fieldMasterComputedCache, setFieldMasterComputedCache] = useState<Record<string, any>>({})
@@ -425,11 +434,12 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
     }
 
     const borderColorClass = status.color ? status.color.replace('text-', 'border-') : 'border-gray-200'
+    const bgColorClass = status.bgColor || 'bg-gray-50'
 
     return (
-      <div className={`inline-flex items-center gap-1.5 shadow-sm ${borderColorClass}`}>
+      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-sm ${bgColorClass} ${borderColorClass}`}>
         <Icon className={`h-3.5 w-3.5 shrink-0 ${status.color}`} />
-        <span className={`text-[10px] font-medium uppercase tracking-wider ${status.color}`}>
+        <span className={`text-[11px] font-bold uppercase tracking-wider ${status.color}`}>
           {status.label}
         </span>
       </div>
@@ -444,7 +454,7 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
         const docIds = req.document_ids || (req.document_id ? [req.document_id] : [])
         for (const col of columns) {
           for (const docId of docIds) {
-            const status = getCellStatus(req, col, documentsByIndividual, allCompanyDocuments)
+            const status = getCellStatus(req, col, documentsByIndividual, allCompanyDocumentsMap)
             if (status.type === 'na' || status.docs.length === 0) continue
 
             const cacheKey = `${task.id}-${docId}-${col.type}-${col.id}`
@@ -456,7 +466,7 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
       }
     }
     calculateAllStatuses()
-  }, [task?.requirements, columns, documentsByIndividual, allCompanyDocuments])
+  }, [task?.requirements, columns, documentsByIndividual, allCompanyDocumentsMap])
 
   const requirementMap = useMemo(() => {
     if (!task?.requirements) return {}
@@ -475,7 +485,7 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
 
     let docs: any[] = []
     if (col.type === "company") {
-      docs = (allCompanyDocuments || []).filter((d: any) => docIds.includes(d.document_id))
+      docs = (allCompanyDocumentsMap[col.id] || []).filter((d: any) => docIds.includes(d.document_id))
     } else {
       docs = (documentsByIndividual[col.id] || []).filter((d: any) => docIds.includes(d.document_id))
     }
@@ -502,7 +512,7 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
       setPreviewDocument({ documents: documentPreviews.filter(Boolean), currentIndex: 0, locked });
       setPreviewDialogOpen(true);
     } catch (err) { console.error(err); toast.error('Preview failed'); }
-  }, [documentsByIndividual, allCompanyDocuments, kycDocsMap])
+  }, [documentsByIndividual, allCompanyDocumentsMap, kycDocsMap])
 
   const handleDeleteDocument = async (doc: any) => {
     if (!confirm("Are you sure you want to delete this document?")) return
@@ -639,9 +649,21 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
                           <TableCell className="w-[400px] py-0 px-4 border-b border-r sticky left-12 bg-white group-hover:bg-slate-50 z-10 align-middle">
                             <div className="flex items-center gap-3 h-full py-3 justify-between">
                               <div className="flex flex-col min-w-0">
-                                <span className="text-[11px] font-semibold text-slate-800 line-clamp-2 leading-tight">
-                                  {req.name || req.display_name || "Untitled Requirement"}
-                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[11px] font-semibold text-slate-800 line-clamp-2 leading-tight">
+                                    {req.name || req.display_name || "Untitled Requirement"}
+                                  </span>
+                                  {req.web_automation?.automationId && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/tasks/${task.id}?tab=automation&automationId=${req.web_automation.automationId}`) }}
+                                      className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-purple-600 text-white shadow-sm ring-2 ring-purple-100 hover:bg-purple-700 hover:ring-purple-200 transition-colors shrink-0"
+                                      title={`Generated by automation: ${req.web_automation.automationName || 'View automation'}`}
+                                    >
+                                      <Zap className="h-3 w-3" fill="currentColor" />
+                                    </button>
+                                  )}
+                                </div>
                                 {isComposite && (
                                   <span className="text-[10px] font-medium text-blue-600 mt-1 uppercase tracking-wide">
                                     {docTypeInfo.count} Types
@@ -681,7 +703,7 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
                           </TableCell>
 
                           {columns.map(col => {
-                            const status = getCellStatus(req, col, documentsByIndividual, allCompanyDocuments)
+                            const status = getCellStatus(req, col, documentsByIndividual, allCompanyDocumentsMap)
                             const docIds = req.document_ids || (req.document_id ? [req.document_id] : [])
                             const latestDoc = status.docs.length > 0 ? getLatestDoc(status.docs) : null
                             const latestDocId = latestDoc?.document_id || docIds[0]
@@ -704,13 +726,14 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
                                         docStatus ? renderStatusBadge(docStatus) : <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
                                       ) : (
                                         isLocked ? (
-                                          <div className="inline-flex items-center gap-1.5 shadow-sm">
+                                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-sm bg-red-50 border-red-200">
                                             <AlertCircle className="h-3.5 w-3.5 text-red-500" />
-                                            <span className="text-[9px] font-semibold uppercase text-red-600 tracking-wider">Missing</span>
+                                            <span className="text-[11px] font-bold uppercase text-red-600 tracking-wider">Missing</span>
                                           </div>
                                         ) : (
-                                          <div className="inline-flex items-center gap-1.5 shadow-sm">
-                                            <span className="text-[9px] font-semibold uppercase text-amber-600 tracking-wider">Pending</span>
+                                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-sm bg-amber-50 border-amber-200">
+                                            <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
+                                            <span className="text-[11px] font-bold uppercase text-amber-600 tracking-wider">Pending</span>
                                           </div>
                                         )
                                       )}
@@ -764,7 +787,7 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
                               <TableCell className="min-w-[280px] py-3 px-5 border-b border-r sticky left-[348px] bg-slate-50/95 z-10 align-middle" />
                               {columns.map(col => {
                                 const subDocs = col.type === "company"
-                                  ? (allCompanyDocuments || []).filter((d: any) => d.document_id === docId)
+                                  ? (allCompanyDocumentsMap[col.id] || []).filter((d: any) => d.document_id === docId)
                                   : (documentsByIndividual[col.id] || []).filter((d: any) => d.document_id === docId)
                                 const hasDocs = subDocs.length > 0
                                 const subLatestDoc = hasDocs ? getLatestDoc(subDocs) : null
@@ -815,7 +838,7 @@ export function RequirementsTab({ data, onRefresh }: RequirementsTabProps) {
                             <TableCell className="min-w-[280px] py-2.5 border-b border-r sticky left-[348px] bg-slate-50/95 z-10 align-middle" />
                             {columns.map(col => {
                               const isApplicable = checkApplicability(col.type, req)
-                              const docData = isApplicable ? getDocDataForReq(req, col, documentsByIndividual, allCompanyDocuments) : null
+                              const docData = isApplicable ? getDocDataForReq(req, col, documentsByIndividual, allCompanyDocumentsMap) : null
                               return (
                                 <TableCell key={`${field.id || fIdx}-${col.id}`} className="py-2.5 px-3 text-center border-b border-r align-middle bg-slate-50/30">
                                   {isApplicable ? (() => {
