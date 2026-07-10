@@ -33,6 +33,7 @@ export const PreviewPanel = ({
 }: PreviewPanelProps) => {
   const docxContainerRef = useRef<HTMLDivElement>(null);
   const hasHtmlContent = !isWordTemplate && previewContent && previewContent.trim().length > 0;
+  const hasWordContent = isWordTemplate && !!docxBuffer;
 
   useEffect(() => {
     if (!isWordTemplate || !docxBuffer || !docxContainerRef.current) return;
@@ -60,6 +61,9 @@ export const PreviewPanel = ({
 
     return () => { cancelled = true; };
   }, [docxBuffer, isWordTemplate]);
+
+  const hasNoContent = isWordTemplate ? !docxBuffer && !isPreviewLoading : !hasHtmlContent && !isPreviewLoading;
+  if (hasNoContent) return null;
 
   return (
     <div className={`${panelClasses} border-r relative bg-gradient-to-br from-slate-50 to-slate-100 overflow-hidden flex flex-col`}>

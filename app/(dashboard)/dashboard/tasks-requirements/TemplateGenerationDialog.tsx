@@ -26,6 +26,8 @@ import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { executeComputedField } from '../tasks/utils/automationComputedFunctions';
 import { PreviewPanel } from './components/PreviewPanel';
+import { UploadModal } from '@/app/generic-components/UploadModal';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 
 // Common docxtemplater format functions
 const formatFunctions = new Set([
@@ -318,7 +320,28 @@ const generateDocumentChecklist = (
     return checklist.join('\n');
 };
 
-const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourceArray = null, entityIdMap = null, combinedCache = null, extractedData = null, companyData = null) => {
+// Anyone associated with the task's company under a given role (director/shareholder/
+// employee/etc.), sourced from registry_individuals.employment_data.associations - same
+// data the Letters module's signatory picker reads from (useLetterData.ts).
+const getCompanyRegistryCandidates = (normType, companyAssociates) => {
+    if (!companyAssociates?.length || !normType) return [];
+    return companyAssociates.filter((ind: any) =>
+        (ind.associations || []).some((a: any) => a.individual_type?.toLowerCase()?.includes(normType))
+    );
+};
+
+// Used as a fallback when the task has no participant tagged with that role, and as the
+// only resolution path for roles (shareholder/employee) that were never task participants
+// at all. entityOverrides[normType] lets the user pick a specific person when more than one
+// candidate matches.
+const resolveCompanyRegistryFallback = (normType, companyAssociates, entityOverrides) => {
+    const candidates = getCompanyRegistryCandidates(normType, companyAssociates);
+    if (candidates.length === 0) return null;
+    const overrideId = entityOverrides?.[normType];
+    return (overrideId && candidates.find((c: any) => String(c.id) === String(overrideId))) || candidates[0];
+};
+
+const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourceArray = null, entityIdMap = null, combinedCache = null, extractedData = null, companyData = null, companyAssociates = null, entityOverrides = null) => {
     if (sourceArray && arrayIndex !== null && sourceArray[arrayIndex]) {
         return sourceArray[arrayIndex];
     }
@@ -330,47 +353,61 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
         entityType = placeholder.entity_type;
     }
     const normType = entityType?.toLowerCase()?.trim();
-    if (entityIdMap) {
-        if (normType === 'director' && entityIdMap.director) {
-            const dirId = entityIdMap.director;
-            return relationshipData?.directors?.find(d => String(d.id) === String(dirId)) ||
-                combinedCache?.['registry_individuals']?.[dirId];
-        }
-        if (normType === 'principal' && entityIdMap.principal) {
-            return relationshipData?.principal || extractedData;
-        }
-    }
-    if (normType === 'principal') {
-        return relationshipData?.principal || extractedData || personData;
-    }
 
-    if (normType === 'sponsor') {
-        if (entityIdMap?.sponsor) {
-            if (relationshipData?.sponsor && String(relationshipData.sponsor.id) === String(entityIdMap.sponsor)) {
-                return relationshipData.sponsor;
+    const resolveFromTaskParticipants = () => {
+        if (entityIdMap) {
+            if (normType === 'director' && entityIdMap.director) {
+                const dirId = entityIdMap.director;
+                return relationshipData?.directors?.find(d => String(d.id) === String(dirId)) ||
+                    combinedCache?.['registry_individuals']?.[dirId];
+            }
+            if (normType === 'principal' && entityIdMap.principal) {
+                return relationshipData?.principal || extractedData;
             }
         }
-        const sponsorResult = relationshipData?.sponsor || null;
-        return sponsorResult;
-    }
-
-    if (['dependant', 'dependant', 'spouse', 'child'].includes(normType)) {
-        if (placeholder.dependant_relationship?.[0]) {
-            const targetRel = placeholder.dependant_relationship[0].toLowerCase();
-            return relationshipData?.dependants?.find(d => d.relationship?.toLowerCase() === targetRel);
+        if (normType === 'principal') {
+            return relationshipData?.principal || extractedData;
         }
-        return relationshipData?.dependants?.[0];
-    }
 
-    if (normType === 'director') {
-        const dir = placeholder.director_type === 'primary'
-            ? relationshipData?.directors?.find(d => d.is_primary)
-            : relationshipData?.directors?.[0];
-        return dir || null;
-    }
+        if (normType === 'sponsor') {
+            if (entityIdMap?.sponsor) {
+                if (relationshipData?.sponsor && String(relationshipData.sponsor.id) === String(entityIdMap.sponsor)) {
+                    return relationshipData.sponsor;
+                }
+            }
+            return relationshipData?.sponsor || null;
+        }
 
-    if (normType === 'company') {
-        return relationshipData?.company || companyData || extractedData;
+        if (['dependant', 'spouse', 'child'].includes(normType)) {
+            if (placeholder.dependant_relationship?.[0]) {
+                const targetRel = placeholder.dependant_relationship[0].toLowerCase();
+                return relationshipData?.dependants?.find(d => d.relationship?.toLowerCase() === targetRel);
+            }
+            return relationshipData?.dependants?.[0];
+        }
+
+        if (normType === 'director') {
+            return placeholder.director_type === 'primary'
+                ? relationshipData?.directors?.find(d => d.is_primary)
+                : relationshipData?.directors?.[0];
+        }
+
+        if (normType === 'company') {
+            return relationshipData?.company || companyData || extractedData;
+        }
+
+        return null;
+    };
+
+    const taskResult = resolveFromTaskParticipants();
+    if (taskResult) return taskResult;
+
+    // No task participant matched this role - e.g. 'shareholder'/'employee' (which were
+    // never task-participant concepts to begin with), or a 'director' with nobody tagged
+    // as director on this specific task. Fall back to the company registry.
+    if (normType && normType !== 'company') {
+        const fallback = resolveCompanyRegistryFallback(normType, companyAssociates, entityOverrides);
+        if (fallback) return fallback;
     }
 
     return null;
@@ -685,6 +722,64 @@ const processDocumentChecklistField = (placeholder, targetEntity, combinedCache)
 };
 
 const processImageField = (placeholder, targetEntity, combinedCache, masterFields) => {
+    // Current placeholders don't carry source_table/linking_variable directly - they resolve
+    // through their master_field_ids' own sources[] instead, same as processTextField does for
+    // text fields. Try that first before falling back to the older placeholder-level config.
+    if (placeholder.master_field_ids?.length > 0 && targetEntity) {
+        const candidateIds = [
+            targetEntity?.id,
+            targetEntity?.director_id,
+            targetEntity?.individual_id,
+            targetEntity?.company_id,
+        ]
+            .filter(Boolean)
+            .map(String)
+            .filter((v, i, arr) => arr.indexOf(v) === i);
+
+        if (candidateIds.length > 0) {
+            for (const mid of placeholder.master_field_ids) {
+                const mf = masterFields.get(parseInt(mid, 10));
+                if (!mf?.sources) continue;
+
+                const sortedSources = [...mf.sources].sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999));
+
+                for (const source of sortedSources) {
+                    const tableData = combinedCache[source.table];
+                    if (!tableData) continue;
+
+                    const linkingVar = source.linking_variable || 'id';
+                    const docIds: string[] = Array.isArray(source.document_id)
+                        ? source.document_id
+                        : (source.document_id ? [source.document_id] : []);
+
+                    let matches = Object.values(tableData).filter((r: any) => {
+                        if (!candidateIds.includes(String(r[linkingVar]))) return false;
+                        if (docIds.length > 0) return docIds.includes(r.document_id);
+                        return true;
+                    });
+
+                    if (matches.length === 0) continue;
+
+                    matches = matches.sort((a: any, b: any) => {
+                        const aDate = a.issue_date ? new Date(a.issue_date).getTime() : (a.created_at ? new Date(a.created_at).getTime() : 0);
+                        const bDate = b.issue_date ? new Date(b.issue_date).getTime() : (b.created_at ? new Date(b.created_at).getTime() : 0);
+                        return bDate - aDate;
+                    });
+
+                    const match: any = matches[0];
+                    if (match?.file_path) {
+                        return {
+                            value: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`,
+                            source: `Image: ${source.table}`,
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    // Older placeholder-level config (source_table/linking_variable set directly on the
+    // placeholder rather than resolved via master_field_ids) - kept for backward compatibility.
     const sourceTable = placeholder.source_table;
     const linkingVariable = placeholder.linking_variable;
     const documentTypeIds = placeholder.document_type_ids || [];
@@ -911,18 +1006,40 @@ const isValidValue = (val: any, placeholderType?: string): boolean => {
     return Boolean(val);
 };
 
-const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null, task = null, computedFieldCache = null) => {
+const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null, task = null, computedFieldCache = null, companyAssociates = null, entityOverrides = null) => {
     const logic = placeholder.source_logic || 'priority';
     const collectedValues: string[] = [];
     const sourceMetadata: string[] = [];
-    const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData);
+    const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData, companyAssociates, entityOverrides);
     const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
+
+    // System-date fields (date_config.useCurrentDate) don't depend on any target entity -
+    // resolve them before the targetEntity-gated loop so an unresolved targetEntity (e.g.
+    // entity_type left unset/unmatched for a plain "today's date" field) never blocks the
+    // placeholder from populating.
+    if (placeholder.master_field_ids?.length > 0 && masterFields) {
+        for (const mid of placeholder.master_field_ids) {
+            const mf = masterFields.get(parseInt(mid, 10));
+            if (mf?.date_config?.useCurrentDate) {
+                const result = processCurrentDateField({ ...placeholder, master_field_ids: [mid] }, masterFields);
+                if (isValidValue(result.value, placeholder.type)) {
+                    if (logic === 'priority') {
+                        console.groupEnd();
+                        return result;
+                    }
+                    collectedValues.push(String(result.value));
+                    sourceMetadata.push(result.source || 'System Date');
+                }
+            }
+        }
+    }
+
     if (placeholder.master_field_ids?.length > 0 && targetEntity) {
         for (const mid of placeholder.master_field_ids) {
             let result = { value: '', source: null };
             const mf = masterFields.get(parseInt(mid, 10));
             if (mf?.date_config?.useCurrentDate) {
-                result = processCurrentDateField({ ...placeholder, master_field_ids: [mid] }, masterFields);
+                continue; // already resolved above, independent of targetEntity
             } else {
                 if (placeholder.type === 'ordinal') {
                     result = processOrdinalField(placeholder, arrayIndex);
@@ -1044,6 +1161,65 @@ const extractDisplayValue = (value) => {
     return String(value);
 };
 
+/**
+ * Resolves every top-level (non-array-block) placeholder in a template against the given
+ * data context, returning how many currently have a real value. Reuses the exact same
+ * processPlaceholderValue logic the live editor uses (refreshWithLiveData follows the same
+ * pattern), so the two can never disagree. Used for the completion-progress indicator in
+ * RequirementsTab.tsx as well as by this dialog itself.
+ * Array-block placeholders (repeated entries like directors/dependants tables) are not
+ * expanded/counted individually here - only scalar top-level placeholders.
+ */
+export function resolveTemplatePlaceholders(template: any, ctx: {
+    relationshipData: any
+    sourceDataCache: Record<string, any>
+    additionalCache?: Record<string, any>
+    masterFields: Map<number, any>
+    entityIdMap: any
+    extractedData?: any
+    companyData?: any
+    task?: any
+    computedFieldCache?: Record<string, any>
+}): { filled: number; total: number; values: Record<string, any> } {
+    if (!template?.placeholders?.length) return { filled: 0, total: 0, values: {} };
+
+    const combinedCache = { ...(ctx.sourceDataCache || {}), ...(ctx.additionalCache || {}) };
+
+    const topLevel: any[] = [];
+    const seenDisplayValues = new Set<string>();
+    template.placeholders.forEach((p: any) => {
+        if (p.is_block_start || p.parent_name) return;
+        const qId = p.boolean_conditions?.[0]?.linked_job_question_id;
+        const uniqueKey = qId ? `q_${qId}` : (p.display_value || p.name);
+        if (seenDisplayValues.has(uniqueKey) && p.type === 'boolean') return;
+        seenDisplayValues.add(uniqueKey);
+        topLevel.push(p);
+    });
+
+    const values: Record<string, any> = {};
+    let filled = 0;
+    topLevel.forEach((p) => {
+        const match = processPlaceholderValue(
+            p,
+            ctx.relationshipData,
+            combinedCache,
+            ctx.masterFields,
+            ctx.entityIdMap,
+            ctx.extractedData,
+            ctx.companyData,
+            null,
+            null,
+            ctx.task,
+            ctx.computedFieldCache
+        );
+        const val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
+        values[p.name] = val;
+        if (isValidValue(val, p.type)) filled++;
+    });
+
+    return { filled, total: topLevel.length, values };
+}
+
 const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
     const sizeMap = { small: '25%', medium: '50%', large: '75%', 'full-width': '100%' };
     const currentSizeKey = Object.keys(sizeMap).find(key => sizeMap[key] === styles.maxWidth) || 'full-width';
@@ -1110,7 +1286,7 @@ const getDisplayLabel = (value, options) => {
 };
 
 const PlaceholderInput = ({
-    resolveSourceValue, placeholder, value, originalValue, onChange, onSaveToDb, isSaving, onFileChange, imageStyles, onImageStyleChange, autoPopulated, isArrayItem = false, arrayIndex = null, blockName = null, onAIRefine, isAIRefining, resolvedOptions = [], masterFields, showLabel = true
+    resolveSourceValue, placeholder, value, originalValue, onChange, onSaveToDb, isSaving, onFileChange, imageStyles, onImageStyleChange, autoPopulated, isArrayItem = false, arrayIndex = null, blockName = null, onAIRefine, isAIRefining, resolvedOptions = [], masterFields, showLabel = true, targetEntity = null, task = null
 }) => {
     const fieldKey = isArrayItem ? `${blockName}_${arrayIndex}_${placeholder.name}` : placeholder.name;
 
@@ -1118,6 +1294,30 @@ const PlaceholderInput = ({
     const [editingSource, setEditingSource] = useState(null);
     const [editValue, setEditValue] = useState("");
     const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+    const [uploadModalOpen, setUploadModalOpen] = useState(false);
+
+    // For image placeholders driven by master_field_ids, the upload target (table +
+    // linking_variable + document type) lives on the master field's sources[], same place
+    // processImageField reads from - keeps "where we save" and "where we read" identical.
+    const uploadTarget = useMemo(() => {
+        if (placeholder.type !== 'image' || !placeholder.master_field_ids?.length || !masterFields || !targetEntity) return null;
+        for (const mid of placeholder.master_field_ids) {
+            const mf = masterFields.get(parseInt(mid, 10));
+            const source = mf?.sources?.[0];
+            if (!source?.table) continue;
+            const entityId = targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id;
+            if (!entityId) continue;
+            const docIds = Array.isArray(source.document_id) ? source.document_id : (source.document_id ? [source.document_id] : []);
+            return {
+                targetTable: source.table,
+                idFieldName: source.linking_variable || 'director_id',
+                entityId: String(entityId),
+                documentId: docIds[0] || null,
+                isCompanyUpload: (source.linking_variable || '') === 'company_id',
+            };
+        }
+        return null;
+    }, [placeholder, masterFields, targetEntity]);
     const hasChanged = JSON.stringify(value) !== JSON.stringify(originalValue);
     const canSave = (placeholder.master_field_ids?.length > 0) || (placeholder.linked_job_question_ids?.length > 0);
 
@@ -1146,8 +1346,41 @@ const PlaceholderInput = ({
     };
     const inputRef = useRef(null);
 
+    // Manual override for this document only - writes straight to local formData via
+    // onChange, same as a plain STATE C input does, and deliberately never calls
+    // onSaveToDb so it doesn't touch the underlying source record.
+    const [isManualEditing, setIsManualEditing] = useState(false);
+    const [manualValue, setManualValue] = useState("");
+    const handleStartManualEdit = () => {
+        setManualValue(isValidValue(value) ? value : '');
+        setIsManualEditing(true);
+        setIsPopoverOpen(false);
+    };
+    const handleApplyManualEdit = () => {
+        onChange(manualValue);
+        setIsManualEditing(false);
+    };
+    const handleCancelManualEdit = () => setIsManualEditing(false);
+
     // --- STATE A: INLINE EDITING MODE (Triggered by Pencil) ---
     if (editingSource) {
+        // Resolve dropdown options for the SPECIFIC master field being edited (not just
+        // master_field_ids[0] - the popover lets you pick any of the placeholder's linked
+        // fields, and each one can independently be a select-type field with its own options).
+        // Mirrors the non-dependent branches of getDependentDropdownOptions (plain array or
+        // { options: [...] }) - the dependency-chain branch needs formData/selectedTemplate
+        // context that isn't available at this leaf component, so cascading dropdowns still
+        // fall back to a plain text input here.
+        const editSourceOptions = (() => {
+            if (editingSource.type !== 'db' || !masterFields?.get) return [];
+            const mf = masterFields.get(parseInt(editingSource.id, 10));
+            const opts = mf?.options;
+            if (!opts) return [];
+            if (Array.isArray(opts)) return opts.map((o: any) => typeof o === 'string' ? { label: o, value: o } : o);
+            if (Array.isArray(opts.options)) return opts.options.map((o: any) => typeof o === 'string' ? { label: o, value: o } : o);
+            return [];
+        })();
+
         return (
             <div className="space-y-1 animate-in fade-in zoom-in-95 duration-200">
                 {showLabel && (
@@ -1156,16 +1389,29 @@ const PlaceholderInput = ({
                     </Label>
                 )}
                 <div className="flex items-center gap-2">
-                    <Input
-                        autoFocus
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleSaveEdit();
-                            if (e.key === 'Escape') handleCancelEdit();
-                        }}
-                        className="h-8 text-xs border-blue-400 ring-2 ring-blue-50"
-                    />
+                    {editSourceOptions.length > 0 ? (
+                        <SearchableSelect
+                            value={editSourceOptions.find((o: any) => o.label === editValue)?.value ?? editValue ?? ''}
+                            onValueChange={(val) => {
+                                const selected = editSourceOptions.find((o: any) => String(o.value) === val);
+                                setEditValue(selected ? selected.label : val);
+                            }}
+                            options={editSourceOptions}
+                            placeholder="Select an option..."
+                            buttonClassName="h-8 text-xs border-blue-400 ring-2 ring-blue-50 flex-1"
+                        />
+                    ) : (
+                        <Input
+                            autoFocus
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveEdit();
+                                if (e.key === 'Escape') handleCancelEdit();
+                            }}
+                            className="h-8 text-xs border-blue-400 ring-2 ring-blue-50"
+                        />
+                    )}
                     <Button size="icon" onClick={handleSaveEdit} className="h-8 w-8 bg-green-600 hover:bg-green-700 shrink-0">
                         <CheckCircle2 className="h-4 w-4" />
                     </Button>
@@ -1179,6 +1425,35 @@ const PlaceholderInput = ({
 
     // --- STATE B: MULTI-SOURCE VIEW (Popover) ---
     if (totalSources > 1 && placeholder.type !== 'image' && placeholder.type !== 'boolean') {
+        if (isManualEditing) {
+            return (
+                <div className="space-y-1 animate-in fade-in zoom-in-95 duration-200">
+                    {showLabel && (
+                        <Label className="text-[10px] font-bold text-blue-600 uppercase tracking-tight flex items-center gap-1">
+                            <Edit3 className="h-2.5 w-2.5" /> Custom Value (this document only)
+                        </Label>
+                    )}
+                    <div className="flex items-center gap-2">
+                        <Input
+                            autoFocus
+                            value={manualValue}
+                            onChange={(e) => setManualValue(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleApplyManualEdit();
+                                if (e.key === 'Escape') handleCancelManualEdit();
+                            }}
+                            className="h-8 text-xs border-blue-400 ring-2 ring-blue-50"
+                        />
+                        <Button size="icon" onClick={handleApplyManualEdit} className="h-8 w-8 bg-green-600 hover:bg-green-700 shrink-0">
+                            <CheckCircle2 className="h-4 w-4" />
+                        </Button>
+                        <Button size="icon" variant="ghost" onClick={handleCancelManualEdit} className="h-8 w-8 text-red-500 shrink-0">
+                            <X className="h-4 w-4" />
+                        </Button>
+                    </div>
+                </div>
+            );
+        }
         return (
             <div className="space-y-1">
                 {showLabel && <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{placeholder.display_value || placeholder.name.replace(/_/g, ' ')}</Label>}
@@ -1249,6 +1524,16 @@ const PlaceholderInput = ({
                                 );
                             })}
                         </div>
+                        <div className="p-1 border-t bg-white">
+                            <Button
+                                size="sm" variant="ghost"
+                                className="w-full h-8 justify-start text-xs text-slate-600 hover:text-blue-700 hover:bg-blue-50"
+                                onClick={handleStartManualEdit}
+                            >
+                                <Edit3 className="h-3.5 w-3.5 mr-2 text-slate-400" />
+                                Type a custom value for this document
+                            </Button>
+                        </div>
                     </PopoverContent>
                 </Popover>
             </div>
@@ -1316,11 +1601,55 @@ const PlaceholderInput = ({
                         <img src={value} className="max-h-full object-contain" style={{ textAlign: style.textAlign || 'center', maxWidth: style.maxWidth || '100%', width: `${imageWidth}px`, height: `${imageHeight}px` }} />
                         <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                             <Button size="sm" variant="secondary" className="h-7 text-[10px]" onClick={() => document.getElementById(`file-${fieldKey}`).click()}>Replace</Button>
+                            {uploadTarget && (
+                                <Button size="sm" variant="secondary" className="h-7 text-[10px]" onClick={() => setUploadModalOpen(true)}>Save to Profile</Button>
+                            )}
                             <Button size="sm" variant="destructive" className="h-7 text-[10px]" onClick={() => onChange('')}>Remove</Button>
                         </div>
                     </div>
-                ) : <div className="text-xs italic border-2 border-dashed rounded p-4 text-center">Upload {placeholder.display_value || placeholder.name}</div>}
+                ) : (
+                    <button
+                        type="button"
+                        onClick={() => uploadTarget ? setUploadModalOpen(true) : document.getElementById(`file-${fieldKey}`).click()}
+                        className="w-full text-xs border-2 border-dashed border-blue-300 rounded-lg p-6 text-center cursor-pointer bg-blue-50/30 hover:bg-blue-50 hover:border-blue-400 transition-all group"
+                    >
+                        <div className="flex flex-col items-center gap-2">
+                            <div className="p-2 bg-blue-100 rounded-full group-hover:bg-blue-200 transition-colors">
+                                <FileUp className="h-5 w-5 text-blue-500" />
+                            </div>
+                            <div>
+                                <p className="font-semibold text-blue-700">{placeholder.display_value || placeholder.name}</p>
+                                <p className="text-[10px] text-blue-400 mt-0.5">
+                                    {uploadTarget ? 'Click to upload & save to their profile' : 'Click to upload an image'}
+                                </p>
+                            </div>
+                        </div>
+                    </button>
+                )}
                 <input id={`file-${fieldKey}`} type="file" className="hidden" accept="image/jpeg,image/jpg,image/png" onChange={onFileChange} />
+                {uploadTarget && uploadModalOpen && (
+                    <UploadModal
+                        isOpen={uploadModalOpen}
+                        onClose={() => setUploadModalOpen(false)}
+                        onSuccess={(newDocument: any) => {
+                            setUploadModalOpen(false);
+                            const filePath = newDocument?.file_path;
+                            if (filePath) {
+                                onChange(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`);
+                            }
+                        }}
+                        documentName={placeholder.display_value || placeholder.name}
+                        entityName={targetEntity?.name || targetEntity?.full_name}
+                        entityId={uploadTarget.entityId}
+                        selectedMember={{ id: uploadTarget.entityId, full_name: targetEntity?.name || targetEntity?.full_name, type: uploadTarget.isCompanyUpload ? 'company' : 'individual', name: targetEntity?.name || targetEntity?.full_name }}
+                        selectedDocumentId={uploadTarget.documentId || undefined}
+                        selectedDoc={uploadTarget.documentId ? { id: uploadTarget.documentId } : undefined}
+                        targetTable={uploadTarget.targetTable}
+                        idFieldName={uploadTarget.idFieldName}
+                        documentIdFieldName="document_id"
+                        isCompanyUpload={uploadTarget.isCompanyUpload}
+                    />
+                )}
                 {value && onImageStyleChange && (
                     <ImagePlaceholderControls
                         styles={style}
@@ -1363,17 +1692,16 @@ const PlaceholderInput = ({
         return (
             <div className="">
                 <FieldHeader />
-                <Select value={String(value || '')} onValueChange={(val) => {
-                    const selected = options.find(o => String(o.value) === val);
-                    onChange(selected ? selected.label : val);
-                }}>
-                    <SelectTrigger className={cn("w-full bg-white h-8 text-xs", hasChanged && canSave ? "border-amber-400 ring-2 ring-amber-50" : "")}>
-                        <SelectValue>{getDisplayLabel(value, options)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                        {options.map((o, i) => <SelectItem key={i} value={String(o.value)}>{o.label}</SelectItem>)}
-                    </SelectContent>
-                </Select>
+                <SearchableSelect
+                    value={options.find(o => o.label === value)?.value != null ? String(options.find(o => o.label === value)?.value) : String(value || '')}
+                    onValueChange={(val) => {
+                        const selected = options.find(o => String(o.value) === val);
+                        onChange(selected ? selected.label : val);
+                    }}
+                    options={options.map(o => ({ ...o, value: String(o.value) }))}
+                    placeholder="Select an option..."
+                    buttonClassName={cn("w-full bg-white h-8 text-xs", hasChanged && canSave ? "border-amber-400 ring-2 ring-amber-50" : "")}
+                />
             </div>
         );
     }
@@ -1440,6 +1768,38 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
     const [requirementJobQuestions, setRequirementJobQuestions] = useState<any[]>([]);
     const [computedFieldCache, setComputedFieldCache] = useState<Record<string, any>>({});
     const [documentTablesReady, setDocumentTablesReady] = useState(false);
+
+    // Company registry fallback: when a placeholder's entity_type (director/shareholder/
+    // employee/etc.) has no matching task participant, we resolve against anyone associated
+    // with the task's company via registry_individuals.employment_data.associations instead
+    // - same source the Letters module's signatory picker reads from (useLetterData.ts).
+    // entityOverrides lets the user pick a different candidate than the default (first match)
+    // when a role resolves to more than one person for this company.
+    const [companyAssociates, setCompanyAssociates] = useState<any[]>([]);
+    const [entityOverrides, setEntityOverrides] = useState<Record<string, string>>({});
+    const companyIdForAssociates = entityIdMap?.company || relationshipData?.company?.id || task?.company_id;
+
+    useEffect(() => {
+        if (!companyIdForAssociates) { setCompanyAssociates([]); return; }
+        let cancelled = false;
+        (async () => {
+            const { data, error } = await supabase
+                .from('registry_individuals')
+                .select('id, full_name, kra_pin, contact_details, employment_data')
+                .order('full_name', { ascending: true });
+            if (error || cancelled) return;
+            const scoped = (data || [])
+                .map((ind: any) => {
+                    const associations = (ind.employment_data?.associations || []).filter(
+                        (a: any) => String(a.company_id) === String(companyIdForAssociates)
+                    );
+                    return associations.length > 0 ? { ...ind, associations } : null;
+                })
+                .filter(Boolean);
+            if (!cancelled) setCompanyAssociates(scoped);
+        })();
+        return () => { cancelled = true; };
+    }, [companyIdForAssociates]);
     const templateZipBuffer = useRef<ArrayBuffer | null>(null); // Store raw zip data for preview
     const loadedTemplateId = useRef<string | null>(null);
 
@@ -1483,7 +1843,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         };
 
         fetchJobQuestions();
-    }, [task?.job_level, isOpen]);
+    }, [JSON.stringify(task?.job_level), isOpen]);
 
     useEffect(() => {
         if (!selectedTemplate?.placeholders) return;
@@ -1559,6 +1919,33 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         return { topLevel, blocks };
     }, [selectedTemplate]);
 
+    // Roles (director/shareholder/employee/etc.) that resolve via the company registry
+    // fallback with more than one candidate - these need the user to pick who's meant,
+    // since e.g. {signatory_name}/{signatory_title} both depend on the same choice.
+    const ambiguousRoles = useMemo(() => {
+        if (!selectedTemplate?.placeholders?.length || !companyAssociates.length) return [];
+
+        const hasTaskParticipant = (normType: string) => {
+            if (normType === 'principal') return !!(relationshipData?.principal);
+            if (normType === 'sponsor') return !!(relationshipData?.sponsor);
+            if (['dependant', 'spouse', 'child'].includes(normType)) return (relationshipData?.dependants?.length || 0) > 0;
+            if (normType === 'director') return (relationshipData?.directors?.length || 0) > 0;
+            return false;
+        };
+
+        const seen = new Map<string, any[]>();
+        selectedTemplate.placeholders.forEach((p: any) => {
+            const entityType = Array.isArray(p.entity_type) ? p.entity_type[0] : p.entity_type;
+            const normType = entityType?.toLowerCase()?.trim();
+            if (!normType || normType === 'company' || seen.has(normType)) return;
+            if (hasTaskParticipant(normType)) return;
+            const candidates = getCompanyRegistryCandidates(normType, companyAssociates);
+            if (candidates.length > 1) seen.set(normType, candidates);
+        });
+
+        return Array.from(seen.entries()).map(([normType, candidates]) => ({ normType, candidates }));
+    }, [selectedTemplate, companyAssociates, relationshipData]);
+
     const resolveSpecificSourceValue = useCallback((type, id, placeholder, arrayIndex = null, computedFieldCache = null) => {
         if (!isOpen) return '';
 
@@ -1593,7 +1980,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         // If getTargetEntity is defined outside component, we pass args. If inside, we use it directly.
         // Assuming getTargetEntity is defined at module level (top of file):
         const combinedCacheWithAdditional = { ...sourceDataCache, ...additionalCache };
-        const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCacheWithAdditional, extractedData, companyData);
+        const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCacheWithAdditional, extractedData, companyData, companyAssociates, entityOverrides);
 
         if (type === 'job') {
             const taskRecord = (combinedCacheWithAdditional['tm_tasks'] && Object.values(combinedCacheWithAdditional['tm_tasks'])[0]) || task;
@@ -1617,15 +2004,24 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
     const panelClasses = useMemo(() => {
         const { form, preview, source } = panelsVisible;
-        const count = [form, preview, source].filter(Boolean).length;
+        // Auto-hide preview when no content available
+        const hasPreviewContent = isWordTemplate ? !!docxPreviewBuffer : (previewContent && previewContent.trim().length > 0);
+        const effectivePreview = preview && (hasPreviewContent || isPreviewLoading);
+        // Auto-hide source when not a word template (HTML has no original reference) or no docPreviewUrl
+        const effectiveSource = source && isWordTemplate;
+
+        const count = [form, effectivePreview, effectiveSource].filter(Boolean).length;
         if (count === 3) return { form: 'col-span-3', preview: 'col-span-5', source: 'col-span-4' };
         if (count === 2) {
             if (!form) return { form: 'hidden', preview: 'col-span-7', source: 'col-span-5' };
-            if (!preview) return { form: 'col-span-5', preview: 'hidden', source: 'col-span-7' };
+            if (!effectivePreview) return { form: 'col-span-5', preview: 'hidden', source: 'col-span-7' };
             return { form: 'col-span-4', preview: 'col-span-8', source: 'hidden' };
         }
-        return { form: form ? 'col-span-12' : 'hidden', preview: preview ? 'col-span-12' : 'hidden', source: source ? 'col-span-12' : 'hidden' };
-    }, [panelsVisible]);
+        if (count === 1) {
+            return { form: form ? 'col-span-12' : 'hidden', preview: effectivePreview ? 'col-span-12' : 'hidden', source: effectiveSource ? 'col-span-12' : 'hidden' };
+        }
+        return { form: form ? 'col-span-12' : 'hidden', preview: 'hidden', source: 'hidden' };
+    }, [panelsVisible, isWordTemplate, docxPreviewBuffer, previewContent, isPreviewLoading]);
 
     const getTargetConfig = useCallback(() => {
         const isCompany = activeEntityType === 'company';
@@ -1646,20 +2042,36 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
     const getDependentDropdownOptions = useCallback((placeholder, masterField, currentRow = null) => {
         const opts = masterField?.options;
-        if (!opts?.isDependencyConfig) return Array.isArray(opts) ? opts.map(o => typeof o === 'string' ? { label: o, value: o } : o) : [];
-        const parentId = opts.dependencyConfig?.dependentFieldId;
-        if (!parentId) return [];
-        const parentPlaceholder = selectedTemplate.placeholders.find(p => p.master_field_ids?.includes(parentId));
-        if (!parentPlaceholder) return [];
-        const parentLabel = (currentRow || formData)[parentPlaceholder.name];
-        if (!parentLabel) return [];
-        const parentMF = masterFields.get(parentId);
-        let parentVal = parentLabel;
-        if (Array.isArray(parentMF?.options)) {
-            const match = parentMF.options.find(o => (typeof o === 'string' ? o : o.label) === parentLabel);
-            if (match) parentVal = typeof match === 'string' ? match : match.value;
+        if (!opts) return [];
+
+        // Simple array of options
+        if (Array.isArray(opts)) {
+            return opts.map(o => typeof o === 'string' ? { label: o, value: o } : o);
         }
-        return opts.manualMapping?.[parentVal] || [];
+
+        // Object with nested options array (e.g. { options: [...] })
+        if (Array.isArray(opts.options)) {
+            return opts.options.map(o => typeof o === 'string' ? { label: o, value: o } : o);
+        }
+
+        // Dependent dropdown config
+        if (opts.isDependencyConfig) {
+            const parentId = opts.dependencyConfig?.dependentFieldId;
+            if (!parentId) return [];
+            const parentPlaceholder = selectedTemplate.placeholders.find(p => p.master_field_ids?.includes(parentId));
+            if (!parentPlaceholder) return [];
+            const parentLabel = (currentRow || formData)[parentPlaceholder.name];
+            if (!parentLabel) return [];
+            const parentMF = masterFields.get(parentId);
+            let parentVal = parentLabel;
+            if (Array.isArray(parentMF?.options)) {
+                const match = parentMF.options.find(o => (typeof o === 'string' ? o : o.label) === parentLabel);
+                if (match) parentVal = typeof match === 'string' ? match : match.value;
+            }
+            return opts.manualMapping?.[parentVal] || [];
+        }
+
+        return [];
     }, [formData, masterFields, selectedTemplate]);
 
     const loadExistingDraft = useCallback(async () => {
@@ -1825,7 +2237,9 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                             null,               // arrayIndex
                             null,               // sourceArray
                             task,
-                            computedFieldCache
+                            computedFieldCache,
+                            companyAssociates,
+                            entityOverrides
                         );
 
                         let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
@@ -1947,7 +2361,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         if (isOpen && selectedTemplate && entityIdMap) {
             loadExistingDraft();
         }
-    }, [isOpen, selectedTemplate?.id, entityIdMap]);
+    }, [isOpen, selectedTemplate?.id, JSON.stringify(entityIdMap)]);
 
     const combinedCache = useMemo(() => ({
         ...sourceDataCache,
@@ -1966,7 +2380,8 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         }
     }, [availableTemplates]);
 
-    const refreshWithLiveData = useCallback(() => {
+    const refreshWithLiveData = useCallback((overridesOverride?: Record<string, string>) => {
+        const activeOverrides = overridesOverride || entityOverrides;
         const initData = { ...formData };
         const autoMap = new Map();
         groupedPlaceholders.topLevel.forEach(p => {
@@ -1981,7 +2396,9 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 null,               // arrayIndex
                 null,               // sourceArray
                 task,
-                computedFieldCache
+                computedFieldCache,
+                companyAssociates,
+                activeOverrides
             );
 
             let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
@@ -2002,7 +2419,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
             title: "Refreshed",
             description: "Form updated with latest database values",
         });
-    }, [formData, groupedPlaceholders, relationshipData, combinedCache, masterFields, entityIdMap, extractedData, companyData]);
+    }, [formData, groupedPlaceholders, relationshipData, combinedCache, masterFields, entityIdMap, extractedData, companyData, companyAssociates, entityOverrides]);
 
     const fetchMissingDataSources = useCallback(async () => {
         if (!isOpen || !selectedTemplate || !masterFields) return;
@@ -2036,6 +2453,11 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
             const sid = typeof s === 'object' ? (s.id || s.individual_id) : s;
             if (sid) allIds.add(String(sid));
         }
+
+        // Company registry fallback candidates (director/shareholder/employee/etc. with no
+        // matching task participant) also need their source-table data (e.g. signature docs)
+        // fetched, same as any other target entity - see getTargetEntity's fallback branch.
+        companyAssociates.forEach((ind: any) => ind.id && allIds.add(String(ind.id)));
 
         const idList = Array.from(allIds).filter(Boolean);
         if (idList.length === 0) return;
@@ -2225,7 +2647,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 return newSet;
             });
         }
-    }, [isOpen, selectedTemplate?.id, entityIdMap, relationshipData, masterFields]);
+    }, [isOpen, selectedTemplate?.id, JSON.stringify(entityIdMap), JSON.stringify(relationshipData), masterFields, companyAssociates]);
 
     const resolveComputedFields = useCallback(async (_updatedCache: Record<string, any>) => {
         if (!selectedTemplate?.placeholders || !masterFields) return;
@@ -2469,9 +2891,8 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
     }, [
         selectedTemplate,
         masterFields,
-        entityIdMap,
-        relationshipData,
-        computedFieldCache,
+        JSON.stringify(entityIdMap),
+        JSON.stringify(relationshipData),
     ]);
 
     useEffect(() => {
@@ -2487,12 +2908,6 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
         loadAndResolve();
     }, [isOpen, selectedTemplate?.id, fetchMissingDataSources]);
-
-    useEffect(() => {
-        if (isOpen && selectedTemplate?.id && masterFields) {
-            resolveComputedFields(combinedCache);
-        }
-    }, [isOpen, selectedTemplate?.id, masterFields, resolveComputedFields]);
 
     useEffect(() => {
         if (!isOpen || !selectedTemplate) return;
@@ -2557,7 +2972,9 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                     null,               // arrayIndex
                     null,               // sourceArray
                     task,
-                    computedFieldCache
+                    computedFieldCache,
+                    companyAssociates,
+                    entityOverrides
                 );
                 let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
                 if (val && val !== '') {
@@ -2711,7 +3128,9 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                     index,         // Argument 8: arrayIndex (Critical Fix)
                     sourceArray,
                     task,
-                    computedFieldCache
+                    computedFieldCache,
+                    companyAssociates,
+                    entityOverrides
                 );
                 // For boolean fields, preserve the structure (array of options)
                 if (field.type === 'boolean') {
@@ -2900,7 +3319,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                     let resolvedOptions = [];
                                     if (child.master_field_ids?.length > 0) {
                                         const mf = masterFields.get(parseInt(child.master_field_ids[0]));
-                                        if (mf?.type === 'select') resolvedOptions = getDependentDropdownOptions(child, mf, row);
+                                        if (mf?.type === 'select' || (mf?.options && (Array.isArray(mf.options) || Array.isArray(mf.options?.options) || mf.options?.isDependencyConfig))) resolvedOptions = getDependentDropdownOptions(child, mf, row);
                                     }
                                     return (
                                         <PlaceholderInput
@@ -3010,7 +3429,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                                 let resolvedOptions = [];
                                                 if (child.master_field_ids?.length > 0) {
                                                     const mf = masterFields.get(parseInt(child.master_field_ids[0]));
-                                                    if (mf?.type === 'select') resolvedOptions = getDependentDropdownOptions(child, mf, row);
+                                                    if (mf?.type === 'select' || (mf?.options && (Array.isArray(mf.options) || Array.isArray(mf.options?.options) || mf.options?.isDependencyConfig))) resolvedOptions = getDependentDropdownOptions(child, mf, row);
                                                 }
                                                 return (
                                                     <td
@@ -3731,7 +4150,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 }
             }
 
-            const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData);
+            const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData, companyAssociates, entityOverrides);
 
             // Determine the ID immediately
             entId = targetEntity?.id || targetEntity?.individual_id || targetEntity?.director_id || targetEntity?.company_id;
@@ -3833,12 +4252,26 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 updatePayload[path || placeholder.name] = newValue;
             }
 
-            const { error: updateError } = await supabase
+            let { error: updateError } = await supabase
                 .from(table)
                 .update({ ...updatePayload, updated_at: new Date().toISOString() })
                 .eq(linkVar, entId);
 
-            if (updateError) throw updateError;
+            if (updateError && updateError.code === 'PGRST204') {
+                const failedCol = updateError.message?.match(/'(\w+)'/)?.[1];
+                if (failedCol && failedCol in updatePayload) {
+                    delete updatePayload[failedCol];
+                    const retry = await supabase
+                        .from(table)
+                        .update({ ...updatePayload, updated_at: new Date().toISOString() })
+                        .eq(linkVar, entId);
+                    if (retry.error) throw retry.error;
+                } else {
+                    throw updateError;
+                }
+            } else if (updateError) {
+                throw updateError;
+            }
             const { data: refreshedRecord, error: fetchError } = await supabase
                 .from(table)
                 .select('*')
@@ -3876,7 +4309,9 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 arrayIndex,
                 sourceArray,
                 task,
-                computedFieldCache
+                computedFieldCache,
+                companyAssociates,
+                entityOverrides
             );
 
             const finalResolvedValue = placeholder.type === 'boolean' ? match.value : extractDisplayValue(match.value);
@@ -4085,6 +4520,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
             }
 
             let storagePath = null;
+            let fileType = 'application/pdf';
             if (isWordTemplate && templateBuffer) {
                 const renderData = await prepareRenderData(formData);
                 const zip = new PizZip(templateBuffer);
@@ -4096,17 +4532,33 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
                 doc.setData(renderData);
                 doc.render();
-                const docBlob = doc.getZip().generate({
-                    type: "blob",
-                    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                });
+
+                const renderedDocxBuffer = doc.getZip().generate({ type: "arraybuffer" });
+
+                const html2pdf = (await import('html2pdf.js')).default;
+                const { default: mammoth } = await import('mammoth');
+
+                const docxHtml = await mammoth.convertToHtml({ buffer: renderedDocxBuffer }).then(r => r.value);
+                const element = document.createElement('div');
+                element.innerHTML = docxHtml;
+                element.className = 'bg-white';
+                element.style.width = '800px';
+
+                const pdfBlob = await html2pdf()
+                    .set({
+                        margin: 10,
+                        html2canvas: { scale: 2, useCORS: true, logging: false },
+                        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                    })
+                    .from(element)
+                    .output('blob');
                 const timestamp = Date.now();
                 const entityFolder = activeEntityType === 'company' ? 'company-documents' : 'individuals-documents';
-                const path = `${entityFolder}/${config.entityId}/${kycDocId}_${timestamp}.docx`;
+                const path = `${entityFolder}/${config.entityId}/${kycDocId}_${timestamp}.pdf`;
 
                 const { data: storageData, error: storageError } = await supabase.storage
                     .from('kyc-documents')
-                    .upload(path, docBlob, { cacheControl: '3600', upsert: true });
+                    .upload(path, pdfBlob, { cacheControl: '3600', upsert: true });
                 if (storageError) {
                     throw storageError;
                 }
@@ -4176,7 +4628,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 [config.idColumn]: config.entityId,
                 [config.docIdColumn]: kycDocId,
                 file_path: storagePath,
-                file_type: isWordTemplate ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/pdf',
+                file_type: fileType,
                 status: 'draft',
                 metadata: draftMetadata,
                 updated_at: new Date().toISOString()
@@ -4447,9 +4899,6 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                             )}
                         </div>
                     </div>
-                    <div className="flex items-center justify-between">
-                        <Label>{documentName}</Label>
-                    </div>
                     <div className="flex items-center gap-2">
                         <Button
                             variant="outline"
@@ -4600,7 +5049,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                     let resolvedOptions = [];
                                     if (p.master_field_ids?.length > 0) {
                                         const mf = masterFields.get(parseInt(p.master_field_ids[0]));
-                                        if (mf?.type === 'select') {
+                                        if (mf?.type === 'select' || (mf?.options && (Array.isArray(mf.options) || Array.isArray(mf.options?.options) || mf.options?.isDependencyConfig))) {
                                             resolvedOptions = getDependentDropdownOptions(p, mf);
                                         }
                                     }
@@ -4639,6 +5088,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                                     isAIRefining={refiningFields.has(p.name)}
                                                     showLabel={false} // Hides the internal vertical label
                                                     resolveSourceValue={resolveSpecificSourceValue}
+                                                    targetEntity={p.type === 'image' ? getTargetEntity(p, relationshipData, null, null, entityIdMap, combinedCache, extractedData, companyData, companyAssociates, entityOverrides) : undefined}
                                                 />
                                             </div>
                                         </div>
@@ -4672,7 +5122,8 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                     docxBuffer={docxPreviewBuffer}
                 />
 
-                {/* RIGHT PANEL: Original Template Reference */}
+                {/* RIGHT PANEL: Original Template Reference - only visible for Word templates */}
+                {isWordTemplate && (
                 <div className={`${panelClasses.source} bg-slate-50 overflow-y-auto transition-all duration-300`}>
                     <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b flex justify-between">
                         <span className="text-[10px] font-bold text-slate-500">ORIGINAL REFERENCE</span>
@@ -4701,6 +5152,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                         )}
                     </div>
                 </div>
+                )}
             </div>
             <div className="border-t px-6 py-3 bg-white flex justify-between flex-shrink-0">
                 <div className="text-[10px] flex items-center gap-1.5">

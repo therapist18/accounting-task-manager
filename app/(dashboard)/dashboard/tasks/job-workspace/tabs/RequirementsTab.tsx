@@ -20,7 +20,8 @@ import { REQUIREMENTS_LOCK_STAGE_IDS } from "../../utils/taskManagerData"
 import { getLatestDocumentExpiryDate } from "../../utils/automationComputedFunctions"
 import { resolveTargetEntityIdImpl, resolveVariableValueImpl, type FieldResolutionContext } from "../../utils/fieldResolution"
 import { resolveAutomationFieldData } from "../../../tasks-requirements/utils/resolveAutomationFieldData"
-import { isTemplateEligible } from "../../../tasks-requirements/utils/templateGenerationData"
+import { isTemplateEligible, fetchMasterFields, buildTemplateGenerationInfo } from "../../../tasks-requirements/utils/templateGenerationData"
+import { resolveTemplatePlaceholders } from "../../../tasks-requirements/TemplateGenerationDialog"
 import { UploadModal } from "@/app/generic-components/UploadModal"
 import { ReviewSubmissionDialog } from "../../../tasks-requirements/components/ReviewSubmissionDialog"
 import { SendRequirementsDialog } from "../../../tasks-requirements/components/SendRequirementsDialog"
@@ -201,6 +202,82 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
   useEffect(() => {
     if (autoOpenSendDialog) setIsSendRequirementsOpen(true)
   }, [autoOpenSendDialog])
+
+  const [templateMasterFields, setTemplateMasterFields] = useState<Map<number, any> | null>(null)
+  const [templateProgress, setTemplateProgress] = useState<Record<string, { filled: number; total: number } | 'loading'>>({})
+
+  useEffect(() => {
+    fetchMasterFields().then(setTemplateMasterFields)
+  }, [])
+
+  // Matches the hasTemplateExplicitly restriction used for the Wand2 badge below (and
+  // TemplatesTab.tsx's templateReqs filter) - only requirements explicitly flagged
+  // hasTemplate: true, not the broader doc-level has_template/main_category fallback.
+  const templateEligibleReqs = useMemo(() => {
+    if (!task?.requirements) return []
+    return task.requirements.filter((r: any) => {
+      const hasTemplateExplicitly = r.hasTemplate === true || String(r.hasTemplate) === 'true'
+      if (!hasTemplateExplicitly) return false
+      const docMeta = kycDocsMap.get(r.document_id || r.document_ids?.[0])
+      return isTemplateEligible(r, docMeta)
+    })
+  }, [task, kycDocsMap])
+
+  const resolveTemplateEntityForReq = useCallback((req: any) => {
+    const entityTypes = req.entityTypes || (req.applicantType ? [req.applicantType] : [])
+    if (entityTypes.includes('company')) {
+      let companyId = task.company_id
+      if (!companyId && task.participants_details) {
+        companyId = task.participants_details.find((p: any) => p.type === 'company')?.id
+      }
+      if (!companyId && task.applicant_details?.type === 'company') companyId = task.applicant_details.id
+      return { colType: 'company', colId: companyId }
+    }
+    const principalPart = task.participants_details?.find((p: any) =>
+      p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
+    )
+    const colId = principalPart?.id || (task.applicant_details?.type === 'individual' ? task.applicant_details.id : task.individual_id)
+    return { colType: 'principal', colId }
+  }, [task])
+
+  // Auto-computes a completion percentage per template-eligible requirement (how many of the
+  // template's placeholders currently resolve to a real value), for the progress bar next to
+  // the Wand2 badge. Reuses the exact same resolution buildTemplateGenerationInfo/
+  // resolveTemplatePlaceholders that the Templates tab uses to generate the real preview, so
+  // the percentage can't drift out of sync with what actually gets generated.
+  useEffect(() => {
+    if (!templateMasterFields || templateEligibleReqs.length === 0 || !task) return
+    let cancelled = false
+    templateEligibleReqs.forEach(async (req: any) => {
+      const reqKey = String(req.id)
+      const docId = req.document_id || req.document_ids?.[0]
+      const docMeta = docId ? kycDocsMap.get(docId) : null
+      if (!docId || !docMeta) return
+      const { colType, colId } = resolveTemplateEntityForReq(req)
+      if (!colId) return
+      try {
+        const info = await buildTemplateGenerationInfo({ document: docMeta }, task, colType, colId, templateMasterFields, task.job_level, req.selectedTemplateId)
+        if (cancelled) return
+        if (!info?.template) {
+          setTemplateProgress(prev => ({ ...prev, [reqKey]: { filled: 0, total: 0 } }))
+          return
+        }
+        const { filled, total } = resolveTemplatePlaceholders(info.template, {
+          relationshipData: info.relationshipData,
+          sourceDataCache: info.sourceDataCache,
+          masterFields: info.masterFields,
+          entityIdMap: info.entityIdMap,
+          extractedData: info.extractedData,
+          companyData: info.companyData,
+          task: info.task,
+        })
+        if (!cancelled) setTemplateProgress(prev => ({ ...prev, [reqKey]: { filled, total } }))
+      } catch (err) {
+        console.error('[RequirementsTab] Error computing template progress for', req.name, err)
+      }
+    })
+    return () => { cancelled = true }
+  }, [templateMasterFields, templateEligibleReqs, task, kycDocsMap, resolveTemplateEntityForReq])
 
   const [jobFieldsRecord, setJobFieldsRecord] = useState<Record<string, any>>({})
   const [fieldSourceDataCache, setFieldSourceDataCache] = useState<Record<string, Record<string, any>>>({})
@@ -631,6 +708,26 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                                     </button>
                                   )}
                                 </div>
+                                {hasTemplateExplicitly && isTemplateEligible(req, docMeta) && (() => {
+                                  const progress = templateProgress[String(req.id)]
+                                  if (!progress) return (
+                                    <span className="text-[9px] text-slate-400 mt-1">Checking template...</span>
+                                  )
+                                  const pct = progress.total > 0 ? Math.round((progress.filled / progress.total) * 100) : 0
+                                  return (
+                                    <div className="flex items-center gap-1.5 mt-1 w-full max-w-[140px]">
+                                      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                        <div
+                                          className={cn("h-full rounded-full transition-all", pct === 100 ? "bg-emerald-500" : "bg-blue-500")}
+                                          style={{ width: `${pct}%` }}
+                                        />
+                                      </div>
+                                      <span className={cn("text-[9px] font-bold shrink-0", pct === 100 ? "text-emerald-600" : "text-slate-500")}>
+                                        {progress.total > 0 ? `${progress.filled}/${progress.total}` : "N/A"}
+                                      </span>
+                                    </div>
+                                  )
+                                })()}
                                 {isComposite && (
                                   <span className="text-[10px] font-medium text-blue-600 mt-1 uppercase tracking-wide">
                                     {docTypeInfo.count} Types
@@ -830,17 +927,30 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
       </div>
 
       {/* Modals & Dialogs */}
-      {selectedDocForUpload && (
-        <UploadModal
-          isOpen={uploadModalOpen}
-          onClose={() => setUploadModalOpen(false)}
-          onSuccess={() => { onRefresh?.(); setUploadModalOpen(false); }}
-          entityId={String(selectedDocForUpload.person?.id)}
-          entityName={selectedDocForUpload.person?.full_name}
-          selectedDocumentId={selectedDocForUpload.document_id || selectedDocForUpload.document_ids?.[0]}
-          documentName={kycDocsMap.get(selectedDocForUpload.document_id || selectedDocForUpload.document_ids?.[0])?.display_name || "Document"}
-        />
-      )}
+      {selectedDocForUpload && (() => {
+        const docId = selectedDocForUpload.document_id || selectedDocForUpload.document_ids?.[0]
+        const docMeta = kycDocsMap.get(docId)
+        const isCompany = selectedDocForUpload.columnType === 'company' || selectedDocForUpload.section_type === 'company'
+        const person = selectedDocForUpload.person || {}
+        return (
+          <UploadModal
+            isOpen={uploadModalOpen}
+            onClose={() => setUploadModalOpen(false)}
+            onSuccess={() => { onRefresh?.(); setUploadModalOpen(false); }}
+            documentName={docMeta?.display_name || docMeta?.name || selectedDocForUpload.display_name || selectedDocForUpload.name || "Document"}
+            documentFields={docMeta?.fields || []}
+            entityName={person.full_name}
+            entityId={String(person.id)}
+            selectedDoc={docMeta ? { ...docMeta, id: docId } : undefined}
+            selectedMember={{ id: person.id, full_name: person.full_name, type: isCompany ? 'company' : 'individual', name: person.full_name }}
+            selectedDocumentId={docId}
+            targetTable={isCompany ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents'}
+            idFieldName={isCompany ? 'company_id' : 'director_id'}
+            documentIdFieldName="document_id"
+            isCompanyUpload={isCompany}
+          />
+        )
+      })()}
 
       {previewDocument && (
         <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>

@@ -103,14 +103,14 @@ export function PlaceholderPanel({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredPlaceholders.map((p: Placeholder) => {
+                  {filteredPlaceholders.map((p: Placeholder, mapIdx: number) => {
                     const isChild = !!p.parent_name;
                     const isBlock = p.is_block_start;
                     const originalIndex = currentTemplate.placeholders.findIndex((orig: Placeholder) => orig.id === p.id);
 
                     return (
                       <TableRow
-                        key={p.id}
+                        key={p.id || `noId-${mapIdx}`}
                         className={cn(
                           isChild && "bg-muted/10 hover:bg-muted/20",
                           isBlock && "bg-blue-50/40 hover:bg-blue-50/60"

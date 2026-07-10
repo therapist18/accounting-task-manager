@@ -8,10 +8,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
-
-import TemplateGenerationComponent from "../../../tasks-requirements/TemplateGenerationComponent"
 import { fetchMasterFields, buildTemplateGenerationInfo, isTemplateEligible } from "../../../tasks-requirements/utils/templateGenerationData"
 import type { JobWorkspaceData } from "../fetchJobWorkspaceData"
+import TemplateGenerationComponent from "../../../tasks-requirements/TemplateGenerationDialog"
 
 interface TemplatesTabProps {
   data: JobWorkspaceData
@@ -25,7 +24,7 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
   const [loadingReqId, setLoadingReqId] = useState<string | null>(null)
   const [masterFields, setMasterFields] = useState<Map<number, any> | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
-  
+
   const autoPreviewedTaskId = useRef<any>(null)
   const listRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
@@ -35,7 +34,7 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
     return task.requirements.filter((r: any) => {
       const isExplicitlyTrue = r.hasTemplate === true || String(r.hasTemplate) === 'true'
       if (!isExplicitlyTrue) return false
-      
+
       const docMeta = kycDocsMap.get(r.document_id || r.document_ids?.[0])
       return isTemplateEligible(r, docMeta)
     })
@@ -45,12 +44,12 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
   const filteredReqs = useMemo(() => {
     if (!searchQuery.trim()) return templateReqs
     const query = searchQuery.toLowerCase()
-    
+
     return templateReqs.filter((req: any) => {
       const docMeta = kycDocsMap.get(req.document_id || req.document_ids?.[0])
       const docName = docMeta?.display_name || docMeta?.name || req.display_name || req.name || "Unknown"
       const category = req.category || "General"
-      
+
       return docName.toLowerCase().includes(query) || category.toLowerCase().includes(query)
     })
   }, [templateReqs, searchQuery, kycDocsMap])
@@ -113,7 +112,7 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
       ? templateReqs.find((r: any) => (r.document_id || r.document_ids?.[0]) === targetDocumentId)
       : null
     const reqToPreview = targeted || templateReqs[0]
-    
+
     if (reqToPreview) {
       const key = String(reqToPreview.id || templateReqs.indexOf(reqToPreview))
       handleGenerateTemplate(reqToPreview, key)
@@ -130,16 +129,6 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-white px-6 py-4">
-      {/* Header Bar */}
-      <div className="flex items-center justify-between border-b pb-4 mb-4 bg-white shrink-0 z-40">
-        <div className="flex items-center gap-4">
-          <h3 className="text-xl font-medium text-slate-800 tracking-tight">Template Generation</h3>
-          <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-sm rounded-full px-3 py-0.5">
-            {templateReqs.length} Available
-          </Badge>
-        </div>
-      </div>
-
       {templateReqs.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
           <div className="bg-white p-6 rounded-full shadow-md mb-4 border border-slate-100">
@@ -153,23 +142,28 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
       ) : (
         <div className="flex flex-1 overflow-hidden gap-5">
           {/* Sidebar Panel for Templates */}
-          <div className="w-[360px] flex flex-col border rounded-xl bg-slate-50/30 shadow-sm overflow-hidden shrink-0">
-            <div className="bg-white border-b px-4 py-3 flex flex-col gap-3 sticky top-0 z-10">
-               <span className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center">
-                 <LayoutTemplate className="w-4 h-4 mr-2" /> Target Documents
-               </span>
-               <div className="relative">
-                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                 <Input
-                   placeholder="Search templates..."
-                   value={searchQuery}
-                   onChange={(e) => setSearchQuery(e.target.value)}
-                   className="h-8 pl-8 text-xs bg-slate-50/50 border-slate-200 focus-visible:ring-blue-500 focus-visible:border-blue-500"
-                 />
-               </div>
+          <div className="w-[360px] flex flex-col bg-slate-50/30 shadow-sm overflow-hidden shrink-0">
+            <div className="bg-white px-4 py-2 flex flex-col gap-3 sticky top-0 z-10">
+              <div className="flex justify-between">
+                <span className="text-xl font-bold uppercase tracking-wider flex items-center">
+                  <LayoutTemplate className="w-4 h-4 mr-2" /> Target Documents
+                </span>
+                <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-sm rounded-full px-3 py-0.5">
+                  {templateReqs.length} Available
+                </Badge>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <Input
+                  placeholder="Search templates..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="h-8 pl-8 text-xs bg-slate-50/50 border-slate-200 focus-visible:ring-blue-500 focus-visible:border-blue-500"
+                />
+              </div>
             </div>
-            
-            <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+
+            <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar border">
               {filteredReqs.length === 0 ? (
                 <div className="py-8 text-center text-xs text-slate-400 font-medium">
                   No templates match your search.
@@ -210,7 +204,7 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
                           </span>
                         </div>
                       </div>
-                      
+
                       <Button
                         variant="outline"
                         size="sm"
@@ -227,11 +221,11 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
                         disabled={isLoading || isSelected}
                       >
                         {isLoading ? (
-                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : isSelected ? (
-                           "Viewing"
+                          "Viewing"
                         ) : (
-                           "Select"
+                          "Select"
                         )}
                       </Button>
                     </div>
@@ -266,7 +260,7 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
                 jobLevel={task.job_level}
                 activeEntityType={generationInfo.activeEntityType}
                 activeEntityId={generationInfo.activeEntityId?.toString()}
-                refreshDocuments={() => {}}
+                refreshDocuments={() => { }}
                 onClose={() => setSelectedTemplateReq(null)}
               />
             ) : (

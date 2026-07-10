@@ -101,7 +101,6 @@ export function RequirementsTable({
   const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
   const [selectedDocumentForPreview, setSelectedDocumentForPreview] = useState<any>(null);
   const [companyData, setCompanyData] = useState<Record<number, any>>({});
-  const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   const [previewDocument, setPreviewDocument] = useState<{
     documents: Array<{
       fileUrl: string;
@@ -578,7 +577,16 @@ export function RequirementsTable({
     }));
   }, [filteredTasks]);
 
-  const searchedGroupedTasks = useMemo(() => !sidebarSearchQuery ? groupedTasks : groupedTasks.filter(group => group.applicantName.toLowerCase().includes(sidebarSearchQuery.toLowerCase())), [groupedTasks, sidebarSearchQuery]);
+  const searchedGroupedTasks = useMemo(() => !searchQuery ? groupedTasks : groupedTasks.filter(group => {
+    const q = searchQuery.toLowerCase();
+    if (group.applicantName.toLowerCase().includes(q)) return true;
+    return group.tasks.some(t => {
+      const companyName = t.applicant_details?.company_name || t.participants_details?.find((p: any) => p.type === 'company')?.name || '';
+      if (companyName.toLowerCase().includes(q)) return true;
+      const requirements = t.requirements || [];
+      return requirements.some((r: any) => (r.display_name || r.name || '').toLowerCase().includes(q) || (r.description || '').toLowerCase().includes(q));
+    });
+  }), [groupedTasks, searchQuery]);
   const filteredGroupedTasks = useMemo(() => !selectedApplicant ? (searchedGroupedTasks.length > 0 ? [searchedGroupedTasks[0]] : []) : searchedGroupedTasks.filter(group => group.applicantName === selectedApplicant), [searchedGroupedTasks, selectedApplicant]);
 
   const hasPendingClientSubmission = useMemo(() => {
@@ -1208,7 +1216,6 @@ export function RequirementsTable({
       <div className="w-74 border-r bg-white flex flex-col">
         {/* Sidebar content */}
         <div className="p-4 border-b"><h2 className="text-lg font-semibold">Applicants</h2></div>
-        <div className="p-2 border-b"><div className="relative"><Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" /><Input placeholder="Search..." className="pl-8" value={sidebarSearchQuery} onChange={(e) => setSidebarSearchQuery(e.target.value)} /></div></div>
         <ScrollArea className="flex-1">
           <div className="space-y-1 p-2">
             {searchedGroupedTasks.map((group) => {
@@ -1264,7 +1271,7 @@ export function RequirementsTable({
           <div className="p-4 border-b flex justify-between">
             <div className="relative">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search requirements..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+              <Input placeholder="Search everything..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
             </div>
             <div className="flex justify-end gap-2">
               <Button

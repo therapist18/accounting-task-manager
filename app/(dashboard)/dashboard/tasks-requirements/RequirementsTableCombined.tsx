@@ -241,11 +241,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           req.name,
           req.description,
           req.main_category,
-          req.sub_category
+          req.sub_category,
+          req.section_type,
+          ...(req.entityTypes || []),
+          ...(req.document_ids || [])
         ].filter(Boolean);
 
         const matchesSearch = searchableFields.some(field =>
-          field.toLowerCase().includes(searchLower)
+          String(field).toLowerCase().includes(searchLower)
         );
         if (!matchesSearch) return;
       }
@@ -471,19 +474,22 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           return true;
         }
 
-        // Apply search filter if search query exists
-        if (searchLower) {
-          const searchableFields = [
-            req.display_name,
-            req.name,
-            req.description,
-            req.main_category,
-            req.sub_category
-          ].filter(Boolean);
+          // Apply search filter if search query exists
+          if (searchLower) {
+            const searchableFields = [
+              req.display_name,
+              req.name,
+              req.description,
+              req.main_category,
+              req.sub_category,
+              req.section_type,
+              ...(req.entityTypes || []),
+              ...(req.document_ids || [])
+            ].filter(Boolean);
 
-          const matchesSearch = searchableFields.some(field =>
-            field.toLowerCase().includes(searchLower)
-          );
+            const matchesSearch = searchableFields.some(field =>
+              String(field).toLowerCase().includes(searchLower)
+            );
 
           if (!matchesSearch) {
             return false;

@@ -145,23 +145,25 @@ export async function buildTemplateGenerationInfo(
   const templates = await fetchDocumentTemplates(docItem.document.id, task, jobLevel)
   if (!templates || templates.length === 0) return null
 
-  const queriesToRun = new Map<string, { docIds: Set<string>; links: Map<string, Set<any>> }>()
+  // Grouped by (table, linking_variable) so each fetch can filter by BOTH the entity id(s)
+  // AND the document id(s) together, instead of two independent broad queries unioned
+  // together (which used to fetch e.g. every entity's copy of a document type, or every
+  // document an entity has of any type - correct in the end since processTextField/
+  // processImageField re-filter in memory, but needlessly wide).
+  const queriesToRun = new Map<string, Map<string, { docIds: Set<string>; entityIds: Set<any> }>>()
   const addQuery = (tableName: string, docId: string | null, linkVar: string | null, entId: any) => {
-    if (!queriesToRun.has(tableName)) queriesToRun.set(tableName, { docIds: new Set(), links: new Map() })
-    const tq = queriesToRun.get(tableName)!
-    if (docId) tq.docIds.add(docId)
-    if (linkVar && entId) {
-      if (!tq.links.has(linkVar)) tq.links.set(linkVar, new Set())
-      if (Array.isArray(entId)) {
-        entId.forEach((id: any) => {
-          const val = (id && typeof id === 'object') ? (id.id || id.director_id || id.individual_id || id.company_id) : id
-          if (val) tq.links.get(linkVar)!.add(val)
-        })
-      } else {
-        const val = (entId && typeof entId === 'object') ? (entId.id || entId.director_id || entId.individual_id || entId.company_id) : entId
-        if (val) tq.links.get(linkVar)!.add(val)
-      }
+    const key = linkVar || 'id'
+    if (!queriesToRun.has(tableName)) queriesToRun.set(tableName, new Map())
+    const byLinkVar = queriesToRun.get(tableName)!
+    if (!byLinkVar.has(key)) byLinkVar.set(key, { docIds: new Set(), entityIds: new Set() })
+    const entry = byLinkVar.get(key)!
+    if (docId) entry.docIds.add(docId)
+    const addEntity = (id: any) => {
+      const val = (id && typeof id === 'object') ? (id.id || id.director_id || id.individual_id || id.company_id) : id
+      if (val) entry.entityIds.add(val)
     }
+    if (Array.isArray(entId)) entId.forEach(addEntity)
+    else if (entId) addEntity(entId)
   }
 
   templates.forEach((template: any) => {
@@ -198,34 +200,28 @@ export async function buildTemplateGenerationInfo(
 
   const sourceDataCache: Record<string, Record<number, any>> = { tm_tasks: { [task.id]: task } }
 
-  const fetchPromises = Array.from(queriesToRun.entries()).map(async ([table, { docIds, links }]) => {
-    const records = new Map<any, any>()
-
-    if (docIds.size > 0) {
-      const validDocIds = [...docIds].filter((id: string) => UUID_REGEX.test(id))
-      if (validDocIds.length > 0) {
-        const { data } = await supabase.from(table).select('*').in('document_id', validDocIds)
-        ;(data || []).forEach((rec: any) => records.set(rec.id, rec))
-      }
-    }
-
-    const linkPromises = Array.from(links.entries()).map(async ([linkVar, entityIdsSet]) => {
-      const entityIds = Array.from(entityIdsSet).filter(Boolean)
-      if (entityIds.length > 0) {
-        const { data } = await supabase.from(table).select('*').in(linkVar, entityIds)
-        return data || []
-      }
-      return []
+  const fetchPromises: Promise<{ table: string; data: any[] }>[] = []
+  queriesToRun.forEach((byLinkVar, table) => {
+    byLinkVar.forEach(({ docIds, entityIds }, linkVar) => {
+      const entityIdList = Array.from(entityIds).filter(Boolean)
+      if (entityIdList.length === 0) return
+      fetchPromises.push((async () => {
+        let query = supabase.from(table).select('*').in(linkVar, entityIdList)
+        const validDocIds = [...docIds].filter((id: string) => UUID_REGEX.test(id))
+        if (validDocIds.length > 0) query = query.in('document_id', validDocIds)
+        const { data } = await query
+        return { table, data: data || [] }
+      })())
     })
-
-    const linkResults = await Promise.all(linkPromises)
-    linkResults.flat().forEach((rec: any) => records.set(rec.id, rec))
-
-    return { table, data: Object.fromEntries(records) }
   })
 
   const results = await Promise.all(fetchPromises)
-  results.forEach(({ table, data }) => { sourceDataCache[table] = data })
+  const mergedByTable: Record<string, Record<any, any>> = {}
+  results.forEach(({ table, data }) => {
+    if (!mergedByTable[table]) mergedByTable[table] = {}
+    data.forEach((rec: any) => { mergedByTable[table][rec.id] = rec })
+  })
+  Object.entries(mergedByTable).forEach(([table, data]) => { sourceDataCache[table] = data })
 
   const relationshipData = {
     company: task.participants_details?.find((p: any) => p.type === 'company') || (task.applicant_details?.type === 'company' ? task.applicant_details : null) || { id: task.company_id, name: task.company_name, type: 'company' },
