@@ -1478,6 +1478,10 @@ const PlaceholderInput = ({
                             <X className="h-4 w-4" />
                         </Button>
                     </div>
+                    <div className="mt-2 p-2 bg-blue-50/50 border border-blue-100 rounded text-[10px] text-blue-700">
+                        <div className="font-medium">💡 Quick Custom Value Entry</div>
+                        <div className="mt-1">Start typing directly in this field for immediate custom values without saving to profile.</div>
+                    </div>
                 </div>
             );
         }
