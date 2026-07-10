@@ -66,6 +66,18 @@ export const getTargetEntity = (
     return relationshipData?.company || companyData || extractedData;
   }
 
+  const fallbackLower = String(normType).toLowerCase().trim();
+  const companyRegistries = ['registry_individuals', 'employment_data'];
+  for (const reg of companyRegistries) {
+    if (!combinedCache?.[reg]) continue;
+    for (const item of Object.values(combinedCache[reg])) {
+      const matches = item.associations?.some((a: any) =>
+          a.individual_type?.toLowerCase().includes(fallbackLower)
+      );
+      if (matches) return item;
+    }
+  }
+
   return null;
 };
 

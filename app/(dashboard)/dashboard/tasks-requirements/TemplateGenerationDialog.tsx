@@ -341,7 +341,7 @@ const resolveCompanyRegistryFallback = (normType, companyAssociates, entityOverr
     return (overrideId && candidates.find((c: any) => String(c.id) === String(overrideId))) || candidates[0];
 };
 
-const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourceArray = null, entityIdMap = null, combinedCache = null, extractedData = null, companyData = null, companyAssociates = null, entityOverrides = null) => {
+  const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourceArray = null, entityIdMap = null, combinedCache = null, extractedData = null, companyData = null, companyAssociates = null, entityOverrides = null) => {
     if (sourceArray && arrayIndex !== null && sourceArray[arrayIndex]) {
         return sourceArray[arrayIndex];
     }
@@ -363,6 +363,21 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
             }
             if (normType === 'principal' && entityIdMap.principal) {
                 return relationshipData?.principal || extractedData;
+            }
+            if (normType === 'shareholder' && entityIdMap.shareholder) {
+                const shareId = entityIdMap.shareholder;
+                return relationshipData?.shareholders?.find(s => String(s.id) === String(shareId)) ||
+                    combinedCache?.['registry_individuals']?.[shareId];
+            }
+            if (normType === 'employee' && entityIdMap.employee) {
+                const empId = entityIdMap.employee;
+                return relationshipData?.employees?.find(e => String(e.id) === String(empId)) ||
+                    combinedCache?.['employment_data']?.[empId];
+            }
+            if (normType === 'understudy' && entityIdMap.understudy) {
+                const underId = entityIdMap.understudy;
+                return relationshipData?.understudies?.find(u => String(u.id) === String(underId)) ||
+                    combinedCache?.['registry_individuals']?.[underId];
             }
         }
         if (normType === 'principal') {
@@ -408,6 +423,18 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
     if (normType && normType !== 'company') {
         const fallback = resolveCompanyRegistryFallback(normType, companyAssociates, entityOverrides);
         if (fallback) return fallback;
+        
+        const fallbackLower = String(normType).toLowerCase().trim();
+        const companyRegistries = ['registry_individuals', 'employment_data'];
+        for (const reg of companyRegistries) {
+            if (!combinedCache?.[reg]) continue;
+            for (const item of Object.values(combinedCache[reg])) {
+                const matches = item.associations?.some((a: any) =>
+                    a.individual_type?.toLowerCase().includes(fallbackLower)
+                );
+                if (matches) return item;
+            }
+        }
     }
 
     return null;
@@ -1922,8 +1949,8 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
     // Roles (director/shareholder/employee/etc.) that resolve via the company registry
     // fallback with more than one candidate - these need the user to pick who's meant,
     // since e.g. {signatory_name}/{signatory_title} both depend on the same choice.
-    const ambiguousRoles = useMemo(() => {
-        if (!selectedTemplate?.placeholders?.length || !companyAssociates.length) return [];
+    const entitySelectionState = useMemo(() => {
+        if (!selectedTemplate?.placeholders?.length || !companyAssociates.length) return null;
 
         const hasTaskParticipant = (normType: string) => {
             if (normType === 'principal') return !!(relationshipData?.principal);
@@ -1933,17 +1960,86 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
             return false;
         };
 
-        const seen = new Map<string, any[]>();
+        const entityTypeMappings = {
+            'signatory': ['director', 'shareholder', 'employee', 'hr', 'accountant', 'understudy', 'manager', 'executive'],
+            'signer': ['director', 'shareholder', 'employee', 'hr', 'accountant', 'understudy', 'manager', 'executive'],
+            'approver': ['director', 'shareholder', 'employee', 'hr', 'accountant', 'manager', 'executive'],
+            'responsible_party': ['director', 'shareholder', 'employee', 'hr', 'accountant', 'manager', 'executive', 'authorising_signatory', 'representative'],
+            'authorised_person': ['director', 'shareholder', 'employee', 'hr', 'accountant', 'manager', 'executive'],
+            'witness': ['witness'],
+            'authorising_signatory': ['director', 'shareholder', 'employee', 'hr', 'accountant', 'manager', 'executive'],
+            'service_provider': ['employee', 'service_provider', 'consultant', 'advisor', 'specialist'],
+            'regulatory_official': ['regulatory_official'],
+            'advisor': ['advisor', 'consultant', 'representative'],
+            'consultant': ['advisor', 'consultant', 'specialist'],
+            'representative': ['employee', 'hr', 'authorising_signatory', 'representative'],
+            'business_owner': ['business_owner', 'principal', 'shareholder'],
+            'manager': ['manager', 'supervisor', 'lead', 'executive'],
+            'executive': ['director', 'principal', 'hr', 'manager', 'executive'],
+            'partner': ['partner', 'business_owner'],
+            'understudy': ['understudy']
+        };
+
+        const entitySelectors: any[] = [];
         selectedTemplate.placeholders.forEach((p: any) => {
             const entityType = Array.isArray(p.entity_type) ? p.entity_type[0] : p.entity_type;
             const normType = entityType?.toLowerCase()?.trim();
-            if (!normType || normType === 'company' || seen.has(normType)) return;
+            if (!normType || normType === 'company') return;
+            
             if (hasTaskParticipant(normType)) return;
-            const candidates = getCompanyRegistryCandidates(normType, companyAssociates);
-            if (candidates.length > 1) seen.set(normType, candidates);
+            
+            const getResolvedEntityTypes = (normType: string): string[] => {
+                return entityTypeMappings[normType.toLowerCase()] || [normType];
+            };
+            
+            const entityTypes = getResolvedEntityTypes(normType);
+            let allCandidates: any[] = [];
+            const matchedEntityTypes: string[] = [];
+            
+            for (const et of entityTypes) {
+                const candidates = getCompanyRegistryCandidates(et, companyAssociates);
+                if (candidates.length > 0) {
+                    allCandidates.push(...candidates);
+                    matchedEntityTypes.push(et);
+                }
+            }
+            
+            const uniqueCandidates = allCandidates.filter((candidate, index, self) =>
+                self.findIndex(c => c.id === candidate.id) === index
+            );
+            
+            if (uniqueCandidates.length > 0) {
+                const allEntityTypes = [...new Set(matchedEntityTypes)];
+                const entitySelector = {
+                    targetEntityType: normType,
+                    allEntityTypes: allEntityTypes,
+                    candidates: uniqueCandidates,
+                    primaryEntityType: normType,
+                    isMultiCandidate: uniqueCandidates.length > 1,
+                    isSingleCandidate: uniqueCandidates.length === 1
+                };
+                
+                entitySelectors.push(entitySelector);
+            }
         });
 
-        return Array.from(seen.entries()).map(([normType, candidates]) => ({ normType, candidates }));
+        if (entitySelectors.length === 0) return null;
+
+        const hasMultiCandidateSelectors = entitySelectors.some(selector => selector.isMultiCandidate);
+        
+        if (hasMultiCandidateSelectors) {
+            return {
+                hasMultiCandidateSelectors: true,
+                selectors: entitySelectors.filter(s => s.isMultiCandidate),
+                singletons: entitySelectors.filter(s => s.isSingleCandidate)
+            };
+        }
+
+        return {
+            hasMultiCandidateSelectors: false,
+            selectors: [],
+            singletons: entitySelectors
+        };
     }, [selectedTemplate, companyAssociates, relationshipData]);
 
     const resolveSpecificSourceValue = useCallback((type, id, placeholder, arrayIndex = null, computedFieldCache = null) => {
