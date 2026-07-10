@@ -7,7 +7,7 @@ import {
   CheckCircle2, AlertCircle, UploadCloud, Eye, FileText, Lock, Loader2,
   ChevronDown, ChevronRight, Trash2, RefreshCw, FileUp, XCircle, User,
   Briefcase, UserCheck, Users2, HeartPulse, Send, Search, AlertTriangle, Check, X, ArrowUpDown, ArrowUp, ArrowDown, HelpCircle,
-  Calendar, Plus, Minus, FileType, Zap
+  Calendar, Plus, Minus, FileType, Zap, Wand2
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -18,7 +18,9 @@ import { supabase } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { REQUIREMENTS_LOCK_STAGE_IDS } from "../../utils/taskManagerData"
 import { getLatestDocumentExpiryDate } from "../../utils/automationComputedFunctions"
-import { fetchSourceDataImpl, resolveTargetEntityIdImpl, resolveVariableValueImpl, type FieldResolutionContext } from "../../utils/fieldResolution"
+import { resolveTargetEntityIdImpl, resolveVariableValueImpl, type FieldResolutionContext } from "../../utils/fieldResolution"
+import { resolveAutomationFieldData } from "../../../tasks-requirements/utils/resolveAutomationFieldData"
+import { isTemplateEligible } from "../../../tasks-requirements/utils/templateGenerationData"
 import { UploadModal } from "@/app/generic-components/UploadModal"
 import { ReviewSubmissionDialog } from "../../../tasks-requirements/components/ReviewSubmissionDialog"
 import { SendRequirementsDialog } from "../../../tasks-requirements/components/SendRequirementsDialog"
@@ -137,8 +139,6 @@ function getCellStatus(req: any, col: ColDef, docsByInd: Record<string, any[]>, 
   const docIds = req.document_ids || (req.document_id ? [req.document_id] : [])
   if (!docIds.length) return { type: "na" as const, docs: [] }
 
-  // Always scope by entity id first (company_id for companies, director_id for any individual
-  // role - principal/director/dependant/understudy/sponsor), then narrow by document type.
   let found: any[] = []
   if (col.type === "company") {
     found = (allCompanyDocs[col.id] || []).filter((d: any) => docIds.includes(d.document_id))
@@ -187,6 +187,7 @@ function getDocDataForReq(req: any, col: ColDef, docsByInd: Record<string, any[]
 export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: RequirementsTabProps) {
   const { task, kycDocsMap, documentsByIndividual, allDocuments, allCompanyDocuments } = data
   const router = useRouter()
+
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(CATEGORY_ORDER))
   const [expandedRequirements, setExpandedRequirements] = useState<Set<string>>(new Set())
   const [expandedComposites, setExpandedComposites] = useState<Set<string>>(new Set())
@@ -200,6 +201,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
   useEffect(() => {
     if (autoOpenSendDialog) setIsSendRequirementsOpen(true)
   }, [autoOpenSendDialog])
+
   const [jobFieldsRecord, setJobFieldsRecord] = useState<Record<string, any>>({})
   const [fieldSourceDataCache, setFieldSourceDataCache] = useState<Record<string, Record<string, any>>>({})
   const [fieldMasterComputedCache, setFieldMasterComputedCache] = useState<Record<string, any>>({})
@@ -266,68 +268,20 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
   }, [task])
 
   useEffect(() => {
-    const linkedFieldIds = new Set<string>()
-      ; (data.automations || []).forEach((auto: any) => {
-        if (auto.webdata && auto.webdata.length > 0) {
-          auto.webdata.forEach((field: any) => {
-            ; (field.linkedMasterFields || field.masterFieldIds || []).forEach((id: any) => linkedFieldIds.add(String(id)))
-              ; (field.arrayItems || []).forEach((item: any) => {
-                ; (item.linkedMasterFields || item.masterFieldIds || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : [])).forEach((id: any) => linkedFieldIds.add(String(id)))
-              })
-          })
-        }
-      })
-    if (linkedFieldIds.size === 0) return
-    const fetchJobFields = async () => {
-      const { data: fields } = await supabase.from('tm_job_fields').select('*').in('id', Array.from(linkedFieldIds))
-      if (fields) {
-        setJobFieldsRecord(fields.reduce((acc: Record<string, any>, field: any) => {
-          acc[String(field.id)] = field
-          return acc
-        }, {}))
-      }
-    }
-    fetchJobFields()
-  }, [data.automations])
-
-  useEffect(() => {
-    if (Object.keys(jobFieldsRecord).length === 0 || relationshipData.length === 0) return
-    const loadAll = async () => {
-      const mergedSource: Record<string, Record<string, any>> = {}
-      const mergedComputed: Record<string, any> = {}
-      const calls: Promise<void>[] = []
-        ; (data.automations || []).forEach((auto: any) => {
-          if (!auto.webdata?.length) return
-          relationshipData.forEach((relData: any) => {
-            calls.push(
-              fetchSourceDataImpl({
-                selectedAutomationId: String(auto.id),
-                webData: [{ automationId: String(auto.id), fields: auto.webdata }],
-                jobFields: jobFieldsRecord,
-                relationshipData: relData,
-                taskId: String(task?.id || ""),
-                currentIndividualId: String(task?.individual_id || ""),
-                task
-              }).then(({ sourceData: sd, masterFieldComputedValues: mc }) => {
-                Object.entries(sd).forEach(([table, records]) => {
-                  if (!mergedSource[table]) mergedSource[table] = {}
-                  Object.assign(mergedSource[table], records)
-                })
-                if (mc) Object.assign(mergedComputed, mc)
-              }).catch(err => console.error('Error resolving field values', err))
-            )
-          })
-        })
-      await Promise.all(calls)
+    if (relationshipData.length === 0) return
+    let cancelled = false
+    resolveAutomationFieldData(data.automations || [], relationshipData, task).then(result => {
+      if (cancelled) return
+      setJobFieldsRecord(result.jobFieldsRecord)
       setFieldSourceDataCache(prev => {
         const next = { ...prev }
-        Object.entries(mergedSource).forEach(([table, records]) => { next[table] = { ...(next[table] || {}), ...records } })
+        Object.entries(result.fieldSourceDataCache).forEach(([table, records]) => { next[table] = { ...(next[table] || {}), ...records } })
         return next
       })
-      setFieldMasterComputedCache(prev => ({ ...prev, ...mergedComputed }))
-    }
-    loadAll()
-  }, [jobFieldsRecord, relationshipData, task, data.automations])
+      setFieldMasterComputedCache(prev => ({ ...prev, ...result.fieldMasterComputedCache }))
+    })
+    return () => { cancelled = true }
+  }, [data.automations, relationshipData, task])
 
   const toggleRequirementExpansion = useCallback((reqId: string) => {
     setExpandedRequirements(prev => {
@@ -635,6 +589,9 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                     const isReqExpanded = expandedRequirements.has(reqId)
                     const isCompExpanded = expandedComposites.has(reqId)
                     const fieldsToRender = docMeta?.fields || []
+                    
+                    // ONLY render the template wand if explicitly marked hasTemplate === true
+                    const hasTemplateExplicitly = req.hasTemplate === true || String(req.hasTemplate) === 'true'
 
                     return (
                       <React.Fragment key={reqId}>
@@ -656,11 +613,21 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                                   {req.web_automation?.automationId && (
                                     <button
                                       type="button"
-                                      onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/tasks/${task.id}?tab=automation&automationId=${req.web_automation.automationId}`) }}
+                                      onClick={(e) => { e.stopPropagation(); window.open(`/dashboard/tasks/${task.id}?tab=automation&automationId=${req.web_automation.automationId}`, '_blank', 'noopener,noreferrer') }}
                                       className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-purple-600 text-white shadow-sm ring-2 ring-purple-100 hover:bg-purple-700 hover:ring-purple-200 transition-colors shrink-0"
                                       title={`Generated by automation: ${req.web_automation.automationName || 'View automation'}`}
                                     >
                                       <Zap className="h-3 w-3" fill="currentColor" />
+                                    </button>
+                                  )}
+                                  {hasTemplateExplicitly && isTemplateEligible(req, docMeta) && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); window.open(`/dashboard/tasks/${task.id}?tab=templates&documentId=${req.document_id || req.document_ids?.[0]}`, '_blank', 'noopener,noreferrer') }}
+                                      className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-blue-600 text-white shadow-sm ring-2 ring-blue-100 hover:bg-blue-700 hover:ring-blue-200 transition-colors shrink-0"
+                                      title="Generate document from template"
+                                    >
+                                      <Wand2 className="h-3 w-3" />
                                     </button>
                                   )}
                                 </div>

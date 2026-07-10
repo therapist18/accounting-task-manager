@@ -165,9 +165,10 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
     }
 
     // 8. Fetch KYC fields
-    const { data: kycData } = await supabase
+    const { data: kycData, error: kycError } = await supabase
       .from('acc_portal_kyc')
-      .select('id, fields, name, display_name')
+      .select('id, fields, name, display_name, has_template, main_category')
+    if (kycError) console.error('[fetchJobWorkspaceData] acc_portal_kyc fetch error:', kycError)
     const kycDocsMap = new Map()
     ;(kycData || []).forEach((doc: any) => {
       kycDocsMap.set(doc.id, {
@@ -175,8 +176,11 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
         name: doc.name,
         display_name: doc.display_name,
         fields: doc.fields || [],
+        has_template: doc.has_template,
+        main_category: doc.main_category || null,
       })
     })
+    console.log('[fetchJobWorkspaceData] kycDocsMap size:', kycDocsMap.size, 'docs with has_template set:', (kycData || []).filter((d: any) => d.has_template).length)
 
     // 9. Process task - apply requirement matching
     const { data: requirementsData } = await supabase

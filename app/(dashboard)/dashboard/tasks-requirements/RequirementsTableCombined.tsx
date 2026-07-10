@@ -1745,10 +1745,21 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                       {/* Template and Automation Indicators */}
                       <span className="flex items-center gap-2 mt-1">
                         {reqItem.hasTemplate && (
-                          <span className="flex items-center gap-1 text-orange-600" title="Has Template">
+                          <button
+                            type="button"
+                            className="flex items-center gap-1 text-orange-600 hover:text-orange-800 hover:underline cursor-pointer transition-colors"
+                            title="Auto-generate template"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const firstValidCol = columnDefinitions.find(c => checkApplicability(c.type, reqItem, c.roles));
+                              if (firstValidCol) {
+                                handleGenerateTemplate(reqItem, firstValidCol.task, firstValidCol.type, firstValidCol.id);
+                              }
+                            }}
+                          >
                             <FileType className="h-3 w-3 fill-current" />
                             <span className="text-xs font-medium">Template</span>
-                          </span>
+                          </button>
                         )}
 
                         {reqItem.web_automation?.automationId && (
@@ -2363,10 +2374,20 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
                 <span className="flex items-center gap-2 mt-1">
                   {reqItem.hasTemplate && (
-                    <span className="flex items-center gap-1 text-orange-600" title="Has Template">
+                    <button
+                      type="button"
+                      className="flex items-center gap-1 text-orange-600 hover:text-orange-800 hover:underline cursor-pointer transition-colors"
+                      title="Auto-generate template"
+                      onClick={() => {
+                        const firstValidCol = columnDefinitions.find(c => checkApplicability(c.type, reqItem, c.roles));
+                        if (firstValidCol) {
+                          handleGenerateTemplate(reqItem, firstValidCol.task, firstValidCol.type, firstValidCol.id);
+                        }
+                      }}
+                    >
                       <FileType className="h-3 w-3 fill-current" />
                       <span className="text-xs font-medium">Template</span>
-                    </span>
+                    </button>
                   )}
 
                   {reqItem.web_automation?.automationId && (

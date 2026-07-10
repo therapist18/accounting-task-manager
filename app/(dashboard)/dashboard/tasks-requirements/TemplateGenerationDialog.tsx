@@ -1394,7 +1394,7 @@ const PlaceholderInput = ({
     );
 };
 
-export default function TemplateGenerationDialog({ task, isOpen, onClose, template, availableTemplates = [], documentName, masterFields, entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {}, relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null }, onDraftDiscarded, jobLevel, activeEntityType, activeEntityId, refreshDocuments }) {
+export default function TemplateGenerationComponent({ task, isOpen, onClose, template, availableTemplates = [], documentName, masterFields, entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {}, relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null }, onDraftDiscarded, jobLevel, activeEntityType, activeEntityId, refreshDocuments }) {
     const [panelsVisible, setPanelsVisible] = useState({ form: true, preview: true, source: true });
     const { toast } = useToast();
     const [formData, setFormData] = useState(() => {
@@ -1632,7 +1632,7 @@ export default function TemplateGenerationDialog({ task, isOpen, onClose, templa
         const id = activeEntityId;
 
         if (id === undefined || id === null || id === 'undefined') {
-            console.error('[TemplateGenerationDialog] Fatal: No valid ID for draft operation', { activeEntityType, activeEntityId });
+            console.error('[TemplateGenerationComponent] Fatal: No valid ID for draft operation', { activeEntityType, activeEntityId });
             return null;
         }
 
@@ -4407,350 +4407,346 @@ export default function TemplateGenerationDialog({ task, isOpen, onClose, templa
     };
 
     return (
-        <>
-            <Dialog open={isOpen} onOpenChange={onClose}>
-                <DialogContent className="max-w-[98vw] w-full h-[95vh] flex flex-col p-0">
-                    <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50 flex-shrink-0">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-blue-500 rounded-lg">
-                                    <Wand2 className="h-5 w-5 text-white" />
+        <div className="flex flex-col h-full w-full bg-white relative">
+            <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50 flex-shrink-0">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-500 rounded-lg shadow-sm">
+                            <Wand2 className="h-5 w-5 text-white" />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-bold text-slate-800 leading-tight">{documentName}</h2>
+                            <p className="text-xs text-slate-500 mt-0.5">Auto-populate and generate template</p>
+                            {loadedDraft && (
+                                <div className="flex items-center gap-2 mt-2">
+                                    <Badge variant="outline" className="ml-2 text-[8px] bg-amber-50 text-amber-700 border-amber-200">
+                                        <FileText className="h-3 w-3" />
+                                        <span className="font-medium">Draft in Progress</span>
+                                    </Badge>
+                                    <span className="text-xs text-muted-foreground">
+                                        Last saved {new Date(loadedDraft.created_at).toLocaleString()}
+                                    </span>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={discardDraft}
+                                        disabled={isLoadingDraft}
+                                        className="h-6 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    >
+                                        <X className="h-3 w-3 mr-1" />
+                                        Discard Draft
+                                    </Button>
                                 </div>
-                                <div>
-                                    <DialogTitle className="text-xl font-bold">{documentName}</DialogTitle>
-                                    <DialogDescription className="text-sm">Auto-populate and generate</DialogDescription>
-                                    {loadedDraft && (
-                                        <div className="flex items-center gap-2 mt-2">
-                                            <Badge variant="outline" className="ml-2 text-[8px] bg-amber-50 text-amber-700 border-amber-200">
-                                                <FileText className="h-3 w-3" />
-                                                <span className="font-medium">Draft in Progress</span>
-                                            </Badge>
-                                            <span className="text-xs text-muted-foreground">
-                                                Last saved {new Date(loadedDraft.created_at).toLocaleString()}
-                                            </span>
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={discardDraft}
-                                                disabled={isLoadingDraft}
-                                                className="h-6 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
-                                            >
-                                                <X className="h-3 w-3 mr-1" />
-                                                Discard Draft
-                                            </Button>
-                                        </div>
-                                    )}
+                            )}
 
-                                    {isLoadingDraft && (
-                                        <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
-                                            <Loader2 className="h-4 w-4 animate-spin" />
-                                            Loading draft...
+                            {isLoadingDraft && (
+                                <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Loading draft...
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                        <Label>{documentName}</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={refineAllFieldsWithAI}
+                            disabled={isGenerating}
+                            className="border-purple-200 text-purple-700 hover:bg-purple-50"
+                        >
+                            <Sparkles className="h-4 w-4 mr-2" />
+                            AI Refine
+                        </Button>
+                        {availableTemplates.length > 1 && (
+                            <Select value={selectedTemplate?.id} onValueChange={handleTemplateSelect}>
+                                <SelectTrigger className="w-64 h-9">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {availableTemplates.map(t => (
+                                        <SelectItem key={t.id} value={t.id}>{t.file_name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        )}
+                        <Button variant="ghost" size="icon" onClick={onClose}>
+                            <X className="h-5 w-5" />
+                        </Button>
+                    </div>
+                </div>
+                <div className="mt-2 space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium">
+                            {completionStats.filled}/{completionStats.total} Fields
+                            {loadedDraft && (
+                                <Badge variant="outline" className="ml-2 text-[8px] bg-amber-50 text-amber-700 border-amber-200">
+                                    DRAFT
+                                </Badge>
+                            )}
+                        </span>
+                        <span>{completionStats.percentage}%</span>
+                    </div>
+                    <Progress
+                        value={completionStats.percentage}
+                        className={`h-1.5 ${loadedDraft ? '[&>div]:bg-amber-500' : ''}`}
+                    />
+                </div>
+                {showConflictBanner && dataConflicts.length > 0 && loadedDraft && (
+                    <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <div className="flex items-start gap-3">
+                            <div className="flex-shrink-0 mt-0.5">
+                                <svg className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                            </div>
+                            <div className="flex-1">
+                                <h4 className="text-sm font-semibold text-amber-900 mb-1">
+                                    ⚠️ Data Changes Detected
+                                </h4>
+                                <p className="text-xs text-amber-800 mb-2">
+                                    The following fields have been updated in the database since this draft was saved:
+                                </p>
+                                <div className="space-y-1 mb-3">
+                                    {dataConflicts.slice(0, 3).map((conflict, idx) => (
+                                        <div key={idx} className="text-xs text-amber-700 font-mono bg-white/50 p-2 rounded">
+                                            <span className="font-semibold">{conflict.field}:</span>{' '}
+                                            <span className="line-through opacity-60">{String(conflict.draftValue).substring(0, 30)}</span>
+                                            {' → '}
+                                            <span className="font-semibold text-green-700">{String(conflict.liveValue).substring(0, 30)}</span>
+                                        </div>
+                                    ))}
+                                    {dataConflicts.length > 3 && (
+                                        <div className="text-xs text-amber-600 italic">
+                                            ...and {dataConflicts.length - 3} more field{dataConflicts.length - 3 > 1 ? 's' : ''}
                                         </div>
                                     )}
                                 </div>
-                            </div>
-                            <div className="flex items-center justify-between">
-                                <Label>{documentName}</Label>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={refineAllFieldsWithAI}
-                                    disabled={isGenerating}
-                                    className="border-purple-200 text-purple-700 hover:bg-purple-50"
-                                >
-                                    <Sparkles className="h-4 w-4 mr-2" />
-                                    AI Refine
-                                </Button>
-                                {availableTemplates.length > 1 && (
-                                    <Select value={selectedTemplate?.id} onValueChange={handleTemplateSelect}>
-                                        <SelectTrigger className="w-64 h-9">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {availableTemplates.map(t => (
-                                                <SelectItem key={t.id} value={t.id}>{t.file_name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                )}
-                                <Button variant="ghost" size="icon" onClick={onClose}>
-                                    <X className="h-5 w-5" />
-                                </Button>
-                            </div>
-                        </div>
-                        <div className="mt-2 space-y-1">
-                            <div className="flex items-center justify-between text-xs">
-                                <span className="font-medium">
-                                    {completionStats.filled}/{completionStats.total} Fields
-                                    {loadedDraft && (
-                                        <Badge variant="outline" className="ml-2 text-[8px] bg-amber-50 text-amber-700 border-amber-200">
-                                            DRAFT
-                                        </Badge>
-                                    )}
-                                </span>
-                                <span>{completionStats.percentage}%</span>
-                            </div>
-                            <Progress
-                                value={completionStats.percentage}
-                                className={`h-1.5 ${loadedDraft ? '[&>div]:bg-amber-500' : ''}`}
-                            />
-                        </div>
-                        {showConflictBanner && dataConflicts.length > 0 && loadedDraft && (
-                            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                                <div className="flex items-start gap-3">
-                                    <div className="flex-shrink-0 mt-0.5">
-                                        <svg className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                <div className="flex gap-2">
+                                    <Button
+                                        size="sm"
+                                        variant="default"
+                                        onClick={refreshWithLiveData}
+                                        className="h-7 text-xs bg-amber-600 hover:bg-amber-700"
+                                    >
+                                        <svg className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                         </svg>
-                                    </div>
-                                    <div className="flex-1">
-                                        <h4 className="text-sm font-semibold text-amber-900 mb-1">
-                                            ⚠️ Data Changes Detected
-                                        </h4>
-                                        <p className="text-xs text-amber-800 mb-2">
-                                            The following fields have been updated in the database since this draft was saved:
-                                        </p>
-                                        <div className="space-y-1 mb-3">
-                                            {dataConflicts.slice(0, 3).map((conflict, idx) => (
-                                                <div key={idx} className="text-xs text-amber-700 font-mono bg-white/50 p-2 rounded">
-                                                    <span className="font-semibold">{conflict.field}:</span>{' '}
-                                                    <span className="line-through opacity-60">{String(conflict.draftValue).substring(0, 30)}</span>
-                                                    {' → '}
-                                                    <span className="font-semibold text-green-700">{String(conflict.liveValue).substring(0, 30)}</span>
-                                                </div>
-                                            ))}
-                                            {dataConflicts.length > 3 && (
-                                                <div className="text-xs text-amber-600 italic">
-                                                    ...and {dataConflicts.length - 3} more field{dataConflicts.length - 3 > 1 ? 's' : ''}
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <Button
-                                                size="sm"
-                                                variant="default"
-                                                onClick={refreshWithLiveData}
-                                                className="h-7 text-xs bg-amber-600 hover:bg-amber-700"
-                                            >
-                                                <svg className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                                </svg>
-                                                Refresh with Latest Data
-                                            </Button>
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                onClick={() => setShowConflictBanner(false)}
-                                                className="h-7 text-xs text-amber-700 hover:bg-amber-100"
-                                            >
-                                                Keep Draft Values
-                                            </Button>
-                                        </div>
-                                    </div>
+                                        Refresh with Latest Data
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => setShowConflictBanner(false)}
+                                        className="h-7 text-xs text-amber-700 hover:bg-amber-100"
+                                    >
+                                        Keep Draft Values
+                                    </Button>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            <div className="flex items-center gap-2 px-6 py-2 border-b bg-white">
+                <View className="h-4 w-4 text-muted-foreground" />
+                <Label className="text-xs font-semibold mr-2">View Panels:</Label>
+                <div className="flex bg-slate-100 p-1 rounded-md">
+                    <Button
+                        variant={panelsVisible.form ? 'secondary' : 'ghost'}
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => togglePanel('form')}
+                    >
+                        <MousePointer2 className="h-3 w-3 mr-1" />
+                        Form Fields
+                    </Button>
+                    <Button
+                        variant={panelsVisible.preview ? 'secondary' : 'ghost'}
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => togglePanel('preview')}
+                    >
+                        <Layout className="h-3 w-3 mr-1" />
+                        Live Preview
+                    </Button>
+                    <Button
+                        variant={panelsVisible.source ? 'secondary' : 'ghost'}
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => togglePanel('source')}
+                    >
+                        <FileText className="h-3 w-3 mr-1" />
+                        Template Source
+                    </Button>
+                </div>
+            </div>
+
+            <div className="flex-1 overflow-hidden grid grid-cols-12 gap-0">
+                <ScrollArea className={`${panelClasses.form} border-r bg-white`}>
+                    <div className="p-6 space-y-8">
+                        {/* Section Header */}
+                        <div className="space-y-4">
+                            <h4 className="flex items-center gap-2 font-black text-blue-600 text-[10px] tracking-widest uppercase border-b pb-2">
+                                <Layout className="h-3 w-3" /> General Document Fields
+                            </h4>
+
+                            <div className="grid grid-cols-1 gap-y-1">
+                                {groupedPlaceholders.topLevel.map((p, idx) => {
+                                    let resolvedOptions = [];
+                                    if (p.master_field_ids?.length > 0) {
+                                        const mf = masterFields.get(parseInt(p.master_field_ids[0]));
+                                        if (mf?.type === 'select') {
+                                            resolvedOptions = getDependentDropdownOptions(p, mf);
+                                        }
+                                    }
+
+                                    return (
+                                        <div
+                                            key={`${p.id || p.name}-${p.name}`}
+                                            className="flex flex-row items-start gap-6 p-2 border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors"
+                                        >
+                                            {/* COLUMN 1: ID Badge + Right Aligned Label */}
+                                            <div className="w-1/3 flex items-start">
+                                                <Label className="font-bold text-slate-700 text-xs leading-relaxed uppercase tracking-tight">
+                                                    {p.name.replace(/_/g, ' ')}
+                                                </Label>
+                                            </div>
+
+                                            {/* COLUMN 2: Input Control */}
+                                            <div className="flex-1 min-w-0">
+                                                <PlaceholderInput
+                                                    placeholder={p}
+                                                    value={formData[p.name]}
+                                                    onChange={(val) => handleInputChange(p.name, val)}
+                                                    onSaveToDb={saveFieldToDatabase}
+                                                    masterFields={masterFields}
+                                                    resolvedOptions={resolvedOptions}
+                                                    onFileChange={(e) => handleFileChange(p.name, e)}
+                                                    imageStyles={imageStyles}
+                                                    onImageStyleChange={handleImageStyleChange}
+                                                    autoPopulated={autoPopulatedFields.get(p.name)}
+                                                    originalValue={originalFormData[p.name]}
+                                                    requirementJobQuestions={requirementJobQuestions}  // NEW
+                                                    task={task}                                         // NEW
+                                                    formData={formData}
+                                                    isArrayItem={false}
+                                                    onAIRefine={handleSingleFieldAIRefine}
+                                                    isAIRefining={refiningFields.has(p.name)}
+                                                    showLabel={false} // Hides the internal vertical label
+                                                    resolveSourceValue={resolveSpecificSourceValue}
+                                                />
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* Repeating Sections Logic */}
+                        {Object.keys(groupedPlaceholders.blocks).length > 0 && (
+                            <div className="space-y-4 pt-4 border-t">
+                                <h4 className="flex items-center gap-2 font-black text-blue-600 text-[10px] tracking-widest uppercase border-b pb-2">
+                                    <Layers className="h-3 w-3" /> Repeating Tables / Blocks
+                                </h4>
+                                {Object.keys(groupedPlaceholders.blocks).map(blockName => (
+                                    <div key={blockName}>
+                                        {renderArrayInputs(blockName, groupedPlaceholders.blocks[blockName])}
+                                    </div>
+                                ))}
                             </div>
                         )}
-                    </DialogHeader>
-
-                    <div className="flex items-center gap-2 px-6 py-2 border-b bg-white">
-                        <View className="h-4 w-4 text-muted-foreground" />
-                        <Label className="text-xs font-semibold mr-2">View Panels:</Label>
-                        <div className="flex bg-slate-100 p-1 rounded-md">
-                            <Button
-                                variant={panelsVisible.form ? 'secondary' : 'ghost'}
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => togglePanel('form')}
-                            >
-                                <MousePointer2 className="h-3 w-3 mr-1" />
-                                Form Fields
-                            </Button>
-                            <Button
-                                variant={panelsVisible.preview ? 'secondary' : 'ghost'}
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => togglePanel('preview')}
-                            >
-                                <Layout className="h-3 w-3 mr-1" />
-                                Live Preview
-                            </Button>
-                            <Button
-                                variant={panelsVisible.source ? 'secondary' : 'ghost'}
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => togglePanel('source')}
-                            >
-                                <FileText className="h-3 w-3 mr-1" />
-                                Template Source
-                            </Button>
-                        </div>
                     </div>
+                </ScrollArea>
 
-                    <div className="flex-1 overflow-hidden grid grid-cols-12 gap-0">
-                        <ScrollArea className={`${panelClasses.form} border-r bg-white`}>
-                            <div className="p-6 space-y-8">
-                                {/* Section Header */}
-                                <div className="space-y-4">
-                                    <h4 className="flex items-center gap-2 font-black text-blue-600 text-[10px] tracking-widest uppercase border-b pb-2">
-                                        <Layout className="h-3 w-3" /> General Document Fields
-                                    </h4>
+                <PreviewPanel
+                    previewContent={previewContent}
+                    isPreviewLoading={isPreviewLoading}
+                    panelClasses={cn(panelClasses.preview, "bg-slate-100/30 dark:bg-slate-900/30 backdrop-blur-sm")}
+                    EDITOR_PREVIEW_STYLES={EDITOR_PREVIEW_STYLES}
+                    isWordTemplate={isWordTemplate}
+                    docxBuffer={docxPreviewBuffer}
+                />
 
-                                    <div className="grid grid-cols-1 gap-y-1">
-                                        {groupedPlaceholders.topLevel.map((p, idx) => {
-                                            let resolvedOptions = [];
-                                            if (p.master_field_ids?.length > 0) {
-                                                const mf = masterFields.get(parseInt(p.master_field_ids[0]));
-                                                if (mf?.type === 'select') {
-                                                    resolvedOptions = getDependentDropdownOptions(p, mf);
-                                                }
-                                            }
-
-                                            return (
-                                                <div
-                                                    key={`${p.id || p.name}-${p.name}`}
-                                                    className="flex flex-row items-start gap-6 p-2 border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors"
-                                                >
-                                                    {/* COLUMN 1: ID Badge + Right Aligned Label */}
-                                                    <div className="w-1/3 flex items-start">
-                                                        <Label className="font-bold text-slate-700 text-xs leading-relaxed uppercase tracking-tight">
-                                                            {p.name.replace(/_/g, ' ')}
-                                                        </Label>
-                                                    </div>
-
-                                                    {/* COLUMN 2: Input Control */}
-                                                    <div className="flex-1 min-w-0">
-                                                        <PlaceholderInput
-                                                            placeholder={p}
-                                                            value={formData[p.name]}
-                                                            onChange={(val) => handleInputChange(p.name, val)}
-                                                            onSaveToDb={saveFieldToDatabase}
-                                                            masterFields={masterFields}
-                                                            resolvedOptions={resolvedOptions}
-                                                            onFileChange={(e) => handleFileChange(p.name, e)}
-                                                            imageStyles={imageStyles}
-                                                            onImageStyleChange={handleImageStyleChange}
-                                                            autoPopulated={autoPopulatedFields.get(p.name)}
-                                                            originalValue={originalFormData[p.name]}
-                                                            requirementJobQuestions={requirementJobQuestions}  // NEW
-                                                            task={task}                                         // NEW
-                                                            formData={formData}
-                                                            isArrayItem={false}
-                                                            onAIRefine={handleSingleFieldAIRefine}
-                                                            isAIRefining={refiningFields.has(p.name)}
-                                                            showLabel={false} // Hides the internal vertical label
-                                                            resolveSourceValue={resolveSpecificSourceValue}
-                                                        />
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
+                {/* RIGHT PANEL: Original Template Reference */}
+                <div className={`${panelClasses.source} bg-slate-50 overflow-y-auto transition-all duration-300`}>
+                    <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b flex justify-between">
+                        <span className="text-[10px] font-bold text-slate-500">ORIGINAL REFERENCE</span>
+                    </div>
+                    <div className="p-4">
+                        {isWordTemplate ? (
+                            docPreviewUrl ? (
+                                <iframe
+                                    src={docPreviewUrl}
+                                    className="w-full h-[calc(100vh-250px)] border-0 rounded shadow bg-white"
+                                    title="Original"
+                                    onError={() => setDocPreviewUrl(null)}
+                                />
+                            ) : (
+                                <div className="h-[300px] flex flex-col items-center justify-center text-slate-400 border-2 border-dashed rounded">
+                                    <FileText className="h-12 w-12 mb-2" />
+                                    <p className="text-xs">Preview unavailable</p>
                                 </div>
-
-                                {/* Repeating Sections Logic */}
-                                {Object.keys(groupedPlaceholders.blocks).length > 0 && (
-                                    <div className="space-y-4 pt-4 border-t">
-                                        <h4 className="flex items-center gap-2 font-black text-blue-600 text-[10px] tracking-widest uppercase border-b pb-2">
-                                            <Layers className="h-3 w-3" /> Repeating Tables / Blocks
-                                        </h4>
-                                        {Object.keys(groupedPlaceholders.blocks).map(blockName => (
-                                            <div key={blockName}>
-                                                {renderArrayInputs(blockName, groupedPlaceholders.blocks[blockName])}
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
+                            )
+                        ) : (
+                            <div className="bg-white rounded border p-6">
+                                <Code className="h-8 w-8 text-blue-500 mb-3" />
+                                <h3 className="font-semibold text-sm mb-2">HTML Template Source</h3>
+                                <p className="text-xs text-slate-600 italic">This template is HTML based. Use the Live Preview to see the output.</p>
                             </div>
-                        </ScrollArea>
-
-                        <PreviewPanel
-                            previewContent={previewContent}
-                            isPreviewLoading={isPreviewLoading}
-                            panelClasses={cn(panelClasses.preview, "bg-slate-100/30 dark:bg-slate-900/30 backdrop-blur-sm")}
-                            EDITOR_PREVIEW_STYLES={EDITOR_PREVIEW_STYLES}
-                            isWordTemplate={isWordTemplate}
-                            docxBuffer={docxPreviewBuffer}
-                        />
-
-                        {/* RIGHT PANEL: Original Template Reference */}
-                        <div className={`${panelClasses.source} bg-slate-50 overflow-y-auto transition-all duration-300`}>
-                            <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b flex justify-between">
-                                <span className="text-[10px] font-bold text-slate-500">ORIGINAL REFERENCE</span>
-                            </div>
-                            <div className="p-4">
-                                {isWordTemplate ? (
-                                    docPreviewUrl ? (
-                                        <iframe
-                                            src={docPreviewUrl}
-                                            className="w-full h-[calc(100vh-250px)] border-0 rounded shadow bg-white"
-                                            title="Original"
-                                            onError={() => setDocPreviewUrl(null)}
-                                        />
-                                    ) : (
-                                        <div className="h-[300px] flex flex-col items-center justify-center text-slate-400 border-2 border-dashed rounded">
-                                            <FileText className="h-12 w-12 mb-2" />
-                                            <p className="text-xs">Preview unavailable</p>
-                                        </div>
-                                    )
-                                ) : (
-                                    <div className="bg-white rounded border p-6">
-                                        <Code className="h-8 w-8 text-blue-500 mb-3" />
-                                        <h3 className="font-semibold text-sm mb-2">HTML Template Source</h3>
-                                        <p className="text-xs text-slate-600 italic">This template is HTML based. Use the Live Preview to see the output.</p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
+                        )}
                     </div>
-                    <DialogFooter className="border-t px-6 py-3 bg-white flex justify-between flex-shrink-0">
-                        <div className="text-[10px] flex items-center gap-1.5">
-                            <CheckCircle2 className="h-3 w-3 text-green-500" />
-                            {isWordTemplate ? 'Word + Images' : 'HTML'}
-                        </div>
-                        <div className='flex gap-2'>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={saveAsDraft}
-                                // ADD isPreviewLoading here
-                                disabled={isGenerating || isPreviewLoading}
-                            >
-                                {isGenerating || isPreviewLoading ? (
+                </div>
+            </div>
+            <div className="border-t px-6 py-3 bg-white flex justify-between flex-shrink-0">
+                <div className="text-[10px] flex items-center gap-1.5">
+                    <CheckCircle2 className="h-3 w-3 text-green-500" />
+                    {isWordTemplate ? 'Word + Images' : 'HTML'}
+                </div>
+                <div className='flex gap-2'>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={saveAsDraft}
+                        // ADD isPreviewLoading here
+                        disabled={isGenerating || isPreviewLoading}
+                    >
+                        {isGenerating || isPreviewLoading ? (
+                            <Loader2 className="animate-spin mr-2 h-4 w-4" />
+                        ) : (
+                            <Save className="mr-2 h-4 w-4" />
+                        )}
+                        {loadedDraft ? 'Update Draft' : 'Save as Draft'}
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button size="sm" disabled={isGenerating} className="bg-blue-600">
+                                {isGenerating ? (
                                     <Loader2 className="animate-spin mr-2 h-4 w-4" />
                                 ) : (
-                                    <Save className="mr-2 h-4 w-4" />
+                                    <Download className="mr-2 h-4 w-4" />
                                 )}
-                                {loadedDraft ? 'Update Draft' : 'Save as Draft'}
+                                Download
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button size="sm" disabled={isGenerating} className="bg-blue-600">
-                                        {isGenerating ? (
-                                            <Loader2 className="animate-spin mr-2 h-4 w-4" />
-                                        ) : (
-                                            <Download className="mr-2 h-4 w-4" />
-                                        )}
-                                        Download
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => generateAndDownload('word')}>
-                                        <FileText className="h-4 w-4 mr-2 text-blue-600" />
-                                        Word
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => generateAndDownload('pdf')}>
-                                        <FileText className="h-4 w-4 mr-2 text-red-600" />
-                                        PDF
-                                    </DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                        </div>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-        </>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => generateAndDownload('word')}>
+                                <FileText className="h-4 w-4 mr-2 text-blue-600" />
+                                Word
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => generateAndDownload('pdf')}>
+                                <FileText className="h-4 w-4 mr-2 text-red-600" />
+                                PDF
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                </div>
+            </div>
+        </div>
     );
 }

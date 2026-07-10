@@ -23,6 +23,7 @@ interface JobWorkspaceProps {
   initialTab?: string
   initialAutomationId?: string
   initialOpenSendDialog?: boolean
+  initialTemplateDocId?: string
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -59,7 +60,7 @@ const TAB_DEFINITIONS = [
   { value: "notes", label: "Notes", icon: MessageSquare },
 ]
 
-export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutomationId, initialOpenSendDialog }: JobWorkspaceProps) {
+export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutomationId, initialOpenSendDialog, initialTemplateDocId }: JobWorkspaceProps) {
   const { task, department, subdepartment, stages, individual } = data
   const [activeTab, setActiveTab] = useState(initialTab || "workflow")
 
@@ -192,7 +193,7 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
           <RequirementsTab data={data} onRefresh={onRefresh} autoOpenSendDialog={activeTab === "requirements" ? initialOpenSendDialog : undefined} />
         </div>
         <div className={cn("h-full overflow-y-auto", activeTab !== "templates" && "hidden")}>
-          <TemplatesTab data={data} />
+          <TemplatesTab data={data} targetDocumentId={activeTab === "templates" ? initialTemplateDocId : undefined} />
         </div>
         <div className={cn("h-full overflow-y-auto", activeTab !== "billing" && "hidden")}>
           <div className="p-6">

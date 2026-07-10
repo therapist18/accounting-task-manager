@@ -1281,7 +1281,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       }
       if (stageLink.tab === 'automation' && currentAutomationConfig) {
         return (
-          <Button variant="ghost" size="icon" className={cn("text-purple-600 hover:bg-purple-50", btnSizeClass)} title={`Open automation: ${currentAutomationConfig.docName}`} onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/tasks/${task.id}?tab=automation&automationId=${currentAutomationConfig.automationId}`); }}>
+          <Button variant="ghost" size="icon" className={cn("text-purple-600 hover:bg-purple-50", btnSizeClass)} title={`Open automation: ${currentAutomationConfig.docName}`} onClick={(e) => { e.stopPropagation(); window.open(`/dashboard/tasks/${task.id}?tab=automation&automationId=${currentAutomationConfig.automationId}`, '_blank', 'noopener,noreferrer'); }}>
             <Zap className={iconSizeClass} />
           </Button>
         );
@@ -1425,7 +1425,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
             )}
             <DialogFooter>
               <Button variant="outline" size="sm" onClick={() => setBillPreviewOpen(false)}>Close</Button>
-              <Button size="sm" onClick={() => router.push(`/dashboard/tasks/${task.id}?tab=billing`)}>
+              <Button size="sm" onClick={() => window.open(`/dashboard/tasks/${task.id}?tab=billing`, '_blank', 'noopener,noreferrer')}>
                 Open Billing Tab <ArrowUpRight className="h-3.5 w-3.5 ml-1" />
               </Button>
             </DialogFooter>

@@ -39,6 +39,7 @@ import { ExtractionPreviewDialog } from "./components/ExtractionPreviewDialog"
 import { ClassSelectionDialog } from "./components/ClassSelectionDialog"
 import { AssignOfficersDialog } from "./components/AssignOfficersDialog"
 import { SendRequirementsDialog } from "../tasks-requirements/components/SendRequirementsDialog"
+import { resolveAutomationFieldData } from "../tasks-requirements/utils/resolveAutomationFieldData"
 import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "./utils/workflowBundleHelpers"
 import { determineCurrentStage, getStageProgress } from './utils/stageUtils'
 import { calculateStageDate } from './utils/dateUtils'
@@ -149,6 +150,12 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [availableClasses, setAvailableClasses] = useState<any[]>([]);
   const [requirementsDialogTask, setRequirementsDialogTask] = useState<any>(null);
   const [automationWebdataMapState, setAutomationWebdataMapState] = useState<Record<string, { name: string; webdata: any[] }>>({});
+  const [requirementsDialogFieldData, setRequirementsDialogFieldData] = useState<{
+    jobFieldsRecord: Record<string, any>
+    fieldSourceDataCache: Record<string, Record<string, any>>
+    fieldMasterComputedCache: Record<string, any>
+    relationshipData: any[]
+  }>({ jobFieldsRecord: {}, fieldSourceDataCache: {}, fieldMasterComputedCache: {}, relationshipData: [] });
   const [tableRows, setTableRows] = useState([]);
   const [taskDependants, setTaskDependants] = useState<Map<string, any[]>>(new Map());
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
@@ -2845,7 +2852,11 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
 
   const handleOpenRequirements = useCallback(async (task: any) => {
     try {
-      // Fetch all class requirements and filter in JS (matches fetchJobWorkspaceData approach)
+      // The task already has requirements and job_level from fetchTasks
+      // We only need to fetch job_specific_questions from class requirements
+      // and build the automationWebdataMap from the task's requirements
+      
+      // Fetch class requirements to get job_specific_questions
       const { data: requirementsData, error } = await supabase
         .from('tm_class_requirements')
         .select('*');
@@ -2868,37 +2879,74 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         }
         return false;
       });
-
-      // Fetch automations for this job level
+      
+      // Build automationWebdataMap from the task's existing requirements
       const automationIds = new Set<string>();
-      (matchingReq?.requirements || []).forEach((req: any) => {
+      (task.requirements || []).forEach((req: any) => {
         if (req.web_automation?.automationId) automationIds.add(req.web_automation.automationId);
       });
-      
+
       let automationWebdataMap: Record<string, { name: string; webdata: any[] }> = {};
+      let autos: any[] = [];
       if (automationIds.size > 0) {
-        const { data: autos } = await supabase
+        const { data } = await supabase
           .from('tm_automations')
           .select('*')
           .in('id', Array.from(automationIds));
-        
-        (autos || []).forEach((auto: any) => {
+        autos = data || [];
+
+        autos.forEach((auto: any) => {
           if (auto.webdata?.length > 0) {
             automationWebdataMap[auto.id] = { name: auto.name || 'Unknown', webdata: auto.webdata };
           }
         });
       }
-      
-      // Enrich task with requirements data
+
+      // Same relationshipData shape as RequirementsTab.tsx (job-workspace) - keeps
+      // field resolution identical between both places SendRequirementsDialog opens from.
+      const participants = task.participants_details || [];
+      const applicant = task.applicant_details || {};
+      const companyParticipant = participants.find((p: any) => p.type === 'company');
+      const isApplicantDependant = applicant.role === 'dependant' || (Array.isArray(applicant.role) && applicant.role.includes('dependant'));
+      let principal = participants.find((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal'));
+      let dependants = participants
+        .filter((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant'))
+        .map((dep: any) => ({ id: dep.id, name: dep.name, relationship: dep.relationship || 'dependant' }));
+      if (isApplicantDependant) {
+        if (!dependants.find((d: any) => d.id === applicant.id)) {
+          dependants.push({ id: applicant.id || task?.individual_id, name: applicant.name, relationship: applicant.relationship || 'dependant' });
+        }
+      } else if (!principal) {
+        principal = { id: applicant.id || task?.individual_id, name: applicant.name, role: applicant.role };
+      }
+      const relationshipData = [{
+        company: { id: companyParticipant?.id || task?.company_id, name: companyParticipant?.name || task?.company_name || 'Company', type: 'company' },
+        principal: principal ? { id: principal.id, name: principal.name, role: principal.role } : null,
+        directors: participants
+          .filter((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? (p.role.includes('director') || p.role.includes('shareholder')) : (p.role === 'director' || p.role === 'shareholder')))
+          .map((d: any) => ({ id: d.id, name: d.name, role: d.role })),
+        dependants,
+        understudy: (() => {
+          const up = participants.find((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy'));
+          return up ? { id: up.id, name: up.name } : null;
+        })(),
+        sponsor: (() => {
+          const sp = participants.find((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor'));
+          return sp ? { id: sp.id, name: sp.name } : null;
+        })()
+      }];
+
+      const fieldData = await resolveAutomationFieldData(autos, relationshipData, task);
+
+      // Enrich task with job_specific_questions from class requirements, keep existing requirements and job_level
       const enrichedTask = {
         ...task,
-        requirements: matchingReq?.requirements || [],
-        job_level: matchingReq?.job_level || null,
         job_specific_questions: matchingReq?.job_specific_questions || [],
       };
-      
+
       setRequirementsDialogTask(enrichedTask);
       setAutomationWebdataMapState(automationWebdataMap);
+      setRequirementsDialogFieldData({ ...fieldData, relationshipData });
     } catch (err) {
       console.error('Error in handleOpenRequirements:', err);
       setRequirementsDialogTask(task);
@@ -4193,15 +4241,10 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
           automationWebdataMap={automationWebdataMapState}
           allCompanyDocuments={allCompanyDocuments}
           allIndividualDocuments={allIndividualDocuments}
-          fieldSourceDataCache={{}}
-          fieldMasterComputedCache={{}}
-          jobFieldsRecord={{}}
-          relationshipData={[{
-            company: requirementsDialogTask.participants_details?.find((p: any) => p.type === 'company') || (requirementsDialogTask.applicant_details?.type === 'company' ? requirementsDialogTask.applicant_details : null),
-            principal: requirementsDialogTask.participants_details?.find((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')),
-            directors: requirementsDialogTask.participants_details?.filter((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('director') : p.role === 'director')) || [],
-            dependants: requirementsDialogTask.participants_details?.filter((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant')) || [],
-          }]}
+          fieldSourceDataCache={requirementsDialogFieldData.fieldSourceDataCache}
+          fieldMasterComputedCache={requirementsDialogFieldData.fieldMasterComputedCache}
+          jobFieldsRecord={requirementsDialogFieldData.jobFieldsRecord}
+          relationshipData={requirementsDialogFieldData.relationshipData}
           kycDocsMap={kycDocuments}
         />
       )}
