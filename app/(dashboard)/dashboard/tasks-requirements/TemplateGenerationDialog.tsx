@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, View, MousePointer2, Layout, Code, ChevronDown, Database, Layers, Edit3 } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, MousePointer2, Layout, Code, ChevronDown, Database, Layers, Edit3, Users } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -272,7 +272,6 @@ const checkDocumentStatus = (
         const uploadDocId = upload[config.document_id_field];
         const uploadEntityId = upload[config.linking_variable];
         return uploadDocId === documentId && uploadEntityId === entityId;
-        return String(upload[config.linking_variable]) === String(entityId);
     });
     return documentFound;
 };
@@ -341,7 +340,7 @@ const resolveCompanyRegistryFallback = (normType, companyAssociates, entityOverr
     return (overrideId && candidates.find((c: any) => String(c.id) === String(overrideId))) || candidates[0];
 };
 
-  const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourceArray = null, entityIdMap = null, combinedCache = null, extractedData = null, companyData = null, companyAssociates = null, entityOverrides = null) => {
+const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourceArray = null, entityIdMap = null, combinedCache = null, extractedData = null, companyData = null, companyAssociates = null, entityOverrides = null) => {
     if (sourceArray && arrayIndex !== null && sourceArray[arrayIndex]) {
         return sourceArray[arrayIndex];
     }
@@ -423,7 +422,7 @@ const resolveCompanyRegistryFallback = (normType, companyAssociates, entityOverr
     if (normType && normType !== 'company') {
         const fallback = resolveCompanyRegistryFallback(normType, companyAssociates, entityOverrides);
         if (fallback) return fallback;
-        
+
         const fallbackLower = String(normType).toLowerCase().trim();
         const companyRegistries = ['registry_individuals', 'employment_data'];
         for (const reg of companyRegistries) {
@@ -1051,7 +1050,6 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
                 const result = processCurrentDateField({ ...placeholder, master_field_ids: [mid] }, masterFields);
                 if (isValidValue(result.value, placeholder.type)) {
                     if (logic === 'priority') {
-                        console.groupEnd();
                         return result;
                     }
                     collectedValues.push(String(result.value));
@@ -1080,7 +1078,6 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
             }
             if (isValidValue(result.value, placeholder.type)) {
                 if (logic === 'priority') {
-                    console.groupEnd();
                     return result;
                 }
                 collectedValues.push(String(result.value));
@@ -1092,7 +1089,7 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
         const result = processBooleanField(placeholder, targetEntity, combinedCache, masterFields, task);
         if (isValidValue(result.value, placeholder.type)) {
             const matchedLabel = result.value.find(v => v.checked)?.label;
-            if (logic === 'priority') { console.groupEnd(); return result; }
+            if (logic === 'priority') { return result; }
             collectedValues.push(result.value);
             sourceMetadata.push(result.source || 'Boolean (DB)');
         }
@@ -1101,7 +1098,7 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
     if (placeholder.type === 'conditional' && placeholder.conditions?.length > 0 && targetEntity) {
         const result = processConditionalField(placeholder, targetEntity, combinedCache, masterFields, computedFieldCache);
         if (isValidValue(result.value)) {
-            if (logic === 'priority') { console.groupEnd(); return result; }
+            if (logic === 'priority') { return result; }
             collectedValues.push(String(result.value));
             sourceMetadata.push(result.source || 'Conditional (DB)');
         }
@@ -1110,7 +1107,7 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
     if (placeholder.type === 'document_checklist' && placeholder.checklist_data_sources?.length > 0 && targetEntity) {
         const result = processDocumentChecklistField(placeholder, targetEntity, combinedCache);
         if (isValidValue(result.value)) {
-            if (logic === 'priority') { console.groupEnd(); return result; }
+            if (logic === 'priority') { return result; }
             collectedValues.push(String(result.value));
             sourceMetadata.push(result.source || 'Document Checklist');
         }
@@ -1119,7 +1116,7 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
     if (placeholder.type === 'image' && placeholder.source_table && placeholder.linking_variable && targetEntity) {
         const result = processImageField(placeholder, targetEntity, combinedCache, masterFields);
         if (isValidValue(result.value)) {
-            if (logic === 'priority') { console.groupEnd(); return result; }
+            if (logic === 'priority') { return result; }
             collectedValues.push(String(result.value));
             sourceMetadata.push(result.source || 'Image');
         }
@@ -1188,15 +1185,6 @@ const extractDisplayValue = (value) => {
     return String(value);
 };
 
-/**
- * Resolves every top-level (non-array-block) placeholder in a template against the given
- * data context, returning how many currently have a real value. Reuses the exact same
- * processPlaceholderValue logic the live editor uses (refreshWithLiveData follows the same
- * pattern), so the two can never disagree. Used for the completion-progress indicator in
- * RequirementsTab.tsx as well as by this dialog itself.
- * Array-block placeholders (repeated entries like directors/dependants tables) are not
- * expanded/counted individually here - only scalar top-level placeholders.
- */
 export function resolveTemplatePlaceholders(template: any, ctx: {
     relationshipData: any
     sourceDataCache: Record<string, any>
@@ -1252,52 +1240,43 @@ const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
     const currentSizeKey = Object.keys(sizeMap).find(key => sizeMap[key] === styles.maxWidth) || 'full-width';
 
     return (
-        <div className="space-y-3 pt-2 border-t mt-2">
-            <div className="flex items-center gap-2">
-                <ToggleGroup
-                    type="single"
-                    value={styles.textAlign || 'center'}
-                    onValueChange={(align) => align && onStyleChange('textAlign', align)}
-                    className="bg-background rounded-md border h-8"
-                >
-                    <ToggleGroupItem value="left" className="px-2"><AlignLeft className="h-3 w-3" /></ToggleGroupItem>
-                    <ToggleGroupItem value="center" className="px-2"><AlignCenter className="h-3 w-3" /></ToggleGroupItem>
-                    <ToggleGroupItem value="right" className="px-2"><AlignRight className="h-3 w-3" /></ToggleGroupItem>
-                </ToggleGroup>
-                <Select value={currentSizeKey} onValueChange={(size) => onStyleChange('maxWidth', sizeMap[size])}>
-                    <SelectTrigger className="w-14 h-8"><SelectValue><Expand className="h-3 w-3" /></SelectValue></SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="small">25%</SelectItem>
-                        <SelectItem value="medium">50%</SelectItem>
-                        <SelectItem value="large">75%</SelectItem>
-                        <SelectItem value="full-width">100%</SelectItem>
-                    </SelectContent>
-                </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-                <div>
-                    <Label className="text-[10px]">Width (px)</Label>
-                    <Input
-                        type="number"
-                        min="50"
-                        max="600"
-                        value={styles.imageWidth || 300}
-                        onChange={(e) => onStyleChange('imageWidth', parseInt(e.target.value) || 300)}
-                        className="h-7 text-xs"
-                    />
-                </div>
-                <div>
-                    <Label className="text-[10px]">Height (px)</Label>
-                    <Input
-                        type="number"
-                        min="50"
-                        max="600"
-                        value={styles.imageHeight || 200}
-                        onChange={(e) => onStyleChange('imageHeight', parseInt(e.target.value) || 200)}
-                        className="h-7 text-xs"
-                    />
-                </div>
-            </div>
+        <div className="flex items-center gap-1.5 pt-1 mt-1 border-t">
+            <ToggleGroup
+                type="single"
+                value={styles.textAlign || 'center'}
+                onValueChange={(align) => align && onStyleChange('textAlign', align)}
+                className="bg-background rounded border h-6"
+            >
+                <ToggleGroupItem value="left" className="px-1.5"><AlignLeft className="h-2.5 w-2.5" /></ToggleGroupItem>
+                <ToggleGroupItem value="center" className="px-1.5"><AlignCenter className="h-2.5 w-2.5" /></ToggleGroupItem>
+                <ToggleGroupItem value="right" className="px-1.5"><AlignRight className="h-2.5 w-2.5" /></ToggleGroupItem>
+            </ToggleGroup>
+            <Select value={currentSizeKey} onValueChange={(size) => onStyleChange('maxWidth', sizeMap[size])}>
+                <SelectTrigger className="w-12 h-6 text-[9px]"><SelectValue><Expand className="h-2.5 w-2.5" /></SelectValue></SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="small">25%</SelectItem>
+                    <SelectItem value="medium">50%</SelectItem>
+                    <SelectItem value="large">75%</SelectItem>
+                    <SelectItem value="full-width">100%</SelectItem>
+                </SelectContent>
+            </Select>
+            <Input
+                type="number"
+                min="50"
+                max="600"
+                value={styles.imageWidth || 300}
+                onChange={(e) => onStyleChange('imageWidth', parseInt(e.target.value) || 300)}
+                className="h-6 w-14 text-[9px] px-1.5"
+            />
+            <span className="text-[9px] text-slate-400">×</span>
+            <Input
+                type="number"
+                min="50"
+                max="600"
+                value={styles.imageHeight || 200}
+                onChange={(e) => onStyleChange('imageHeight', parseInt(e.target.value) || 200)}
+                className="h-6 w-14 text-[9px] px-1.5"
+            />
         </div>
     );
 };
@@ -1316,16 +1295,11 @@ const PlaceholderInput = ({
     resolveSourceValue, placeholder, value, originalValue, onChange, onSaveToDb, isSaving, onFileChange, imageStyles, onImageStyleChange, autoPopulated, isArrayItem = false, arrayIndex = null, blockName = null, onAIRefine, isAIRefining, resolvedOptions = [], masterFields, showLabel = true, targetEntity = null, task = null
 }) => {
     const fieldKey = isArrayItem ? `${blockName}_${arrayIndex}_${placeholder.name}` : placeholder.name;
-
-    // tracks which specific source (Table/ID) is being edited inline
     const [editingSource, setEditingSource] = useState(null);
     const [editValue, setEditValue] = useState("");
     const [isPopoverOpen, setIsPopoverOpen] = useState(false);
     const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
-    // For image placeholders driven by master_field_ids, the upload target (table +
-    // linking_variable + document type) lives on the master field's sources[], same place
-    // processImageField reads from - keeps "where we save" and "where we read" identical.
     const uploadTarget = useMemo(() => {
         if (placeholder.type !== 'image' || !placeholder.master_field_ids?.length || !masterFields || !targetEntity) return null;
         for (const mid of placeholder.master_field_ids) {
@@ -1628,32 +1602,30 @@ const PlaceholderInput = ({
             <div className="">
                 <FieldHeader />
                 {value ? (
-                    <div className={cn("relative border rounded overflow-hidden flex items-center justify-center bg-white", hasChanged && canSave ? "border-amber-400" : "")} style={{ maxWidth: `${imageWidth}px`, height: `${imageHeight}px` }}>
-                        <img src={value} className="max-h-full object-contain" style={{ textAlign: style.textAlign || 'center', maxWidth: style.maxWidth || '100%', width: `${imageWidth}px`, height: `${imageHeight}px` }} />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                            <Button size="sm" variant="secondary" className="h-7 text-[10px]" onClick={() => document.getElementById(`file-${fieldKey}`).click()}>Replace</Button>
+                    <div className={cn("relative border rounded overflow-hidden flex items-center justify-center bg-slate-50", hasChanged && canSave ? "border-amber-400" : "")} style={{ height: `${Math.min(imageHeight, 100)}px` }}>
+                        <img src={value} className="max-h-full object-contain" style={{ textAlign: style.textAlign || 'center', maxWidth: style.maxWidth || '100%', width: `${imageWidth}px` }} />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                            <Button size="sm" variant="secondary" className="h-6 text-[9px] px-2" onClick={() => document.getElementById(`file-${fieldKey}`).click()}>Replace</Button>
                             {uploadTarget && (
-                                <Button size="sm" variant="secondary" className="h-7 text-[10px]" onClick={() => setUploadModalOpen(true)}>Save to Profile</Button>
+                                <Button size="sm" variant="secondary" className="h-6 text-[9px] px-2" onClick={() => setUploadModalOpen(true)}>Save</Button>
                             )}
-                            <Button size="sm" variant="destructive" className="h-7 text-[10px]" onClick={() => onChange('')}>Remove</Button>
+                            <Button size="sm" variant="destructive" className="h-6 text-[9px] px-2" onClick={() => onChange('')}>Remove</Button>
                         </div>
                     </div>
                 ) : (
                     <button
                         type="button"
                         onClick={() => uploadTarget ? setUploadModalOpen(true) : document.getElementById(`file-${fieldKey}`).click()}
-                        className="w-full text-xs border-2 border-dashed border-blue-300 rounded-lg p-6 text-center cursor-pointer bg-blue-50/30 hover:bg-blue-50 hover:border-blue-400 transition-all group"
+                        className="w-full text-[10px] border border-dashed border-blue-300 rounded p-2 text-center cursor-pointer bg-blue-50/30 hover:bg-blue-50 hover:border-blue-400 transition-all group flex items-center gap-2"
                     >
-                        <div className="flex flex-col items-center gap-2">
-                            <div className="p-2 bg-blue-100 rounded-full group-hover:bg-blue-200 transition-colors">
-                                <FileUp className="h-5 w-5 text-blue-500" />
-                            </div>
-                            <div>
-                                <p className="font-semibold text-blue-700">{placeholder.display_value || placeholder.name}</p>
-                                <p className="text-[10px] text-blue-400 mt-0.5">
-                                    {uploadTarget ? 'Click to upload & save to their profile' : 'Click to upload an image'}
-                                </p>
-                            </div>
+                        <div className="p-1 bg-blue-100 rounded group-hover:bg-blue-200 transition-colors shrink-0">
+                            <FileUp className="h-3.5 w-3.5 text-blue-500" />
+                        </div>
+                        <div className="text-left min-w-0">
+                            <p className="font-semibold text-blue-700 truncate">{placeholder.display_value || placeholder.name}</p>
+                            <p className="text-blue-400">
+                                {uploadTarget ? 'Upload & save to profile' : 'Click to upload'}
+                            </p>
                         </div>
                     </button>
                 )}
@@ -1799,13 +1771,6 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
     const [requirementJobQuestions, setRequirementJobQuestions] = useState<any[]>([]);
     const [computedFieldCache, setComputedFieldCache] = useState<Record<string, any>>({});
     const [documentTablesReady, setDocumentTablesReady] = useState(false);
-
-    // Company registry fallback: when a placeholder's entity_type (director/shareholder/
-    // employee/etc.) has no matching task participant, we resolve against anyone associated
-    // with the task's company via registry_individuals.employment_data.associations instead
-    // - same source the Letters module's signatory picker reads from (useLetterData.ts).
-    // entityOverrides lets the user pick a different candidate than the default (first match)
-    // when a role resolves to more than one person for this company.
     const [companyAssociates, setCompanyAssociates] = useState<any[]>([]);
     const [entityOverrides, setEntityOverrides] = useState<Record<string, string>>({});
     const companyIdForAssociates = entityIdMap?.company || relationshipData?.company?.id || task?.company_id;
@@ -1950,9 +1915,6 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         return { topLevel, blocks };
     }, [selectedTemplate]);
 
-    // Roles (director/shareholder/employee/etc.) that resolve via the company registry
-    // fallback with more than one candidate - these need the user to pick who's meant,
-    // since e.g. {signatory_name}/{signatory_title} both depend on the same choice.
     const entitySelectionState = useMemo(() => {
         if (!selectedTemplate?.placeholders?.length || !companyAssociates.length) return null;
 
@@ -1985,21 +1947,25 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         };
 
         const entitySelectors: any[] = [];
+        const seenEntityTypes = new Set<string>();
         selectedTemplate.placeholders.forEach((p: any) => {
             const entityType = Array.isArray(p.entity_type) ? p.entity_type[0] : p.entity_type;
             const normType = entityType?.toLowerCase()?.trim();
             if (!normType || normType === 'company') return;
-            
+
             if (hasTaskParticipant(normType)) return;
-            
+
+            if (seenEntityTypes.has(normType)) return;
+            seenEntityTypes.add(normType);
+
             const getResolvedEntityTypes = (normType: string): string[] => {
                 return entityTypeMappings[normType.toLowerCase()] || [normType];
             };
-            
+
             const entityTypes = getResolvedEntityTypes(normType);
             let allCandidates: any[] = [];
             const matchedEntityTypes: string[] = [];
-            
+
             for (const et of entityTypes) {
                 const candidates = getCompanyRegistryCandidates(et, companyAssociates);
                 if (candidates.length > 0) {
@@ -2007,11 +1973,11 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                     matchedEntityTypes.push(et);
                 }
             }
-            
+
             const uniqueCandidates = allCandidates.filter((candidate, index, self) =>
                 self.findIndex(c => c.id === candidate.id) === index
             );
-            
+
             if (uniqueCandidates.length > 0) {
                 const allEntityTypes = [...new Set(matchedEntityTypes)];
                 const entitySelector = {
@@ -2022,7 +1988,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                     isMultiCandidate: uniqueCandidates.length > 1,
                     isSingleCandidate: uniqueCandidates.length === 1
                 };
-                
+
                 entitySelectors.push(entitySelector);
             }
         });
@@ -2030,7 +1996,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         if (entitySelectors.length === 0) return null;
 
         const hasMultiCandidateSelectors = entitySelectors.some(selector => selector.isMultiCandidate);
-        
+
         if (hasMultiCandidateSelectors) {
             return {
                 hasMultiCandidateSelectors: true,
@@ -2076,9 +2042,6 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
             }
         }
 
-        // Reusing the getTargetEntity logic we defined outside (make sure getTargetEntity is imported or available)
-        // If getTargetEntity is defined outside component, we pass args. If inside, we use it directly.
-        // Assuming getTargetEntity is defined at module level (top of file):
         const combinedCacheWithAdditional = { ...sourceDataCache, ...additionalCache };
         const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCacheWithAdditional, extractedData, companyData, companyAssociates, entityOverrides);
 
@@ -2092,8 +2055,6 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         if (type === 'db' && targetEntity) {
             const mf = masterFields.get(parseInt(id));
             if (!mf) return '';
-
-            // Construct a temp placeholder to use the existing resolver logic for a single field
             const tempPlaceholder = { ...placeholder, master_field_ids: [id] };
             const result = processTextField(tempPlaceholder, targetEntity, combinedCacheWithAdditional, masterFields, computedFieldCache);
             return result.value || '';
@@ -2104,10 +2065,8 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
     const panelClasses = useMemo(() => {
         const { form, preview, source } = panelsVisible;
-        // Auto-hide preview when no content available
         const hasPreviewContent = isWordTemplate ? !!docxPreviewBuffer : (previewContent && previewContent.trim().length > 0);
         const effectivePreview = preview && (hasPreviewContent || isPreviewLoading);
-        // Auto-hide source when not a word template (HTML has no original reference) or no docPreviewUrl
         const effectiveSource = source && isWordTemplate;
 
         const count = [form, effectivePreview, effectiveSource].filter(Boolean).length;
@@ -2520,6 +2479,12 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
             description: "Form updated with latest database values",
         });
     }, [formData, groupedPlaceholders, relationshipData, combinedCache, masterFields, entityIdMap, extractedData, companyData, companyAssociates, entityOverrides]);
+
+    const handleEntityOverrideChange = useCallback((entityType: string, selectedId: string) => {
+        const nextOverrides = { ...entityOverrides, [entityType]: selectedId };
+        setEntityOverrides(nextOverrides);
+        refreshWithLiveData(nextOverrides);
+    }, [entityOverrides, refreshWithLiveData]);
 
     const fetchMissingDataSources = useCallback(async () => {
         if (!isOpen || !selectedTemplate || !masterFields) return;
@@ -3175,7 +3140,6 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
                             if (value) {
                                 const chars = String(value).split('');
-                                console.groupEnd();
                                 return chars.map(char => ({
                                     [childFields[0]?.name || 'value']: char
                                 }));
@@ -3209,7 +3173,6 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
         if (sourceArray.length === 0) {
             console.warn(`⚠️ No source array found for block: ${blockName} (entity type: ${entityType})`);
-            console.groupEnd();
             return [];
         }
 
@@ -3243,11 +3206,9 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                     rowData[`__${field.name}_source`] = processed.source;
                 }
             });
-            console.groupEnd();
             return rowData;
         });
 
-        console.groupEnd();
         return result;
     }, [extractedData, personData, companyData, task]);
 
@@ -4960,184 +4921,185 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
     return (
         <div className="flex flex-col h-full w-full bg-white relative">
-            <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50 flex-shrink-0">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-blue-500 rounded-lg shadow-sm">
-                            <Wand2 className="h-5 w-5 text-white" />
-                        </div>
-                        <div>
-                            <h2 className="text-lg font-bold text-slate-800 leading-tight">{documentName}</h2>
-                            <p className="text-xs text-slate-500 mt-0.5">Auto-populate and generate template</p>
-                            {loadedDraft && (
-                                <div className="flex items-center gap-2 mt-2">
-                                    <Badge variant="outline" className="ml-2 text-[8px] bg-amber-50 text-amber-700 border-amber-200">
-                                        <FileText className="h-3 w-3" />
-                                        <span className="font-medium">Draft in Progress</span>
-                                    </Badge>
-                                    <span className="text-xs text-muted-foreground">
-                                        Last saved {new Date(loadedDraft.created_at).toLocaleString()}
-                                    </span>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={discardDraft}
-                                        disabled={isLoadingDraft}
-                                        className="h-6 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
-                                    >
-                                        <X className="h-3 w-3 mr-1" />
-                                        Discard Draft
-                                    </Button>
-                                </div>
-                            )}
-
-                            {isLoadingDraft && (
-                                <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    Loading draft...
-                                </div>
-                            )}
-                        </div>
+            {/* Compact Header Bar */}
+            <div className="px-4 py-2 border-b bg-gradient-to-r from-blue-50/80 to-indigo-50/80 flex-shrink-0">
+                <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-blue-500 rounded-md shadow-sm shrink-0">
+                        <Wand2 className="h-3.5 w-3.5 text-white" />
                     </div>
-                    <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-bold text-slate-800 truncate max-w-[200px] shrink-0">{documentName}</h2>
+                    {loadedDraft && (
+                        <Badge variant="outline" className="text-[7px] bg-amber-50 text-amber-700 border-amber-200 shrink-0 px-1.5 py-0">
+                            <FileText className="h-2.5 w-2.5 mr-0.5" />
+                            DRAFT
+                        </Badge>
+                    )}
+                    {isLoadingDraft && (
+                        <span className="flex items-center gap-1 text-[10px] text-muted-foreground shrink-0">
+                            <Loader2 className="h-3 w-3 animate-spin" /> Loading...
+                        </span>
+                    )}
+                    {/* Inline progress */}
+                    <div className="flex items-center gap-2 ml-2 min-w-0 flex-1">
+                        <span className="text-[10px] font-medium text-slate-500 whitespace-nowrap shrink-0">
+                            {completionStats.filled}/{completionStats.total}
+                        </span>
+                        <Progress
+                            value={completionStats.percentage}
+                            className={`h-1 flex-1 min-w-[60px] max-w-[120px] ${loadedDraft ? '[&>div]:bg-amber-500' : ''}`}
+                        />
+                        <span className="text-[10px] font-medium text-slate-400 shrink-0">{completionStats.percentage}%</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
                         <Button
                             variant="outline"
                             size="sm"
                             onClick={refineAllFieldsWithAI}
                             disabled={isGenerating}
-                            className="border-purple-200 text-purple-700 hover:bg-purple-50"
+                            className="h-7 text-[10px] border-purple-200 text-purple-700 hover:bg-purple-50 px-2"
                         >
-                            <Sparkles className="h-4 w-4 mr-2" />
+                            <Sparkles className="h-3 w-3 mr-1" />
                             AI Refine
                         </Button>
                         {availableTemplates.length > 1 && (
                             <Select value={selectedTemplate?.id} onValueChange={handleTemplateSelect}>
-                                <SelectTrigger className="w-64 h-9">
+                                <SelectTrigger className="w-44 h-7 text-[10px]">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
                                     {availableTemplates.map(t => (
-                                        <SelectItem key={t.id} value={t.id}>{t.file_name}</SelectItem>
+                                        <SelectItem key={t.id} value={t.id} className="text-[10px]">{t.file_name}</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
                         )}
-                        <Button variant="ghost" size="icon" onClick={onClose}>
-                            <X className="h-5 w-5" />
+                        <div className="flex bg-slate-100 p-0.5 rounded-md">
+                            <Button
+                                variant={panelsVisible.form ? 'secondary' : 'ghost'}
+                                size="sm"
+                                className="h-6 px-2 text-[10px]"
+                                onClick={() => togglePanel('form')}
+                            >
+                                <MousePointer2 className="h-2.5 w-2.5 mr-0.5" />
+                                Fields
+                            </Button>
+                            <Button
+                                variant={panelsVisible.preview ? 'secondary' : 'ghost'}
+                                size="sm"
+                                className="h-6 px-2 text-[10px]"
+                                onClick={() => togglePanel('preview')}
+                            >
+                                <Layout className="h-2.5 w-2.5 mr-0.5" />
+                                Preview
+                            </Button>
+                            <Button
+                                variant={panelsVisible.source ? 'secondary' : 'ghost'}
+                                size="sm"
+                                className="h-6 px-2 text-[10px]"
+                                onClick={() => togglePanel('source')}
+                            >
+                                <FileText className="h-2.5 w-2.5 mr-0.5" />
+                                Source
+                            </Button>
+                        </div>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+                            <X className="h-4 w-4" />
                         </Button>
                     </div>
                 </div>
-                <div className="mt-2 space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                        <span className="font-medium">
-                            {completionStats.filled}/{completionStats.total} Fields
-                            {loadedDraft && (
-                                <Badge variant="outline" className="ml-2 text-[8px] bg-amber-50 text-amber-700 border-amber-200">
-                                    DRAFT
-                                </Badge>
-                            )}
+                {loadedDraft && (
+                    <div className="flex items-center gap-2 mt-1 ml-6">
+                        <span className="text-[10px] text-muted-foreground">
+                            Saved {new Date(loadedDraft.created_at).toLocaleString()}
                         </span>
-                        <span>{completionStats.percentage}%</span>
-                    </div>
-                    <Progress
-                        value={completionStats.percentage}
-                        className={`h-1.5 ${loadedDraft ? '[&>div]:bg-amber-500' : ''}`}
-                    />
-                </div>
-                {showConflictBanner && dataConflicts.length > 0 && loadedDraft && (
-                    <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                        <div className="flex items-start gap-3">
-                            <div className="flex-shrink-0 mt-0.5">
-                                <svg className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                </svg>
-                            </div>
-                            <div className="flex-1">
-                                <h4 className="text-sm font-semibold text-amber-900 mb-1">
-                                    ⚠️ Data Changes Detected
-                                </h4>
-                                <p className="text-xs text-amber-800 mb-2">
-                                    The following fields have been updated in the database since this draft was saved:
-                                </p>
-                                <div className="space-y-1 mb-3">
-                                    {dataConflicts.slice(0, 3).map((conflict, idx) => (
-                                        <div key={idx} className="text-xs text-amber-700 font-mono bg-white/50 p-2 rounded">
-                                            <span className="font-semibold">{conflict.field}:</span>{' '}
-                                            <span className="line-through opacity-60">{String(conflict.draftValue).substring(0, 30)}</span>
-                                            {' → '}
-                                            <span className="font-semibold text-green-700">{String(conflict.liveValue).substring(0, 30)}</span>
-                                        </div>
-                                    ))}
-                                    {dataConflicts.length > 3 && (
-                                        <div className="text-xs text-amber-600 italic">
-                                            ...and {dataConflicts.length - 3} more field{dataConflicts.length - 3 > 1 ? 's' : ''}
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="flex gap-2">
-                                    <Button
-                                        size="sm"
-                                        variant="default"
-                                        onClick={refreshWithLiveData}
-                                        className="h-7 text-xs bg-amber-600 hover:bg-amber-700"
-                                    >
-                                        <svg className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                        </svg>
-                                        Refresh with Latest Data
-                                    </Button>
-                                    <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={() => setShowConflictBanner(false)}
-                                        className="h-7 text-xs text-amber-700 hover:bg-amber-100"
-                                    >
-                                        Keep Draft Values
-                                    </Button>
-                                </div>
-                            </div>
-                        </div>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={discardDraft}
+                            disabled={isLoadingDraft}
+                            className="h-5 text-[9px] text-red-600 hover:text-red-700 hover:bg-red-50 px-1.5"
+                        >
+                            <X className="h-2.5 w-2.5 mr-0.5" />
+                            Discard
+                        </Button>
                     </div>
                 )}
             </div>
 
-            <div className="flex items-center gap-2 px-6 py-2 border-b bg-white">
-                <View className="h-4 w-4 text-muted-foreground" />
-                <Label className="text-xs font-semibold mr-2">View Panels:</Label>
-                <div className="flex bg-slate-100 p-1 rounded-md">
-                    <Button
-                        variant={panelsVisible.form ? 'secondary' : 'ghost'}
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => togglePanel('form')}
-                    >
-                        <MousePointer2 className="h-3 w-3 mr-1" />
-                        Form Fields
-                    </Button>
-                    <Button
-                        variant={panelsVisible.preview ? 'secondary' : 'ghost'}
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => togglePanel('preview')}
-                    >
-                        <Layout className="h-3 w-3 mr-1" />
-                        Live Preview
-                    </Button>
-                    <Button
-                        variant={panelsVisible.source ? 'secondary' : 'ghost'}
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => togglePanel('source')}
-                    >
-                        <FileText className="h-3 w-3 mr-1" />
-                        Template Source
-                    </Button>
+            {showConflictBanner && dataConflicts.length > 0 && loadedDraft && (
+                <div className="px-4 py-1.5 bg-amber-50 border-b border-amber-200 flex items-center gap-3 text-[10px]">
+                    <svg className="h-3.5 w-3.5 text-amber-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <span className="font-semibold text-amber-800 shrink-0">Data Changed:</span>
+                    <span className="text-amber-700 truncate min-w-0">
+                        {dataConflicts.slice(0, 2).map(c => c.field).join(', ')}
+                        {dataConflicts.length > 2 && ` +${dataConflicts.length - 2} more`}
+                    </span>
+                    <div className="flex items-center gap-1 ml-auto shrink-0">
+                        <Button size="sm" variant="default" onClick={refreshWithLiveData} className="h-5 text-[9px] bg-amber-600 hover:bg-amber-700 px-2">
+                            Refresh
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setShowConflictBanner(false)} className="h-5 text-[9px] text-amber-700 hover:bg-amber-100 px-2">
+                            Keep Draft
+                        </Button>
+                    </div>
                 </div>
-            </div>
+            )}
 
             <div className="flex-1 overflow-hidden grid grid-cols-12 gap-0">
                 <ScrollArea className={`${panelClasses.form} border-r bg-white`}>
                     <div className="p-6 space-y-8">
+                        {/* Entity Override Selectors */}
+                        {entitySelectionState?.hasMultiCandidateSelectors && entitySelectionState.selectors.length > 0 && (
+                            <div className="space-y-4">
+                                <h4 className="flex items-center gap-2 font-black text-amber-600 text-[10px] tracking-widest uppercase border-b pb-2">
+                                    <Users className="h-3 w-3" /> Auto-Selected Signatories &amp; Roles
+                                </h4>
+                                <p className="text-[11px] text-slate-500 -mt-2">
+                                    Multiple people found for these roles. The first match was auto-selected. Click to change.
+                                </p>
+                                <div className="grid grid-cols-1 gap-y-3">
+                                    {entitySelectionState.selectors.map((selector) => {
+                                        const currentOverrideId = entityOverrides[selector.targetEntityType];
+                                        const selectedId = currentOverrideId || selector.candidates[0]?.id;
+                                        const selectedCandidate = selector.candidates.find(c => String(c.id) === String(selectedId)) || selector.candidates[0];
+                                        const isAutoSelected = !currentOverrideId;
+
+                                        return (
+                                            <div key={selector.targetEntityType} className="flex flex-row items-center gap-6 p-3 rounded-lg border border-amber-200 bg-amber-50/40">
+                                                <div className="w-1/3 flex flex-col">
+                                                    <Label className="font-bold text-slate-700 text-xs uppercase tracking-tight">
+                                                        {selector.targetEntityType.replace(/_/g, ' ')}
+                                                    </Label>
+                                                    <span className="text-[10px] text-slate-400 mt-0.5">
+                                                        {selector.candidates.length} candidate{selector.candidates.length !== 1 ? 's' : ''}
+                                                    </span>
+                                                </div>
+                                                <div className="flex-1 flex items-center gap-2">
+                                                    <SearchableSelect
+                                                        value={String(selectedId)}
+                                                        onValueChange={(val) => handleEntityOverrideChange(selector.targetEntityType, val)}
+                                                        options={selector.candidates.map((c: any) => ({
+                                                            label: c.full_name || `Individual #${c.id}`,
+                                                            value: String(c.id),
+                                                        }))}
+                                                        placeholder="Select a person..."
+                                                        buttonClassName="h-8 text-xs bg-white"
+                                                    />
+                                                    {isAutoSelected && (
+                                                        <Badge variant="outline" className="text-[8px] h-5 px-1.5 bg-blue-50 text-blue-600 border-blue-200 shrink-0 whitespace-nowrap">
+                                                            <Sparkles className="h-2.5 w-2.5 mr-0.5" /> Auto
+                                                        </Badge>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
                         {/* Section Header */}
                         <div className="space-y-4">
                             <h4 className="flex items-center gap-2 font-black text-blue-600 text-[10px] tracking-widest uppercase border-b pb-2">
@@ -5224,34 +5186,34 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
                 {/* RIGHT PANEL: Original Template Reference - only visible for Word templates */}
                 {isWordTemplate && (
-                <div className={`${panelClasses.source} bg-slate-50 overflow-y-auto transition-all duration-300`}>
-                    <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b flex justify-between">
-                        <span className="text-[10px] font-bold text-slate-500">ORIGINAL REFERENCE</span>
-                    </div>
-                    <div className="p-4">
-                        {isWordTemplate ? (
-                            docPreviewUrl ? (
-                                <iframe
-                                    src={docPreviewUrl}
-                                    className="w-full h-[calc(100vh-250px)] border-0 rounded shadow bg-white"
-                                    title="Original"
-                                    onError={() => setDocPreviewUrl(null)}
-                                />
+                    <div className={`${panelClasses.source} bg-slate-50 overflow-y-auto transition-all duration-300`}>
+                        <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b flex justify-between">
+                            <span className="text-[10px] font-bold text-slate-500">ORIGINAL REFERENCE</span>
+                        </div>
+                        <div className="p-4">
+                            {isWordTemplate ? (
+                                docPreviewUrl ? (
+                                    <iframe
+                                        src={docPreviewUrl}
+                                        className="w-full h-[calc(100vh-250px)] border-0 rounded shadow bg-white"
+                                        title="Original"
+                                        onError={() => setDocPreviewUrl(null)}
+                                    />
+                                ) : (
+                                    <div className="h-[300px] flex flex-col items-center justify-center text-slate-400 border-2 border-dashed rounded">
+                                        <FileText className="h-12 w-12 mb-2" />
+                                        <p className="text-xs">Preview unavailable</p>
+                                    </div>
+                                )
                             ) : (
-                                <div className="h-[300px] flex flex-col items-center justify-center text-slate-400 border-2 border-dashed rounded">
-                                    <FileText className="h-12 w-12 mb-2" />
-                                    <p className="text-xs">Preview unavailable</p>
+                                <div className="bg-white rounded border p-6">
+                                    <Code className="h-8 w-8 text-blue-500 mb-3" />
+                                    <h3 className="font-semibold text-sm mb-2">HTML Template Source</h3>
+                                    <p className="text-xs text-slate-600 italic">This template is HTML based. Use the Live Preview to see the output.</p>
                                 </div>
-                            )
-                        ) : (
-                            <div className="bg-white rounded border p-6">
-                                <Code className="h-8 w-8 text-blue-500 mb-3" />
-                                <h3 className="font-semibold text-sm mb-2">HTML Template Source</h3>
-                                <p className="text-xs text-slate-600 italic">This template is HTML based. Use the Live Preview to see the output.</p>
-                            </div>
-                        )}
+                            )}
+                        </div>
                     </div>
-                </div>
                 )}
             </div>
             <div className="border-t px-6 py-3 bg-white flex justify-between flex-shrink-0">
