@@ -1,0 +1,123 @@
+for the TemplateGenerationComponent - i had imporvised this scheme of handling signatories and other special placeholders- in that when a placholder is linked to an entity type not included in the participants_details - we associate that entity type with the company in the participants_details - then get the ids associated with the company under that entity_id 
+
+analyze the code and give feedback on this 
+
+it's mostly for handling things like signatories 
+C:\Users\Administrator\Documents\GitHub\accounting-task-manager\app\(dashboard)\dashboard\tasks-requirements\TemplateGenerationDialog.tsx
+C:\Users\Administrator\Documents\GitHub\accounting-task-manager\app\(dashboard)\dashboard\templates\document-template-manager\page.tsx
+
+
+do you think this is okay - or should i simply let the user select who they'll be using as a third_party for the task - for things associated with company indivuals eg the signatories ? at the enquiry level ???
+
+we treat it as job question or something
+
+no - one third party will be used through out 
+we can just put it in the participants_Details json 
+so let's update the enquiry dialog to include this  - we should get the individuals in the same manner we're getting them currecntly and use a searchable select so that the user can search and ensure we include their positions accoridngly 
+
+C:\Users\Administrator\Documents\GitHub\accounting-task-manager\app\(dashboard)\dashboard\tasks\components\EnquiryDialog.tsx
+
+
+
+FOR THE BANK TRANSFER CARD update it to handle any type of currency - not just the fixed ksh currency 
+
+then we have the terms and conditions displayed in the live preview - they should be editable in the left panel 
+
+then for the live preview - add settings for adjusting the sizes , zooming , fit into / fill /etc 
+
+https://zyszsqgdlrpnunkegipk.supabase.co/rest/v1/acc_portal_banks?select=*&company_id=eq.10
+[
+    {
+        "id": 309,
+        "bank_name": "",
+        "account_number": "0700505275",
+        "bank_currency": "KSH",
+        "branch": null,
+        "bank_verified": null,
+        "status": "missing",
+        "company_id": 10,
+        "company_name": null,
+        "prefix_account_no": null,
+        "to_take_action": null,
+        "client_email_with_bank": null,
+        "acc_password": null,
+        "created_at": "2025-12-05T12:28:02.679+00:00",
+        "updated_at": "2025-12-05T12:28:02.679+00:00",
+        "bank_prefix": null,
+        "type": "Mpesa",
+        "valid_to": "",
+        "company_prefix": null,
+        "valid_from": "01/01/2020",
+        "bank_id": 62,
+        "branch_id": null,
+        "rm_history": [],
+        "initial_opening_balance": null,
+        "account_type": "CA",
+        "company_branch": null,
+        "client_mobile_with_bank": null
+    },
+    {
+        "id": 8,
+        "bank_name": "I & M Bank Ltd",
+        "account_number": "01001565661250",
+        "bank_currency": "USD",
+        "branch": "ONE PARK BRANCH",
+        "bank_verified": null,
+        "status": "Active",
+        "company_id": 10,
+        "company_name": "BOOKSMART CONSULTANCY LIMITED",
+        "prefix_account_no": null,
+        "to_take_action": null,
+        "client_email_with_bank": null,
+        "acc_password": "156566",
+        "created_at": "2025-01-10T06:42:28.19+00:00",
+        "updated_at": "2026-06-03T08:22:56.644+00:00",
+        "bank_prefix": "I & M",
+        "type": "CA",
+        "valid_to": "2050-12-31",
+        "company_prefix": "BOOKSMART",
+        "valid_from": "2024-12-14",
+        "bank_id": 34,
+        "branch_id": 234,
+        "rm_history": [],
+        "initial_opening_balance": 100,
+        "account_type": "CA",
+        "company_branch": null,
+        "client_mobile_with_bank": null
+    },
+    {
+        "id": 7,
+        "bank_name": "I & M Bank Ltd",
+        "account_number": "01001565661210",
+        "bank_currency": "KSH",
+        "branch": "ONE PARK BRANCH",
+        "bank_verified": null,
+        "status": "Active",
+        "company_id": 10,
+        "company_name": "BOOKSMART CONSULTANCY LIMITED",
+        "prefix_account_no": null,
+        "to_take_action": null,
+        "client_email_with_bank": null,
+        "acc_password": "156566",
+        "created_at": "2025-01-10T06:42:28.19+00:00",
+        "updated_at": "2026-06-03T08:43:24.502+00:00",
+        "bank_prefix": "I & M",
+        "type": "CA",
+        "valid_to": "2050-12-31",
+        "company_prefix": "BOOKSMART",
+        "valid_from": "2017-07-06",
+        "bank_id": 34,
+        "branch_id": 234,
+        "rm_history": [],
+        "initial_opening_balance": 35000,
+        "account_type": "CA",
+        "company_branch": null,
+        "client_mobile_with_bank": null
+    }
+]
+the payment_details section should render the fecthed data and let the user select which one they want to use - remove the bank and mpesa cards sections - their functionality should get overidden by the select 
+
+update the summary and aditional settings section too - it should affect the live preview - the essense of the left panel of the invoice module is to act as a form - in which the user can manipuate the content of the live preview accoindgly 
+
+so for the payment and summary sections - they don't need much styling - they should be of form like design 
+C:\Users\Administrator\Documents\GitHub\bcl-invoice-generator\app\(auth)\invoices\page.tsx
