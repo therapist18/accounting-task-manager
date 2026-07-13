@@ -468,9 +468,9 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
     const bgColorClass = status.bgColor || 'bg-gray-50'
 
     return (
-      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-sm ${bgColorClass} ${borderColorClass}`}>
+      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${bgColorClass} ${borderColorClass}`}>
         <Icon className={`h-3.5 w-3.5 shrink-0 ${status.color}`} />
-        <span className={`text-[11px] font-bold uppercase tracking-wider ${status.color}`}>
+        <span className={`text-[11px] font-semibold uppercase tracking-wide ${status.color}`}>
           {status.label}
         </span>
       </div>
@@ -567,8 +567,8 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
         <div className="flex items-center gap-4">
           <h3 className="text-xl font-medium text-slate-800 tracking-tight">Requirements Matrix</h3>
           <div className="flex gap-2">
-            {lockState.processingLocked && <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-sm rounded-full px-3 py-0.5"><Lock className="h-3.5 w-3.5 mr-1.5" />Processing Locked</Badge>}
-            {lockState.issuanceLocked && <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-sm rounded-full px-3 py-0.5"><Lock className="h-3.5 w-3.5 mr-1.5" />Issuance Locked</Badge>}
+            {lockState.processingLocked && <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-xs font-medium rounded-full px-3 py-0.5"><Lock className="h-3.5 w-3.5 mr-1.5" />Processing Locked</Badge>}
+            {lockState.issuanceLocked && <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-xs font-medium rounded-full px-3 py-0.5"><Lock className="h-3.5 w-3.5 mr-1.5" />Issuance Locked</Badge>}
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -588,15 +588,15 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
         <Table className="border-separate border-spacing-0 min-w-full">
           <TableHeader className="sticky top-0 z-30 text-white">
             <TableRow className="bg-custom-blue hover:bg-custom-blue">
-              <TableHead className="w-12 border-b border-r sticky left-0 top-0 bg-custom-blue z-40 p-0 text-white shadow-sm">
-                <div className="flex items-center justify-center text-sm font-medium uppercase tracking-wider">#</div>
+              <TableHead className="w-12 border-b border-r border-white/15 sticky left-0 top-0 bg-custom-blue z-40 p-0 text-white">
+                <div className="flex items-center justify-center text-xs font-medium uppercase tracking-wider">#</div>
               </TableHead>
-              <TableHead className="w-[300px] border-b border-r sticky left-12 top-0 bg-custom-blue z-40 p-0 text-white shadow-sm">
+              <TableHead className="w-[300px] border-b border-r border-white/15 sticky left-12 top-0 bg-custom-blue z-40 p-0 text-white">
                 <div className="flex items-center px-6 text-[11px] font-medium uppercase tracking-wider">
                   Requirement
                 </div>
               </TableHead>
-              <TableHead className="max-w-[280px] border-b border-r sticky left-[348px] top-0 bg-custom-blue z-40 p-0 text-white shadow-sm">
+              <TableHead className="max-w-[280px] border-b border-r border-white/15 sticky left-[348px] top-0 bg-custom-blue z-40 p-0 text-white">
                 <div className="flex items-center px-6 text-[11px] font-medium uppercase tracking-wider">
                   Document Type
                 </div>
@@ -604,19 +604,19 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
               {columns.map(col => {
                 const { bgColor, Icon } = getEntityTypeConfig(col.type)
                 return (
-                  <TableHead key={col.id} className={cn("min-w-[340px] border-b border-r top-0 p-0 text-white align-top shadow-sm", bgColor)}>
+                  <TableHead key={col.id} className={cn("min-w-[340px] border-b border-r border-white/15 top-0 p-0 text-white align-top", bgColor)}>
                     <div className="flex flex-col h-full w-full">
-                      <div className="flex flex-col items-center justify-center gap-1.5 border-b border-white/20 flex-1 p-3">
+                      <div className="flex flex-col items-center justify-center gap-1.5 border-b border-white/15 flex-1 p-3">
                         <span className={cn("flex items-center gap-2 text-[11px] font-semibold tracking-wide")}>
                           <Icon className="h-4 w-4 opacity-90" />
                           <span className="truncate max-w-[200px]">{col.label}</span>
                         </span>
                         <span className="text-[10px] font-medium uppercase tracking-wide opacity-80">{col.subLabel}</span>
                       </div>
-                      <div className="grid grid-cols-[90px_120px_1fr] text-[10px] uppercase font-medium tracking-wider bg-black/20 shrink-0">
-                        <div className="py-2.5 px-2 text-center border-r border-white/10">Date</div>
-                        <div className="py-2.5 px-2 text-center border-r border-white/10">Status</div>
-                        <div className="py-2.5 px-2 text-center">Action</div>
+                      <div className="grid grid-cols-[90px_120px_1fr] text-[10px] uppercase font-medium tracking-wider bg-black/10 shrink-0">
+                        <div className="py-2 px-2 text-center border-r border-white/10 opacity-80">Date</div>
+                        <div className="py-2 px-2 text-center border-r border-white/10 opacity-80">Status</div>
+                        <div className="py-2 px-2 text-center opacity-80">Action</div>
                       </div>
                     </div>
                   </TableHead>
@@ -635,7 +635,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                 <React.Fragment key={cat}>
                   {/* Category Separator Row */}
                   <TableRow
-                    className="bg-slate-100/90 hover:bg-slate-200/90 cursor-pointer transition-colors"
+                    className="bg-slate-50 hover:bg-slate-100 cursor-pointer transition-colors"
                     onClick={() => setExpandedCategories(prev => {
                       const next = new Set(prev)
                       if (next.has(cat)) next.delete(cat)
@@ -645,13 +645,13 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                   >
                     <TableCell
                       colSpan={totalCols}
-                      className="py-3 px-5 border-b border-slate-300 sticky left-0 z-20 shadow-[inset_0_-1px_0_rgba(0,0,0,0.05)]"
+                      className="py-2.5 px-5 border-b border-slate-200 sticky left-0 z-20"
                     >
                       <div className="flex items-center gap-3">
-                        {isExpanded ? <ChevronDown className="h-5 w-5 text-slate-500" /> : <ChevronRight className="h-5 w-5 text-slate-500" />}
-                        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-800">{CATEGORY_LABELS[cat]}</span>
-                        <Badge variant="outline" className="text-sm font-medium rounded-full px-3 py-0.5 bg-white border-slate-300 text-slate-600 shadow-sm">{reqs.length}</Badge>
-                        {isLocked && <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-[10px] rounded-full px-2.5 py-0.5"><Lock className="h-3 w-3 mr-1" />Locked</Badge>}
+                        {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-700">{CATEGORY_LABELS[cat]}</span>
+                        <Badge variant="outline" className="text-xs font-medium rounded-full px-2.5 py-0.5 bg-white border-slate-200 text-slate-500">{reqs.length}</Badge>
+                        {isLocked && <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-[10px] rounded-full px-2.5 py-0.5"><Lock className="h-3 w-3 mr-1" />Locked</Badge>}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -669,18 +669,19 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                     
                     // ONLY render the template wand if explicitly marked hasTemplate === true
                     const hasTemplateExplicitly = req.hasTemplate === true || String(req.hasTemplate) === 'true'
+                    const stripeBg = idx % 2 === 1 ? "bg-slate-50/50" : "bg-white"
 
                     return (
                       <React.Fragment key={reqId}>
                         {/* Main Requirement Row */}
-                        <TableRow className="group hover:bg-slate-50/70 transition-colors">
-                          <TableCell className="w-12 py-0 px-0 text-center text-xs font-mono text-slate-400 border-b border-r sticky left-0 bg-white group-hover:bg-slate-50 z-10 align-middle">
+                        <TableRow className={cn("group transition-colors", stripeBg, "hover:bg-blue-50/30")}>
+                          <TableCell className={cn("w-12 py-0 px-0 text-center text-xs font-mono text-slate-400 border-b border-r border-slate-100 sticky left-0 z-10 align-middle", stripeBg, "group-hover:bg-blue-50/30")}>
                             <div className="flex items-center justify-center h-full font-medium">
                               {idx + 1}
                             </div>
                           </TableCell>
 
-                          <TableCell className="w-[400px] py-0 px-4 border-b border-r sticky left-12 bg-white group-hover:bg-slate-50 z-10 align-middle">
+                          <TableCell className={cn("w-[400px] py-0 px-4 border-b border-r border-slate-100 sticky left-12 z-10 align-middle", stripeBg, "group-hover:bg-blue-50/30")}>
                             <div className="flex items-center gap-3 h-full py-3 justify-between">
                               <div className="flex flex-col min-w-0">
                                 <div className="flex items-center gap-1.5">
@@ -691,7 +692,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                                     <button
                                       type="button"
                                       onClick={(e) => { e.stopPropagation(); window.open(`/dashboard/tasks/${task.id}?tab=automation&automationId=${req.web_automation.automationId}`, '_blank', 'noopener,noreferrer') }}
-                                      className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-purple-600 text-white shadow-sm ring-2 ring-purple-100 hover:bg-purple-700 hover:ring-purple-200 transition-colors shrink-0"
+                                      className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-purple-600 text-white ring-1 ring-purple-100 hover:bg-purple-700 hover:ring-purple-200 transition-colors shrink-0"
                                       title={`Generated by automation: ${req.web_automation.automationName || 'View automation'}`}
                                     >
                                       <Zap className="h-3 w-3" fill="currentColor" />
@@ -701,7 +702,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                                     <button
                                       type="button"
                                       onClick={(e) => { e.stopPropagation(); window.open(`/dashboard/tasks/${task.id}?tab=templates&documentId=${req.document_id || req.document_ids?.[0]}`, '_blank', 'noopener,noreferrer') }}
-                                      className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-blue-600 text-white shadow-sm ring-2 ring-blue-100 hover:bg-blue-700 hover:ring-blue-200 transition-colors shrink-0"
+                                      className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-blue-600 text-white ring-1 ring-blue-100 hover:bg-blue-700 hover:ring-blue-200 transition-colors shrink-0"
                                       title="Generate document from template"
                                     >
                                       <Wand2 className="h-3 w-3" />
@@ -736,7 +737,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                               </div>
                               {isComposite ? (
                                 <button
-                                  className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors shrink-0 shadow-sm border border-slate-200"
+                                  className="p-1.5 bg-slate-50 hover:bg-slate-200 rounded-full transition-colors shrink-0 border border-slate-200"
                                   onClick={() => toggleCompositeExpansion(reqId)}
                                   title="Expand document types"
                                 >
@@ -744,7 +745,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                                 </button>
                               ) : fieldsToRender.length > 0 ? (
                                 <button
-                                  className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors shrink-0 shadow-sm border border-slate-200"
+                                  className="p-1.5 bg-slate-50 hover:bg-slate-200 rounded-full transition-colors shrink-0 border border-slate-200"
                                   onClick={() => toggleRequirementExpansion(reqId)}
                                   title="Expand fields"
                                 >
@@ -757,7 +758,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                             </div>
                           </TableCell>
 
-                          <TableCell className="max-w-[280px] py-0 px-5 border-b border-r sticky left-[348px] bg-white group-hover:bg-slate-50 z-10 align-middle">
+                          <TableCell className={cn("max-w-[280px] py-0 px-5 border-b border-r border-slate-100 sticky left-[348px] z-10 align-middle", stripeBg, "group-hover:bg-blue-50/30")}>
                             <div className="flex flex-col gap-1.5 h-full justify-center py-3">
                               <span className="text-[11px] font-medium text-slate-700 line-clamp-2 leading-snug">
                                 {docTypeInfo?.primary?.display_name || docTypeInfo?.primary?.name || docName}
@@ -774,8 +775,8 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                             const statusKey = latestDocId ? `${task.id}-${latestDocId}-${col.type}-${col.id}` : null
                             const docStatus = statusKey ? documentStatusCache.get(statusKey) : null
 
-                            return (  
-                              <TableCell key={col.id} className="p-0 border-b border-r align-middle bg-white group-hover:bg-slate-50/70 transition-colors">
+                            return (
+                              <TableCell key={col.id} className={cn("p-0 border-b border-r border-slate-100 align-middle transition-colors", stripeBg, "group-hover:bg-blue-50/20")}>
                                 {status.type === "na" ? (
                                   <div className="flex h-full items-center justify-center p-3">
                                     <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wide italic">N/A</span>
@@ -790,14 +791,14 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                                         docStatus ? renderStatusBadge(docStatus) : <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
                                       ) : (
                                         isLocked ? (
-                                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-sm bg-red-50 border-red-200">
+                                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border bg-red-50 border-red-200">
                                             <AlertCircle className="h-3.5 w-3.5 text-red-500" />
-                                            <span className="text-[11px] font-bold uppercase text-red-600 tracking-wider">Missing</span>
+                                            <span className="text-[11px] font-semibold uppercase text-red-600 tracking-wide">Missing</span>
                                           </div>
                                         ) : (
-                                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-sm bg-amber-50 border-amber-200">
+                                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border bg-amber-50 border-amber-200">
                                             <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
-                                            <span className="text-[11px] font-bold uppercase text-amber-600 tracking-wider">Pending</span>
+                                            <span className="text-[11px] font-semibold uppercase text-amber-600 tracking-wide">Pending</span>
                                           </div>
                                         )
                                       )}
@@ -814,7 +815,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                                           <Button
                                             variant="outline"
                                             size="sm"
-                                            className="h-8 px-4 text-xs font-medium text-blue-600 bg-white hover:bg-blue-50 border-dashed border-blue-300 hover:border-blue-500 rounded-full shadow-sm transition-all"
+                                            className="h-8 px-4 text-xs font-medium text-blue-600 bg-white hover:bg-blue-50 border-dashed border-blue-300 hover:border-blue-500 rounded-full transition-all"
                                             onClick={() => {
                                               setSelectedDocForUpload({ ...req, person: { id: col.id, full_name: col.label } });
                                               setUploadModalOpen(true);
@@ -908,8 +909,8 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                                   {isApplicable ? (() => {
                                     const val = docData?.extracted_details?.[field.name]
                                     if (val === null || val === undefined) return <span className="text-sm text-slate-300 font-medium">-</span>
-                                    if (typeof val === 'object') return <span className="text-sm font-semibold text-slate-600 bg-white px-2.5 py-1 rounded border shadow-sm">{JSON.stringify(val)}</span>
-                                    return <span className="text-sm text-slate-800 font-medium bg-white px-3 py-1 rounded-md border shadow-sm inline-block max-w-full truncate">{String(val)}</span>
+                                    if (typeof val === 'object') return <span className="text-sm font-semibold text-slate-600 bg-white px-2.5 py-1 rounded border">{JSON.stringify(val)}</span>
+                                    return <span className="text-sm text-slate-800 font-medium bg-white px-3 py-1 rounded-md border inline-block max-w-full truncate">{String(val)}</span>
                                   })() : <span className="text-sm text-slate-300 font-medium">-</span>}
                                 </TableCell>
                               )
