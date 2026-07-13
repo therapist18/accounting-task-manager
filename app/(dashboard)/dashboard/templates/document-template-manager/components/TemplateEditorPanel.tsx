@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { RefreshCw, ChevronDown, FileText, Download, X, Loader2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { ENTITY_TYPES } from "@/lib/constants/entity-types";
 import TemplateEditor from "@/components/TemplateEditor";
 import { DocxLivePreview } from "@/components/DocxLivePreview";
@@ -22,6 +23,7 @@ interface TemplateEditorPanelProps {
   onEntityTypeToggle: (entityType: EntityType) => void;
   onClearEntityTypes: () => void;
   onDownloadTemplate?: () => void;
+  onToggleLetterhead?: () => void;
   isProcessing: boolean;
 }
 
@@ -36,6 +38,7 @@ export function TemplateEditorPanel({
   onEntityTypeToggle,
   onClearEntityTypes,
   onDownloadTemplate,
+  onToggleLetterhead,
   isProcessing
 }: TemplateEditorPanelProps) {
   if (!currentTemplate) {
@@ -63,7 +66,7 @@ export function TemplateEditorPanel({
         )}
       </CardHeader>
       <CardContent className="flex-1 flex flex-col gap-4">
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-4 gap-4">
           <div className="space-y-2">
             <Label htmlFor="template-name">Template Name</Label>
             <Input 
@@ -109,6 +112,20 @@ export function TemplateEditorPanel({
               </Button>
             </div>
           </div>
+          {currentTemplate.file_type === 'text/html' && (
+            <div className="space-y-2">
+              <Label>Use Letterhead</Label>
+              <div className="flex items-center gap-2 h-9">
+                <Switch
+                  checked={currentTemplate.use_letterhead ?? false}
+                  onCheckedChange={onToggleLetterhead}
+                />
+                <span className="text-xs text-muted-foreground">
+                  {currentTemplate.use_letterhead ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+            </div>
+          )}
           <div className="flex flex-col items-center justify-between">
             <Label htmlFor="entity-type"></Label>
             {currentTemplate.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && (

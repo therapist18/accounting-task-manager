@@ -22,6 +22,7 @@ export interface DocumentTemplate {
     class_id?: number | null;
     subclass_id?: number | null;
   }>;
+  use_letterhead?: boolean;
 }
 
 export interface JobField {

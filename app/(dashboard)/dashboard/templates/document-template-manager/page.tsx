@@ -429,6 +429,16 @@ export function DocumentTemplateManager({
     setTemplates(newTemplates);
   };
 
+  const handleToggleLetterhead = () => {
+    if (currentTemplateIndex === null) return;
+    const newTemplates = [...templates];
+    newTemplates[currentTemplateIndex] = {
+      ...newTemplates[currentTemplateIndex],
+      use_letterhead: !newTemplates[currentTemplateIndex].use_letterhead
+    };
+    setTemplates(newTemplates);
+  };
+
   const handleAddPlaceholder = () => {
     if (currentTemplateIndex === null) return;
     const newPlaceholder: Placeholder = {
@@ -513,7 +523,8 @@ export function DocumentTemplateManager({
               placeholders: template.placeholders,
               entity_types: template.entity_types,
               banks_associated: template.banks_associated,
-              job_level: template.job_level
+              job_level: template.job_level,
+              use_letterhead: template.use_letterhead ?? false
             });
 
           if (dbError) throw dbError;
@@ -530,7 +541,8 @@ export function DocumentTemplateManager({
               placeholders: template.placeholders,
               entity_types: template.entity_types,
               banks_associated: template.banks_associated,
-              job_level: template.job_level
+              job_level: template.job_level,
+              use_letterhead: template.use_letterhead ?? false
             });
 
           if (dbError) throw dbError;
@@ -550,7 +562,8 @@ export function DocumentTemplateManager({
               placeholders: template.placeholders,
               entity_types: template.entity_types,
               banks_associated: template.banks_associated,
-              job_level: template.job_level
+              job_level: template.job_level,
+              use_letterhead: template.use_letterhead ?? false
             });
 
           if (dbError) throw dbError;
@@ -581,12 +594,14 @@ export function DocumentTemplateManager({
       if (error) throw error;
 
       const url = URL.createObjectURL(fileData);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = currentTemplate.file_name || currentTemplate.file_path.split('/').pop() || 'template.docx';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      if (typeof document !== 'undefined') {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = currentTemplate.file_name || currentTemplate.file_path.split('/').pop() || 'template.docx';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
       URL.revokeObjectURL(url);
 
       toast({ title: 'Template downloaded successfully' });
@@ -676,6 +691,7 @@ export function DocumentTemplateManager({
               onEntityTypeToggle={handleEntityTypeToggle}
               onClearEntityTypes={handleClearEntityTypes}
               onDownloadTemplate={handleDownloadTemplate}
+              onToggleLetterhead={handleToggleLetterhead}
               isProcessing={isProcessing}
             />
           </div>

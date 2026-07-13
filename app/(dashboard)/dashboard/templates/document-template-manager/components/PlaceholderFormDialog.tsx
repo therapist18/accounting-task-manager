@@ -220,10 +220,11 @@ export function PlaceholderFormDialog({
                                 <CommandItem
                                   key={type.value}
                                   onSelect={() => {
+                                    const currentTypes = Array.isArray(placeholder.entity_type) ? placeholder.entity_type : [];
                                     onChange({
                                       entity_type: isSelected
-                                        ? placeholder.entity_type.filter(et => et !== type.value)
-                                        : [...(placeholder.entity_type || []), type.value]
+                                        ? currentTypes.filter(et => et !== type.value)
+                                        : [...currentTypes, type.value]
                                     });
                                   }}
                                 >

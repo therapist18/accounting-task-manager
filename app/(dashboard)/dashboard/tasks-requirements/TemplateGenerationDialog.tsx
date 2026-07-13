@@ -103,6 +103,30 @@ const formatDate = (date, formatStr) => {
         .replace('DD', day);
 };
 
+const replacePlaceholders = (html: string, renderData: Record<string, any> = {}): string => {
+    if (!html) return '';
+    return html.replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, (match, key) => {
+        const val = renderData[key];
+        if (val === undefined || val === null) return match;
+        return String(val);
+    });
+};
+
+const htmlToPlainText = (html: string, renderData: Record<string, any> = {}): string => {
+    if (!html) return '';
+    const content = replacePlaceholders(html, renderData);
+    const div = document.createElement('div');
+    div.innerHTML = content;
+    div.querySelectorAll('p, div').forEach(el => {
+        el.appendChild(document.createTextNode('\n'));
+    });
+    div.querySelectorAll('br').forEach(el => {
+        el.replaceWith(document.createTextNode('\n'));
+    });
+    const text = div.textContent || div.innerText || '';
+    return text.replace(/\n{3,}/g, '\n\n').trim();
+};
+
 const base64Parser = async (dataURL) => {
     try {
         if (!dataURL) return null;
@@ -3351,7 +3375,15 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
     const convertWordXmlToHtml = async (xml) => {
         const tempZip = new PizZip();
-        tempZip.file('word/document.xml', xml);
+
+        // Detect if this is header/footer XML (root is <w:hdr> or <w:ftr>) and wrap in <w:body>
+        const isHeaderFooter = /<w:(?:hdr|ftr)[\s>]/i.test(xml);
+        let documentXml = xml;
+        if (isHeaderFooter) {
+            documentXml = `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="wp14"><w:body>${xml}</w:body></w:document>`;
+        }
+
+        tempZip.file('word/document.xml', documentXml);
         tempZip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
             <Default Extension="xml" ContentType="application/xml"/>
@@ -3361,7 +3393,6 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
         const arrayBuffer = tempZip.generate({ type: 'arraybuffer' });
 
-        // Convert using Mammoth
         const result = await mammoth.convertToHtml({ arrayBuffer });
         return result.value;
     };
@@ -4589,6 +4620,119 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 docxTemplateBuffer.current = templateBuffer; // Cache it for next time
             }
 
+            // ── HTML template with letterhead: save draft using company .docx letterhead ──
+            if (!isWordTemplate && selectedTemplate?.use_letterhead) {
+                const companyId = companyIdForAssociates;
+                if (!companyId) {
+                    toast({ title: "Error", description: "No company associated with this task", variant: "destructive" });
+                    return;
+                }
+
+                const { data: letterheads, error: lhQueryError } = await supabase
+                    .from('acc_portal_company_letterheads')
+                    .select('id, file_path')
+                    .eq('company_id', companyId)
+                    .eq('is_default', true)
+                    .eq('is_active', true)
+                    .single();
+
+                if (lhQueryError || !letterheads) {
+                    toast({ title: "Error", description: "No default letterhead found for this company", variant: "destructive" });
+                    return;
+                }
+
+                const { data: fileData, error: downloadError } = await supabase.storage
+                    .from('letterheads')
+                    .download(letterheads.file_path);
+
+                if (downloadError || !fileData) {
+                    toast({ title: "Error", description: "Failed to download letterhead file", variant: "destructive" });
+                    return;
+                }
+
+                const lhBuffer = await fileData.arrayBuffer();
+                const letterheadZip = new PizZip(lhBuffer);
+
+                const renderData = await prepareRenderData(formData);
+                const htmlContent = selectedTemplate.content || '';
+                const replacedHtml = replacePlaceholders(htmlContent, renderData);
+
+                // Extract header/footer HTML from letterhead
+                let headerHtml = '';
+                let footerHtml = '';
+                for (let i = 1; i <= 3; i++) {
+                    const hFile = letterheadZip.file(`word/header${i}.xml`);
+                    if (hFile && !headerHtml) {
+                        headerHtml = await convertWordXmlToHtml(hFile.asText());
+                    }
+                    const fFile = letterheadZip.file(`word/footer${i}.xml`);
+                    if (fFile && !footerHtml) {
+                        footerHtml = await convertWordXmlToHtml(fFile.asText());
+                    }
+                }
+
+                const fullHtml = `${headerHtml}<div style="padding: 40px 20px;">${replacedHtml}</div>${footerHtml}`;
+                const html2pdf = (await import('html2pdf.js')).default;
+                const element = document.createElement('div');
+                element.innerHTML = fullHtml;
+                element.className = 'bg-white';
+                element.style.width = '800px';
+
+                const pdfBlob = await html2pdf()
+                    .set({
+                        margin: 10,
+                        html2canvas: { scale: 2, useCORS: true, logging: false },
+                        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                    })
+                    .from(element)
+                    .output('blob');
+
+                const timestamp = Date.now();
+                const entityFolder = activeEntityType === 'company' ? 'company-documents' : 'individuals-documents';
+                const path = `${entityFolder}/${config.entityId}/${kycDocId}_${timestamp}.pdf`;
+
+                const { data: storageData, error: storageError } = await supabase.storage
+                    .from('kyc-documents')
+                    .upload(path, pdfBlob, { cacheControl: '3600', upsert: true });
+                if (storageError) throw storageError;
+
+                const storagePath = storageData.path;
+                const fileType = 'application/pdf';
+                const draftMetadata = {
+                    formData, imageStyles, savedAt: new Date().toISOString(),
+                    templateId: selectedTemplate?.id, activeEntityType, activeEntityId
+                };
+                const payload = {
+                    [config.idColumn]: config.entityId,
+                    [config.docIdColumn]: kycDocId,
+                    file_path: storagePath, file_type: fileType,
+                    status: 'draft', metadata: draftMetadata,
+                    updated_at: new Date().toISOString()
+                };
+                const { data: existingDraft } = await supabase
+                    .from(config.table).select('id, file_path')
+                    .eq(config.docIdColumn, kycDocId)
+                    .eq(config.idColumn, config.entityId)
+                    .eq('status', 'draft').maybeSingle();
+
+                let result;
+                if (existingDraft) {
+                    if (existingDraft.file_path && storagePath && existingDraft.file_path !== storagePath) {
+                        await supabase.storage.from('kyc-documents').remove([existingDraft.file_path]);
+                    }
+                    result = await supabase.from(config.table).update(payload).eq('id', existingDraft.id).select();
+                } else {
+                    result = await supabase.from(config.table).insert([{ ...payload, created_at: new Date().toISOString() }]).select();
+                }
+                if (result.error) throw result.error;
+                setLoadedDraft(result.data[0]);
+                setOriginalFormData(JSON.parse(JSON.stringify(formData)));
+                setManuallyEditedFields(new Set());
+                toast({ title: "Draft Saved", description: "Progress has been stored successfully." });
+                if (refreshDocuments) await refreshDocuments();
+                return;
+            }
+
             let storagePath = null;
             let fileType = 'application/pdf';
             if (isWordTemplate && templateBuffer) {
@@ -4755,6 +4899,97 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 }
             });
             await Promise.all(imageConversionPromises);
+
+            // ── HTML template with letterhead: merge content into company .docx letterhead ──
+            if (!isWordTemplate && selectedTemplate?.use_letterhead) {
+                const companyId = companyIdForAssociates;
+                if (!companyId) {
+                    toast({ title: "Error", description: "No company associated with this task", variant: "destructive" });
+                    return;
+                }
+
+                const { data: letterheads, error: lhQueryError } = await supabase
+                    .from('acc_portal_company_letterheads')
+                    .select('id, file_path')
+                    .eq('company_id', companyId)
+                    .eq('is_default', true)
+                    .eq('is_active', true)
+                    .single();
+
+                if (lhQueryError || !letterheads) {
+                    toast({ title: "Error", description: "No default letterhead found for this company. Please set a default letterhead in the Letterheads page.", variant: "destructive" });
+                    return;
+                }
+
+                const { data: fileData, error: downloadError } = await supabase.storage
+                    .from('letterheads')
+                    .download(letterheads.file_path);
+
+                if (downloadError || !fileData) {
+                    toast({ title: "Error", description: "Failed to download letterhead file from storage", variant: "destructive" });
+                    return;
+                }
+
+                const lhBuffer = await fileData.arrayBuffer();
+                const letterheadZip = new PizZip(lhBuffer);
+
+                const htmlContent = selectedTemplate.content || '';
+
+                if (type === 'word') {
+                    // Use Docxtemplater with the letterhead .docx as base (preserves header/footer/logo)
+                    const plainText = htmlToPlainText(htmlContent, renderData);
+                    const doc = new Docxtemplater(letterheadZip, {
+                        linebreaks: true,
+                        paragraphLoop: true,
+                        nullGetter: () => ''
+                    });
+                    doc.render({
+                        ...renderData,
+                        BODY: plainText,
+                    });
+                    const docxBuffer = doc.getZip().generate({
+                        type: 'arraybuffer',
+                        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                    });
+                    const blob = new Blob([docxBuffer], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+                    saveAs(blob, `${fileName}.docx`);
+                    toast({ title: "Success", description: `Document downloaded as ${fileName}.docx` });
+                } else {
+                    // PDF: extract header/footer HTML from letterhead + replaced HTML body
+                    const replacedHtml = replacePlaceholders(htmlContent, renderData);
+                    let headerHtml = '';
+                    let footerHtml = '';
+                    for (let i = 1; i <= 3; i++) {
+                        const hFile = letterheadZip.file(`word/header${i}.xml`);
+                        if (hFile && !headerHtml) {
+                            headerHtml = await convertWordXmlToHtml(hFile.asText());
+                        }
+                        const fFile = letterheadZip.file(`word/footer${i}.xml`);
+                        if (fFile && !footerHtml) {
+                            footerHtml = await convertWordXmlToHtml(fFile.asText());
+                        }
+                    }
+
+                    const fullHtml = `${headerHtml}<div style="padding: 40px 20px;">${replacedHtml}</div>${footerHtml}`;
+                    const html2pdf = (await import('html2pdf.js')).default;
+                    const element = document.createElement('div');
+                    element.innerHTML = fullHtml;
+                    element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
+                    element.style.width = '800px';
+                    await html2pdf()
+                        .set({
+                            margin: 10,
+                            filename: `${fileName}.pdf`,
+                            image: { type: 'jpeg', quality: 0.98 },
+                            html2canvas: { scale: 2, useCORS: true, logging: false },
+                            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                        })
+                        .from(element)
+                        .save();
+                }
+                return;
+            }
+
             if (isWordTemplate) {
                 let templateBuffer = docxTemplateBuffer.current;
 
