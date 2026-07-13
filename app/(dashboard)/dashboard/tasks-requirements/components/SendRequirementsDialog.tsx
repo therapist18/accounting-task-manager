@@ -42,13 +42,13 @@ interface SendRequirementsDialogProps {
   selectedApplicant: string
   tasks: any[]
   taskClassRequirements: Record<string, any>
-  automationWebdataMap: Record<string, { name: string; webdata: any[] }>
+  automationWebdataMap?: Record<string, { name: string; webdata: any[] }>
   allCompanyDocuments: Record<string, any[]>
   allIndividualDocuments: Record<string, any[]>
   fieldSourceDataCache: Record<string, Record<string, any>>
   fieldMasterComputedCache: Record<string, any>
-  jobFieldsRecord: Record<string, any>
-  relationshipData: any[]
+  jobFieldsRecord?: Record<string, any>
+  relationshipData?: any[]
   kycDocsMap?: Map<string, any>
 }
 
@@ -58,13 +58,13 @@ export function SendRequirementsDialog({
   selectedApplicant,
   tasks,
   taskClassRequirements,
-  automationWebdataMap,
+  automationWebdataMap = {},
   allCompanyDocuments,
   allIndividualDocuments,
   fieldSourceDataCache = {},
   fieldMasterComputedCache = {},
-  jobFieldsRecord,
-  relationshipData,
+  jobFieldsRecord = {},
+  relationshipData = [],
   kycDocsMap = new Map()
 }: SendRequirementsDialogProps) {
   const [copied, setCopied] = useState(false)

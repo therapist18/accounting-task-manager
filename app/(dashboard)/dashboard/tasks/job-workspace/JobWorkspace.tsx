@@ -182,33 +182,6 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
             )
           })}
         </div>
-
-        {/* Action buttons on the right side of the tab bar */}
-        <div className="flex items-center gap-3 py-2">
-          {activeTab === "requirements" && (
-            <>
-              {clientDraft && clientDraft.status !== "applied" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9 px-4 text-xs font-semibold rounded-lg border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 shadow-sm flex items-center gap-1.5"
-                  onClick={() => setOpenReviewDraft(true)}
-                >
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  Review Draft
-                </Button>
-              )}
-              <Button
-                size="sm"
-                className="h-9 px-5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-sm flex items-center gap-1.5"
-                onClick={() => setOpenSendRequirements(true)}
-              >
-                <Send className="h-3.5 w-3.5" />
-                Send Requirements
-              </Button>
-            </>
-          )}
-        </div>
       </div>
 
       {/* Tab Content */}
