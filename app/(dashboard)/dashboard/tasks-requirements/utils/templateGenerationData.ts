@@ -1,26 +1,6 @@
 // @ts-nocheck
 import { supabase } from "@/lib/supabase/client"
 
-/**
- * Builds the data TemplateGenerationDialog needs to actually resolve placeholders and
- * render a real preview (masterFields, entityIdMap, sourceDataCache, personData,
- * companyData, relationshipData). Ported from RequirementsTableCombined.tsx's
- * handleOpenTemplateGenerator (and its supporting fetchDocumentTemplates / master-fields
- * fetch) so every place that opens the dialog builds this the same, working way.
- * RequirementsTableCombined.tsx itself is left untouched - this is a generalized copy,
- * not a shared import from it, since that function is entangled with that file's
- * multi-task column state.
- */
-
-/**
- * Same three signals RequirementsTable.tsx uses to classify a requirement as
- * template-eligible (RequirementsTable.tsx:649-656,951): the requirement's own
- * hasTemplate flag, the linked KYC document type's has_template flag, or the
- * document type being categorized as a Letter.
- */
-// acc_portal_kyc.has_template is stored as the text string "true"/"false" (not a real
-// boolean column) - a raw truthy check on the string "false" would incorrectly pass, so
-// this normalizes both real booleans and the text-string form before checking.
 const isTruthyFlag = (val: any): boolean => {
   if (typeof val === 'boolean') return val
   if (typeof val === 'string') return val.trim().toLowerCase() === 'true'
@@ -29,15 +9,6 @@ const isTruthyFlag = (val: any): boolean => {
 
 export function isTemplateEligible(req: any, docMeta: any): boolean {
   const eligible = isTruthyFlag(req?.hasTemplate) || isTruthyFlag(docMeta?.has_template) || docMeta?.main_category === 'Letters'
-  console.log('[isTemplateEligible]', {
-    reqId: req?.id,
-    reqName: req?.name,
-    reqHasTemplate: req?.hasTemplate,
-    docId: docMeta?.id,
-    docHasTemplate: docMeta?.has_template,
-    docMainCategory: docMeta?.main_category,
-    eligible,
-  })
   return eligible
 }
 
@@ -142,6 +113,18 @@ export async function buildTemplateGenerationInfo(
     sponsor: colType === 'sponsor' ? colId : (sponsorPart?.id || null),
   }
 
+  // Add third-party participants to entityIdMap (e.g. signatory, approver, witness)
+  const standardRoles = new Set(['company', 'director', 'principal', 'dependant', 'dependent', 'understudy', 'sponsor', 'officer', 'task_manager', 'task_assistant'])
+  task.participants_details?.forEach((p: any) => {
+    if (p.type !== 'individual' || !Array.isArray(p.role)) return
+    p.role.forEach((r: string) => {
+      if (standardRoles.has(r)) return
+      if (!entityIdMap[r]) {
+        entityIdMap[r] = p.id
+      }
+    })
+  })
+
   const templates = await fetchDocumentTemplates(docItem.document.id, task, jobLevel)
   if (!templates || templates.length === 0) return null
 
@@ -167,7 +150,7 @@ export async function buildTemplateGenerationInfo(
   }
 
   templates.forEach((template: any) => {
-    ;(template.placeholders || []).forEach((placeholder: any) => {
+    ; (template.placeholders || []).forEach((placeholder: any) => {
       const pids = placeholder.master_field_ids || (placeholder.master_field_id ? [placeholder.master_field_id] : [])
       pids.forEach((id: any) => {
         const masterField = masterFields.get(parseInt(id, 10))

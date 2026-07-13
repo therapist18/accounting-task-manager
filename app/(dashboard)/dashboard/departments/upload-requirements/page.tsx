@@ -122,6 +122,7 @@ interface JobQuestion {
   default_value?: string // Matches DB column name
   order: number
   linkedToColumn?: 'duration' | 'renewal_status' | null // Links question answer to direct task column
+  third_party_role?: string | null // When set, marks this boolean question as a third-party indicator
 }
 
 interface ReportDocDefault {
@@ -717,6 +718,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 <TableHead className="border-r">Applies To</TableHead>
                 <TableHead className="border-r">Linked Column</TableHead>
                 <TableHead className="border-r">Configuration</TableHead>
+                <TableHead className="border-r">Third Party</TableHead>
                 <TableHead className="w-16 text-center border-r">
                   {(() => {
                     const total = questionsToRender.length;
@@ -742,13 +744,13 @@ export default function UploadRequirements({ departments: initialDepartments }: 
             <TableBody>
               {Object.keys(grouped).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
+                  <TableCell colSpan={11} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
                     No matching questions found.
                   </TableCell>
                 </TableRow>
               ) : Object.entries(grouped).map(([category, items]) => (
                 <React.Fragment key={category}>
-                  <TableRow className="bg-slate-50 border-y"><TableCell colSpan={10} className="py-2 px-4 font-bold text-xs uppercase text-slate-500">{category}</TableCell></TableRow>
+                  <TableRow className="bg-slate-50 border-y"><TableCell colSpan={11} className="py-2 px-4 font-bold text-xs uppercase text-slate-500">{category}</TableCell></TableRow>
                   {items.map((q, idx) => {
                     const linkedMasterField = q.linked_field_id
                       ? masterFields.find(mf => String(mf.id) === String(q.linked_field_id))
@@ -806,6 +808,15 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                               {q.options.length} Manual Options
                             </span>
                           ) : <span className="text-slate-400">-</span>}
+                        </TableCell>
+                        <TableCell className="border-r text-xs text-center">
+                          {q.third_party_role ? (
+                            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[10px]">
+                              {q.third_party_role}
+                            </Badge>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
                         </TableCell>
                         <TableCell className="border-r text-center">
                           <Checkbox

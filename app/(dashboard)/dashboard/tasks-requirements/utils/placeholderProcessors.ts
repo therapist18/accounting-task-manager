@@ -66,6 +66,14 @@ export const getTargetEntity = (
     return relationshipData?.company || companyData || extractedData;
   }
 
+  // Generic third-party role lookup (e.g. signatory, approver, witness)
+  if (entityIdMap && entityIdMap[normType]) {
+    const tpId = entityIdMap[normType];
+    return relationshipData?.directors?.find((d: any) => String(d.id) === String(tpId)) ||
+      combinedCache?.['registry_individuals']?.[tpId] ||
+      combinedCache?.['employment_data']?.[tpId];
+  }
+
   const fallbackLower = String(normType).toLowerCase().trim();
   const companyRegistries = ['registry_individuals', 'employment_data'];
   for (const reg of companyRegistries) {

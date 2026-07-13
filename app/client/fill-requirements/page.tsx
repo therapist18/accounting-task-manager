@@ -8,12 +8,12 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { SearchableSelect } from "@/components/ui/searchable-select"
 import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
-  FileText, Loader2, Eye, Check, X, CheckCircle2, ShieldCheck, UploadCloud, 
-  AlertCircle, Briefcase, User, UserCheck, Users2, HeartPulse, LayoutDashboard,
-  Lock, Database, HelpCircle, Plus, Trash2,
-  FileCheck2, ChevronDown, ChevronRight, Calendar
+  FileText, Loader2, Eye, Check, X, ShieldCheck, UploadCloud, 
+  AlertCircle, LayoutDashboard, Lock, Database, HelpCircle, 
+  Plus, Trash2, ChevronDown, ChevronRight, Info, HelpCircle as QuestionMark,
+  ArrowUpDown, ArrowUp, ArrowDown
 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
@@ -27,29 +27,43 @@ import {
   fetchSourceDataImpl,
 } from "@/app/(dashboard)/dashboard/tasks/utils/fieldResolution"
 
-// -- Helper: Modern Input Styling --
-const fieldContainerClass = "group flex flex-col gap-1.5 p-4 rounded-xl border border-transparent transition-all duration-200 hover:bg-slate-50/50"
-const inputBaseClass = "rounded-lg font-medium transition-all duration-200 border w-full focus:ring-2 focus:ring-blue-100"
+// -- Modern Soft SaaS Styling --
+const inputBaseClass = "rounded-lg border-slate-300 w-full focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-slate-800 text-sm h-10 px-3 shadow-sm transition-all"
 const inputHighlightClass = (hasValue: boolean) => cn(
   inputBaseClass,
-  hasValue 
-    ? "bg-emerald-50/40 border-emerald-200 text-emerald-900 shadow-sm" 
-    : "bg-white border-slate-200"
+  hasValue ? "bg-emerald-50/40 border-emerald-200 text-emerald-900" : "bg-white"
 )
 
-// -- Components --
+const tableHeaderClass = "h-11 px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-500 bg-slate-50 border-b border-r border-slate-200 last:border-r-0 whitespace-nowrap select-none"
+const tableCellClass = "px-4 py-3 text-sm text-slate-700 align-top border-b border-r border-slate-200 last:border-r-0 group-hover:bg-slate-50/50 transition-colors"
 
-const SectionHeader = ({ icon: Icon, title, count, colorClass }: any) => (
-  <div className="flex items-center gap-3 mb-6 px-2">
-    <div className={cn("p-2 rounded-xl shadow-sm", colorClass)}>
-      <Icon className="h-5 w-5" />
-    </div>
-    <div>
-      <h2 className="text-lg font-bold text-slate-800 leading-none">{title}</h2>
-      {count !== undefined && <p className="text-[11px] font-bold text-slate-400 uppercase mt-1 tracking-wider">{count} Items Pending</p>}
-    </div>
-  </div>
-)
+const getAcceptedTypesLabel = (docIds: string[], requiredCount: number, meta: Record<string, any>) => {
+  const names = docIds.map(id => meta[id]?.display_name || meta[id]?.name || 'Document')
+  if (names.length <= 1) return names[0] || 'Document'
+  return requiredCount > 1 ? `Any ${requiredCount} of ${names.length}` : `Any 1 of ${names.length}`
+}
+
+const StatusIndicator = ({ isMissing, isFlagged }: { isMissing: boolean, isFlagged?: boolean }) => {
+  if (isFlagged) {
+    return (
+      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1.5 py-1">
+        <QuestionMark className="h-3.5 w-3.5" /> Missing / Not Sure
+      </Badge>
+    )
+  }
+  if (isMissing) {
+    return (
+      <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 gap-1.5 py-1">
+        <AlertCircle className="h-3.5 w-3.5" /> Required
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1.5 py-1">
+      <Check className="h-3.5 w-3.5" /> Provided
+    </Badge>
+  )
+}
 
 const getTaskName = (task: any) => {
   if (task?.applicant_details?.name) return task.applicant_details.name
@@ -73,20 +87,19 @@ function isValidExistingValue(val: any): boolean {
   return val !== null && val !== undefined && val !== "" && val !== "Missing"
 }
 
-const ENTITY_TYPE_CONFIG = {
-  company: { bgColor: "bg-slate-700", Icon: Briefcase, label: "Company" },
-  director: { bgColor: "bg-indigo-600", Icon: UserCheck, label: "Director" },
-  principal: { bgColor: "bg-blue-700", Icon: User, label: "Principal" },
-  dependant: { bgColor: "bg-blue-500", Icon: Users2, label: "Dependant" },
-  sponsor: { bgColor: "bg-emerald-600", Icon: HeartPulse, label: "Sponsor" },
-  understudy: { bgColor: "bg-cyan-600", Icon: User, label: "Understudy" },
-}
-
-function getEntityBadges(entityTypes: string[]) {
-  return (entityTypes || []).map((et: string) => {
-    const cfg = ENTITY_TYPE_CONFIG[et.toLowerCase()] || { bgColor: "bg-blue-600", Icon: User, label: et }
-    return { ...cfg, type: et }
-  })
+// Helpers to extract immigration values
+function getExtractedImmigrationValue(docId: string, extractedDetails: any, meta: any) {
+  if (!extractedDetails || !meta[docId]) return null;
+  const fields = meta[docId].fields || [];
+  // Look for field marked as isImmigrationField
+  const immiField = fields.find((f: any) => f.isImmigrationField || f.is_immigration_field);
+  if (immiField && extractedDetails[immiField.variableName]) {
+    return { label: getFieldLabel(immiField), value: extractedDetails[immiField.variableName] };
+  }
+  // Fallback
+  if (extractedDetails['document_number']) return { label: 'Doc Number', value: extractedDetails['document_number'] };
+  if (extractedDetails['passport_number']) return { label: 'Passport No', value: extractedDetails['passport_number'] };
+  return null;
 }
 
 interface ColDef {
@@ -99,6 +112,7 @@ interface ColDef {
 }
 
 function buildParticipantColumns(task: any): ColDef[] {
+  // Same logic as before, omitted for brevity but intact in execution...
   if (!task) return []
   const cols: ColDef[] = []
   const participants = task.participants_details || []
@@ -141,6 +155,7 @@ function buildParticipantColumns(task: any): ColDef[] {
 }
 
 function isApplicableToCol(entityTypes: string[], col: ColDef): boolean {
+  // Logic preserved
   if (!entityTypes || entityTypes.length === 0) return true
   const lowerEntityTypes = entityTypes.map((t: string) => String(t).toLowerCase())
   const colType = String(col.type).toLowerCase()
@@ -183,18 +198,25 @@ function ClientFillRequirementsContent() {
   const [arrayFieldValues, setArrayFieldValues] = useState<Record<string, Array<Record<string, any>>>>({})
   const [docFiles, setDocFiles] = useState<Record<string, Array<{ file: File, docId: string }>>>({})
   const [selectedReqDocs, setSelectedReqDocs] = useState<Record<string, string>>({})
+  const [missingDocs, setMissingDocs] = useState<Set<string>>(new Set()) // Tracks marked missing docs
+  
   const [submitted, setSubmitted] = useState(false)
   const [fieldSourceDataCache, setFieldSourceDataCache] = useState<Record<string, Record<string, any>>>({})
   const [fieldMasterComputedCache, setFieldMasterComputedCache] = useState<Record<string, any>>({})
   const [existingDocsByEntity, setExistingDocsByEntity] = useState<Record<string, any[]>>({})
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({})
+  
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
   const [previewDocument, setPreviewDocument] = useState<any>(null)
   const [expandedMultiDocs, setExpandedMultiDocs] = useState<Set<string>>(new Set())
   const prefilledRef = useRef(false)
 
-  // Logic remains identical to original for data integrity
+  // Sorting States
+  const [docSort, setDocSort] = useState<{key: string, dir: 'asc'|'desc'}>({ key: 'none', dir: 'asc' })
+
+  // Hooks and API calls (Preserved exactly as original to not break functionality)
   useEffect(() => {
+    // API logic preserved...
     const load = async () => {
       if (!taskId) { setLoading(false); return }
       try {
@@ -282,6 +304,7 @@ function ClientFillRequirementsContent() {
   }, [automations, jobFields])
 
   const relationshipData = useMemo(() => {
+    // Relationship data build preserved...
     if (!task) return null
     const participants = task.participants_details || []
     const applicant = task.applicant_details || {}
@@ -299,6 +322,7 @@ function ClientFillRequirementsContent() {
   }, [task])
 
   useEffect(() => {
+    // Field resolution execution...
     if (!task || !relationshipData || Object.keys(jobFields).length === 0 || Object.keys(automations).length === 0) return
     const loadAll = async () => {
       const mergedSource: Record<string, Record<string, any>> = {}
@@ -326,6 +350,7 @@ function ClientFillRequirementsContent() {
   }, [task, relationshipData, jobFields, automations])
 
   useEffect(() => {
+    // Pre-filling inputs...
     if (prefilledRef.current) return
     if (Object.keys(fieldSourceDataCache).length === 0 && Object.keys(fieldMasterComputedCache).length === 0) return
     if (clientFields.length === 0 && clientArrayFields.length === 0) return
@@ -343,6 +368,8 @@ function ClientFillRequirementsContent() {
       if (isValidExistingValue(val)) scalarDefaults[field.key] = val
     })
     if (Object.keys(scalarDefaults).length > 0) setFieldValues(prev => ({ ...scalarDefaults, ...prev }))
+    
+    // Arrays prefilling
     const arrayDefaults: Record<string, Array<Record<string, any>>> = {}
     clientArrayFields.forEach((field: any) => {
       const ctx = buildCtx(field.automationId, [field])
@@ -372,6 +399,7 @@ function ClientFillRequirementsContent() {
   }, [fieldSourceDataCache, fieldMasterComputedCache, clientFields, clientArrayFields, columns, jobFields, relationshipData, task])
 
   useEffect(() => {
+    // Existing documents retrieval...
     if (!task || columns.length === 0 || requirements.length === 0) return
     const loadExistingDocs = async () => {
       const docIdSet = new Set<string>()
@@ -437,6 +465,15 @@ function ClientFillRequirementsContent() {
     })
   }
 
+  const toggleMissingReq = (slotKey: string) => {
+    setMissingDocs(prev => {
+      const next = new Set(prev)
+      if (next.has(slotKey)) next.delete(slotKey)
+      else next.add(slotKey)
+      return next
+    })
+  }
+
   const requirementRows = useMemo(() => {
     const rows: any[] = []
     requirements.forEach((req: any) => {
@@ -449,8 +486,25 @@ function ClientFillRequirementsContent() {
         rows.push({ req, docIds, col, slotKey })
       })
     })
+
+    // Sort Logic
+    if (docSort.key !== 'none') {
+      rows.sort((a, b) => {
+        let valA = '', valB = ''
+        if (docSort.key === 'name') {
+          valA = a.req.name; valB = b.req.name;
+        } else if (docSort.key === 'applies') {
+          valA = a.col.label; valB = b.col.label;
+        }
+        return docSort.dir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA)
+      })
+    }
     return rows
-  }, [requirements, columns, task])
+  }, [requirements, columns, task, docSort])
+
+  const handleDocSort = (key: string) => {
+    setDocSort(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' })
+  }
 
   useEffect(() => {
     const nextSelected = { ...selectedReqDocs }
@@ -486,7 +540,8 @@ function ClientFillRequirementsContent() {
     requirementRows.forEach(row => {
       const requiredCount = getRequiredCount(row.req)
       const uploadedCount = (docFiles[row.slotKey] || []).length + getExistingDocsForReq(row.docIds, row.col).length
-      if (uploadedCount >= requiredCount) completed++
+      // If user marked it as missing, we count it as "completed" action-wise so they can submit
+      if (uploadedCount >= requiredCount || missingDocs.has(row.slotKey)) completed++
     })
     total += clientFields.length
     clientFields.forEach(f => { if (isValidExistingValue(fieldValues[f.key])) completed++ })
@@ -505,7 +560,7 @@ function ClientFillRequirementsContent() {
     total += questions.length
     questions.forEach(q => { if (isValidExistingValue(answers[q.id])) completed++ })
     return { total, completed, percent: total > 0 ? Math.round((completed / total) * 100) : 0 }
-  }, [requirementRows, docFiles, existingDocsByEntity, clientFields, fieldValues, clientArrayFields, arrayFieldValues, questions, answers, columns])
+  }, [requirementRows, docFiles, existingDocsByEntity, clientFields, fieldValues, clientArrayFields, arrayFieldValues, questions, answers, columns, missingDocs])
 
   const handleSubmit = async () => {
     if (!task || !taskId) return
@@ -548,19 +603,43 @@ function ClientFillRequirementsContent() {
         })
         if (rows.length > 0) { fieldMetadata[field.key] = { value: rows, automationId: field.automationId, automationName: field.automationName, variableName: field.variableName, fieldType: "array", entityTypes, arrayItems: (field.arrayItems || []).map((item: any) => ({ variableName: item.variableName, name: item.efnsDisplayName || item.name || item.variableName, masterFieldIds: item.linkedMasterFields || item.masterFieldIds || [] })), } }
       })
-      const draft = { status: "submitted", submitted_at: new Date().toISOString(), documents, questions: answers, fields: fieldMetadata }
+      const draft = { 
+        status: "submitted", 
+        submitted_at: new Date().toISOString(), 
+        documents, 
+        questions: answers, 
+        fields: fieldMetadata,
+        missing_requirements: Array.from(missingDocs) // Pass to backend
+      }
       const { error } = await supabase.from("tm_tasks").update({ registry_metadata: { ...(task.registry_metadata || {}), client_requirements_draft: draft }, updated_at: new Date().toISOString() }).eq("id", taskId)
       if (error) throw error
       setSubmitted(true); toast.success("Submitted successfully", { id: toastId })
     } catch { toast.error("Failed to submit", { id: toastId }) } finally { setSubmitting(false) }
   }
 
+  // Common Header Renderer for Tables
+  const SortableHeader = ({ label, sortKey, currentSort, onSort, className }: any) => {
+    return (
+      <div 
+        className={cn("flex items-center gap-1.5 cursor-pointer hover:text-slate-800 transition-colors w-max", className)}
+        onClick={() => onSort(sortKey)}
+      >
+        {label}
+        {currentSort.key === sortKey ? (
+          currentSort.dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+        ) : (
+          <ArrowUpDown className="h-3 w-3 text-slate-300" />
+        )}
+      </div>
+    )
+  }
+
   if (loading) {
     return (
-      <main className="fixed inset-0 bg-white flex items-center justify-center z-[100]">
+      <main className="fixed inset-0 bg-slate-50/50 flex items-center justify-center z-[100]">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
-          <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Loading Portal...</p>
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+          <p className="text-sm font-semibold text-slate-600 uppercase tracking-widest">Preparing Workspace</p>
         </div>
       </main>
     )
@@ -569,10 +648,10 @@ function ClientFillRequirementsContent() {
   if (!taskId || !task) {
     return (
       <main className="fixed inset-0 bg-slate-50 flex items-center justify-center p-6 z-[100]">
-        <div className="bg-white rounded-3xl shadow-xl p-10 max-w-sm w-full text-center border border-slate-200">
-          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-slate-900 mb-2">Link Invalid</h1>
-          <p className="text-slate-500 font-medium">This secure link is invalid or has expired.</p>
+        <div className="bg-white p-8 rounded-2xl max-w-sm w-full text-center border border-slate-200 shadow-xl">
+          <AlertCircle className="h-10 w-10 text-red-500 mx-auto mb-4" />
+          <h1 className="text-xl font-bold text-slate-900 mb-2">Link Invalid</h1>
+          <p className="text-sm text-slate-500">This secure connection is invalid or has expired.</p>
         </div>
       </main>
     )
@@ -581,336 +660,462 @@ function ClientFillRequirementsContent() {
   if (submitted) {
     return (
       <main className="fixed inset-0 bg-slate-50 flex items-center justify-center p-6 z-[100]">
-        <div className="bg-white rounded-3xl shadow-xl p-12 max-w-md w-full text-center space-y-5 border border-slate-200">
-          <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-2 border-4 border-emerald-100">
-            <CheckCircle2 className="h-10 w-10 text-emerald-600" />
+        <div className="bg-white p-10 rounded-2xl max-w-md w-full text-center border border-slate-200 shadow-xl">
+          <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Check className="h-8 w-8 text-emerald-600" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Successfully Submitted</h1>
-          <p className="text-slate-500 font-medium leading-relaxed">Your information has been securely transmitted and is now being reviewed by our team.</p>
+          <h1 className="text-2xl font-bold text-slate-900 mb-2">Submission Complete</h1>
+          <p className="text-sm text-slate-500 leading-relaxed">Your data has been securely transmitted. You may now close this window.</p>
         </div>
       </main>
     )
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 flex flex-col items-center p-0 sm:p-6 md:p-10">
-      <div className="w-full max-w-5xl bg-white sm:rounded-[2.5rem] shadow-xl shadow-slate-200/60 flex flex-col overflow-hidden border border-slate-200 relative">
+    <main className="min-h-screen bg-slate-50 flex flex-col font-sans">
+      
+      {/* Top Header */}
+      <header className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 z-40 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm h-auto md:h-[76px]">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <h1 className="text-lg font-bold text-slate-900 tracking-tight">Information Request</h1>
+            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] uppercase tracking-wider font-bold">Secure</Badge>
+          </div>
+          <p className="text-sm font-medium text-slate-500">{getTaskName(task)}</p>
+        </div>
+
+        <div className="flex items-center gap-6">
+          <div className="text-right">
+            <div className="text-sm font-bold text-slate-900">{stats.percent}% Complete</div>
+            <div className="text-[11px] text-slate-500 font-medium uppercase tracking-wider">{stats.completed} of {stats.total} items ready</div>
+          </div>
+          <div className="w-32 sm:w-48 h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+            <div className="h-full bg-blue-600 rounded-full transition-all duration-500 ease-in-out" style={{ width: `${stats.percent}%` }} />
+          </div>
+        </div>
+      </header>
+
+      <div className="flex-1 w-full max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-10">
         
-        {/* Simplified Header */}
-        <header className="px-6 py-8 sm:px-10 sm:py-10 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="flex items-center gap-5">
-            <div className="h-14 w-14 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-lg shrink-0">
-              <LayoutDashboard className="h-7 w-7" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <h1 className="text-2xl font-black text-slate-900 tracking-tight">Onboarding</h1>
-                <Badge variant="secondary" className="bg-blue-50 text-blue-700 border-blue-100 font-bold uppercase text-[10px]">Portal</Badge>
-              </div>
-              <div className="flex items-center gap-3 text-slate-500">
-                <span className="text-sm font-bold text-slate-700">{getTaskName(task)}</span>
-                <span className="h-1 w-1 rounded-full bg-slate-300" />
-                <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-                  <Lock className="h-3 w-3" /> Secure AES-256
-                </span>
-              </div>
-            </div>
+        {/* Instruction Banner */}
+        <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3 shadow-sm">
+          <Info className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+          <div className="text-sm text-blue-900 leading-relaxed">
+            <p className="font-bold mb-1">Please verify your information.</p>
+            We have pre-filled data and documents we already have on file. Please review them for accuracy and modify any incorrect fields. If you are missing a requested document, use the <strong>"Mark Missing"</strong> option in the actions menu, and our team will assist you.
           </div>
+        </div>
 
-          <div className="md:w-64 space-y-2">
-            <div className="flex justify-between items-end">
-              <span className="text-[10px] uppercase font-black text-slate-400 tracking-tighter">Progress</span>
-              <span className="text-sm font-black text-slate-900">{stats.percent}%</span>
+        {/* Documents Section */}
+        {requirementRows.length > 0 && (
+          <section className="relative">
+            {/* Sticky Section Header */}
+            <div className="sticky top-[76px] z-30 bg-white/95 backdrop-blur-md border border-slate-200 shadow-sm rounded-xl px-5 py-3 mb-4 flex items-center justify-between">
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <FileText className="h-5 w-5 text-blue-600" />
+                Required Documentation
+              </h2>
             </div>
-            <Progress value={stats.percent} className="h-2 bg-slate-100" indicatorClassName={stats.percent === 100 ? "bg-emerald-500" : "bg-blue-600"} />
-          </div>
-        </header>
+            
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <Table className="min-w-[1000px] w-full border-collapse">
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className={tableHeaderClass}>
+                        <SortableHeader label="Requirement" sortKey="name" currentSort={docSort} onSort={handleDocSort} />
+                      </TableHead>
+                      <TableHead className={tableHeaderClass}>
+                        <SortableHeader label="Applies To" sortKey="applies" currentSort={docSort} onSort={handleDocSort} />
+                      </TableHead>
+                      <TableHead className={tableHeaderClass}>Extracted Data</TableHead>
+                      <TableHead className={tableHeaderClass}>Files</TableHead>
+                      <TableHead className={tableHeaderClass}>Status</TableHead>
+                      <TableHead className={cn(tableHeaderClass, "text-right pr-4")}>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {requirementRows.map(({ req, docIds, col, slotKey }) => {
+                      const activeDocId = selectedReqDocs[slotKey] || docIds[0]
+                      const requiredCount = getRequiredCount(req)
+                      const existingDocs = getExistingDocsForReq(docIds, col)
+                      const existingDoc = existingDocs[0] || null
+                      const newFiles = docFiles[slotKey] || []
+                      const uploadedCount = existingDocs.length + newFiles.length
+                      const isReplacing = newFiles.length > 0
+                      const hasData = requiredCount > 1 ? uploadedCount >= requiredCount : (isReplacing || !!existingDoc)
+                      const isMultiDoc = docIds.length > 1
+                      const isExpanded = expandedMultiDocs.has(slotKey)
+                      const isFlagged = missingDocs.has(slotKey)
 
-        {/* Content Area */}
-        <div className="flex-1 px-6 py-8 sm:px-10 sm:py-12 space-y-16">
-          
-          {/* Documents Section */}
-          {requirementRows.length > 0 && (
-            <section>
-              <SectionHeader icon={FileText} title="Required Documents" count={requirementRows.length - stats.completed} colorClass="bg-blue-50 text-blue-600" />
-              <div className="grid grid-cols-1 gap-3">
-                {requirementRows.map(({ req, docIds, col, slotKey }) => {
-                  const activeDocId = selectedReqDocs[slotKey] || docIds[0]
-                  const requiredCount = getRequiredCount(req)
-                  const existingDocs = getExistingDocsForReq(docIds, col)
-                  const existingDoc = existingDocs[0] || null
-                  const newFiles = docFiles[slotKey] || []
-                  const uploadedCount = existingDocs.length + newFiles.length
-                  const isReplacing = newFiles.length > 0
-                  const hasData = requiredCount > 1 ? uploadedCount >= requiredCount : (isReplacing || !!existingDoc)
-                  const isMultiDoc = docIds.length > 1
-                  const isExpanded = expandedMultiDocs.has(slotKey)
+                      // Extract value
+                      const extracted = existingDoc ? getExtractedImmigrationValue(existingDoc.document_id, existingDoc.extracted_details, documentsMeta) : null;
 
-                  return (
-                    <div key={slotKey} className={cn(
-                      "group rounded-2xl border transition-all duration-300",
-                      hasData ? "bg-emerald-50/20 border-emerald-100" : "bg-white border-slate-200 hover:border-blue-200"
-                    )}>
-                      <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-5">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-sm font-bold text-slate-900">{req.name}</span>
-                            <Badge variant="outline" className="text-[9px] font-black uppercase px-1.5 py-0 border-slate-200 text-slate-500 bg-white">{col.label}</Badge>
-                          </div>
+                      return (
+                        <TableRow key={slotKey} className="group transition-none border-b border-slate-100">
                           
-                          {isMultiDoc && (
-                            <button onClick={() => toggleMultiDoc(slotKey)} className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-1">
-                              {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                              Accepted: {docIds.length} Types
-                            </button>
-                          )}
+                          {/* Requirement */}
+                          <TableCell className={tableCellClass}>
+                            <div className="font-semibold text-slate-900">{req.name}</div>
+                            <div className="text-[10px] font-medium text-slate-500 mt-1">
+                              {getAcceptedTypesLabel(docIds, requiredCount, documentsMeta)}
+                            </div>
+                            {isMultiDoc && (
+                                <div className="mt-1">
+                                  <button onClick={() => toggleMultiDoc(slotKey)} className="text-[10px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                                    {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                                    {isExpanded ? 'Hide types' : 'View accepted types'}
+                                  </button>
+                                  {isExpanded && (
+                                    <div className="mt-1.5 space-y-1 pl-2 border-l-2 border-blue-100">
+                                      {docIds.map((id) => (
+                                        <div key={id} className="text-[10px] text-slate-600">
+                                          • {documentsMeta[id]?.display_name || documentsMeta[id]?.name}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                          </TableCell>
+                          
+                          {/* Applies To */}
+                          <TableCell className={tableCellClass}>
+                            <Badge variant="secondary" className="bg-slate-100 text-slate-700 border-slate-200">
+                              {col.label}
+                            </Badge>
+                          </TableCell>
 
-                          {isExpanded && isMultiDoc && (
-                            <div className="mt-3 space-y-1 pl-2">
-                              {docIds.map((id) => (
-                                <div key={id} className={cn("text-[11px] font-medium p-1.5 rounded-lg border", activeDocId === id ? "bg-blue-50 border-blue-100 text-blue-700" : "text-slate-500 border-transparent")}>
-                                  {documentsMeta[id]?.display_name || documentsMeta[id]?.name}
+                          {/* Extracted Data */}
+                          <TableCell className={cn(tableCellClass, extracted && "bg-emerald-50/20")}>
+                            {extracted ? (
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-[10px] uppercase font-bold text-emerald-700 tracking-wider">{extracted.label}</span>
+                                <span className="text-sm font-medium text-slate-900">{extracted.value}</span>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400 italic">--</span>
+                            )}
+                          </TableCell>
+
+                          {/* Files */}
+                          <TableCell className={tableCellClass}>
+                            <div className="flex flex-col gap-2">
+                              {existingDocs.length === 0 && newFiles.length === 0 && (
+                                <span className="text-xs text-slate-400 italic">None</span>
+                              )}
+                              {existingDocs.map((d: any) => (
+                                <div key={d.id} className="flex items-center gap-2 group/file bg-slate-50 border border-slate-200 rounded px-2 py-1.5 w-max">
+                                  <FileText className="h-3.5 w-3.5 text-slate-400" />
+                                  <span className="text-xs font-medium text-slate-700 truncate max-w-[150px]" title={d.file_name}>{d.file_name}</span>
+                                  {!isReplacing && signedUrls[d.id] && (
+                                    <button onClick={() => handleDocPreview(docIds, col)} className="opacity-0 group-hover/file:opacity-100 text-[10px] font-bold text-blue-600 hover:text-blue-800 transition-opacity ml-2">
+                                      Preview
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                              {newFiles.map((f, i) => (
+                                <div key={i} className="flex items-center gap-2 group/file bg-blue-50 border border-blue-200 rounded px-2 py-1.5 w-max">
+                                  <UploadCloud className="h-3.5 w-3.5 text-blue-600" />
+                                  <span className="text-xs font-medium text-blue-900 truncate max-w-[150px]" title={f.file.name}>{f.file.name}</span>
+                                  <button onClick={() => setDocFiles(prev => { const next = {...prev}; next[slotKey] = next[slotKey].filter((_,idx)=>idx!==i); return next })} className="opacity-0 group-hover/file:opacity-100 text-[10px] font-bold text-red-600 hover:text-red-800 transition-opacity ml-2">
+                                    Remove
+                                  </button>
                                 </div>
                               ))}
                             </div>
-                          )}
+                          </TableCell>
+
+                          {/* Status */}
+                          <TableCell className={tableCellClass}>
+                            <StatusIndicator isMissing={!hasData} isFlagged={isFlagged} />
+                          </TableCell>
+
+                          {/* Actions */}
+                          <TableCell className={cn(tableCellClass, "text-right pr-4 align-middle")}>
+                            <div className="flex flex-col items-end gap-2">
+                              <div className="flex gap-2">
+                                <input type="file" className="hidden" ref={el => fileInputRefs.current[slotKey] = el} onChange={(e) => {
+                                  const file = e.target.files?.[0]; if (!file) return
+                                  setDocFiles(prev => ({ ...prev, [slotKey]: requiredCount > 1 ? [...(prev[slotKey] || []), { file, docId: activeDocId }] : [{ file, docId: activeDocId }] }))
+                                  if(missingDocs.has(slotKey)) toggleMissingReq(slotKey); // Unmark missing if uploaded
+                                  e.target.value = ''
+                                }}/>
+                                <Button 
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => fileInputRefs.current[slotKey]?.click()}
+                                  className={cn("h-8 rounded-lg shadow-sm border-slate-300 text-slate-700 hover:bg-slate-50", !hasData && !isFlagged && "bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:text-white")}
+                                >
+                                  {hasData ? 'Replace' : 'Upload File'}
+                                </Button>
+                              </div>
+                              <button 
+                                onClick={() => toggleMissingReq(slotKey)}
+                                className={cn("text-[10px] font-bold hover:underline", isFlagged ? "text-amber-600" : "text-slate-400 hover:text-slate-600")}
+                              >
+                                {isFlagged ? "Unmark Missing" : "Mark as Missing"}
+                              </button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Form Fields Section */}
+        {(clientFields.length > 0 || questions.length > 0) && (
+          <section className="relative">
+            <div className="sticky top-[76px] z-30 bg-white/95 backdrop-blur-md border border-slate-200 shadow-sm rounded-xl px-5 py-3 mb-4 flex items-center justify-between">
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Database className="h-5 w-5 text-indigo-600" />
+                Required Information
+              </h2>
+            </div>
+            
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <Table className="min-w-[800px] w-full border-collapse">
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className={tableHeaderClass}>Information Requested</TableHead>
+                      <TableHead className={cn(tableHeaderClass, "w-[400px]")}>Your Value</TableHead>
+                      <TableHead className={tableHeaderClass}>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    
+                    {/* Questions */}
+                    {questions.map((question: any) => {
+                      const hasValue = isValidExistingValue(answers[question.id])
+                      const options = (question.options || []).map((o:any) => typeof o === 'string' ? {value:o, label:o} : o)
+                      
+                      return (
+                        <TableRow key={`q-${question.id}`} className="group transition-none border-b border-slate-100">
+                          <TableCell className={tableCellClass}>
+                            <div className="font-semibold text-slate-900">{question.label} {question.required && <span className="text-red-500">*</span>}</div>
+                            {question.description && <div className="text-xs text-slate-500 mt-1">{question.description}</div>}
+                          </TableCell>
+
+                          <TableCell className={cn(tableCellClass, "bg-slate-50/30")}>
+                            {question.type === "textarea" ? (
+                              <Textarea
+                                value={answers[question.id] || ""}
+                                onChange={(e) => setAnswers(prev => ({ ...prev, [question.id]: e.target.value }))}
+                                className={cn("min-h-[80px]", inputHighlightClass(hasValue))}
+                              />
+                            ) : options.length > 0 ? (
+                              <SearchableSelect
+                                value={answers[question.id] || ""}
+                                onValueChange={(val) => setAnswers(prev => ({ ...prev, [question.id]: val }))}
+                                options={options}
+                                buttonClassName={inputHighlightClass(hasValue)}
+                              />
+                            ) : (
+                              <Input
+                                value={answers[question.id] || ""}
+                                onChange={(e) => setAnswers(prev => ({ ...prev, [question.id]: e.target.value }))}
+                                className={inputHighlightClass(hasValue)}
+                              />
+                            )}
+                          </TableCell>
+
+                          <TableCell className={tableCellClass}>
+                            <StatusIndicator isMissing={!hasValue} />
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+
+                    {/* Regular Fields */}
+                    {clientFields.map((field: any) => {
+                      const hasValue = isValidExistingValue(fieldValues[field.key])
+                      const entityLabel = (field.entityTypes || (field.entityType ? [field.entityType] : [])).join(", ") || "General"
+                      
+                      return (
+                        <TableRow key={`f-${field.key}`} className="group transition-none border-b border-slate-100">
+                          <TableCell className={tableCellClass}>
+                            <div className="font-semibold text-slate-900">{getFieldLabel(field)}</div>
+                            <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mt-1">{entityLabel}</div>
+                          </TableCell>
+
+                          <TableCell className={cn(tableCellClass, "bg-slate-50/30")}>
+                            {field.options && field.options.length > 0 ? (
+                              <SearchableSelect
+                                value={fieldValues[field.key] || ""}
+                                onValueChange={(val) => setFieldValues(prev => ({ ...prev, [field.key]: val }))}
+                                options={field.options}
+                                placeholder="Select value..."
+                                buttonClassName={inputHighlightClass(hasValue)}
+                              />
+                            ) : (
+                              <Input
+                                value={fieldValues[field.key] || ""}
+                                onChange={(e) => setFieldValues(prev => ({ ...prev, [field.key]: e.target.value }))}
+                                placeholder="Enter detail..."
+                                className={inputHighlightClass(hasValue)}
+                              />
+                            )}
+                          </TableCell>
+
+                          <TableCell className={tableCellClass}>
+                            <StatusIndicator isMissing={!hasValue} />
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Array Fields Section */}
+        {clientArrayFields.length > 0 && (
+          <section className="relative space-y-6">
+            <div className="sticky top-[76px] z-30 bg-white/95 backdrop-blur-md border border-slate-200 shadow-sm rounded-xl px-5 py-3 flex items-center justify-between">
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Database className="h-5 w-5 text-emerald-600" />
+                List Requirements
+              </h2>
+            </div>
+
+            {clientArrayFields.map((field: any) => {
+              const slots = (columns.filter(col => isApplicableToCol(field.entityTypes || [field.entityType], col))).length > 0 
+                ? columns.filter(col => isApplicableToCol(field.entityTypes || [field.entityType], col)) 
+                : [{ type: "individual", id: "primary", label: getTaskName(task), subLabel: "" } as ColDef]
+
+              return (
+                <div key={`arr-${field.key}`} className="space-y-4">
+                  <div className="px-2">
+                    <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide">{getFieldLabel(field)}</h3>
+                  </div>
+
+                  {slots.map(col => {
+                    const slotKey = `${field.key}::${col.id}`
+                    const rows = arrayFieldValues[slotKey] || []
+                    const hasData = rows.some(r => field.arrayItems.some((i: any) => isValidExistingValue(r[i.variableName])))
+
+                    return (
+                      <div key={slotKey} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                        <div className="flex justify-between items-center px-4 py-3 bg-slate-50 border-b border-slate-200">
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-bold text-slate-900">{col.label}</span>
+                            {col.subLabel && <Badge variant="outline" className="bg-white">{col.subLabel}</Badge>}
+                          </div>
+                          <StatusIndicator isMissing={!hasData} />
                         </div>
 
-                        <div className="flex items-center gap-2 self-end sm:self-center">
-                          {existingDoc && !isReplacing && signedUrls[existingDoc.id] && (
-                            <Button variant="ghost" size="sm" onClick={() => handleDocPreview(docIds, col)} className="h-9 text-blue-600 hover:bg-blue-50 font-bold px-3">
-                              <Eye className="h-4 w-4 mr-1.5" /> Preview
-                            </Button>
-                          )}
-                          <input type="file" className="hidden" ref={el => fileInputRefs.current[slotKey] = el} onChange={(e) => {
-                            const file = e.target.files?.[0]; if (!file) return
-                            setDocFiles(prev => ({ ...prev, [slotKey]: requiredCount > 1 ? [...(prev[slotKey] || []), { file, docId: activeDocId }] : [{ file, docId: activeDocId }] }))
-                            e.target.value = ''
-                          }}/>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left border-collapse min-w-[600px]">
+                            <thead>
+                              <tr>
+                                {field.arrayItems.map((item: any) => (
+                                  <th key={item.variableName} className={tableHeaderClass}>
+                                    {getFieldLabel(item)}
+                                  </th>
+                                ))}
+                                <th className={cn(tableHeaderClass, "w-16")}></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.map((row, rIdx) => (
+                                <tr key={row._id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
+                                  {field.arrayItems.map((item: any) => (
+                                    <td key={item.variableName} className={tableCellClass}>
+                                      {item.options?.length ? (
+                                        <SearchableSelect
+                                          value={row[item.variableName] || ""}
+                                          onValueChange={(v) => updateArrayFieldValue(slotKey, rIdx, item.variableName, v)}
+                                          options={item.options}
+                                          buttonClassName={cn("h-9 text-sm", inputHighlightClass(isValidExistingValue(row[item.variableName])))}
+                                        />
+                                      ) : (
+                                        <Input
+                                          value={row[item.variableName] || ""}
+                                          onChange={(e) => updateArrayFieldValue(slotKey, rIdx, item.variableName, e.target.value)}
+                                          className={cn("h-9 text-sm", inputHighlightClass(isValidExistingValue(row[item.variableName])))}
+                                        />
+                                      )}
+                                    </td>
+                                  ))}
+                                  <td className={cn(tableCellClass, "text-right align-middle")}>
+                                    {rows.length > 1 && (
+                                      <button 
+                                        onClick={() => removeArrayRow(slotKey, rIdx)} 
+                                        className="text-slate-400 hover:text-red-600 transition-colors p-1.5 rounded-md hover:bg-red-50"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div className="p-3 border-t border-slate-200 bg-slate-50/50">
                           <Button 
-                            onClick={() => fileInputRefs.current[slotKey]?.click()}
-                            className={cn("h-10 px-5 rounded-xl font-bold shadow-sm transition-all", hasData ? "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50" : "bg-blue-600 text-white hover:bg-blue-700")}
+                            onClick={() => addArrayRow(slotKey)} 
+                            variant="outline" 
+                            size="sm" 
+                            className="text-xs font-bold text-blue-600 border-blue-200 bg-white hover:bg-blue-50 h-8 rounded-lg"
                           >
-                            <UploadCloud className="h-4 w-4 mr-2" />
-                            {hasData ? 'Replace' : 'Upload'}
+                            <Plus className="h-3 w-3 mr-1.5" /> Add Row
                           </Button>
                         </div>
                       </div>
-
-                      {/* File feedback tray */}
-                      {(newFiles.length > 0 || existingDocs.length > 0) && (
-                        <div className="px-5 pb-4 pt-0 flex flex-wrap gap-2">
-                           {existingDocs.map((d: any) => (
-                             <div key={d.id} className="flex items-center gap-2 bg-white border border-emerald-100 px-3 py-1.5 rounded-lg">
-                               <FileCheck2 className="h-3 w-3 text-emerald-500" />
-                               <span className="text-[11px] font-bold text-slate-600 truncate max-w-[120px]">{d.file_name}</span>
-                             </div>
-                           ))}
-                           {newFiles.map((f, i) => (
-                             <div key={i} className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg">
-                               <CheckCircle2 className="h-3 w-3 text-blue-500" />
-                               <span className="text-[11px] font-bold text-blue-700 truncate max-w-[120px]">{f.file.name}</span>
-                               <button onClick={() => setDocFiles(prev => { const next = {...prev}; next[slotKey] = next[slotKey].filter((_,idx)=>idx!==i); return next })}><X className="h-3 w-3 text-blue-400 hover:text-red-500"/></button>
-                             </div>
-                           ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </section>
-          )}
-
-          {/* Profile Section - Refactored to Grid */}
-          {clientFields.length > 0 && (
-            <section>
-              <SectionHeader icon={Database} title="Profile Details" colorClass="bg-indigo-50 text-indigo-600" />
-              <div className="bg-white border border-slate-100 rounded-3xl p-2 sm:p-6 shadow-sm">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2">
-                  {clientFields.map((field: any) => {
-                    const hasValue = isValidExistingValue(fieldValues[field.key])
-                    const badges = getEntityBadges(field.entityTypes || (field.entityType ? [field.entityType] : []))
-                    return (
-                      <div key={field.key} className={fieldContainerClass}>
-                        <div className="flex items-center justify-between">
-                          <label className="text-[11px] font-black uppercase text-slate-400 tracking-tight">{getFieldLabel(field)}</label>
-                          <div className="flex gap-1">
-                            {badges.map((b:any) => <b.Icon key={b.type} className="h-3 w-3 text-slate-300" />)}
-                          </div>
-                        </div>
-                        {field.options && field.options.length > 0 ? (
-                          <SearchableSelect
-                            value={fieldValues[field.key] || ""}
-                            onValueChange={(val) => setFieldValues(prev => ({ ...prev, [field.key]: val }))}
-                            options={field.options}
-                            placeholder="Select..."
-                            buttonClassName={cn("h-11", inputHighlightClass(hasValue))}
-                          />
-                        ) : (
-                          <Input
-                            value={fieldValues[field.key] || ""}
-                            onChange={(e) => setFieldValues(prev => ({ ...prev, [field.key]: e.target.value }))}
-                            placeholder="Enter detail..."
-                            className={cn("h-11", inputHighlightClass(hasValue))}
-                          />
-                        )}
-                      </div>
                     )
                   })}
                 </div>
-              </div>
-            </section>
-          )}
-
-          {/* Dynamic Arrays Section */}
-          {clientArrayFields.length > 0 && (
-            <section className="space-y-10">
-              {clientArrayFields.map((field: any) => {
-                const slots = (columns.filter(col => isApplicableToCol(field.entityTypes || [field.entityType], col))).length > 0 
-                  ? columns.filter(col => isApplicableToCol(field.entityTypes || [field.entityType], col)) 
-                  : [{ type: "individual", id: "primary", label: getTaskName(task), subLabel: "" } as ColDef]
-                
-                return (
-                  <div key={field.key} className="space-y-4">
-                    <SectionHeader icon={Users2} title={getFieldLabel(field)} colorClass="bg-slate-100 text-slate-600" />
-                    {slots.map((col: ColDef) => {
-                      const slotKey = `${field.key}::${col.id}`
-                      const rows = arrayFieldValues[slotKey] || []
-                      return (
-                        <div key={slotKey} className="bg-slate-50/50 border border-slate-200 rounded-3xl overflow-hidden">
-                          <div className="px-6 py-4 bg-white border-b border-slate-200 flex justify-between items-center">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-black text-slate-800">{col.label}</span>
-                              <Badge variant="outline" className="text-[9px] font-bold bg-slate-50 text-slate-500">{col.subLabel}</Badge>
-                            </div>
-                            <Button onClick={() => addArrayRow(slotKey)} variant="outline" size="sm" className="h-8 rounded-lg font-bold text-blue-600 border-blue-200 bg-white">
-                              <Plus className="h-3.5 w-3.5 mr-1" /> Add
-                            </Button>
-                          </div>
-                          <div className="p-4 space-y-3">
-                            {rows.map((row, rIdx) => (
-                              <div key={row._id} className="flex flex-col sm:flex-row gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm relative group">
-                                {rows.length > 1 && (
-                                  <button onClick={() => removeArrayRow(slotKey, rIdx)} className="absolute -top-2 -right-2 h-6 w-6 bg-white border border-red-100 rounded-full flex items-center justify-center text-red-500 shadow-sm hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Trash2 className="h-3 w-3" />
-                                  </button>
-                                )}
-                                {field.arrayItems.map((item: any) => (
-                                  <div key={item.variableName} className="flex-1 space-y-1.5">
-                                    <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">{getFieldLabel(item)}</label>
-                                    {item.options?.length ? (
-                                      <SearchableSelect
-                                        value={row[item.variableName] || ""}
-                                        onValueChange={(v) => updateArrayFieldValue(slotKey, rIdx, item.variableName, v)}
-                                        options={item.options}
-                                        buttonClassName={cn("h-10", inputHighlightClass(isValidExistingValue(row[item.variableName])))}
-                                      />
-                                    ) : (
-                                      <Input
-                                        value={row[item.variableName] || ""}
-                                        onChange={(e) => updateArrayFieldValue(slotKey, rIdx, item.variableName, e.target.value)}
-                                        className={cn("h-10", inputHighlightClass(isValidExistingValue(row[item.variableName])))}
-                                      />
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )
-              })}
-            </section>
-          )}
-
-          {/* Questionnaire Section - Grid */}
-          {questions.length > 0 && (
-            <section>
-              <SectionHeader icon={HelpCircle} title="Additional Questions" colorClass="bg-purple-50 text-purple-600" />
-              <div className="bg-white border border-slate-100 rounded-3xl p-2 sm:p-6 shadow-sm">
-                <div className="grid grid-cols-1 gap-y-2">
-                  {questions.map((question: any) => {
-                    const hasValue = isValidExistingValue(answers[question.id])
-                    const options = (question.options || []).map((o:any) => typeof o === 'string' ? {value:o, label:o} : o)
-                    return (
-                      <div key={question.id} className={cn(fieldContainerClass, "md:p-6")}>
-                        <label className="text-[13px] font-bold text-slate-800">
-                          {question.label} {question.required && <span className="text-red-500">*</span>}
-                        </label>
-                        {question.description && <p className="text-[11px] text-slate-400 mb-1">{question.description}</p>}
-                        {question.type === "textarea" ? (
-                          <Textarea
-                            value={answers[question.id] || ""}
-                            onChange={(e) => setAnswers(prev => ({ ...prev, [question.id]: e.target.value }))}
-                            className={cn("min-h-[100px] rounded-xl", inputHighlightClass(hasValue))}
-                          />
-                        ) : options.length > 0 ? (
-                          <SearchableSelect
-                            value={answers[question.id] || ""}
-                            onValueChange={(val) => setAnswers(prev => ({ ...prev, [question.id]: val }))}
-                            options={options}
-                            buttonClassName={cn("h-11 rounded-xl", inputHighlightClass(hasValue))}
-                          />
-                        ) : (
-                          <Input
-                            value={answers[question.id] || ""}
-                            onChange={(e) => setAnswers(prev => ({ ...prev, [question.id]: e.target.value }))}
-                            className={cn("h-11 rounded-xl", inputHighlightClass(hasValue))}
-                          />
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            </section>
-          )}
-
-        </div>
-
-        {/* Action Footer */}
-        <footer className="sticky bottom-0 bg-white/80 backdrop-blur-md border-t border-slate-100 px-8 py-8 flex flex-col sm:flex-row justify-between items-center gap-6 z-30">
-          <div className="hidden sm:flex items-center gap-4">
-             <div className="h-12 w-12 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 border border-emerald-100 shadow-sm">
-                <ShieldCheck className="h-6 w-6" />
-             </div>
-             <div>
-               <p className="text-sm font-black text-slate-900">Finalize & Submit</p>
-               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">End-to-End Encryption</p>
-             </div>
-          </div>
-          <Button
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="h-14 px-12 text-base font-black bg-slate-900 hover:bg-black text-white rounded-2xl shadow-xl w-full sm:w-auto transition-all active:scale-[0.98]"
-          >
-            {submitting ? <Loader2 className="h-5 w-5 mr-3 animate-spin" /> : <Check className="h-5 w-5 mr-3" />}
-            {submitting ? 'Processing...' : 'Complete Submission'}
-          </Button>
-        </footer>
-
-        {/* Modals */}
-        {previewDocument && (
-          <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
-            <DialogContent className="max-w-[95vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden rounded-[2rem] border-none shadow-2xl">
-              <DialogHeader className="px-8 py-6 border-b border-slate-100 bg-white">
-                <DialogTitle className="text-xl font-black text-slate-900 flex items-center gap-3">
-                  <FileText className="h-6 w-6 text-blue-600" /> Document Preview
-                </DialogTitle>
-              </DialogHeader>
-              <div className="flex-1 overflow-y-auto p-8 bg-slate-50">
-                {previewDocument.documents.map((doc: any) => (
-                  <ExtractionPreview key={doc.id} documentName={doc.name} extractedData={doc.extractedData} fields={doc.fields} fileUrl={doc.fileUrl} expanded={true} showSaveButton={false} onDialogClose={() => setPreviewDialogOpen(false)} />
-                ))}
-              </div>
-            </DialogContent>
-          </Dialog>
+              )
+            })}
+          </section>
         )}
       </div>
+
+      {/* Footer Actions */}
+      <footer className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 z-40 flex justify-between items-center shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+        <div className="hidden sm:flex items-center gap-3 text-slate-500 bg-slate-50 px-4 py-2 rounded-lg border border-slate-200">
+          <Lock className="h-4 w-4 text-slate-400" />
+          <span className="text-[11px] font-bold uppercase tracking-wider">End-to-End Encrypted</span>
+        </div>
+        <Button
+          onClick={handleSubmit}
+          disabled={submitting}
+          className="h-11 px-8 text-sm font-bold bg-slate-900 hover:bg-black text-white rounded-xl shadow-md w-full sm:w-auto transition-transform active:scale-[0.98]"
+        >
+          {submitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
+          {submitting ? 'Processing...' : 'Complete Submission'}
+        </Button>
+      </footer>
+
+      {/* Modals */}
+      {previewDocument && (
+        <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
+          <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden rounded-2xl border-none shadow-2xl bg-white">
+            <DialogHeader className="px-6 py-4 border-b border-slate-100 bg-slate-50/80 backdrop-blur-sm">
+              <DialogTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <Eye className="h-5 w-5 text-blue-600" /> Document Preview
+              </DialogTitle>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+              {previewDocument.documents.map((doc: any) => (
+                <ExtractionPreview key={doc.id} documentName={doc.name} extractedData={doc.extractedData} fields={doc.fields} fileUrl={doc.fileUrl} expanded={true} showSaveButton={false} onDialogClose={() => setPreviewDialogOpen(false)} />
+              ))}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
     </main>
   )
 }
@@ -926,7 +1131,7 @@ function getFieldOptions(field: any, jobFields: Record<string, any>) {
 
 export default function ClientFillRequirementsPage() {
   return (
-    <Suspense fallback={<main className="fixed inset-0 flex items-center justify-center"><Loader2 className="h-10 w-10 animate-spin text-slate-300"/></main>}>
+    <Suspense fallback={<main className="fixed inset-0 flex items-center justify-center bg-slate-50"><Loader2 className="h-8 w-8 animate-spin text-blue-600"/></main>}>
       <ClientFillRequirementsContent />
     </Suspense>
   )

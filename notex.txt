@@ -18,7 +18,6 @@ so let's update the enquiry dialog to include this  - we should get the individu
 C:\Users\Administrator\Documents\GitHub\accounting-task-manager\app\(dashboard)\dashboard\tasks\components\EnquiryDialog.tsx
 
 
-
 FOR THE BANK TRANSFER CARD update it to handle any type of currency - not just the fixed ksh currency 
 
 then we have the terms and conditions displayed in the live preview - they should be editable in the left panel 

@@ -45,6 +45,7 @@ interface JobQuestion {
     linked_field_id?: string
     applicant_types?: string[]
     default_value?: string
+    third_party_role?: string | null
     depends_on?: {
         id: string
         operator: 'equals' | 'not_equals' | 'is_not_empty' | 'is_empty'
@@ -160,6 +161,10 @@ export function EnquiryDialog({
 
     // Ref to track if edit data has been loaded
     const editDataLoadedRef = useRef(false)
+
+    // Third-party selection state
+    const [thirdPartySelections, setThirdPartySelections] = useState<Record<string, string>>({}) // questionId -> individual id
+    const [companyIndividuals, setCompanyIndividuals] = useState<any[]>([])
 
     // Selection State
     const [applicantType, setApplicantType] = useState<'principal' | 'dependant'>('principal')
@@ -530,6 +535,8 @@ export function EnquiryDialog({
         setDuplicateTaskConflicts([])
         setSelectedJobLevelBundle(null)
         setWorkflowRestrictionSummary(null)
+        setThirdPartySelections({})
+        setCompanyIndividuals([])
     }, [])
 
     useEffect(() => {
@@ -808,6 +815,50 @@ export function EnquiryDialog({
                 .then(({ data }) => setSponsors(data || []))
         }
     }, [formData.subdepartment_id])
+
+    // Load company individuals for third-party selection
+    useEffect(() => {
+        if (!selectedCompany) { setCompanyIndividuals([]); return; }
+        let cancelled = false;
+        (async () => {
+            const { data, error } = await supabase
+                .from('registry_individuals')
+                .select('id, full_name, employment_data')
+                .order('full_name', { ascending: true });
+            if (error || cancelled) return;
+            const scoped = (data || [])
+                .map((ind: any) => {
+                    const associations = (ind.employment_data?.associations || []).filter(
+                        (a: any) => String(a.company_id) === String(selectedCompany)
+                    );
+                    return associations.length > 0 ? { ...ind, associations } : null;
+                })
+                .filter(Boolean);
+            if (!cancelled) setCompanyIndividuals(scoped);
+        })();
+        return () => { cancelled = true; };
+    }, [selectedCompany])
+
+    // Restore third-party selections from edit data
+    useEffect(() => {
+        if (!taskToEdit || !jobQuestions.length || !editDataLoadedRef.current) return;
+        const tpQuestions = jobQuestions.filter(q => q.third_party_role);
+        if (tpQuestions.length === 0) return;
+        const restored: Record<string, string> = {};
+        tpQuestions.forEach(q => {
+            if (jobAnswers[q.id] === true || jobAnswers[q.id] === 'true') {
+                const participant = taskToEdit.participants_details?.find(
+                    (p: any) => p.role?.includes(q.third_party_role) && p.type === 'individual'
+                );
+                if (participant) {
+                    restored[q.id] = String(participant.id);
+                }
+            }
+        });
+        if (Object.keys(restored).length > 0) {
+            setThirdPartySelections(prev => ({ ...prev, ...restored }));
+        }
+    }, [taskToEdit, jobQuestions, jobAnswers, companyIndividuals])
 
     const loadStaffData = useCallback(async () => {
         setLoadingStaff(true);
@@ -1419,6 +1470,25 @@ export function EnquiryDialog({
             if (formData.subdepartment_id === SPONSOR_SUBDEPT_ID && selectedSponsor) {
                 participants.push({ id: selectedSponsor.id, name: selectedSponsor.full_name, role: ['sponsor'], type: "individual" })
             }
+
+            // 7. Third-party selections from job questions
+            jobQuestions.forEach(q => {
+                if (q.third_party_role && thirdPartySelections[q.id]) {
+                    const selectedInd = companyIndividuals.find(ind => String(ind.id) === String(thirdPartySelections[q.id]));
+                    if (selectedInd) {
+                        const roles = [q.third_party_role];
+                        (q.entityTypes || []).forEach(et => {
+                            if (!roles.includes(et)) roles.push(et);
+                        });
+                        participants.push({
+                            id: selectedInd.id,
+                            name: selectedInd.full_name,
+                            role: roles,
+                            type: "individual"
+                        });
+                    }
+                }
+            });
 
             const payload = {
                 job_description: formData.job_description,
@@ -2042,9 +2112,20 @@ export function EnquiryDialog({
                                                                     )}
 
                                                                     {q.type === 'boolean' && (
+                                                                        <>
                                                                         <RadioGroup
                                                                             value={jobAnswers[q.id] === undefined ? "" : String(jobAnswers[q.id])}
-                                                                            onValueChange={v => setJobAnswers(prev => ({ ...prev, [q.id]: v === 'true' }))}
+                                                                            onValueChange={v => {
+                                                                                const boolVal = v === 'true';
+                                                                                setJobAnswers(prev => ({ ...prev, [q.id]: boolVal }));
+                                                                                if (!boolVal && q.third_party_role) {
+                                                                                    setThirdPartySelections(prev => {
+                                                                                        const next = { ...prev };
+                                                                                        delete next[q.id];
+                                                                                        return next;
+                                                                                    });
+                                                                                }
+                                                                            }}
                                                                             disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
                                                                             className="flex gap-4"
                                                                         >
@@ -2057,6 +2138,39 @@ export function EnquiryDialog({
                                                                                 <Label htmlFor={`q-no-${q.id}`} className="text-sm cursor-pointer">No</Label>
                                                                             </div>
                                                                         </RadioGroup>
+
+                                                                        {q.third_party_role && jobAnswers[q.id] === true && (
+                                                                            <div className="mt-3 space-y-1">
+                                                                                <Label className="text-[10px] font-bold uppercase text-amber-600 flex items-center gap-1">
+                                                                                    <User className="h-3 w-3" /> Select {q.third_party_role}
+                                                                                </Label>
+                                                                                <SearchableSelect
+                                                                                    value={thirdPartySelections[q.id] || ''}
+                                                                                    onValueChange={(val) => {
+                                                                                        setThirdPartySelections(prev => ({ ...prev, [q.id]: val }));
+                                                                                    }}
+                                                                                    options={companyIndividuals.map(ind => ({
+                                                                                        value: String(ind.id),
+                                                                                        label: ind.full_name,
+                                                                                        description: ind.associations?.map((a: any) => a.individual_type).filter(Boolean).join(', ')
+                                                                                    }))}
+                                                                                    placeholder={`Select a ${q.third_party_role}...`}
+                                                                                    searchPlaceholder="Search individuals..."
+                                                                                    disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
+                                                                                />
+                                                                                {thirdPartySelections[q.id] && (
+                                                                                    <p className="text-[9px] text-amber-600 italic">
+                                                                                        Selected {q.third_party_role} will be stored in participants for document generation.
+                                                                                    </p>
+                                                                                )}
+                                                                                {!companyIndividuals.length && selectedCompany && (
+                                                                                    <p className="text-[9px] text-slate-400 italic">
+                                                                                        No individuals found for the selected company.
+                                                                                    </p>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                        </>
                                                                     )}
 
                                                                     {(q.type === 'select' || q.type === 'multiselect') && (

@@ -1014,6 +1014,19 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           return sponsorPart?.id || null;
         })()
       };
+
+      // Add third-party participants to entityIdMap (e.g. signatory, approver, witness)
+      const standardRoles = new Set(['company', 'director', 'principal', 'dependant', 'dependent', 'understudy', 'sponsor', 'officer', 'task_manager', 'task_assistant']);
+      task.participants_details?.forEach((p: any) => {
+        if (p.type !== 'individual' || !Array.isArray(p.role)) return;
+        p.role.forEach((r: string) => {
+          if (standardRoles.has(r)) return;
+          if (!entityIdMap[r]) {
+            entityIdMap[r] = p.id;
+          }
+        });
+      });
+
       // 2. Fetch Templates
       const templates = await fetchDocumentTemplates(docItem.document.id, task);
       if (!templates || templates.length === 0) {

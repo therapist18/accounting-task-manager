@@ -48,6 +48,7 @@ interface JobQuestion {
   sub_questions?: SubQuestion[] // New field
   order: number
   linkedToColumn?: 'duration' | 'renewal_status' | null // Links question answer to direct task column
+  third_party_role?: string | null // When set, marks this boolean question as a third-party indicator
   depends_on?: {
     id: string
     operator: LogicOperator
@@ -516,6 +517,23 @@ export function EditJobQuestionDialog({
               Link this question's answer to a direct task column. The answer will be automatically synced when the enquiry is saved.
             </p>
           </div>
+
+          {formData.type === 'boolean' && (
+            <div className="space-y-2 pt-4 border-t">
+              <Label className="flex items-center gap-2 text-[10px] font-bold uppercase text-amber-600">
+                <Users className="h-3 w-3" /> Third Party Indicator Role
+              </Label>
+              <Input
+                value={formData.third_party_role || ''}
+                onChange={e => updateField('third_party_role', e.target.value || null)}
+                placeholder="e.g. signatory, approver, witness"
+                className="bg-amber-50 border-amber-200"
+              />
+              <p className="text-[9px] text-amber-600 italic">
+                When set, answering "Yes" will show a picker to select a third-party individual. Stored as this role plus the entity types from "Applies To" in participants.
+              </p>
+            </div>
+          )}
 
           <div className="flex items-center space-x-2 bg-slate-100 p-4 rounded-lg border border-slate-200">
             <Checkbox id="req-check" checked={formData.required} onCheckedChange={(c) => updateField('required', !!c)} />

@@ -233,14 +233,14 @@ export function SendRequirementsDialog({
     let completed = 0;
 
     clientRequirements.docs.forEach(doc => {
-        if (getDocStatus(doc, doc.task).status === 'valid') completed++;
+      if (getDocStatus(doc, doc.task).status === 'valid') completed++;
     });
     clientRequirements.questions.forEach(q => {
-        if (q.task.job_specific_answers?.[q.id]) completed++;
+      if (q.task.job_specific_answers?.[q.id]) completed++;
     });
     clientRequirements.fields.forEach(f => {
-        const val = f.fieldType === 'array' ? getArrayVal(f, f.task, f.groupIndex) : getFieldVal(f, f.task, f.groupIndex);
-        if (f.fieldType === 'array' ? val.length > 0 : !isFieldMissingVal(val)) completed++;
+      const val = f.fieldType === 'array' ? getArrayVal(f, f.task, f.groupIndex) : getFieldVal(f, f.task, f.groupIndex);
+      if (f.fieldType === 'array' ? val.length > 0 : !isFieldMissingVal(val)) completed++;
     });
 
     return { total, completed, percent: total > 0 ? Math.round((completed / total) * 100) : 0 };
@@ -270,7 +270,7 @@ export function SendRequirementsDialog({
     const now = new Date()
     const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
     const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-    const refNo = `REQ-${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}-${Math.random().toString(36).substring(2,6).toUpperCase()}`
+    const refNo = `REQ-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
 
     const formatAcceptedTypes = (docTypeNames: string[], requiredCount: number) => {
       if (docTypeNames.length <= 1) return docTypeNames[0] || 'Document'
@@ -287,7 +287,7 @@ export function SendRequirementsDialog({
         ? ' <span style="display:inline-block; font-size:8px; font-weight:700; color:#7c3aed; background:#f5f3ff; border:1px solid #ddd6fe; border-radius:9999px; padding:1px 6px; vertical-align:middle;">&#9889; Automated</span>'
         : ''
       return `<tr>
-        <td style="text-align:center; color:#94a3b8; font-family:monospace; font-size:9px;">${String(idx + 1).padStart(2,'0')}</td>
+        <td style="text-align:center; color:#94a3b8; font-family:monospace; font-size:9px;">${String(idx + 1).padStart(2, '0')}</td>
         <td style="font-weight:600; color:#1e293b;">${doc.name}${automationTag}</td>
         <td style="color:#64748b; font-size:9.5px;">${formatAcceptedTypes(docTypeNames, requiredCount)}</td>
         <td style="text-align:center; color:#64748b; font-size:9.5px; white-space:nowrap;">${status.date}</td>
@@ -303,7 +303,7 @@ export function SendRequirementsDialog({
         const isMissing = !val
         return `<div class="field-card ${isMissing ? 'field-missing' : 'field-ok'}">
           <div class="field-card-top">
-            <span class="field-num">${String(idx + 1).padStart(2,'0')}</span>
+            <span class="field-num">${String(idx + 1).padStart(2, '0')}</span>
             <span class="field-name">${q.label}</span>
             <span class="status-dot ${isMissing ? 'dot-missing' : 'dot-valid'}"></span>
           </div>
@@ -333,7 +333,7 @@ export function SendRequirementsDialog({
         }
         return `<div class="field-card ${isMissing ? 'field-missing' : 'field-ok'} ${isArray ? 'field-wide' : ''}">
           <div class="field-card-top">
-            <span class="field-num">${String(clientRequirements.questions.length + idx + 1).padStart(2,'0')}</span>
+            <span class="field-num">${String(clientRequirements.questions.length + idx + 1).padStart(2, '0')}</span>
             <span class="field-name">${getFieldLabel(f)}</span>
             <span class="status-dot ${isMissing ? 'dot-missing' : 'dot-valid'}"></span>
           </div>
@@ -501,7 +501,7 @@ export function SendRequirementsDialog({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-[1050px] w-[95vw] max-h-[92vh] flex flex-col p-0 overflow-hidden rounded-2xl border-none shadow-2xl">
-        
+
         {/* Modern Header Widget */}
         <header className="bg-white border-b px-8 py-6 shrink-0 shadow-sm z-10">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -525,14 +525,14 @@ export function SendRequirementsDialog({
 
             {/* Progress Card */}
             <div className="bg-slate-900 text-white rounded-xl p-4 min-w-[260px] shadow-lg flex flex-col justify-center border border-slate-800 shrink-0">
-               <div className="flex justify-between items-end mb-2.5 px-1">
-                  <span className="text-[10px] uppercase tracking-widest font-semibold text-slate-400">Total Completion</span>
-                  <span className="text-lg font-bold leading-none">{stats.percent}%</span>
-               </div>
-               <Progress value={stats.percent} className="h-2 bg-slate-700" indicatorClassName="bg-blue-400" />
-               <p className="text-[11px] mt-2.5 px-1 text-slate-300 font-medium">
+              <div className="flex justify-between items-end mb-2.5 px-1">
+                <span className="text-[10px] uppercase tracking-widest font-semibold text-slate-400">Total Completion</span>
+                <span className="text-lg font-bold leading-none">{stats.percent}%</span>
+              </div>
+              <Progress value={stats.percent} className="h-2 bg-slate-700" indicatorClassName="bg-blue-400" />
+              <p className="text-[11px] mt-2.5 px-1 text-slate-300 font-medium">
                 <strong className="text-white">{stats.completed}</strong> of <strong className="text-white">{stats.total}</strong> requirements satisfied
-               </p>
+              </p>
             </div>
           </div>
         </header>
@@ -541,22 +541,22 @@ export function SendRequirementsDialog({
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col h-full overflow-hidden">
             <div className="px-8 bg-white border-b shadow-sm z-0 relative shrink-0">
               <TabsList className="bg-transparent h-14 p-0 space-x-6">
-                <TabsTrigger 
-                  value="checklist" 
+                <TabsTrigger
+                  value="checklist"
                   className="rounded-none border-b-2 border-transparent px-2 py-4 text-sm font-semibold text-slate-500 data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-all"
                 >
                   <CheckSquare className="h-4 w-4 mr-2" />
                   Action Checklist
                 </TabsTrigger>
-                <TabsTrigger 
-                  value="link" 
+                <TabsTrigger
+                  value="link"
                   className="rounded-none border-b-2 border-transparent px-2 py-4 text-sm font-semibold text-slate-500 data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-all"
                 >
                   <LinkIcon className="h-4 w-4 mr-2" />
                   Share Access
                 </TabsTrigger>
-                <TabsTrigger 
-                  value="pdf" 
+                <TabsTrigger
+                  value="pdf"
                   className="rounded-none border-b-2 border-transparent px-2 py-4 text-sm font-semibold text-slate-500 data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-all"
                 >
                   <Printer className="h-4 w-4 mr-2" />
@@ -566,10 +566,9 @@ export function SendRequirementsDialog({
             </div>
 
             <div className="flex-1 overflow-auto relative">
-              
-              {/* TABS CONTENT: CHECKLIST */}
+                {/* TABS CONTENT: CHECKLIST */}
               <TabsContent value="checklist" className="h-full flex flex-col m-0 data-[state=active]:flex overflow-auto bg-slate-50/50">
-                  <div className="p-8 space-y-12">
+                  <div className="p-6 md:p-8 space-y-10">
                     
                     {/* Document Requirements */}
                     <div className="space-y-4">
@@ -578,20 +577,19 @@ export function SendRequirementsDialog({
                           <div className="p-2 bg-blue-100 text-blue-700 rounded-lg shadow-sm">
                             <FileText className="h-4 w-4" />
                           </div>
-                          <h3 className="text-sm font-bold text-slate-800">Document Requirements</h3>
+                          <h3 className="text-base font-bold text-slate-800">Document Requirements</h3>
                         </div>
                       </div>
                       
-                      <div className="border border-slate-200 rounded-2xl bg-white overflow-hidden shadow-sm w-full">
-                        <div className="overflow-x-auto w-full">
-                          <Table className="min-w-max w-full">
-                            <TableHeader className="bg-slate-50/80 border-b">
+                      <div className="border border-slate-200 rounded-xl bg-white overflow-hidden shadow-sm">
+                        <div className="overflow-x-auto">
+                          <Table className="min-w-[800px] w-full">
+                            <TableHeader className="bg-slate-50/80 border-b border-slate-200">
                               <TableRow className="hover:bg-transparent">
-                                <TableHead className="w-12 py-3 text-center text-[10px] font-bold uppercase tracking-wider text-slate-400">#</TableHead>
-                                <TableHead className="py-3 px-6 text-[10px] font-bold uppercase tracking-wider text-slate-400">Requirement</TableHead>
-                                <TableHead className="w-[200px] py-3 text-center text-[10px] font-bold uppercase tracking-wider text-slate-400">Accepted Types</TableHead>
-                                <TableHead className="w-[180px] py-3 text-center text-[10px] font-bold uppercase tracking-wider text-slate-400">Status</TableHead>
-                                <TableHead className="w-[80px] py-3 text-center text-[10px] font-bold uppercase tracking-wider text-slate-400">Details</TableHead>
+                                <TableHead className="w-16 py-3 text-center text-[10px] font-bold uppercase tracking-wider text-slate-500">#</TableHead>
+                                <TableHead className="py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Requirement</TableHead>
+                                <TableHead className="w-[300px] py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Accepted Types</TableHead>
+                                <TableHead className="w-[180px] py-3 text-right pr-6 text-[10px] font-bold uppercase tracking-wider text-slate-500">Status</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -602,67 +600,39 @@ export function SendRequirementsDialog({
                                 const docTypeNames = getDocTypeNames(doc)
                                 
                                 return (
-                                  <TableRow key={idx} className={cn("group transition-colors", isMissing ? "bg-red-50/30 hover:bg-red-50/50" : "hover:bg-slate-50/60")}>
-                                    <TableCell className="text-center font-mono text-xs text-slate-400 font-semibold">{idx + 1}</TableCell>
-                                    <TableCell className="px-6 py-4">
-                                      <div className="flex flex-col">
-                                        <div className="flex items-center gap-1.5">
-                                          <span className={cn("text-sm font-semibold", isMissing ? "text-red-900" : "text-slate-800")}>{doc.name}</span>
+                                  <TableRow key={idx} className="group hover:bg-slate-50/60 border-slate-100 transition-colors">
+                                    <TableCell className="text-center font-mono text-xs text-slate-400 font-medium">{idx + 1}</TableCell>
+                                    <TableCell className="py-4 pr-4">
+                                      <div className="flex flex-col gap-1">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-sm font-semibold text-slate-800">{doc.name}</span>
                                           {doc.web_automation?.automationId && (
                                             <button
                                               type="button"
                                               onClick={(e) => { e.stopPropagation(); window.open(`/dashboard/tasks/${doc.task.id}?tab=automation&automationId=${doc.web_automation.automationId}`, '_blank', 'noopener,noreferrer') }}
-                                              className="inline-flex items-center gap-1 text-[10px] font-bold text-white bg-purple-600 rounded-full pl-1 pr-2 py-0.5 shadow-sm ring-2 ring-purple-100 hover:bg-purple-700 hover:ring-purple-200 transition-colors shrink-0"
-                                              title={`Generated by automation: ${doc.web_automation.automationName || 'View automation'}`}
+                                              className="inline-flex items-center gap-1 text-[9px] font-bold text-purple-700 bg-purple-50 rounded-full px-2 py-0.5 border border-purple-200 hover:bg-purple-100 transition-colors shrink-0 uppercase tracking-wide"
+                                              title="Generated by automation"
                                             >
-                                              <Zap className="h-3 w-3" fill="currentColor" /> Automated
+                                              <Zap className="h-3 w-3" fill="currentColor" /> Auto
                                             </button>
                                           )}
                                         </div>
-                                        {doc.description && <span className="text-xs text-slate-500 line-clamp-1 mt-0.5">{doc.description}</span>}
+                                        {doc.description && <span className="text-xs text-slate-500 line-clamp-1">{doc.description}</span>}
                                       </div>
                                     </TableCell>
-                                    <TableCell className="text-center">
-                                      {docTypeNames.length > 1 ? (
-                                        <Popover>
-                                          <PopoverTrigger asChild>
-                                            <button type="button" className="mx-auto">
-                                              <Badge variant="secondary" className="text-[10px] font-semibold bg-blue-50 text-blue-700 border-blue-200 cursor-pointer hover:bg-blue-100 transition-colors">
-                                                {getAcceptedTypesLabel(docTypeNames, doc.requiredDocumentCount || 1)}
-                                              </Badge>
-                                            </button>
-                                          </PopoverTrigger>
-                                          <PopoverContent className="w-64 p-0" align="center">
-                                            <Command>
-                                              <CommandList>
-                                                <CommandGroup heading="Accepted document types">
-                                                  {docTypeNames.map((name, i) => (
-                                                    <CommandItem key={i} className="text-xs">{name}</CommandItem>
-                                                  ))}
-                                                </CommandGroup>
-                                              </CommandList>
-                                            </Command>
-                                          </PopoverContent>
-                                        </Popover>
-                                      ) : (
-                                        <Badge variant="secondary" className="text-[10px] font-semibold bg-slate-100 text-slate-600 border-slate-200">
-                                          {docTypeNames[0] || 'Document'}
-                                        </Badge>
-                                      )}
+                                    <TableCell className="py-4 pr-4">
+                                      <span className="inline-block text-xs font-medium text-slate-600 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-md">
+                                        {getAcceptedTypesLabel(docTypeNames, doc.requiredDocumentCount || 1)}
+                                      </span>
                                     </TableCell>
-                                    <TableCell className="text-center">
+                                    <TableCell className="py-4 pr-6 text-right">
                                       <div className={cn(
                                         "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border shadow-sm",
-                                        status.bgColor, status.color.replace('text-', 'border-')
+                                        status.bgColor, status.color.replace('text-', 'border-'), status.color
                                       )}>
                                         <StatusIcon className="h-3.5 w-3.5" />
                                         <span className="text-[10px] font-bold uppercase tracking-wider">{status.label}</span>
                                       </div>
-                                    </TableCell>
-                                    <TableCell className="text-center">
-                                      <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all rounded-full">
-                                        <ArrowRight className="h-4 w-4" />
-                                      </Button>
                                     </TableCell>
                                   </TableRow>
                                 )
@@ -680,19 +650,19 @@ export function SendRequirementsDialog({
                           <div className="p-2 bg-indigo-100 text-indigo-700 rounded-lg shadow-sm">
                             <Database className="h-4 w-4" />
                           </div>
-                          <h3 className="text-sm font-bold text-slate-800">Information & Context Fields</h3>
+                          <h3 className="text-base font-bold text-slate-800">Information & Context Fields</h3>
                         </div>
                       </div>
                       
-                      <div className="border border-slate-200 rounded-2xl bg-white overflow-hidden shadow-sm w-full">
-                        <div className="overflow-x-auto w-full">
-                          <Table className="min-w-max w-full">
-                            <TableHeader className="bg-slate-50/80 border-b">
+                      <div className="border border-slate-200 rounded-xl bg-white overflow-hidden shadow-sm">
+                        <div className="overflow-x-auto">
+                          <Table className="min-w-[800px] w-full">
+                            <TableHeader className="bg-slate-50/80 border-b border-slate-200">
                               <TableRow className="hover:bg-transparent">
-                                <TableHead className="w-12 py-3 text-center text-[10px] font-bold uppercase tracking-wider text-slate-400">#</TableHead>
-                                <TableHead className="py-3 px-6 text-[10px] font-bold uppercase tracking-wider text-slate-400">Requested Field</TableHead>
-                                <TableHead className="min-w-[300px] py-3 px-6 text-[10px] font-bold uppercase tracking-wider text-slate-400">Current Value</TableHead>
-                                <TableHead className="w-[180px] py-3 text-center text-[10px] font-bold uppercase tracking-wider text-slate-400">Status</TableHead>
+                                <TableHead className="w-16 py-3 text-center text-[10px] font-bold uppercase tracking-wider text-slate-500">#</TableHead>
+                                <TableHead className="py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Requested Field</TableHead>
+                                <TableHead className="w-[350px] py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Current Value</TableHead>
+                                <TableHead className="w-[180px] py-3 text-right pr-6 text-[10px] font-bold uppercase tracking-wider text-slate-500">Status</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -701,28 +671,26 @@ export function SendRequirementsDialog({
                                 const val = q.task.job_specific_answers?.[q.id]
                                 const isMissing = !val
                                 return (
-                                  <TableRow key={`q-${idx}`} className={cn("group transition-colors", isMissing ? "bg-red-50/30 hover:bg-red-50/50" : "hover:bg-slate-50/60")}>
-                                    <TableCell className="text-center font-mono text-xs text-slate-400 font-semibold">{idx + 1}</TableCell>
-                                    <TableCell className="px-6 py-4">
-                                      <div className="flex flex-col">
-                                        <span className={cn("text-sm font-semibold", isMissing ? "text-red-900" : "text-slate-800")}>{q.label}</span>
-                                        <span className="text-[10px] font-medium text-slate-400 flex items-center gap-1 mt-1 uppercase tracking-wider">
+                                  <TableRow key={`q-${idx}`} className="group hover:bg-slate-50/60 border-slate-100 transition-colors">
+                                    <TableCell className="text-center font-mono text-xs text-slate-400 font-medium align-top pt-5">{idx + 1}</TableCell>
+                                    <TableCell className="py-4 pr-4 align-top">
+                                      <div className="flex flex-col gap-1">
+                                        <span className="text-sm font-semibold text-slate-800">{q.label}</span>
+                                        <span className="text-[10px] font-semibold text-slate-400 flex items-center gap-1 uppercase tracking-wider">
                                           <HelpCircle className="h-3 w-3" /> Questionnaire
                                         </span>
                                       </div>
                                     </TableCell>
-                                    <TableCell className="px-6 py-4">
+                                    <TableCell className="py-4 pr-4 align-top">
                                       {isMissing ? (
-                                        <div className="flex items-center gap-2 text-red-400/80 italic text-sm font-medium bg-white w-fit px-3 py-1.5 rounded-lg border border-red-100 shadow-sm">
-                                          Pending Input
-                                        </div>
+                                        <span className="text-red-400/80 italic text-sm font-medium">Pending Input</span>
                                       ) : (
-                                        <span className="text-sm font-medium text-slate-700 bg-white shadow-sm border border-slate-200 py-1.5 px-3 rounded-lg inline-block">
+                                        <span className="text-sm font-medium text-slate-700 bg-white border border-slate-200 py-1.5 px-3 rounded-lg inline-block shadow-sm">
                                           {val}
                                         </span>
                                       )}
                                     </TableCell>
-                                    <TableCell className="text-center">
+                                    <TableCell className="py-4 pr-6 text-right align-top">
                                       <div className={cn(
                                         "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border shadow-sm",
                                         isMissing ? "bg-red-50 border-red-200 text-red-600" : "bg-green-50 border-green-200 text-green-600"
@@ -743,68 +711,58 @@ export function SendRequirementsDialog({
                                 const isMissing = isArray ? arrayRows.length === 0 : isFieldMissingVal(val)
                                 
                                 return (
-                                  <TableRow key={`f-${idx}`} className={cn("group transition-colors", isMissing ? "bg-red-50/30 hover:bg-red-50/50" : "hover:bg-slate-50/60")}>
-                                    <TableCell className="text-center font-mono text-xs text-slate-400 font-semibold align-top pt-5">
+                                  <TableRow key={`f-${idx}`} className="group hover:bg-slate-50/60 border-slate-100 transition-colors">
+                                    <TableCell className="text-center font-mono text-xs text-slate-400 font-medium align-top pt-5">
                                       {clientRequirements.questions.length + idx + 1}
                                     </TableCell>
-                                    <TableCell className="px-6 py-4 align-top">
-                                      <div className="flex flex-col">
-                                        <span className={cn("text-sm font-semibold", isMissing ? "text-red-900" : "text-slate-800")}>{getFieldLabel(f)}</span>
-                                        <div className="flex items-center gap-2 mt-1.5 text-[10px] uppercase font-semibold text-slate-400 tracking-wider">
-                                          {isArray && (
-                                            <>
-                                              <span>•</span>
-                                              <span className="text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded shadow-sm border border-indigo-100">List Format</span>
-                                            </>
-                                          )}
-                                        </div>
+                                    <TableCell className="py-4 pr-4 align-top">
+                                      <div className="flex flex-col gap-1">
+                                        <span className="text-sm font-semibold text-slate-800">{getFieldLabel(f)}</span>
+                                        {isArray && (
+                                          <span className="inline-block w-max text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded uppercase tracking-wider">
+                                            List Format
+                                          </span>
+                                        )}
                                       </div>
                                     </TableCell>
-                                    <TableCell className="px-6 py-4 align-top">
+                                    <TableCell className="py-4 pr-4 align-top">
                                       {isArray ? (
                                         arrayRows.length > 0 ? (
-                                          <div className="border border-slate-200 rounded-xl overflow-x-auto bg-white shadow-sm max-w-full relative">
-                                            <table className="w-full text-xs text-left min-w-[500px]">
-                                              <thead className="bg-slate-50 border-b border-slate-100">
-                                                <tr>
-                                                  <th className="px-4 py-3 font-bold text-slate-500 uppercase text-[10px] tracking-wider whitespace-nowrap">Entity Record</th>
+                                          <div className="flex flex-col gap-2">
+                                            {arrayRows.map((row: any, rIdx: number) => (
+                                              <div key={rIdx} className="bg-slate-50 rounded-lg p-3 border border-slate-200 shadow-sm">
+                                                <span className="text-xs font-bold text-slate-700 mb-2 block border-b border-slate-200 pb-1">
+                                                  {getEntityLabelForRow(f.task, row.entityId)}
+                                                </span>
+                                                <div className="grid grid-cols-1 gap-2">
                                                   {(f.arrayItems || []).map((item: any) => (
-                                                    <th key={item.variableName} className="px-4 py-3 font-bold text-slate-500 uppercase text-[10px] tracking-wider whitespace-nowrap">
-                                                      {getFieldLabel(item)}
-                                                    </th>
+                                                    <div key={item.variableName} className="flex flex-col">
+                                                      <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold">
+                                                        {getFieldLabel(item)}
+                                                      </span>
+                                                      <span className="text-sm text-slate-800 font-medium">
+                                                        {row[item.variableName] ?? '-'}
+                                                      </span>
+                                                    </div>
                                                   ))}
-                                                </tr>
-                                              </thead>
-                                              <tbody className="divide-y divide-slate-100">
-                                                {arrayRows.map((row: any, rIdx: number) => (
-                                                  <tr key={rIdx} className="hover:bg-slate-50/50 transition-colors">
-                                                    <td className="px-4 py-3 font-semibold text-slate-700 whitespace-nowrap">{getEntityLabelForRow(f.task, row.entityId)}</td>
-                                                    {(f.arrayItems || []).map((item: any) => (
-                                                      <td key={item.variableName} className="px-4 py-3 text-slate-600 whitespace-nowrap">{row[item.variableName] ?? '-'}</td>
-                                                    ))}
-                                                  </tr>
-                                                ))}
-                                              </tbody>
-                                            </table>
+                                                </div>
+                                              </div>
+                                            ))}
                                           </div>
                                         ) : (
-                                          <div className="flex items-center gap-2 text-red-400/80 italic text-sm font-medium bg-white w-fit px-3 py-1.5 rounded-lg border border-red-100 shadow-sm">
-                                            Pending Input
-                                          </div>
+                                          <span className="text-red-400/80 italic text-sm font-medium">Pending Input</span>
                                         )
                                       ) : (
                                         isMissing ? (
-                                          <div className="flex items-center gap-2 text-red-400/80 italic text-sm font-medium bg-white w-fit px-3 py-1.5 rounded-lg border border-red-100 shadow-sm">
-                                            Pending Input
-                                          </div>
+                                          <span className="text-red-400/80 italic text-sm font-medium">Pending Input</span>
                                         ) : (
-                                          <span className="text-sm font-medium text-slate-700 bg-white shadow-sm border border-slate-200 py-1.5 px-3 rounded-lg inline-block break-all">
+                                          <span className="text-sm font-medium text-slate-700 bg-white border border-slate-200 py-1.5 px-3 rounded-lg inline-block shadow-sm break-all">
                                             {val}
                                           </span>
                                         )
                                       )}
                                     </TableCell>
-                                    <TableCell className="text-center align-top pt-5">
+                                    <TableCell className="py-4 pr-6 text-right align-top">
                                       <div className={cn(
                                         "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border shadow-sm",
                                         isMissing ? "bg-red-50 border-red-200 text-red-600" : "bg-green-50 border-green-200 text-green-600"
@@ -823,21 +781,20 @@ export function SendRequirementsDialog({
                   </div>
                   </div>
               </TabsContent>
-
               {/* TABS CONTENT: LINK */}
               <TabsContent value="link" className="h-full m-0 p-8 flex items-center justify-center bg-slate-50/50">
                 <div className="bg-white rounded-3xl border border-slate-200 shadow-xl p-12 max-w-2xl w-full mx-auto text-center space-y-8 transform transition-all hover:shadow-2xl">
                   <div className="bg-blue-50 h-24 w-24 rounded-[2rem] mx-auto border-8 border-white shadow-inner flex items-center justify-center">
                     <LinkIcon className="h-10 w-10 text-blue-600" />
                   </div>
-                  
+
                   <div className="space-y-3">
                     <h3 className="text-2xl font-bold text-slate-900 tracking-tight">Share Secure Access</h3>
                     <p className="text-base text-slate-500 leading-relaxed px-6 max-w-md mx-auto">
                       Provide this link to the applicant. They can securely upload missing documents and fill out outstanding details.
                     </p>
                   </div>
-                  
+
                   <div className="flex flex-col gap-5 pt-4">
                     <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-sm font-mono text-slate-700 break-all select-all text-left shadow-inner">
                       <span className="flex-1 font-medium text-blue-600 line-clamp-1">{clientUrl}</span>
@@ -845,7 +802,7 @@ export function SendRequirementsDialog({
                         {copied ? <Check className="h-5 w-5 text-green-500" /> : <Copy className="h-5 w-5" />}
                       </Button>
                     </div>
-                    
+
                     <div className="flex justify-center gap-4">
                       <Button variant="outline" className="h-12 rounded-xl px-8 font-semibold border-slate-200 text-slate-700 hover:bg-slate-50 shadow-sm" onClick={() => window.open(clientUrl, "_blank")}>
                         <ExternalLink className="h-4 w-4 mr-2" /> Live Preview
@@ -864,14 +821,14 @@ export function SendRequirementsDialog({
                   <div className="bg-orange-50 h-24 w-24 rounded-[2rem] mx-auto border-8 border-white shadow-inner flex items-center justify-center">
                     <Printer className="h-10 w-10 text-orange-500" />
                   </div>
-                  
+
                   <div className="space-y-3">
                     <h3 className="text-2xl font-bold text-slate-900 tracking-tight">Export Requirements Report</h3>
                     <p className="text-base text-slate-500 leading-relaxed px-6 max-w-md mx-auto">
                       Generate a clean, printable physical report summarizing all verified and outstanding action items.
                     </p>
                   </div>
-                  
+
                   <div className="pt-6">
                     <Button variant="default" className="h-14 rounded-2xl px-10 font-bold text-lg bg-orange-500 hover:bg-orange-600 shadow-lg shadow-orange-200 text-white transition-all active:scale-95" onClick={handlePrint}>
                       <Printer className="h-5 w-5 mr-3" /> Generate PDF Report

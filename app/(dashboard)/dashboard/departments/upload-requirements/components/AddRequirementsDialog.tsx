@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { FileText, Plus, Zap, Check, ChevronsUpDown, Trash2, FileType, Loader2, Database, Settings2, Calculator, X, Search, Split, Folder, HelpCircle } from "lucide-react"
+import { FileText, Plus, Zap, Check, ChevronsUpDown, Trash2, FileType, Loader2, Database, Settings2, Calculator, X, Search, Split, Folder, HelpCircle, Users } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList, CommandEmpty } from "@/components/ui/command"
@@ -71,6 +71,7 @@ export interface RequirementForm {
   dependsOnOperator?: LogicOperator
   dependsOnValue?: string
   linkedToColumn?: 'duration' | 'renewal_status' | null // Links question answer to direct task column
+  third_party_role?: string | null // When set, marks this boolean question as a third-party indicator
 }
 
 const DEFAULT_REQUIREMENT = (category: RequirementCategory): RequirementForm => ({
@@ -102,7 +103,8 @@ const DEFAULT_REQUIREMENT = (category: RequirementCategory): RequirementForm => 
   dependsOnQuestionId: undefined,
   dependsOnOperator: 'equals',
   dependsOnValue: '',
-  linkedToColumn: null
+  linkedToColumn: null,
+  third_party_role: null
 })
 
 interface AddRequirementsDialogProps {
@@ -396,6 +398,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
               options: options,
               linked_field_id: req.linkedMasterFieldId || null,
               entityTypes: req.entityTypes,
+              third_party_role: req.third_party_role || null,
               depends_on: resolvedParentId ? {
                 id: resolvedParentId,
                 operator: req.dependsOnOperator,
@@ -602,692 +605,709 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                     Select KYC documents to display by default in reports. Documents are grouped by type (Individual, Company, Application) based on their entity types.
                   </p>
 
-                   {/* Selected Documents */}
-                   {reportDocs.length > 0 && (
-                     <div className="space-y-2 mb-4">
-                       <Label className="text-[10px] uppercase font-bold text-slate-500">Selected Documents ({reportDocs.length})</Label>
-                       <div className="space-y-3">
-                         {reportDocs.map((doc, idx) => (
-                           <div key={doc.id} className="p-3 bg-white border border-emerald-200 rounded-lg space-y-2">
-                             <div className="flex items-center justify-between">
-                               <div className="flex items-center gap-3">
-                                 <span className="flex items-center justify-center w-6 h-6 bg-emerald-100 rounded-full text-xs font-bold text-emerald-700">
-                                   {idx + 1}
-                                 </span>
-                                 <div>
-                                   <p className="text-sm font-medium text-slate-800">{doc.display_name || doc.name}</p>
-                                   <p className="text-[10px] text-slate-500">
-                                     {doc.category || 'Uncategorized'}
-                                   </p>
-                                 </div>
-                                 <Badge variant="outline" className={cn(
-                                   "text-[9px] ml-2",
-                                   (doc.category || '').toLowerCase().includes('company') ? "bg-purple-50 text-purple-700 border-purple-200" :
-                                   (doc.category || '').toLowerCase().includes('director') || (doc.category || '').toLowerCase().includes('individual') ? "bg-blue-50 text-blue-700 border-blue-200" :
-                                   "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                 )}>
-                                   {(doc.category || '').toLowerCase().includes('company') ? 'Company' :
+                  {/* Selected Documents */}
+                  {reportDocs.length > 0 && (
+                    <div className="space-y-2 mb-4">
+                      <Label className="text-[10px] uppercase font-bold text-slate-500">Selected Documents ({reportDocs.length})</Label>
+                      <div className="space-y-3">
+                        {reportDocs.map((doc, idx) => (
+                          <div key={doc.id} className="p-3 bg-white border border-emerald-200 rounded-lg space-y-2">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <span className="flex items-center justify-center w-6 h-6 bg-emerald-100 rounded-full text-xs font-bold text-emerald-700">
+                                  {idx + 1}
+                                </span>
+                                <div>
+                                  <p className="text-sm font-medium text-slate-800">{doc.display_name || doc.name}</p>
+                                  <p className="text-[10px] text-slate-500">
+                                    {doc.category || 'Uncategorized'}
+                                  </p>
+                                </div>
+                                <Badge variant="outline" className={cn(
+                                  "text-[9px] ml-2",
+                                  (doc.category || '').toLowerCase().includes('company') ? "bg-purple-50 text-purple-700 border-purple-200" :
+                                    (doc.category || '').toLowerCase().includes('director') || (doc.category || '').toLowerCase().includes('individual') ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                      "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                )}>
+                                  {(doc.category || '').toLowerCase().includes('company') ? 'Company' :
                                     (doc.category || '').toLowerCase().includes('director') || (doc.category || '').toLowerCase().includes('individual') ? 'Individual' :
-                                    'Application'}
-                                 </Badge>
-                               </div>
-                               <Button
-                                 variant="ghost"
-                                 size="icon"
-                                 className="h-8 w-8 text-red-400 hover:text-red-600"
-                                 onClick={() => setReportDocs(reportDocs.filter((_, i) => i !== idx))}
-                               >
-                                 <Trash2 className="h-4 w-4" />
-                               </Button>
-                             </div>
-                             {/* Applies To */}
-                             <div className="flex items-center gap-2 flex-wrap">
-                               <Label className="text-[10px] font-bold text-slate-400 shrink-0">Applies To:</Label>
-                               <div className="flex flex-wrap gap-1">
-                                 {ENTITY_TYPE_OPTIONS.map(opt => {
-                                   const isSelected = (doc.appliesTo || []).includes(opt.value)
-                                   return (
-                                     <button
-                                       key={opt.value}
-                                       type="button"
-                                       className={cn(
-                                         "text-[10px] px-2 py-0.5 rounded-full border transition-all font-medium",
-                                         isSelected
-                                           ? "bg-emerald-100 text-emerald-700 border-emerald-300"
-                                           : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
-                                       )}
-                                       onClick={() => {
-                                         const newDocs = [...reportDocs]
-                                         const current = newDocs[idx].appliesTo || []
-                                         if (isSelected) {
-                                           newDocs[idx] = { ...newDocs[idx], appliesTo: current.filter((v: string) => v !== opt.value) }
-                                         } else {
-                                           newDocs[idx] = { ...newDocs[idx], appliesTo: [...current, opt.value] }
-                                         }
-                                         setReportDocs(newDocs)
-                                       }}
-                                     >
-                                       {opt.label}
-                                     </button>
-                                   )
-                                 })}
-                               </div>
-                             </div>
-                           </div>
-                         ))}
-                       </div>
-                     </div>
-                   )}
+                                      'Application'}
+                                </Badge>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-red-400 hover:text-red-600"
+                                onClick={() => setReportDocs(reportDocs.filter((_, i) => i !== idx))}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            {/* Applies To */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Label className="text-[10px] font-bold text-slate-400 shrink-0">Applies To:</Label>
+                              <div className="flex flex-wrap gap-1">
+                                {ENTITY_TYPE_OPTIONS.map(opt => {
+                                  const isSelected = (doc.appliesTo || []).includes(opt.value)
+                                  return (
+                                    <button
+                                      key={opt.value}
+                                      type="button"
+                                      className={cn(
+                                        "text-[10px] px-2 py-0.5 rounded-full border transition-all font-medium",
+                                        isSelected
+                                          ? "bg-emerald-100 text-emerald-700 border-emerald-300"
+                                          : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+                                      )}
+                                      onClick={() => {
+                                        const newDocs = [...reportDocs]
+                                        const current = newDocs[idx].appliesTo || []
+                                        if (isSelected) {
+                                          newDocs[idx] = { ...newDocs[idx], appliesTo: current.filter((v: string) => v !== opt.value) }
+                                        } else {
+                                          newDocs[idx] = { ...newDocs[idx], appliesTo: [...current, opt.value] }
+                                        }
+                                        setReportDocs(newDocs)
+                                      }}
+                                    >
+                                      {opt.label}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
-                {/* KYC Document Selector */}
-                <div className="space-y-2">
-                  <Label className="text-[10px] uppercase font-bold text-slate-500">Add KYC Document</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-between border-dashed border-2 border-emerald-300 hover:border-emerald-400 hover:bg-emerald-50 transition-all h-10">
-                        <span className="text-slate-500 text-sm">Select a KYC document to add...</span>
-                        <Plus className="h-4 w-4 text-emerald-500" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[450px] p-0" align="start">
-                      <Command>
-                        <CommandInput placeholder="Search KYC documents..." />
-                        <CommandList>
-                          <CommandEmpty>No documents found.</CommandEmpty>
-                          <CommandGroup className="max-h-[300px] overflow-y-auto">
-                            {kycDocuments.map(doc => {
-                              const alreadyAdded = reportDocs.some(d => d.id === doc.id)
-                              const docCategory = (doc.category || '').toLowerCase()
-                              const docType = docCategory.includes('company') ? 'Company' :
-                                docCategory.includes('director') || docCategory.includes('individual') ? 'Individual' : 'Application'
-                              return (
-                                <CommandItem
-                                  key={doc.id}
-                                  disabled={alreadyAdded}
-                                  onSelect={() => {
-                                    if (!alreadyAdded) {
-                                      setReportDocs([...reportDocs, { ...doc, appliesTo: getDefaultAppliesTo(doc) }])
-                                    }
-                                  }}
-                                >
-                                  <Check className={cn("mr-2 h-4 w-4", alreadyAdded ? "opacity-100" : "opacity-0")} />
-                                  <div className="flex-1 flex items-center gap-2">
-                                    <span className="text-sm">{doc.display_name || doc.name}</span>
-                                    <Badge variant="outline" className={cn(
-                                      "text-[8px] px-1.5 py-0",
-                                      docType === 'Company' ? "bg-purple-50 text-purple-600 border-purple-200" :
-                                        docType === 'Individual' ? "bg-blue-50 text-blue-600 border-blue-200" :
-                                          "bg-emerald-50 text-emerald-600 border-emerald-200"
-                                    )}>
-                                      {docType}
-                                    </Badge>
-                                    {doc.category && (
-                                      <span className="text-[10px] text-slate-400">{doc.category}</span>
-                                    )}
-                                  </div>
-                                  {alreadyAdded && <span className="text-xs text-slate-400">(added)</span>}
-                                </CommandItem>
-                              )
-                            })}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-              </div>
-          ) : (
-          <>
-            <div className="bg-white border rounded-xl p-4 shadow-sm space-y-3">
-              <Label className="text-[10px] uppercase font-bold text-slate-400">
-                Quick Add {activeSection === 'job-specific' ? 'Questions' : 'Requirements'} (One per line)
-              </Label>
-              <Textarea
-                value={getCurrentBulkInput()}
-                onChange={(e) => handleBulkInputChange(activeSection, e.target.value)}
-                placeholder={getCurrentBulkPlaceholder()}
-                className="min-h-[80px] text-sm"
-              />
-            </div>
-
-            {currentReqs.map((req, idx) => (
-              <Card key={idx} className="border-2 border-slate-200 overflow-hidden bg-white shadow-sm">
-                <div className="bg-slate-50 px-4 py-3 border-b flex justify-between items-center">
-                  <div className="flex items-center gap-3">
-                    <Badge variant="outline" className="bg-white">Item {idx + 1}</Badge>
-                    <Input
-                      value={req.name}
-                      onChange={e => updateCurrentReq(idx, { name: e.target.value })}
-                      className="h-8 bg-transparent border-none font-bold text-slate-700 w-[300px] focus-visible:ring-0"
-                      placeholder="Question label..."
-                    />
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-red-400"
-                    onClick={() => {
-                      const updated = currentReqs.filter((_, i) => i !== idx);
-                      if (activeSection === 'general') setGeneralReqs(updated);
-                      else if (activeSection === 'processing') setProcessingReqs(updated);
-                      else if (activeSection === 'issuance') setIssuanceReqs(updated);
-                      else if (activeSection === 'job-specific') setJobSpecificReqs(updated);
-                      else if (activeSection === 'reference') setReferenceReqs(updated);
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-
-                <div className="p-5 space-y-6">
+                  {/* KYC Document Selector */}
                   <div className="space-y-2">
-                    <Label className="text-[10px] uppercase font-bold text-slate-500">Applies To</Label>
+                    <Label className="text-[10px] uppercase font-bold text-slate-500">Add KYC Document</Label>
                     <Popover>
                       <PopoverTrigger asChild>
-                        <Button variant="outline" className="w-full justify-between h-10 bg-white">
-                          <div className="flex gap-1 truncate text-xs">
-                            {req.entityTypes.length > 0 ? req.entityTypes.map(t => <Badge key={t} variant="secondary" className="capitalize text-[9px]">{t}</Badge>) : "Select role..."}
-                          </div>
-                          <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
+                        <Button variant="outline" className="w-full justify-between border-dashed border-2 border-emerald-300 hover:border-emerald-400 hover:bg-emerald-50 transition-all h-10">
+                          <span className="text-slate-500 text-sm">Select a KYC document to add...</span>
+                          <Plus className="h-4 w-4 text-emerald-500" />
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-[300px] p-0">
+                      <PopoverContent className="w-[450px] p-0" align="start">
                         <Command>
-                          <CommandInput placeholder="Search roles..." />
+                          <CommandInput placeholder="Search KYC documents..." />
                           <CommandList>
-                            <CommandGroup>
-                              {APPLICANT_OPTIONS.map((opt) => (
-                                <CommandItem key={opt.value} onSelect={() => {
-                                  const current = req.entityTypes;
-                                  const updated = current.includes(opt.value as EntityType)
-                                    ? current.filter(t => t !== opt.value)
-                                    : [...current, opt.value as EntityType];
-                                  updateCurrentReq(idx, { entityTypes: updated });
-                                }}>
-                                  <Check className={cn("mr-2 h-4 w-4", req.entityTypes.includes(opt.value as EntityType) ? "opacity-100" : "opacity-0")} />
-                                  {opt.label}
-                                </CommandItem>
-                              ))}
+                            <CommandEmpty>No documents found.</CommandEmpty>
+                            <CommandGroup className="max-h-[300px] overflow-y-auto">
+                              {kycDocuments.map(doc => {
+                                const alreadyAdded = reportDocs.some(d => d.id === doc.id)
+                                const docCategory = (doc.category || '').toLowerCase()
+                                const docType = docCategory.includes('company') ? 'Company' :
+                                  docCategory.includes('director') || docCategory.includes('individual') ? 'Individual' : 'Application'
+                                return (
+                                  <CommandItem
+                                    key={doc.id}
+                                    disabled={alreadyAdded}
+                                    onSelect={() => {
+                                      if (!alreadyAdded) {
+                                        setReportDocs([...reportDocs, { ...doc, appliesTo: getDefaultAppliesTo(doc) }])
+                                      }
+                                    }}
+                                  >
+                                    <Check className={cn("mr-2 h-4 w-4", alreadyAdded ? "opacity-100" : "opacity-0")} />
+                                    <div className="flex-1 flex items-center gap-2">
+                                      <span className="text-sm">{doc.display_name || doc.name}</span>
+                                      <Badge variant="outline" className={cn(
+                                        "text-[8px] px-1.5 py-0",
+                                        docType === 'Company' ? "bg-purple-50 text-purple-600 border-purple-200" :
+                                          docType === 'Individual' ? "bg-blue-50 text-blue-600 border-blue-200" :
+                                            "bg-emerald-50 text-emerald-600 border-emerald-200"
+                                      )}>
+                                        {docType}
+                                      </Badge>
+                                      {doc.category && (
+                                        <span className="text-[10px] text-slate-400">{doc.category}</span>
+                                      )}
+                                    </div>
+                                    {alreadyAdded && <span className="text-xs text-slate-400">(added)</span>}
+                                  </CommandItem>
+                                )
+                              })}
                             </CommandGroup>
                           </CommandList>
                         </Command>
                       </PopoverContent>
                     </Popover>
                   </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="bg-white border rounded-xl p-4 shadow-sm space-y-3">
+                  <Label className="text-[10px] uppercase font-bold text-slate-400">
+                    Quick Add {activeSection === 'job-specific' ? 'Questions' : 'Requirements'} (One per line)
+                  </Label>
+                  <Textarea
+                    value={getCurrentBulkInput()}
+                    onChange={(e) => handleBulkInputChange(activeSection, e.target.value)}
+                    placeholder={getCurrentBulkPlaceholder()}
+                    className="min-h-[80px] text-sm"
+                  />
+                </div>
 
-                  {activeSection === 'job-specific' ? (
-                    <>
-                      <div className="grid grid-cols-4 gap-4">
-                        <div className="space-y-1.5">
-                          <Label className="text-[10px] uppercase font-bold text-blue-600 flex items-center gap-1">
-                            <Folder className="h-3 w-3" /> Section Category
-                          </Label>
-                          <Input
-                            value={req.category_name}
-                            onChange={e => updateCurrentReq(idx, { category_name: e.target.value })}
-                            placeholder="e.g. Arrival Details"
-                            className="h-9"
-                          />
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <Label className="text-[10px] uppercase font-bold text-slate-400">Response Type</Label>
-                          <Select value={req.inputType} onValueChange={(v: QuestionType) => updateCurrentReq(idx, { inputType: v })}>
-                            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="text">Text Input</SelectItem>
-                              <SelectItem value="number">Number</SelectItem>
-                              <SelectItem value="date">Date Picker</SelectItem>
-                              <SelectItem value="select">Dropdown (Single)</SelectItem>
-                              <SelectItem value="multiselect">Dropdown (Multi)</SelectItem>
-                              <SelectItem value="boolean">Yes/No</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <Label className="text-[10px] uppercase font-bold text-slate-400">Default Value</Label>
-                          <Input
-                            value={req.defaultValue}
-                            onChange={e => updateCurrentReq(idx, { defaultValue: e.target.value })}
-                            className="h-9"
-                            placeholder="Optional..."
-                          />
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <Label className="text-[10px] uppercase font-bold text-slate-400">Mandatory</Label>
-                          <div className="flex items-center h-9 gap-2 px-3 border rounded-md">
-                            <Checkbox
-                              checked={req.isRequired}
-                              onCheckedChange={c => updateCurrentReq(idx, { isRequired: !!c })}
-                            />
-                            <span className="text-xs">Required</span>
-                          </div>
-                        </div>
+                {currentReqs.map((req, idx) => (
+                  <Card key={idx} className="border-2 border-slate-200 overflow-hidden bg-white shadow-sm">
+                    <div className="bg-slate-50 px-4 py-3 border-b flex justify-between items-center">
+                      <div className="flex items-center gap-3">
+                        <Badge variant="outline" className="bg-white">Item {idx + 1}</Badge>
+                        <Input
+                          value={req.name}
+                          onChange={e => updateCurrentReq(idx, { name: e.target.value })}
+                          className="h-8 bg-transparent border-none font-bold text-slate-700 w-[300px] focus-visible:ring-0"
+                          placeholder="Question label..."
+                        />
                       </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-red-400"
+                        onClick={() => {
+                          const updated = currentReqs.filter((_, i) => i !== idx);
+                          if (activeSection === 'general') setGeneralReqs(updated);
+                          else if (activeSection === 'processing') setProcessingReqs(updated);
+                          else if (activeSection === 'issuance') setIssuanceReqs(updated);
+                          else if (activeSection === 'job-specific') setJobSpecificReqs(updated);
+                          else if (activeSection === 'reference') setReferenceReqs(updated);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
 
-                      <div className="space-y-2 pt-2 border-t">
-                        <Label className="flex items-center gap-2 text-[10px] font-bold uppercase text-purple-600">
-                          <Split className="h-3 w-3" /> Link to Task Column
-                        </Label>
-                        <Select
-                          value={req.linkedToColumn || 'none'}
-                          onValueChange={(v) => updateCurrentReq(idx, { linkedToColumn: v === 'none' ? null : v as 'duration' | 'renewal_status' })}
-                        >
-                          <SelectTrigger className="bg-purple-50 border-purple-200 h-9">
-                            <SelectValue placeholder="No column linked" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">-- No Column Linked --</SelectItem>
-                            <SelectItem value="duration">Duration (e.g., 1 year, 6 months)</SelectItem>
-                            <SelectItem value="renewal_status">Renewal Status (New/Renewal)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-[9px] text-purple-600 italic">
-                          Link this question's answer to a direct task column. The answer will be automatically synced when the enquiry is saved.
-                        </p>
-                      </div>
-
-                      {(req.inputType === 'select' || req.inputType === 'multiselect') && (
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center">
-                            <Label className="text-[10px] uppercase font-bold text-blue-600">Dropdown Options</Label>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 text-xs"
-                              onClick={() => {
-                                const currentOptions = Array.isArray(req.options) ? [...req.options] : [];
-                                updateCurrentReq(idx, { options: [...currentOptions, ''] });
-                              }}
-                            >
-                              <Plus className="h-3 w-3 mr-1" /> Add Option
+                    <div className="p-5 space-y-6">
+                      <div className="space-y-2">
+                        <Label className="text-[10px] uppercase font-bold text-slate-500">Applies To</Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" className="w-full justify-between h-10 bg-white">
+                              <div className="flex gap-1 truncate text-xs">
+                                {req.entityTypes.length > 0 ? req.entityTypes.map(t => <Badge key={t} variant="secondary" className="capitalize text-[9px]">{t}</Badge>) : "Select role..."}
+                              </div>
+                              <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
                             </Button>
-                          </div>
-                          <div className="space-y-2">
-                            {Array.isArray(req.options) && req.options.map((option, optIdx) => (
-                              <div key={optIdx} className="flex gap-2 items-center">
-                                <Input
-                                  value={option}
-                                  onChange={(e) => {
-                                    const newOptions = [...req.options];
-                                    newOptions[optIdx] = e.target.value;
-                                    updateCurrentReq(idx, { options: newOptions });
-                                  }}
-                                  placeholder={`Option ${optIdx + 1}`}
-                                  className="h-9 flex-1"
-                                />
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-9 w-9 text-destructive"
-                                  onClick={() => {
-                                    const newOptions = [...req.options];
-                                    newOptions.splice(optIdx, 1);
-                                    updateCurrentReq(idx, { options: newOptions });
-                                  }}
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            ))}
-                            {(!req.options || req.options.length === 0) && (
-                              <div className="text-sm text-muted-foreground text-center py-2">
-                                No options added yet. Click "Add Option" to get started.
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="space-y-1.5">
-                        <Label className="text-[10px] uppercase font-bold text-blue-600">Master Field Sync</Label>
-                        <Select value={req.linkedMasterFieldId} onValueChange={(v) => updateCurrentReq(idx, { linkedMasterFieldId: v })}>
-                          <SelectTrigger className="h-9"><SelectValue placeholder="Link field..." /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">None</SelectItem>
-                            {masterFields.map(mf => (
-                              <SelectItem key={mf.id} value={String(mf.id)}>{mf.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[300px] p-0">
+                            <Command>
+                              <CommandInput placeholder="Search roles..." />
+                              <CommandList>
+                                <CommandGroup>
+                                  {APPLICANT_OPTIONS.map((opt) => (
+                                    <CommandItem key={opt.value} onSelect={() => {
+                                      const current = req.entityTypes;
+                                      const updated = current.includes(opt.value as EntityType)
+                                        ? current.filter(t => t !== opt.value)
+                                        : [...current, opt.value as EntityType];
+                                      updateCurrentReq(idx, { entityTypes: updated });
+                                    }}>
+                                      <Check className={cn("mr-2 h-4 w-4", req.entityTypes.includes(opt.value as EntityType) ? "opacity-100" : "opacity-0")} />
+                                      {opt.label}
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
                       </div>
 
-                      {/* CONDITIONAL LOGIC ENGINE */}
-                      <div className="bg-amber-50/50 border border-amber-100 rounded-xl p-4 space-y-4">
-                        <div className="flex items-center gap-2 text-amber-800">
-                          <Split className="h-4 w-4" />
-                          <span className="text-[11px] font-bold uppercase">Visibility Logic</span>
-                          <HelpCircle className="h-3 w-3 text-amber-600" />
-                        </div>
-                        <div className="grid grid-cols-3 gap-4">
-                          <div className="space-y-1">
-                            <Label className="text-[10px] text-amber-700 font-bold">Show if this question...</Label>
+                      {activeSection === 'job-specific' ? (
+                        <>
+                          <div className="grid grid-cols-4 gap-4">
+                            <div className="space-y-1.5">
+                              <Label className="text-[10px] uppercase font-bold text-blue-600 flex items-center gap-1">
+                                <Folder className="h-3 w-3" /> Section Category
+                              </Label>
+                              <Input
+                                value={req.category_name}
+                                onChange={e => updateCurrentReq(idx, { category_name: e.target.value })}
+                                placeholder="e.g. Arrival Details"
+                                className="h-9"
+                              />
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <Label className="text-[10px] uppercase font-bold text-slate-400">Response Type</Label>
+                              <Select value={req.inputType} onValueChange={(v: QuestionType) => updateCurrentReq(idx, { inputType: v })}>
+                                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="text">Text Input</SelectItem>
+                                  <SelectItem value="number">Number</SelectItem>
+                                  <SelectItem value="date">Date Picker</SelectItem>
+                                  <SelectItem value="select">Dropdown (Single)</SelectItem>
+                                  <SelectItem value="multiselect">Dropdown (Multi)</SelectItem>
+                                  <SelectItem value="boolean">Yes/No</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <Label className="text-[10px] uppercase font-bold text-slate-400">Default Value</Label>
+                              <Input
+                                value={req.defaultValue}
+                                onChange={e => updateCurrentReq(idx, { defaultValue: e.target.value })}
+                                className="h-9"
+                                placeholder="Optional..."
+                              />
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <Label className="text-[10px] uppercase font-bold text-slate-400">Mandatory</Label>
+                              <div className="flex items-center h-9 gap-2 px-3 border rounded-md">
+                                <Checkbox
+                                  checked={req.isRequired}
+                                  onCheckedChange={c => updateCurrentReq(idx, { isRequired: !!c })}
+                                />
+                                <span className="text-xs">Required</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="space-y-2 pt-2 border-t">
+                            <Label className="flex items-center gap-2 text-[10px] font-bold uppercase text-purple-600">
+                              <Split className="h-3 w-3" /> Link to Task Column
+                            </Label>
                             <Select
-                              value={req.dependsOnQuestionId || "always"}
-                              onValueChange={v => updateCurrentReq(idx, {
-                                dependsOnQuestionId: v === "always" ? undefined : v
-                              })}
+                              value={req.linkedToColumn || 'none'}
+                              onValueChange={(v) => updateCurrentReq(idx, { linkedToColumn: v === 'none' ? null : v as 'duration' | 'renewal_status' })}
                             >
-                              <SelectTrigger className="bg-white border-amber-200 h-9">
-                                <SelectValue placeholder="Always Visible" />
+                              <SelectTrigger className="bg-purple-50 border-purple-200 h-9">
+                                <SelectValue placeholder="No column linked" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="always">Always Visible</SelectItem>
-                                {currentReqs.slice(0, idx).filter(q => q.name.trim()).map((prev, pIdx) => (
-                                  <SelectItem key={`${prev.name}-${pIdx}`} value={prev.name.trim()}>
-                                    {prev.name || 'Untitled'}
-                                  </SelectItem>
+                                <SelectItem value="none">-- No Column Linked --</SelectItem>
+                                <SelectItem value="duration">Duration (e.g., 1 year, 6 months)</SelectItem>
+                                <SelectItem value="renewal_status">Renewal Status (New/Renewal)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <p className="text-[9px] text-purple-600 italic">
+                              Link this question's answer to a direct task column. The answer will be automatically synced when the enquiry is saved.
+                            </p>
+                          </div>
+
+                          {req.inputType === 'boolean' && (
+                            <div className="space-y-2 pt-2 border-t">
+                              <Label className="flex items-center gap-2 text-[10px] font-bold uppercase text-amber-600">
+                                <Users className="h-3 w-3" /> Third Party Indicator
+                              </Label>
+                              <Input
+                                value={req.third_party_role || ''}
+                                onChange={e => updateCurrentReq(idx, { third_party_role: e.target.value || null })}
+                                placeholder="e.g. signatory, approver"
+                                className="h-9"
+                              />
+                              <p className="text-[9px] text-amber-600 italic">
+                                When set, answering "Yes" will show a picker to select a third-party individual. Stored as this role plus the entity types from "Applies To" in participants.
+                              </p>
+                            </div>
+                          )}
+
+                          {(req.inputType === 'select' || req.inputType === 'multiselect') && (
+                            <div className="space-y-2">
+                              <div className="flex justify-between items-center">
+                                <Label className="text-[10px] uppercase font-bold text-blue-600">Dropdown Options</Label>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-xs"
+                                  onClick={() => {
+                                    const currentOptions = Array.isArray(req.options) ? [...req.options] : [];
+                                    updateCurrentReq(idx, { options: [...currentOptions, ''] });
+                                  }}
+                                >
+                                  <Plus className="h-3 w-3 mr-1" /> Add Option
+                                </Button>
+                              </div>
+                              <div className="space-y-2">
+                                {Array.isArray(req.options) && req.options.map((option, optIdx) => (
+                                  <div key={optIdx} className="flex gap-2 items-center">
+                                    <Input
+                                      value={option}
+                                      onChange={(e) => {
+                                        const newOptions = [...req.options];
+                                        newOptions[optIdx] = e.target.value;
+                                        updateCurrentReq(idx, { options: newOptions });
+                                      }}
+                                      placeholder={`Option ${optIdx + 1}`}
+                                      className="h-9 flex-1"
+                                    />
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-9 w-9 text-destructive"
+                                      onClick={() => {
+                                        const newOptions = [...req.options];
+                                        newOptions.splice(optIdx, 1);
+                                        updateCurrentReq(idx, { options: newOptions });
+                                      }}
+                                    >
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                ))}
+                                {(!req.options || req.options.length === 0) && (
+                                  <div className="text-sm text-muted-foreground text-center py-2">
+                                    No options added yet. Click "Add Option" to get started.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="space-y-1.5">
+                            <Label className="text-[10px] uppercase font-bold text-blue-600">Master Field Sync</Label>
+                            <Select value={req.linkedMasterFieldId} onValueChange={(v) => updateCurrentReq(idx, { linkedMasterFieldId: v })}>
+                              <SelectTrigger className="h-9"><SelectValue placeholder="Link field..." /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">None</SelectItem>
+                                {masterFields.map(mf => (
+                                  <SelectItem key={mf.id} value={String(mf.id)}>{mf.label}</SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           </div>
 
-                          {req.dependsOnQuestionId && (
-                            <>
+                          {/* CONDITIONAL LOGIC ENGINE */}
+                          <div className="bg-amber-50/50 border border-amber-100 rounded-xl p-4 space-y-4">
+                            <div className="flex items-center gap-2 text-amber-800">
+                              <Split className="h-4 w-4" />
+                              <span className="text-[11px] font-bold uppercase">Visibility Logic</span>
+                              <HelpCircle className="h-3 w-3 text-amber-600" />
+                            </div>
+                            <div className="grid grid-cols-3 gap-4">
                               <div className="space-y-1">
-                                <Label className="text-[10px] text-amber-700 font-bold">Operator</Label>
+                                <Label className="text-[10px] text-amber-700 font-bold">Show if this question...</Label>
                                 <Select
-                                  value={req.dependsOnOperator}
-                                  onValueChange={v => updateCurrentReq(idx, { dependsOnOperator: v as LogicOperator })}
+                                  value={req.dependsOnQuestionId || "always"}
+                                  onValueChange={v => updateCurrentReq(idx, {
+                                    dependsOnQuestionId: v === "always" ? undefined : v
+                                  })}
                                 >
                                   <SelectTrigger className="bg-white border-amber-200 h-9">
-                                    <SelectValue />
+                                    <SelectValue placeholder="Always Visible" />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="equals">Equals</SelectItem>
-                                    <SelectItem value="not_equals">Not Equals</SelectItem>
-                                    <SelectItem value="is_not_empty">Is Answered</SelectItem>
-                                    <SelectItem value="is_empty">Is Empty</SelectItem>
+                                    <SelectItem value="always">Always Visible</SelectItem>
+                                    {currentReqs.slice(0, idx).filter(q => q.name.trim()).map((prev, pIdx) => (
+                                      <SelectItem key={`${prev.name}-${pIdx}`} value={prev.name.trim()}>
+                                        {prev.name || 'Untitled'}
+                                      </SelectItem>
+                                    ))}
                                   </SelectContent>
                                 </Select>
                               </div>
-                              {(req.dependsOnOperator === 'equals' || req.dependsOnOperator === 'not_equals') && (
-                                <div className="space-y-1">
-                                  <Label className="text-[10px] text-amber-700 font-bold">Value</Label>
-                                  <Input
-                                    placeholder="e.g. Arriving by Air"
-                                    value={req.dependsOnValue}
-                                    onChange={e => updateCurrentReq(idx, { dependsOnValue: e.target.value })}
-                                    className="bg-white border-amber-200 h-9"
-                                  />
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="space-y-6">
-                      <div className="p-4 bg-white border rounded-xl shadow-sm space-y-4">
-                        <div className="space-y-2">
-                          <Label className="text-xs font-bold text-slate-500">Document Links</Label>
-                          <div className="space-y-2">
-                            {req.documentIds.length > 0 && (
-                              <div className="flex flex-wrap gap-1">
-                                {req.documentIds.map(docId => {
-                                  const doc = kycDocuments.find(d => String(d.id) === String(docId))
-                                  return doc ? (
-                                    <Badge key={docId} variant="secondary" className="text-xs px-2 py-1">
-                                      {doc.display_name || doc.name}
-                                      <button
-                                        onClick={() => {
-                                          const current = req.documentIds;
-                                          const updated = current.filter(id => id !== String(docId));
-                                          updateCurrentReq(idx, { documentIds: updated });
-                                        }}
-                                        className="ml-1 hover:text-red-600"
-                                      >
-                                        <X className="h-3 w-3" />
-                                      </button>
-                                    </Badge>
-                                  ) : null
-                                })}
-                              </div>
-                            )}
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
-                                  <span className="text-slate-400">Add document links...</span>
-                                  <Search className="h-4 w-4 opacity-50" />
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-[450px] p-0" align="start">
-                                <Command>
-                                  <CommandInput placeholder="Search documents..." />
-                                  <CommandList>
-                                    <CommandGroup className="max-h-[300px] overflow-y-auto">
-                                      {kycDocuments.map(doc => (
-                                        <CommandItem key={doc.id} onSelect={() => {
-                                          const current = req.documentIds;
-                                          const updated = current.includes(String(doc.id))
-                                            ? current.filter(id => id !== String(doc.id))
-                                            : [...current, String(doc.id)];
-                                          updateCurrentReq(idx, { documentIds: updated });
-                                        }}>
-                                          <Check className={cn("mr-2 h-4 w-4", req.documentIds.includes(String(doc.id)) ? "opacity-100" : "opacity-0")} />
-                                          {doc.display_name || doc.name}
-                                        </CommandItem>
-                                      ))}
-                                    </CommandGroup>
-                                  </CommandList>
-                                </Command>
-                              </PopoverContent>
-                            </Popover>
-                          </div>
-                        </div>
 
-                        <div className="space-y-2">
-                          <Label className="text-xs font-bold text-slate-500">Source Table</Label>
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
-                                <span className="text-slate-400">
-                                  {req.sourceTable ? tables.find(t => t.name === req.sourceTable)?.label || req.sourceTable : "Select source table..."}
-                                </span>
-                                <Search className="h-4 w-4 opacity-50" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[450px] p-0" align="start">
-                              <Command>
-                                <CommandInput placeholder="Search tables..." />
-                                <CommandList>
-                                  {loadingTables ? (
-                                    <div className="px-2 py-4 text-center text-sm text-slate-500">Loading tables...</div>
-                                  ) : tables.length > 0 ? (
-                                    <CommandGroup className="max-h-[300px] overflow-y-auto">
-                                      {tables.map(table => (
-                                        <CommandItem key={table.name} onSelect={() => {
-                                          updateCurrentReq(idx, { sourceTable: table.name });
-                                        }}>
-                                          <Check className={cn("mr-2 h-4 w-4", req.sourceTable === table.name ? "opacity-100" : "opacity-0")} />
-                                          {table.label}
-                                        </CommandItem>
-                                      ))}
-                                    </CommandGroup>
-                                  ) : (
-                                    <div className="px-2 py-4 text-center text-sm text-slate-500">No tables available</div>
+                              {req.dependsOnQuestionId && (
+                                <>
+                                  <div className="space-y-1">
+                                    <Label className="text-[10px] text-amber-700 font-bold">Operator</Label>
+                                    <Select
+                                      value={req.dependsOnOperator}
+                                      onValueChange={v => updateCurrentReq(idx, { dependsOnOperator: v as LogicOperator })}
+                                    >
+                                      <SelectTrigger className="bg-white border-amber-200 h-9">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="equals">Equals</SelectItem>
+                                        <SelectItem value="not_equals">Not Equals</SelectItem>
+                                        <SelectItem value="is_not_empty">Is Answered</SelectItem>
+                                        <SelectItem value="is_empty">Is Empty</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  {(req.dependsOnOperator === 'equals' || req.dependsOnOperator === 'not_equals') && (
+                                    <div className="space-y-1">
+                                      <Label className="text-[10px] text-amber-700 font-bold">Value</Label>
+                                      <Input
+                                        placeholder="e.g. Arriving by Air"
+                                        value={req.dependsOnValue}
+                                        onChange={e => updateCurrentReq(idx, { dependsOnValue: e.target.value })}
+                                        className="bg-white border-amber-200 h-9"
+                                      />
+                                    </div>
                                   )}
-                                </CommandList>
-                              </Command>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
-
-                        {req.sourceTable && (
-                          <div className="space-y-2">
-                            <Label className="text-xs font-bold text-slate-500">Linking Variable</Label>
-                            <Select value={req.linkingVariable || ''} onValueChange={(value) => updateCurrentReq(idx, { linkingVariable: value || null })}>
-                              <SelectTrigger className="bg-white h-9">
-                                <SelectValue placeholder="Select linking variable..." />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {LINKING_VARIABLES.map(variable => (
-                                  <SelectItem key={variable.value} value={variable.value}>
-                                    {variable.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                                </>
+                              )}
+                            </div>
                           </div>
-                        )}
-
-                        <div className="pt-4 border-t">
-                          <div className="space-y-2">
-                            <Label className="text-xs font-bold text-slate-500">Extraction / Computed Function</Label>
-                            <Select value={req.computedFunction || 'none'} onValueChange={(v) => {
-                              const updates: Partial<RequirementForm> = { computedFunction: v };
-
-                              if (v === 'none') {
-                                updates.executionMode = '';
-                              } else if (v.includes('Latest')) {
-                                updates.executionMode = 'latest';
-                              } else {
-                                updates.executionMode = 'all';
-                              }
-
-                              updateCurrentReq(idx, updates);
-                            }}>
-                              <SelectTrigger className="bg-slate-50 border-slate-200 h-10">
-                                <SelectValue placeholder="Select function..." />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {COMPUTED_FUNCTIONS.map(fn => (
-                                  <SelectItem key={fn.value} value={fn.value} className="text-sm">
-                                    {fn.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-purple-50/50 p-3 rounded-lg border border-purple-100 space-y-2">
-                          <div className="flex items-center space-x-2">
-                            <Checkbox id={`webform-${idx}`} checked={req.hasWebForm} onCheckedChange={(c) => updateCurrentReq(idx, { hasWebForm: !!c })} />
-                            <Label htmlFor={`webform-${idx}`} className="text-[10px] font-bold text-purple-700 flex items-center gap-1 uppercase tracking-tight">
-                              <Zap className="h-3 w-3" /> Link Web Form
-                            </Label>
-                          </div>
-                          {req.hasWebForm && (
-                            <Select value={req.automationId} onValueChange={(v) => updateCurrentReq(idx, { automationId: v })}>
-                              <SelectTrigger className="bg-white h-8 text-xs border-purple-200"><SelectValue placeholder="Select Logic..." /></SelectTrigger>
-                              <SelectContent>
-                                {automationTypes.map(auto => (
-                                  <SelectItem key={auto.id} value={String(auto.id)}>{auto.name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        </div>
-                        <div className="bg-white p-3 rounded-lg border flex items-center gap-6">
-                          <div className="flex items-center space-x-2">
-                            <Checkbox id={`stage-req-${idx}`} checked={req.isStageDocument} onCheckedChange={(c) => updateCurrentReq(idx, { isStageDocument: !!c })} />
-                            <Label htmlFor={`stage-req-${idx}`} className="text-[10px] font-bold uppercase text-slate-500">Stage Doc</Label>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Checkbox id={`template-req-${idx}`} checked={req.hasTemplate} onCheckedChange={(c) => updateCurrentReq(idx, { hasTemplate: !!c })} />
-                            <Label htmlFor={`template-req-${idx}`} className="text-[10px] font-bold uppercase text-orange-600">Has Template</Label>
-                          </div>
-                        </div>
-                      </div>
-
-                      {req.hasTemplate && (
-                        <div className="bg-orange-50/50 p-4 rounded-lg border border-orange-100">
-                          <div className="space-y-3">
-                            <div className="flex items-center gap-2">
-                              <Settings2 className="h-4 w-4 text-orange-600" />
-                              <Label className="text-sm font-medium text-orange-800">Template Selection</Label>
-                              {loadingTemplates && <Loader2 className="h-4 w-4 animate-spin text-orange-600" />}
+                        </>
+                      ) : (
+                        <div className="space-y-6">
+                          <div className="p-4 bg-white border rounded-xl shadow-sm space-y-4">
+                            <div className="space-y-2">
+                              <Label className="text-xs font-bold text-slate-500">Document Links</Label>
+                              <div className="space-y-2">
+                                {req.documentIds.length > 0 && (
+                                  <div className="flex flex-wrap gap-1">
+                                    {req.documentIds.map(docId => {
+                                      const doc = kycDocuments.find(d => String(d.id) === String(docId))
+                                      return doc ? (
+                                        <Badge key={docId} variant="secondary" className="text-xs px-2 py-1">
+                                          {doc.display_name || doc.name}
+                                          <button
+                                            onClick={() => {
+                                              const current = req.documentIds;
+                                              const updated = current.filter(id => id !== String(docId));
+                                              updateCurrentReq(idx, { documentIds: updated });
+                                            }}
+                                            className="ml-1 hover:text-red-600"
+                                          >
+                                            <X className="h-3 w-3" />
+                                          </button>
+                                        </Badge>
+                                      ) : null
+                                    })}
+                                  </div>
+                                )}
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
+                                      <span className="text-slate-400">Add document links...</span>
+                                      <Search className="h-4 w-4 opacity-50" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-[450px] p-0" align="start">
+                                    <Command>
+                                      <CommandInput placeholder="Search documents..." />
+                                      <CommandList>
+                                        <CommandGroup className="max-h-[300px] overflow-y-auto">
+                                          {kycDocuments.map(doc => (
+                                            <CommandItem key={doc.id} onSelect={() => {
+                                              const current = req.documentIds;
+                                              const updated = current.includes(String(doc.id))
+                                                ? current.filter(id => id !== String(doc.id))
+                                                : [...current, String(doc.id)];
+                                              updateCurrentReq(idx, { documentIds: updated });
+                                            }}>
+                                              <Check className={cn("mr-2 h-4 w-4", req.documentIds.includes(String(doc.id)) ? "opacity-100" : "opacity-0")} />
+                                              {doc.display_name || doc.name}
+                                            </CommandItem>
+                                          ))}
+                                        </CommandGroup>
+                                      </CommandList>
+                                    </Command>
+                                  </PopoverContent>
+                                </Popover>
+                              </div>
                             </div>
 
-                            {templates.length > 0 ? (
+                            <div className="space-y-2">
+                              <Label className="text-xs font-bold text-slate-500">Source Table</Label>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
+                                    <span className="text-slate-400">
+                                      {req.sourceTable ? tables.find(t => t.name === req.sourceTable)?.label || req.sourceTable : "Select source table..."}
+                                    </span>
+                                    <Search className="h-4 w-4 opacity-50" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-[450px] p-0" align="start">
+                                  <Command>
+                                    <CommandInput placeholder="Search tables..." />
+                                    <CommandList>
+                                      {loadingTables ? (
+                                        <div className="px-2 py-4 text-center text-sm text-slate-500">Loading tables...</div>
+                                      ) : tables.length > 0 ? (
+                                        <CommandGroup className="max-h-[300px] overflow-y-auto">
+                                          {tables.map(table => (
+                                            <CommandItem key={table.name} onSelect={() => {
+                                              updateCurrentReq(idx, { sourceTable: table.name });
+                                            }}>
+                                              <Check className={cn("mr-2 h-4 w-4", req.sourceTable === table.name ? "opacity-100" : "opacity-0")} />
+                                              {table.label}
+                                            </CommandItem>
+                                          ))}
+                                        </CommandGroup>
+                                      ) : (
+                                        <div className="px-2 py-4 text-center text-sm text-slate-500">No tables available</div>
+                                      )}
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+
+                            {req.sourceTable && (
                               <div className="space-y-2">
-                                <p className="text-xs text-slate-600">Available templates for selected documents:</p>
-                                <div className="grid gap-2">
-                                  {templates.map(template => (
-                                    <div key={template.id} className="flex items-center justify-between p-2 bg-white rounded border border-orange-200">
-                                      <div className="flex items-center gap-2">
-                                        <FileText className="h-4 w-4 text-orange-600" />
-                                        <div>
-                                          <p className="text-sm font-medium">{template.file_name}</p>
-                                          <p className="text-xs text-slate-500">{template.file_type?.toUpperCase()}</p>
-                                        </div>
-                                      </div>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-7 text-xs"
-                                        onClick={() => {
-                                          updateCurrentReq(idx, {
-                                            selectedTemplateId: template.id,
-                                            selectedTemplate: template
-                                          });
-                                          toast({
-                                            title: "Template Selected",
-                                            description: `${template.file_name} has been selected`
-                                          });
-                                        }}
-                                      >
-                                        Select
-                                      </Button>
-                                    </div>
-                                  ))}
-                                </div>
+                                <Label className="text-xs font-bold text-slate-500">Linking Variable</Label>
+                                <Select value={req.linkingVariable || ''} onValueChange={(value) => updateCurrentReq(idx, { linkingVariable: value || null })}>
+                                  <SelectTrigger className="bg-white h-9">
+                                    <SelectValue placeholder="Select linking variable..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {LINKING_VARIABLES.map(variable => (
+                                      <SelectItem key={variable.value} value={variable.value}>
+                                        {variable.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
                               </div>
-                            ) : !loadingTemplates ? (
-                              <div className="text-center py-4">
-                                <FileText className="h-8 w-8 text-slate-300 mx-auto mb-2" />
-                                <p className="text-sm text-slate-500">No templates found</p>
-                                <p className="text-xs text-slate-400">Templates will appear here once available for the selected documents</p>
+                            )}
+
+                            <div className="pt-4 border-t">
+                              <div className="space-y-2">
+                                <Label className="text-xs font-bold text-slate-500">Extraction / Computed Function</Label>
+                                <Select value={req.computedFunction || 'none'} onValueChange={(v) => {
+                                  const updates: Partial<RequirementForm> = { computedFunction: v };
+
+                                  if (v === 'none') {
+                                    updates.executionMode = '';
+                                  } else if (v.includes('Latest')) {
+                                    updates.executionMode = 'latest';
+                                  } else {
+                                    updates.executionMode = 'all';
+                                  }
+
+                                  updateCurrentReq(idx, updates);
+                                }}>
+                                  <SelectTrigger className="bg-slate-50 border-slate-200 h-10">
+                                    <SelectValue placeholder="Select function..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {COMPUTED_FUNCTIONS.map(fn => (
+                                      <SelectItem key={fn.value} value={fn.value} className="text-sm">
+                                        {fn.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
                               </div>
-                            ) : null}
+                            </div>
                           </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-purple-50/50 p-3 rounded-lg border border-purple-100 space-y-2">
+                              <div className="flex items-center space-x-2">
+                                <Checkbox id={`webform-${idx}`} checked={req.hasWebForm} onCheckedChange={(c) => updateCurrentReq(idx, { hasWebForm: !!c })} />
+                                <Label htmlFor={`webform-${idx}`} className="text-[10px] font-bold text-purple-700 flex items-center gap-1 uppercase tracking-tight">
+                                  <Zap className="h-3 w-3" /> Link Web Form
+                                </Label>
+                              </div>
+                              {req.hasWebForm && (
+                                <Select value={req.automationId} onValueChange={(v) => updateCurrentReq(idx, { automationId: v })}>
+                                  <SelectTrigger className="bg-white h-8 text-xs border-purple-200"><SelectValue placeholder="Select Logic..." /></SelectTrigger>
+                                  <SelectContent>
+                                    {automationTypes.map(auto => (
+                                      <SelectItem key={auto.id} value={String(auto.id)}>{auto.name}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            </div>
+                            <div className="bg-white p-3 rounded-lg border flex items-center gap-6">
+                              <div className="flex items-center space-x-2">
+                                <Checkbox id={`stage-req-${idx}`} checked={req.isStageDocument} onCheckedChange={(c) => updateCurrentReq(idx, { isStageDocument: !!c })} />
+                                <Label htmlFor={`stage-req-${idx}`} className="text-[10px] font-bold uppercase text-slate-500">Stage Doc</Label>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <Checkbox id={`template-req-${idx}`} checked={req.hasTemplate} onCheckedChange={(c) => updateCurrentReq(idx, { hasTemplate: !!c })} />
+                                <Label htmlFor={`template-req-${idx}`} className="text-[10px] font-bold uppercase text-orange-600">Has Template</Label>
+                              </div>
+                            </div>
+                          </div>
+
+                          {req.hasTemplate && (
+                            <div className="bg-orange-50/50 p-4 rounded-lg border border-orange-100">
+                              <div className="space-y-3">
+                                <div className="flex items-center gap-2">
+                                  <Settings2 className="h-4 w-4 text-orange-600" />
+                                  <Label className="text-sm font-medium text-orange-800">Template Selection</Label>
+                                  {loadingTemplates && <Loader2 className="h-4 w-4 animate-spin text-orange-600" />}
+                                </div>
+
+                                {templates.length > 0 ? (
+                                  <div className="space-y-2">
+                                    <p className="text-xs text-slate-600">Available templates for selected documents:</p>
+                                    <div className="grid gap-2">
+                                      {templates.map(template => (
+                                        <div key={template.id} className="flex items-center justify-between p-2 bg-white rounded border border-orange-200">
+                                          <div className="flex items-center gap-2">
+                                            <FileText className="h-4 w-4 text-orange-600" />
+                                            <div>
+                                              <p className="text-sm font-medium">{template.file_name}</p>
+                                              <p className="text-xs text-slate-500">{template.file_type?.toUpperCase()}</p>
+                                            </div>
+                                          </div>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-7 text-xs"
+                                            onClick={() => {
+                                              updateCurrentReq(idx, {
+                                                selectedTemplateId: template.id,
+                                                selectedTemplate: template
+                                              });
+                                              toast({
+                                                title: "Template Selected",
+                                                description: `${template.file_name} has been selected`
+                                              });
+                                            }}
+                                          >
+                                            Select
+                                          </Button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : !loadingTemplates ? (
+                                  <div className="text-center py-4">
+                                    <FileText className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                                    <p className="text-sm text-slate-500">No templates found</p>
+                                    <p className="text-xs text-slate-400">Templates will appear here once available for the selected documents</p>
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-              </Card>
-            ))}
+                  </Card>
+                ))}
 
-            <Button
-              variant="outline"
-              className="w-full border-dashed py-8 bg-white hover:bg-slate-50"
-              onClick={() => {
-                const newItem = DEFAULT_REQUIREMENT(activeSection);
-                if (activeSection === 'general') setGeneralReqs([...generalReqs, newItem]);
-                else if (activeSection === 'processing') setProcessingReqs([...processingReqs, newItem]);
-                else if (activeSection === 'issuance') setIssuanceReqs([...issuanceReqs, newItem]);
-                else setJobSpecificReqs([...jobSpecificReqs, newItem]);
-              }}
-            >
-              <Plus className="mr-2 h-4 w-4" /> Add Another Item
-            </Button>
-          </>
-          )}
+                <Button
+                  variant="outline"
+                  className="w-full border-dashed py-8 bg-white hover:bg-slate-50"
+                  onClick={() => {
+                    const newItem = DEFAULT_REQUIREMENT(activeSection);
+                    if (activeSection === 'general') setGeneralReqs([...generalReqs, newItem]);
+                    else if (activeSection === 'processing') setProcessingReqs([...processingReqs, newItem]);
+                    else if (activeSection === 'issuance') setIssuanceReqs([...issuanceReqs, newItem]);
+                    else setJobSpecificReqs([...jobSpecificReqs, newItem]);
+                  }}
+                >
+                  <Plus className="mr-2 h-4 w-4" /> Add Another Item
+                </Button>
+              </>
+            )}
+          </div>
         </div>
-      </div>
 
-      <DialogFooter className="p-6 bg-white border-t gap-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-        <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-        <Button onClick={handleSubmit} disabled={isSubmitting} className="min-w-[150px]">
-          {isSubmitting ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Saving...
-            </>
-          ) : (
-            activeSection === 'report-docs' ? 'Add Report Documents' : 'Save & Merge Configuration'
-          )}
-        </Button>
-      </DialogFooter>
-    </DialogContent>
+        <DialogFooter className="p-6 bg-white border-t gap-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+          <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={isSubmitting} className="min-w-[150px]">
+            {isSubmitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              activeSection === 'report-docs' ? 'Add Report Documents' : 'Save & Merge Configuration'
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
     </Dialog >
   )
 }

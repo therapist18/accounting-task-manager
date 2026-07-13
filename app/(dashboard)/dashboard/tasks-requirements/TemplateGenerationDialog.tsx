@@ -410,6 +410,15 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
             return relationshipData?.company || companyData || extractedData;
         }
 
+        // Generic third-party role lookup (e.g. signatory, approver, witness)
+        if (entityIdMap && entityIdMap[normType]) {
+            const tpId = entityIdMap[normType];
+            return relationshipData?.directors?.find(d => String(d.id) === String(tpId)) ||
+                combinedCache?.['registry_individuals']?.[tpId] ||
+                combinedCache?.['employment_data']?.[tpId] ||
+                companyAssociates?.find((c: any) => String(c.id) === String(tpId));
+        }
+
         return null;
     };
 
