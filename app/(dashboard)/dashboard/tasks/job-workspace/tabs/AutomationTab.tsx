@@ -898,21 +898,21 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
   return (
     <div className="h-full flex flex-col overflow-hidden bg-white px-6 py-4">
       {/* Header Bar */}
-      <div className="flex items-center justify-between border-b pb-4 mb-3 bg-white shrink-0 z-40">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4 bg-white shrink-0 z-40">
         <div className="flex items-center gap-4">
-          <h3 className="text-xl font-medium text-slate-800 tracking-tight">Field Resolution Matrix</h3>
-          <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-sm rounded-full px-3 py-0.5">
+          <h3 className="text-lg font-bold text-slate-900 tracking-tight">Field Resolution Matrix</h3>
+          <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-xs rounded-full px-3 py-0.5">
             {automations?.length || 0} Automations
           </Badge>
         </div>
         <div className="flex items-center gap-3">
           {automationJobId && showConsole && (
-            <Button variant="outline" className="h-10 px-5 text-sm font-semibold rounded-full border-slate-300 text-slate-700 bg-slate-50 hover:bg-slate-100 shadow-sm" onClick={() => setShowConsole(!showConsole)}>
-              <Terminal className="h-4 w-4 mr-2" /> {showConsole ? 'Hide Console' : 'Show Console'}
+            <Button variant="outline" size="sm" className="h-9 px-4 text-xs font-semibold rounded-lg border-slate-200 text-slate-700 bg-white hover:bg-slate-50 shadow-sm flex items-center gap-1.5" onClick={() => setShowConsole(!showConsole)}>
+              <Terminal className="h-3.5 w-3.5 text-slate-500" /> {showConsole ? 'Hide Console' : 'Show Console'}
             </Button>
           )}
-          <Button variant="outline" className="h-10 px-5 text-sm font-medium rounded-full border-slate-300 text-slate-700 hover:bg-slate-50 shadow-sm" onClick={onRefresh}>
-            <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+          <Button variant="outline" size="sm" className="h-9 px-4 text-xs font-semibold rounded-lg border-slate-200 text-slate-700 bg-white hover:bg-slate-50 shadow-sm flex items-center gap-1.5" onClick={onRefresh}>
+            <RefreshCw className="h-3.5 w-3.5 text-slate-500" /> Refresh
           </Button>
         </div>
       </div>

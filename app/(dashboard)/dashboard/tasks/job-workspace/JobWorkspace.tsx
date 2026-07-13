@@ -2,7 +2,7 @@
 "use client"
 
 import React, { useState, useMemo, useEffect } from "react"
-import { ArrowLeft, Briefcase, CheckCircle2, Clock, FileText, User, Zap, History, MessageSquare, CreditCard, FileType, Building2, ChevronRight, LayoutList, Calendar, Globe, Hash } from "lucide-react"
+import { ArrowLeft, Briefcase, CheckCircle2, Clock, FileText, User, Zap, History, MessageSquare, CreditCard, FileType, Building2, ChevronRight, LayoutList, Calendar, Globe, Hash, AlertTriangle, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -28,7 +28,7 @@ interface JobWorkspaceProps {
 
 const STATUS_COLORS: Record<string, string> = {
   enquiry: "bg-amber-100 text-amber-800 border-amber-200",
-  in_progress: "bg-blue-100 text-blue-800 border-blue-200",
+  in_progress: "bg-blue-50 text-blue-700 border-blue-200",
   completed: "bg-green-100 text-green-800 border-green-200",
   cancelled: "bg-red-100 text-red-800 border-red-200",
   endorsed: "bg-purple-100 text-purple-800 border-purple-200",
@@ -63,13 +63,22 @@ const TAB_DEFINITIONS = [
 export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutomationId, initialOpenSendDialog, initialTemplateDocId }: JobWorkspaceProps) {
   const { task, department, subdepartment, stages, individual } = data
   const [activeTab, setActiveTab] = useState(initialTab || "workflow")
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(new Set([initialTab || "workflow"]))
+  const [openReviewDraft, setOpenReviewDraft] = useState(false)
+  const [openSendRequirements, setOpenSendRequirements] = useState(false)
 
   // Sync activeTab when URL-driven initialTab prop changes (e.g. from zap icon redirect)
   useEffect(() => {
     if (initialTab && initialTab !== activeTab) {
       setActiveTab(initialTab)
+      setVisitedTabs(prev => prev.has(initialTab) ? prev : new Set(prev).add(initialTab))
     }
   }, [initialTab])
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab)
+    setVisitedTabs(prev => prev.has(tab) ? prev : new Set(prev).add(tab))
+  }
 
   const stageProgress = useMemo(() => getStageProgress(task, stages), [task, stages])
   const currentStage = useMemo(() => getCurrentStage(task, stages), [task, stages])
@@ -88,131 +97,178 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
   const jobTitle = task?.job_description || subdepartment?.name || department?.name || "Job Workspace"
   const applicantName = task?.applicant_name || individual?.full_name || "Unknown"
   const statusLabel = task?.status?.replace("_", " ") || "Unknown"
+  const clientDraft = task?.registry_metadata?.client_requirements_draft
 
   return (
     <div className="h-screen flex flex-col bg-[#FAFAFC] overflow-hidden">
+      <div className="h-1 bg-gradient-to-r from-custom-blue via-blue-400 to-blue-300" />
       {/* Header */}
-      <div className="shrink-0 z-10 bg-white shadow-sm border-b border-slate-200">
-        {/* Accent bar */}
-        <div className="h-1 bg-gradient-to-r from-custom-blue via-blue-400 to-blue-300" />
-
+      <div className="shrink-0 z-10 bg-white border-b border-slate-200">
         <div className="px-6 py-3">
-          {/* Breadcrumb */}
-          <div className="flex items-center gap-1.5 mb-2 text-xs text-slate-400">
-            <Button variant="ghost" size="sm" onClick={onBack} className="h-6 px-1.5 -ml-1.5 text-slate-400 hover:text-slate-700">
-              <ArrowLeft className="h-3.5 w-3.5" />
-            </Button>
-            <span className="hover:text-slate-600 transition-colors cursor-default">Tasks</span>
-            <ChevronRight className="h-3 w-3" />
-            <span className="text-slate-600 font-medium truncate max-w-[200px]">{applicantName}</span>
+          {/* Breadcrumb and Metadata Row */}
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5 text-base text-slate-400">
+              <Button variant="ghost" size="sm" onClick={onBack} className="h-7 px-1.5 -ml-1.5 text-slate-400 hover:text-slate-700">
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <span className="hover:text-slate-600 transition-colors cursor-default">Tasks</span>
+              <ChevronRight className="h-3.5 w-3.5" />
+              <span className="text-slate-500 font-medium uppercase">{applicantName}</span>
+            </div>
+
+            <div className="flex items-center gap-5 text-sm text-slate-500 font-medium">
+              <span className="flex items-center gap-1.5"><User className="h-4 w-4 text-slate-400" /> {task?.officer?.name || "Unassigned"}</span>
+              <span className="flex items-center gap-1.5"><Building2 className="h-4 w-4 text-slate-400" /> {department?.name}{subdepartment ? <><span className="text-slate-300 mx-0.5">/</span>{subdepartment.name}</> : ""}{jobLevelLabel ? <><span className="text-slate-300 mx-0.5">/</span>{jobLevelLabel}</> : ""}</span>
+              {task?.created_at && (
+                <span className="flex items-center gap-1.5"><Calendar className="h-4 w-4 text-slate-400" /> {new Date(task.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</span>
+              )}
+            </div>
           </div>
 
           {/* Main header row */}
-          <div className="flex items-start justify-between">
-            <div className="flex items-start gap-3 min-w-0">
-              <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-custom-blue to-blue-500 flex items-center justify-center shadow-sm shrink-0 mt-0.5">
-                <Briefcase className="h-5 w-5 text-white" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-lg font-bold text-slate-900 truncate">{applicantName}</h1>
-                  <Badge variant="outline" className={cn("text-[10px] font-semibold capitalize px-1.5 py-0", STATUS_COLORS[task?.status] || "bg-slate-100 text-slate-600")}>
-                    {statusLabel}
-                  </Badge>
-                  <span className="text-[10px] text-slate-400 font-mono bg-slate-100 px-1.5 py-0.5 rounded">#{task?.id}</span>
-                  {jobLevelLabel && (
-                    <Badge variant="outline" className="text-xs font-bold px-2 py-0.5 bg-indigo-50 text-indigo-700 border-indigo-200">
-                      {jobLevelLabel}
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-sm text-slate-500 mt-0.5">{jobTitle}</p>
-              </div>
-            </div>
-
-            {/* Progress bar row */}
-            <div className="mt-3 flex items-center gap-3">
-              <div className="flex-1 max-w-sm">
-                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-custom-blue to-blue-400 rounded-full transition-all duration-500" />
-                </div>
-              </div>
-              <span className="text-[10px] font-medium text-slate-500">{stageProgress.completed}/{stageProgress.total} stages</span>
-              {currentStage && (
-                <Badge variant="secondary" className="text-[10px] font-normal px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200">{currentStage.name}</Badge>
+          <div className="flex items-center justify-between gap-6 py-2">
+            <div className="flex items-center gap-3 min-w-0">
+              <h1 className="text-3xl font-bold text-slate-900 uppercase truncate">{applicantName}</h1>
+              <Badge variant="outline" className={cn("text-sm font-bold capitalize px-3 py-0.5 rounded-full border-blue-200", STATUS_COLORS[task?.status] || "bg-slate-100 text-slate-600")}>
+                {statusLabel}
+              </Badge>
+              <span className="text-sm text-slate-500 font-semibold bg-slate-100 px-2.5 py-0.5 rounded-full font-mono">#{task?.id}</span>
+              {jobLevelLabel && (
+                <Badge variant="outline" className="text-sm font-bold px-3 py-0.5 rounded-full bg-blue-50 text-blue-700 border-blue-200">
+                  {jobLevelLabel}
+                </Badge>
               )}
             </div>
 
-            <div className="flex items-center gap-5 text-xs text-slate-500 shrink-0 ml-4">
-              <span className="flex items-center gap-1.5"><User className="h-3.5 w-3.5 text-slate-400" /> {task?.officer?.name || "Unassigned"}</span>
-              <span className="flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5 text-slate-400" /> {department?.name}{subdepartment ? <><span className="text-slate-300 mx-0.5">/</span>{subdepartment.name}</> : ""}{jobLevelLabel ? <><span className="text-slate-300 mx-0.5">/</span>{jobLevelLabel}</> : ""}</span>
-              {task?.created_at && (
-                <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5 text-slate-400" /> {new Date(task.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</span>
+            {/* Progress Section */}
+            <div className="flex items-center gap-4 shrink-0">
+              <span className="text-sm font-semibold text-slate-500">{stageProgress.completed} / {stageProgress.total} stages</span>
+              <div className="w-40 h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                <div className="h-full bg-blue-600 rounded-full transition-all duration-500" style={{ width: `${stageProgress.percentage}%` }} />
+              </div>
+              {currentStage && (
+                <Badge variant="outline" className="text-sm font-bold px-3 py-0.5 rounded-full bg-blue-50 text-blue-700 border-blue-200">
+                  {currentStage.name}
+                </Badge>
               )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Pill-style Tabs (matching DepartmentTasksManager) */}
-      <div className="border-b border-slate-200 bg-white px-6 py-3 shrink-0 shadow-sm z-10">
-        <div className="flex gap-1 bg-slate-100 p-1 rounded-full border border-slate-200 w-fit">
+      {/* Tabs Row with actions aligned */}
+      <div className="border-b border-slate-200 bg-white px-6 shrink-0 flex items-center justify-between z-10 shadow-sm">
+        <div className="flex gap-1.5">
           {TAB_DEFINITIONS.map(tab => {
-            const Icon = tab.icon
             const isActive = activeTab === tab.value
+            const Icon = tab.icon
             return (
               <button
                 key={tab.value}
-                onClick={() => setActiveTab(tab.value)}
+                onClick={() => handleTabChange(tab.value)}
                 className={cn(
-                  "px-4 py-1.5 text-sm font-bold rounded-full transition-all flex items-center gap-1.5 whitespace-nowrap",
+                  "px-4 py-3 my-1.5 rounded-lg text-sm font-semibold flex items-center gap-2 whitespace-nowrap transition-all relative",
                   isActive
-                    ? "bg-custom-blue text-white shadow-sm"
-                    : "text-slate-500 hover:text-slate-800"
+                    ? "text-blue-700 bg-blue-50"
+                    : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
                 )}
               >
-                <Icon className="h-3.5 w-3.5" />
+                <Icon className={cn("h-4 w-4", isActive ? "text-blue-600" : "text-slate-400")} />
                 {tab.label}
+                {isActive && (
+                  <span className="absolute left-2 right-2 -bottom-[7px] h-[3px] rounded-full bg-blue-600" />
+                )}
               </button>
             )
           })}
+        </div>
+
+        {/* Action buttons on the right side of the tab bar */}
+        <div className="flex items-center gap-3 py-2">
+          {activeTab === "requirements" && (
+            <>
+              {clientDraft && clientDraft.status !== "applied" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 px-4 text-xs font-semibold rounded-lg border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 shadow-sm flex items-center gap-1.5"
+                  onClick={() => setOpenReviewDraft(true)}
+                >
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Review Draft
+                </Button>
+              )}
+              <Button
+                size="sm"
+                className="h-9 px-5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-sm flex items-center gap-1.5"
+                onClick={() => setOpenSendRequirements(true)}
+              >
+                <Send className="h-3.5 w-3.5" />
+                Send Requirements
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
       {/* Tab Content */}
       <div className="flex-1 overflow-hidden relative">
-        <div className={cn("h-full overflow-y-auto", activeTab !== "overview" && "hidden")}>
-          <div className="p-6">
-            <OverviewTabContent data={data} />
+        {visitedTabs.has("overview") && (
+          <div className={cn("h-full overflow-y-auto", activeTab !== "overview" && "hidden")}>
+            <div className="p-6">
+              <OverviewTabContent data={data} />
+            </div>
           </div>
-        </div>
-        <div className={cn("h-full overflow-y-auto", activeTab !== "workflow" && "hidden")}>
-          <WorkflowTab task={task} stages={stages} allDocuments={data.allDocuments} />
-        </div>
-        <div className={cn("h-full overflow-y-auto", activeTab !== "requirements" && "hidden")}>
-          <RequirementsTab data={data} onRefresh={onRefresh} autoOpenSendDialog={activeTab === "requirements" ? initialOpenSendDialog : undefined} />
-        </div>
-        <div className={cn("h-full overflow-y-auto", activeTab !== "templates" && "hidden")}>
-          <TemplatesTab data={data} targetDocumentId={activeTab === "templates" ? initialTemplateDocId : undefined} />
-        </div>
-        <div className={cn("h-full overflow-y-auto", activeTab !== "billing" && "hidden")}>
-          <div className="p-6">
-            <BillingTab task={task} onRefresh={onRefresh} />
+        )}
+        {visitedTabs.has("workflow") && (
+          <div className={cn("h-full overflow-y-auto", activeTab !== "workflow" && "hidden")}>
+            <WorkflowTab task={task} stages={stages} allDocuments={data.allDocuments} />
           </div>
-        </div>
-        <div className={cn("h-full overflow-y-auto", activeTab !== "automation" && "hidden")}>
-          <AutomationTab data={data} onRefresh={onRefresh} highlightAutomationId={activeTab === "automation" ? initialAutomationId : undefined} />
-        </div>
-        <div className={cn("h-full overflow-y-auto", activeTab !== "history" && "hidden")}>
-          <div className="p-6">
-            <HistoryTab task={task} stages={stages} />
+        )}
+        {visitedTabs.has("requirements") && (
+          <div className={cn("h-full overflow-y-auto", activeTab !== "requirements" && "hidden")}>
+            <RequirementsTab
+              data={data}
+              onRefresh={onRefresh}
+              openReviewDraft={openReviewDraft}
+              setOpenReviewDraft={setOpenReviewDraft}
+              openSendRequirements={openSendRequirements}
+              setOpenSendRequirements={setOpenSendRequirements}
+              autoOpenSendDialog={activeTab === "requirements" ? initialOpenSendDialog : undefined}
+            />
           </div>
-        </div>
-        <div className={cn("h-full overflow-y-auto", activeTab !== "notes" && "hidden")}>
-          <div className="p-6">
-            <NotesTab task={task} onRefresh={onRefresh} />
+        )}
+        {visitedTabs.has("templates") && (
+          <div className={cn("h-full overflow-y-auto", activeTab !== "templates" && "hidden")}>
+            <TemplatesTab data={data} targetDocumentId={activeTab === "templates" ? initialTemplateDocId : undefined} />
           </div>
-        </div>
+        )}
+        {visitedTabs.has("billing") && (
+          <div className={cn("h-full overflow-y-auto", activeTab !== "billing" && "hidden")}>
+            <div className="p-6">
+              <BillingTab task={task} onRefresh={onRefresh} />
+            </div>
+          </div>
+        )}
+        {visitedTabs.has("automation") && (
+          <div className={cn("h-full overflow-y-auto", activeTab !== "automation" && "hidden")}>
+            <AutomationTab data={data} onRefresh={onRefresh} highlightAutomationId={activeTab === "automation" ? initialAutomationId : undefined} />
+          </div>
+        )}
+        {visitedTabs.has("history") && (
+          <div className={cn("h-full overflow-y-auto", activeTab !== "history" && "hidden")}>
+            <div className="p-6">
+              <HistoryTab task={task} stages={stages} />
+            </div>
+          </div>
+        )}
+        {visitedTabs.has("notes") && (
+          <div className={cn("h-full overflow-y-auto", activeTab !== "notes" && "hidden")}>
+            <div className="p-6">
+              <NotesTab task={task} onRefresh={onRefresh} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

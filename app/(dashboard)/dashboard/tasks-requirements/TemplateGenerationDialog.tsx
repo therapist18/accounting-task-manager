@@ -103,30 +103,6 @@ const formatDate = (date, formatStr) => {
         .replace('DD', day);
 };
 
-const replacePlaceholders = (html: string, renderData: Record<string, any> = {}): string => {
-    if (!html) return '';
-    return html.replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, (match, key) => {
-        const val = renderData[key];
-        if (val === undefined || val === null) return match;
-        return String(val);
-    });
-};
-
-const htmlToPlainText = (html: string, renderData: Record<string, any> = {}): string => {
-    if (!html) return '';
-    const content = replacePlaceholders(html, renderData);
-    const div = document.createElement('div');
-    div.innerHTML = content;
-    div.querySelectorAll('p, div').forEach(el => {
-        el.appendChild(document.createTextNode('\n'));
-    });
-    div.querySelectorAll('br').forEach(el => {
-        el.replaceWith(document.createTextNode('\n'));
-    });
-    const text = div.textContent || div.innerText || '';
-    return text.replace(/\n{3,}/g, '\n\n').trim();
-};
-
 const base64Parser = async (dataURL) => {
     try {
         if (!dataURL) return null;
@@ -188,6 +164,226 @@ const fetchImageAsBase64 = async (url) => {
     } catch (error) {
         return null;
     }
+};
+
+// Default mammoth styleMap omits a rule for direct (non-style-based) underline runs,
+// so plain <u> formatting silently disappears from converted HTML unless we add it back.
+const MAMMOTH_STYLE_MAP = [
+    "p => p:fresh",
+    "u => u",
+    "table => table.border-collapse.table-auto.w-full.my-4",
+    "td => td.border.p-2",
+    "th => th.border.bg-muted.p-2.font-bold"
+];
+
+// Substitutes {field} tokens with placeholder-type awareness, so image placeholders render as
+// actual <img> tags instead of dumping a raw base64/URL string into the page as text. Iterates
+// the known placeholders (like populateHtmlContent does) rather than a single generic regex,
+// because tokens aren't always plain "{name}" - image/signature placeholders are commonly
+// authored as "{%name}" (and can have extra/repeated braces), which a bare [a-zA-Z_]-first
+// capture group rejects outright and leaves untouched as literal "{%name}" text.
+const replacePlaceholdersRich = (html, renderData = {}, placeholders = []) => {
+    if (!html) return '';
+    let content = html;
+    (placeholders || []).forEach(placeholder => {
+        if (placeholder.parent_name) return; // block children aren't supported in this flat body context
+        const cleanName = placeholder.name.replace(/[%#{}]/g, '').trim();
+        if (!cleanName) return;
+        const formatSuffix = placeholder.format || '';
+        const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}${formatSuffix ? '\\s*\\/\\s*' + formatSuffix : ''}\\s*\\}+`, 'gi');
+        const rawValue = renderData[cleanName];
+
+        if (placeholder.type === 'image') {
+            const value = typeof rawValue === 'string' ? rawValue : (rawValue != null ? String(rawValue) : '');
+            if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
+                const width = placeholder.image_width || '200px';
+                content = content.replace(regex, `<img src="${value}" style="width:${width}; height:auto; max-width:100%; display:inline-block;" />`);
+            } else {
+                content = content.replace(regex, '');
+            }
+        } else {
+            const value = rawValue != null && rawValue !== '' ? String(rawValue) : '';
+            content = content.replace(regex, value);
+        }
+    });
+    return content;
+};
+
+const escapeXmlText = (str) => String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+const EMU_PER_PX = 9525;
+const BLOCK_TAGS = new Set(['p', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+
+// Walks the rich-text HTML DOM and produces a list of paragraphs, each a list of runs
+// (text with bold/italic/underline flags, or an inline image), so it can be turned into
+// real OOXML instead of the plain-text dump that used to wipe out all formatting/images.
+const htmlToOoxmlParagraphs = (html) => {
+    const container = document.createElement('div');
+    container.innerHTML = html;
+
+    const paragraphs = [];
+    let currentRuns = [];
+    const pushParagraph = () => {
+        paragraphs.push(currentRuns);
+        currentRuns = [];
+    };
+
+    const walk = (node, fmt) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+            if (node.textContent) currentRuns.push({ type: 'text', text: node.textContent, ...fmt });
+            return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+        const tag = node.tagName.toLowerCase();
+        if (tag === 'br') {
+            pushParagraph();
+            return;
+        }
+        if (tag === 'img') {
+            currentRuns.push({ type: 'image', src: node.getAttribute('src') || '' });
+            return;
+        }
+
+        const nextFmt = {
+            bold: fmt.bold || tag === 'strong' || tag === 'b',
+            italic: fmt.italic || tag === 'em' || tag === 'i',
+            underline: fmt.underline || tag === 'u'
+        };
+        node.childNodes.forEach(child => walk(child, nextFmt));
+
+        if (BLOCK_TAGS.has(tag)) pushParagraph();
+    };
+
+    container.childNodes.forEach(node => walk(node, { bold: false, italic: false, underline: false }));
+    if (currentRuns.length) pushParagraph();
+
+    return paragraphs.filter(runs => runs.length > 0);
+};
+
+// Converts the parsed paragraphs/runs into OOXML <w:p>/<w:r> markup. Image runs become
+// inline <w:drawing> elements referencing a relationship ID; the caller is responsible for
+// writing the actual image bytes + relationships into the docx zip using the returned list.
+const buildOoxmlBody = (paragraphs, imageWidthPx = 300, imageHeightPx = 200) => {
+    const images = [];
+    let imgCounter = 0;
+
+    const paragraphsXml = paragraphs.map(runs => {
+        const runsXml = runs.map(run => {
+            if (run.type === 'image') {
+                const match = typeof run.src === 'string' && run.src.match(/^data:(image\/[^;]+);base64,(.*)$/);
+                if (!match) return '';
+                imgCounter += 1;
+                const relId = `rIdBodyImg${imgCounter}`;
+                const ext = (match[1].split('/')[1] || 'png').toLowerCase();
+                images.push({ relId, base64: match[2], ext });
+                const cx = imageWidthPx * EMU_PER_PX;
+                const cy = imageHeightPx * EMU_PER_PX;
+                return `<w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0">` +
+                    `<wp:extent cx="${cx}" cy="${cy}"/>` +
+                    `<wp:docPr id="${imgCounter}" name="BodyImage${imgCounter}"/>` +
+                    `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">` +
+                    `<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+                    `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+                    `<pic:nvPicPr><pic:cNvPr id="${imgCounter}" name="BodyImage${imgCounter}"/><pic:cNvPicPr/></pic:nvPicPr>` +
+                    `<pic:blipFill><a:blip r:embed="${relId}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+                    `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
+                    `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+            }
+            const rPrParts = [];
+            if (run.bold) rPrParts.push('<w:b/>');
+            if (run.italic) rPrParts.push('<w:i/>');
+            if (run.underline) rPrParts.push('<w:u w:val="single"/>');
+            const rPr = rPrParts.length ? `<w:rPr>${rPrParts.join('')}</w:rPr>` : '';
+            return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXmlText(run.text || '')}</w:t></w:r>`;
+        }).join('');
+        // Each source <p>/<div> becomes its own <w:p> with no inherited paragraph style, so
+        // without explicit spacing they render back-to-back with no visual gap - unlike the
+        // live HTML preview where <p> margins separate them. w:after adds that gap back.
+        return `<w:p><w:pPr><w:spacing w:after="200"/></w:pPr>${runsXml}</w:p>`;
+    }).join('');
+
+    return { paragraphsXml, images };
+};
+
+// Finds the <w:p> paragraph whose *text content* (tags stripped) contains the literal
+// "{BODY}" marker - tolerating Word having split "{", "BODY", "}" across separate runs -
+// and swaps that whole paragraph for the generated body paragraphs.
+const injectBodyIntoLetterheadXml = (documentXml, paragraphsXml) => {
+    const paragraphRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
+    let matched = false;
+    const result = documentXml.replace(paragraphRegex, (paragraphXml) => {
+        if (matched) return paragraphXml;
+        const text = paragraphXml.replace(/<[^>]+>/g, '');
+        if (/\{\s*BODY\s*\}/i.test(text)) {
+            matched = true;
+            return paragraphsXml;
+        }
+        return paragraphXml;
+    });
+    if (matched) return result;
+    return documentXml.replace('</w:body>', `${paragraphsXml}</w:body>`);
+};
+
+// Builds the final letterhead .docx buffer by splicing real OOXML (bold/italic/underline
+// runs + embedded images) into the {BODY} paragraph, instead of the old approach of
+// flattening the rich HTML to plain text via Docxtemplater (which silently dropped all
+// formatting and every image).
+const renderLetterheadDocxBuffer = async (letterheadBuffer, htmlContent, renderData, placeholders) => {
+    const zip = new PizZip(letterheadBuffer);
+    const documentXmlFile = zip.file('word/document.xml');
+    if (!documentXmlFile) throw new Error('Invalid letterhead file: missing word/document.xml');
+    let documentXml = documentXmlFile.asText();
+
+    const bodyHtml = replacePlaceholdersRich(htmlContent, renderData, placeholders);
+    const paragraphs = htmlToOoxmlParagraphs(bodyHtml);
+    const { paragraphsXml, images } = buildOoxmlBody(paragraphs);
+
+    documentXml = injectBodyIntoLetterheadXml(documentXml, paragraphsXml);
+
+    if (images.length > 0) {
+        const relsPath = 'word/_rels/document.xml.rels';
+        const relsFile = zip.file(relsPath);
+        let relsXml = relsFile
+            ? relsFile.asText()
+            : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+
+        const newRels = images.map(img =>
+            `<Relationship Id="${img.relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/body-${img.relId}.${img.ext}"/>`
+        ).join('');
+        relsXml = relsXml.replace('</Relationships>', `${newRels}</Relationships>`);
+        zip.file(relsPath, relsXml);
+
+        images.forEach(img => {
+            const binaryStr = atob(img.base64);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+            zip.file(`word/media/body-${img.relId}.${img.ext}`, bytes);
+        });
+
+        const ctPath = '[Content_Types].xml';
+        const ctFile = zip.file(ctPath);
+        if (ctFile) {
+            let ctXml = ctFile.asText();
+            const exts = [...new Set(images.map(i => i.ext))];
+            const missing = exts.filter(ext => !new RegExp(`Extension="${ext}"`, 'i').test(ctXml));
+            if (missing.length) {
+                const defaults = missing.map(ext => {
+                    const type = (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg' : `image/${ext}`;
+                    return `<Default Extension="${ext}" ContentType="${type}"/>`;
+                }).join('');
+                ctXml = ctXml.replace('</Types>', `${defaults}</Types>`);
+                zip.file(ctPath, ctXml);
+            }
+        }
+    }
+
+    zip.file('word/document.xml', documentXml);
+
+    return zip.generate({ type: 'arraybuffer', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
 };
 
 const parseJsonValue = (data, path) => {
@@ -3393,7 +3589,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
         const arrayBuffer = tempZip.generate({ type: 'arraybuffer' });
 
-        const result = await mammoth.convertToHtml({ arrayBuffer });
+        const result = await mammoth.convertToHtml({ arrayBuffer }, { styleMap: MAMMOTH_STYLE_MAP });
         return result.value;
     };
 
@@ -3911,12 +4107,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
             const result = await mammoth.convertToHtml(
                 { arrayBuffer: out },
                 {
-                    styleMap: [
-                        "p => p:fresh",
-                        "table => table.border-collapse.table-auto.w-full.my-4",
-                        "td => td.border.p-2",
-                        "th => th.border.bg-muted.p-2.font-bold"
-                    ],
+                    styleMap: MAMMOTH_STYLE_MAP,
                     convertImage: mammoth.images.imgElement(function (image) {
                         return image.read("base64").then(function (imageBuffer) {
                             return {
@@ -4651,53 +4842,28 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 }
 
                 const lhBuffer = await fileData.arrayBuffer();
-                const letterheadZip = new PizZip(lhBuffer);
 
                 const renderData = await prepareRenderData(formData);
                 const htmlContent = selectedTemplate.content || '';
-                const replacedHtml = replacePlaceholders(htmlContent, renderData);
 
-                // Extract header/footer HTML from letterhead
-                let headerHtml = '';
-                let footerHtml = '';
-                for (let i = 1; i <= 3; i++) {
-                    const hFile = letterheadZip.file(`word/header${i}.xml`);
-                    if (hFile && !headerHtml) {
-                        headerHtml = await convertWordXmlToHtml(hFile.asText());
-                    }
-                    const fFile = letterheadZip.file(`word/footer${i}.xml`);
-                    if (fFile && !footerHtml) {
-                        footerHtml = await convertWordXmlToHtml(fFile.asText());
-                    }
-                }
-
-                const fullHtml = `${headerHtml}<div style="padding: 40px 20px;">${replacedHtml}</div>${footerHtml}`;
-                const html2pdf = (await import('html2pdf.js')).default;
-                const element = document.createElement('div');
-                element.innerHTML = fullHtml;
-                element.className = 'bg-white';
-                element.style.width = '800px';
-
-                const pdfBlob = await html2pdf()
-                    .set({
-                        margin: 10,
-                        html2canvas: { scale: 2, useCORS: true, logging: false },
-                        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-                    })
-                    .from(element)
-                    .output('blob');
+                // PDF is intentionally not offered for letterhead templates: the letterhead's
+                // background graphics are floating/anchored drawings, which mammoth (the only
+                // docx->HTML converter available without a server-side rendering service) simply
+                // cannot render. Word is the fully-branded output; users convert to PDF themselves.
+                const docxBuffer = await renderLetterheadDocxBuffer(lhBuffer, htmlContent, renderData, selectedTemplate?.placeholders || []);
+                const docxBlob = new Blob([docxBuffer], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
 
                 const timestamp = Date.now();
                 const entityFolder = activeEntityType === 'company' ? 'company-documents' : 'individuals-documents';
-                const path = `${entityFolder}/${config.entityId}/${kycDocId}_${timestamp}.pdf`;
+                const path = `${entityFolder}/${config.entityId}/${kycDocId}_${timestamp}.docx`;
 
                 const { data: storageData, error: storageError } = await supabase.storage
                     .from('kyc-documents')
-                    .upload(path, pdfBlob, { cacheControl: '3600', upsert: true });
+                    .upload(path, docxBlob, { cacheControl: '3600', upsert: true });
                 if (storageError) throw storageError;
 
                 const storagePath = storageData.path;
-                const fileType = 'application/pdf';
+                const fileType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
                 const draftMetadata = {
                     formData, imageStyles, savedAt: new Date().toISOString(),
                     templateId: selectedTemplate?.id, activeEntityType, activeEntityId
@@ -4752,7 +4918,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 const html2pdf = (await import('html2pdf.js')).default;
                 const { default: mammoth } = await import('mammoth');
 
-                const docxHtml = await mammoth.convertToHtml({ buffer: renderedDocxBuffer }).then(r => r.value);
+                const docxHtml = await mammoth.convertToHtml({ buffer: renderedDocxBuffer }, { styleMap: MAMMOTH_STYLE_MAP }).then(r => r.value);
                 const element = document.createElement('div');
                 element.innerHTML = docxHtml;
                 element.className = 'bg-white';
@@ -4931,62 +5097,25 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 }
 
                 const lhBuffer = await fileData.arrayBuffer();
-                const letterheadZip = new PizZip(lhBuffer);
 
                 const htmlContent = selectedTemplate.content || '';
 
-                if (type === 'word') {
-                    // Use Docxtemplater with the letterhead .docx as base (preserves header/footer/logo)
-                    const plainText = htmlToPlainText(htmlContent, renderData);
-                    const doc = new Docxtemplater(letterheadZip, {
-                        linebreaks: true,
-                        paragraphLoop: true,
-                        nullGetter: () => ''
-                    });
-                    doc.render({
-                        ...renderData,
-                        BODY: plainText,
-                    });
-                    const docxBuffer = doc.getZip().generate({
-                        type: 'arraybuffer',
-                        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-                    });
-                    const blob = new Blob([docxBuffer], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-                    saveAs(blob, `${fileName}.docx`);
-                    toast({ title: "Success", description: `Document downloaded as ${fileName}.docx` });
-                } else {
-                    // PDF: extract header/footer HTML from letterhead + replaced HTML body
-                    const replacedHtml = replacePlaceholders(htmlContent, renderData);
-                    let headerHtml = '';
-                    let footerHtml = '';
-                    for (let i = 1; i <= 3; i++) {
-                        const hFile = letterheadZip.file(`word/header${i}.xml`);
-                        if (hFile && !headerHtml) {
-                            headerHtml = await convertWordXmlToHtml(hFile.asText());
-                        }
-                        const fFile = letterheadZip.file(`word/footer${i}.xml`);
-                        if (fFile && !footerHtml) {
-                            footerHtml = await convertWordXmlToHtml(fFile.asText());
-                        }
-                    }
-
-                    const fullHtml = `${headerHtml}<div style="padding: 40px 20px;">${replacedHtml}</div>${footerHtml}`;
-                    const html2pdf = (await import('html2pdf.js')).default;
-                    const element = document.createElement('div');
-                    element.innerHTML = fullHtml;
-                    element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
-                    element.style.width = '800px';
-                    await html2pdf()
-                        .set({
-                            margin: 10,
-                            filename: `${fileName}.pdf`,
-                            image: { type: 'jpeg', quality: 0.98 },
-                            html2canvas: { scale: 2, useCORS: true, logging: false },
-                            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-                        })
-                        .from(element)
-                        .save();
+                // PDF is intentionally not offered for letterhead templates (see the disabled
+                // "PDF" menu item below): the letterhead's background graphics are floating/
+                // anchored drawings, which mammoth - the only docx->HTML converter available
+                // without a server-side rendering service - cannot render at all. Word is the
+                // fully-branded output; users convert to PDF themselves once downloaded.
+                if (type !== 'word') {
+                    toast({ title: "PDF not available", description: "Letterhead templates can only be downloaded as Word for now. Download the Word doc and convert it to PDF yourself.", variant: "destructive" });
+                    return;
                 }
+
+                // Splice real OOXML (bold/italic/underline + embedded images) into the
+                // letterhead's {BODY} paragraph, preserving header/footer/logo.
+                const docxBuffer = await renderLetterheadDocxBuffer(lhBuffer, htmlContent, renderData, selectedTemplate?.placeholders || []);
+                const blob = new Blob([docxBuffer], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+                saveAs(blob, `${fileName}.docx`);
+                toast({ title: "Success", description: `Document downloaded as ${fileName}.docx` });
                 return;
             }
 
@@ -5086,7 +5215,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                     saveAs(blob, `${fileName}.docx`);
                     toast({ title: "Success", description: `Document downloaded as ${fileName}.docx` });
                 } else {
-                    const result = await mammoth.convertToHtml({ arrayBuffer: docxBuffer });
+                    const result = await mammoth.convertToHtml({ arrayBuffer: docxBuffer }, { styleMap: MAMMOTH_STYLE_MAP });
                     const html2pdf = (await import('html2pdf.js')).default;
                     const element = document.createElement('div');
                     element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
@@ -5497,10 +5626,12 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                 <FileText className="h-4 w-4 mr-2 text-blue-600" />
                                 Word
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => generateAndDownload('pdf')}>
-                                <FileText className="h-4 w-4 mr-2 text-red-600" />
-                                PDF
-                            </DropdownMenuItem>
+                            {(isWordTemplate || !selectedTemplate?.use_letterhead) && (
+                                <DropdownMenuItem onClick={() => generateAndDownload('pdf')}>
+                                    <FileText className="h-4 w-4 mr-2 text-red-600" />
+                                    PDF
+                                </DropdownMenuItem>
+                            )}
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </div>

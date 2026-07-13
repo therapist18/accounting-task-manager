@@ -166,18 +166,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [selectedTaskForOfficers, setSelectedTaskForOfficers] = useState<any>(null);
   const [selectedStageForOfficers, setSelectedStageForOfficers] = useState<any>(null);
 
-  useEffect(() => {
-    const loadDepartments = async () => {
-      try {
-        const depts = await fetchDepartments();
-        setDepartments(depts);
-      } catch (error) {
-        console.error('Error loading departments:', error);
-      }
-    };
-    loadDepartments();
-  }, []);
-
   const isStageApplicableToTask = useCallback((stage: any, task: any, departments: any[]): boolean => {
     if (!task || !stage || !Array.isArray(departments) || departments.length === 0) {
       return true;
@@ -2875,10 +2863,26 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         return false;
       });
       
-      // Build automationWebdataMap from the task's existing requirements
+      // Build automationWebdataMap from the task's existing requirements AND from
+      // stage/document targetEntities matching this task's job level - same two-source
+      // linkage fetchJobWorkspaceData.ts uses for RequirementsTab.tsx. Without the
+      // stage-linked source, any client-requirement field sourced from a stage-level
+      // automation (rather than a requirement's own web_automation) would silently show
+      // as blank/"Pending Input" only when this dialog is opened from DepartmentTasksManager.
       const automationIds = new Set<string>();
       (task.requirements || []).forEach((req: any) => {
         if (req.web_automation?.automationId) automationIds.add(req.web_automation.automationId);
+      });
+      const jlKey = (jl: any) => `${jl?.subdepartment_id}:${jl?.class_id || 0}:${jl?.subclass_id || 0}`;
+      const taskJobLevelKey = jlKey(task.job_level || {});
+      (stages || []).forEach((stage: any) => {
+        (stage.documents || []).forEach((doc: any) => {
+          (doc.targetEntities || []).forEach((te: any) => {
+            if (te.automationId && te.job_level && jlKey(te.job_level) === taskJobLevelKey) {
+              automationIds.add(te.automationId);
+            }
+          });
+        });
       });
 
       let automationWebdataMap: Record<string, { name: string; webdata: any[] }> = {};
@@ -2946,7 +2950,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       console.error('Error in handleOpenRequirements:', err);
       setRequirementsDialogTask(task);
     }
-  }, []);
+  }, [stages]);
 
   const loadRows = useCallback(async (tasks: any[]) => {
     if (!tasks || tasks.length === 0) return;

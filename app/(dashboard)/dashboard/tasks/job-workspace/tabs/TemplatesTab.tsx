@@ -143,12 +143,12 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
         <div className="flex flex-1 overflow-hidden gap-5">
           {/* Sidebar Panel for Templates */}
           <div className="w-[360px] flex flex-col bg-slate-50/30 shadow-sm overflow-hidden shrink-0">
-            <div className="bg-white px-4 py-2 flex flex-col gap-3 sticky top-0 z-10">
-              <div className="flex justify-between">
-                <span className="text-xl font-bold uppercase tracking-wider flex items-center">
-                  <LayoutTemplate className="w-4 h-4 mr-2" /> Target Documents
+            <div className="bg-white px-4 py-3 flex flex-col gap-3 sticky top-0 z-10 border-b border-slate-100">
+              <div className="flex justify-between items-center">
+                <span className="text-lg font-bold text-slate-900 tracking-tight flex items-center">
+                  <LayoutTemplate className="w-4 h-4 mr-2 text-slate-500" /> Target Documents
                 </span>
-                <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-sm rounded-full px-3 py-0.5">
+                <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-xs rounded-full px-3 py-0.5">
                   {templateReqs.length} Available
                 </Badge>
               </div>
