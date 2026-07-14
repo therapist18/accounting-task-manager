@@ -67,6 +67,11 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
   const [visitedTabs, setVisitedTabs] = useState<Set<string>>(new Set([initialTab || "workflow"]))
   const [openReviewDraft, setOpenReviewDraft] = useState(false)
   const [openSendRequirements, setOpenSendRequirements] = useState(false)
+  // Mutable versions of the URL-sourced deep-link targets, so a same-session jump
+  // (e.g. AutomationTab's "linked requirement" button) can retarget the highlight
+  // without a page reload - tabs stay mounted, data stays in memory.
+  const [requirementHighlightId, setRequirementHighlightId] = useState(initialRequirementId)
+  const [templateHighlightId, setTemplateHighlightId] = useState(initialTemplateDocId)
 
   // Sync activeTab when URL-driven initialTab prop changes (e.g. from zap icon redirect)
   useEffect(() => {
@@ -79,6 +84,16 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
   const handleTabChange = (tab: string) => {
     setActiveTab(tab)
     setVisitedTabs(prev => prev.has(tab) ? prev : new Set(prev).add(tab))
+  }
+
+  const handleNavigateToRequirement = (requirementId: string) => {
+    setRequirementHighlightId(requirementId)
+    handleTabChange("requirements")
+  }
+
+  const handleNavigateToTemplate = (documentId: string) => {
+    setTemplateHighlightId(documentId)
+    handleTabChange("templates")
   }
 
   const stageProgress = useMemo(() => getStageProgress(task, stages), [task, stages])
@@ -209,13 +224,13 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
               openSendRequirements={openSendRequirements}
               setOpenSendRequirements={setOpenSendRequirements}
               autoOpenSendDialog={activeTab === "requirements" ? initialOpenSendDialog : undefined}
-              highlightRequirementId={activeTab === "requirements" ? initialRequirementId : undefined}
+              highlightRequirementId={activeTab === "requirements" ? requirementHighlightId : undefined}
             />
           </div>
         )}
         {visitedTabs.has("templates") && (
           <div className={cn("h-full overflow-y-auto", activeTab !== "templates" && "hidden")}>
-            <TemplatesTab data={data} targetDocumentId={activeTab === "templates" ? initialTemplateDocId : undefined} />
+            <TemplatesTab data={data} targetDocumentId={activeTab === "templates" ? templateHighlightId : undefined} />
           </div>
         )}
         {visitedTabs.has("billing") && (
@@ -227,7 +242,13 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
         )}
         {visitedTabs.has("automation") && (
           <div className={cn("h-full overflow-y-auto", activeTab !== "automation" && "hidden")}>
-            <AutomationTab data={data} onRefresh={onRefresh} highlightAutomationId={activeTab === "automation" ? initialAutomationId : undefined} />
+            <AutomationTab
+              data={data}
+              onRefresh={onRefresh}
+              highlightAutomationId={activeTab === "automation" ? initialAutomationId : undefined}
+              onNavigateToRequirement={handleNavigateToRequirement}
+              onNavigateToTemplate={handleNavigateToTemplate}
+            />
           </div>
         )}
         {visitedTabs.has("history") && (

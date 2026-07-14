@@ -26,6 +26,11 @@ interface AutomationTabProps {
   data: JobWorkspaceData
   onRefresh?: () => void
   highlightAutomationId?: string | number
+  // In-app tab switch + highlight, no page reload - JobWorkspace already has this
+  // task's data loaded, so Requirements/Templates just need to become the active
+  // tab rather than being fetched again from a fresh page navigation.
+  onNavigateToRequirement?: (requirementId: string) => void
+  onNavigateToTemplate?: (documentId: string) => void
 }
 
 interface ColDef {
@@ -137,7 +142,7 @@ function isFieldApplicable(field: any, col: ColDef): boolean {
   return false
 }
 
-export function AutomationTab({ data, onRefresh, highlightAutomationId }: AutomationTabProps) {
+export function AutomationTab({ data, onRefresh, highlightAutomationId, onNavigateToRequirement, onNavigateToTemplate }: AutomationTabProps) {
   const { task, automations, automationLinkSources = {}, kycDocsMap } = data
   const [expandedAutomations, setExpandedAutomations] = useState<Set<number>>(new Set(automations?.map(a => a.id) || []))
   const [highlightedRowId, setHighlightedRowId] = useState<string | number | null>(null)
@@ -748,10 +753,13 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
   };
 
   // A linked requirement that is itself template-backed (e.g. "Invitation Letter")
-  // has its own dedicated generation flow in the Templates tab - redirect straight
+  // has its own dedicated generation flow in the Templates tab - jump straight
   // there instead of sending the user to Requirements only to have them redirect
-  // again via that tab's own template wand button.
-  const getRequirementRedirectUrl = useCallback((requirementId: string) => {
+  // again via that tab's own template wand button. Switches tabs in-app (via the
+  // callbacks JobWorkspace passes down) since this task's data is already loaded -
+  // no page reload/refetch needed. Falls back to a new-tab URL nav if this
+  // component is ever used somewhere those callbacks aren't wired up.
+  const handleGoToRequirement = useCallback((requirementId: string) => {
     const req = (task?.requirements || []).find((r: any) => String(r.id) === String(requirementId))
     if (req) {
       const hasTemplateExplicitly = req.hasTemplate === true || String(req.hasTemplate) === 'true'
@@ -759,12 +767,15 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
       if (hasTemplateExplicitly && docId) {
         const docMeta = kycDocsMap?.get?.(docId)
         if (isTemplateEligible(req, docMeta)) {
-          return `/dashboard/tasks/${task.id}?tab=templates&documentId=${docId}`
+          if (onNavigateToTemplate) onNavigateToTemplate(docId)
+          else window.open(`/dashboard/tasks/${task.id}?tab=templates&documentId=${docId}`, '_blank', 'noopener,noreferrer')
+          return
         }
       }
     }
-    return `/dashboard/tasks/${task.id}?tab=requirements&requirementId=${requirementId}`
-  }, [task, kycDocsMap])
+    if (onNavigateToRequirement) onNavigateToRequirement(requirementId)
+    else window.open(`/dashboard/tasks/${task.id}?tab=requirements&requirementId=${requirementId}`, '_blank', 'noopener,noreferrer')
+  }, [task, kycDocsMap, onNavigateToRequirement, onNavigateToTemplate])
 
   const handlePreviewDocumentField = useCallback(async (field: any, col: ColDef) => {
     const linkedDocIds: string[] = field.linkedKycDocuments || []
@@ -1453,7 +1464,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
                                               <button
                                                 type="button"
                                                 className="text-green-600 hover:text-green-700 shrink-0"
-                                                onClick={() => window.open(getRequirementRedirectUrl(field.linkedRequirementId), '_blank', 'noopener,noreferrer')}
+                                                onClick={() => handleGoToRequirement(field.linkedRequirementId)}
                                                 title="Go to linked requirement - upload/manage this document there"
                                               >
                                                 <Shield className="h-3.5 w-3.5" />
@@ -1701,7 +1712,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
                                                   <button
                                                     type="button"
                                                     className="text-green-600 hover:text-green-700 shrink-0"
-                                                    onClick={() => window.open(getRequirementRedirectUrl(item.linkedRequirementId), '_blank', 'noopener,noreferrer')}
+                                                    onClick={() => handleGoToRequirement(item.linkedRequirementId)}
                                                     title="Go to linked requirement - upload/manage this document there"
                                                   >
                                                     <Shield className="h-3.5 w-3.5" />

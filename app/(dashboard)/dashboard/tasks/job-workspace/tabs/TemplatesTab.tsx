@@ -6,11 +6,12 @@ import { FileType, Loader2, Wand2, Search, LayoutTemplate } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { fetchMasterFields, buildTemplateGenerationInfo, isTemplateEligible } from "../../../tasks-requirements/utils/templateGenerationData"
 import type { JobWorkspaceData } from "../fetchJobWorkspaceData"
-import TemplateGenerationComponent from "../../../tasks-requirements/TemplateGenerationDialog"
+import TemplateGenerationComponent, { resolveTemplatePlaceholders } from "../../../tasks-requirements/TemplateGenerationDialog"
 
 interface TemplatesTabProps {
   data: JobWorkspaceData
@@ -24,21 +25,57 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
   const [loadingReqId, setLoadingReqId] = useState<string | null>(null)
   const [masterFields, setMasterFields] = useState<Map<number, any> | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
+  const [templateProgress, setTemplateProgress] = useState<Record<string, { filled: number; total: number } | 'loading'>>({})
 
-  const autoPreviewedTaskId = useRef<any>(null)
+  // Keyed by task+targetDocumentId (not just task) so a later in-app navigation to a
+  // *different* target document (e.g. from AutomationTab's "linked requirement" button)
+  // still triggers auto-preview even though this tab was already visited once before.
+  const autoPreviewedKey = useRef<string | null>(null)
   const listRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  // Filter requirements that STRICTLY have hasTemplate: true
+  const resolveEntityForReq = useCallback((req: any) => {
+    const entityTypes = req.entityTypes || (req.applicantType ? [req.applicantType] : [])
+    if (entityTypes.includes('company')) {
+      let companyId = task.company_id
+      if (!companyId && task.participants_details) {
+        companyId = task.participants_details.find((p: any) => p.type === 'company')?.id
+      }
+      if (!companyId && task.applicant_details?.type === 'company') companyId = task.applicant_details.id
+      return { colType: 'company', colId: companyId }
+    }
+    const principalPart = task.participants_details?.find((p: any) =>
+      p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
+    )
+    const colId = principalPart?.id || (task.applicant_details?.type === 'individual' ? task.applicant_details.id : task.individual_id)
+    return { colType: 'principal', colId }
+  }, [task])
+
+  // Filter requirements that STRICTLY have hasTemplate: true, deduped by the
+  // actual document type + entity it resolves to - overlapping class-requirement
+  // rows (e.g. a subclass-level and a broader department-level row) can both mark
+  // the same document as template-eligible, which would otherwise list the exact
+  // same generated document twice. Two requirements for the same doc but
+  // *different* entities (e.g. a director's vs the principal's invitation letter)
+  // are genuinely different generated files, so those stay separate.
   const templateReqs = useMemo(() => {
     if (!task?.requirements) return []
-    return task.requirements.filter((r: any) => {
+    const eligible = task.requirements.filter((r: any) => {
       const isExplicitlyTrue = r.hasTemplate === true || String(r.hasTemplate) === 'true'
       if (!isExplicitlyTrue) return false
 
       const docMeta = kycDocsMap.get(r.document_id || r.document_ids?.[0])
       return isTemplateEligible(r, docMeta)
     })
-  }, [task, kycDocsMap])
+
+    const seen = new Map<string, any>()
+    eligible.forEach((req: any) => {
+      const docId = req.document_id || req.document_ids?.[0]
+      const { colType, colId } = resolveEntityForReq(req)
+      const key = `${docId}::${colType}::${colId ?? ''}`
+      if (!seen.has(key)) seen.set(key, req)
+    })
+    return Array.from(seen.values())
+  }, [task, kycDocsMap, resolveEntityForReq])
 
   // Apply search query filtering
   const filteredReqs = useMemo(() => {
@@ -58,22 +95,41 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
     fetchMasterFields().then(setMasterFields)
   }, [])
 
-  const resolveEntityForReq = useCallback((req: any) => {
-    const entityTypes = req.entityTypes || (req.applicantType ? [req.applicantType] : [])
-    if (entityTypes.includes('company')) {
-      let companyId = task.company_id
-      if (!companyId && task.participants_details) {
-        companyId = task.participants_details.find((p: any) => p.type === 'company')?.id
+  // Proactively compute each template's fill progress so the sidebar can show a
+  // percentage without requiring the user to click into the generation module.
+  useEffect(() => {
+    if (!masterFields || templateReqs.length === 0 || !task) return
+    let cancelled = false
+    templateReqs.forEach(async (req: any, idx: number) => {
+      const reqKey = String(req.id || idx)
+      const docId = req.document_id || req.document_ids?.[0]
+      const docMeta = docId ? kycDocsMap.get(docId) : null
+      if (!docId || !docMeta) return
+      const { colType, colId } = resolveEntityForReq(req)
+      if (!colId) return
+      try {
+        const info = await buildTemplateGenerationInfo({ document: docMeta }, task, colType, colId, masterFields, task.job_level, req.selectedTemplateId)
+        if (cancelled) return
+        if (!info?.template) {
+          setTemplateProgress(prev => ({ ...prev, [reqKey]: { filled: 0, total: 0 } }))
+          return
+        }
+        const { filled, total } = resolveTemplatePlaceholders(info.template, {
+          relationshipData: info.relationshipData,
+          sourceDataCache: info.sourceDataCache,
+          masterFields: info.masterFields,
+          entityIdMap: info.entityIdMap,
+          extractedData: info.extractedData,
+          companyData: info.companyData,
+          task: info.task,
+        })
+        if (!cancelled) setTemplateProgress(prev => ({ ...prev, [reqKey]: { filled, total } }))
+      } catch (err) {
+        console.error('[TemplatesTab] Error computing template progress for', req.name, err)
       }
-      if (!companyId && task.applicant_details?.type === 'company') companyId = task.applicant_details.id
-      return { colType: 'company', colId: companyId }
-    }
-    const principalPart = task.participants_details?.find((p: any) =>
-      p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
-    )
-    const colId = principalPart?.id || (task.applicant_details?.type === 'individual' ? task.applicant_details.id : task.individual_id)
-    return { colType: 'principal', colId }
-  }, [task])
+    })
+    return () => { cancelled = true }
+  }, [masterFields, templateReqs, task, kycDocsMap, resolveEntityForReq])
 
   const handleGenerateTemplate = useCallback(async (req: any, reqId: string) => {
     if (!masterFields) return
@@ -102,26 +158,21 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
     }
   }, [masterFields, task, kycDocsMap, resolveEntityForReq])
 
-  // Auto-preview functionality (deep linking or fallback to first template)
+  // Auto-preview only kicks in for an explicit deep link (e.g. "Go to linked template"
+  // from the Automation tab). Otherwise the user is prompted to pick a template themselves.
   useEffect(() => {
-    if (!masterFields || templateReqs.length === 0) return
-    if (autoPreviewedTaskId.current === task.id) return
-    autoPreviewedTaskId.current = task.id
+    if (!masterFields || templateReqs.length === 0 || !targetDocumentId) return
+    const key = `${task.id}:${targetDocumentId}`
+    if (autoPreviewedKey.current === key) return
+    autoPreviewedKey.current = key
 
-    const targeted = targetDocumentId
-      ? templateReqs.find((r: any) => (r.document_id || r.document_ids?.[0]) === targetDocumentId)
-      : null
-    const reqToPreview = targeted || templateReqs[0]
-
-    if (reqToPreview) {
-      const key = String(reqToPreview.id || templateReqs.indexOf(reqToPreview))
-      handleGenerateTemplate(reqToPreview, key)
-
-      if (targeted) {
-        setTimeout(() => {
-          listRefs.current[key]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        }, 150)
-      }
+    const targeted = templateReqs.find((r: any) => (r.document_id || r.document_ids?.[0]) === targetDocumentId)
+    if (targeted) {
+      const reqKey = String(targeted.id || templateReqs.indexOf(targeted))
+      handleGenerateTemplate(targeted, reqKey)
+      setTimeout(() => {
+        listRefs.current[reqKey]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 150)
     }
   }, [masterFields, templateReqs, task?.id, targetDocumentId, handleGenerateTemplate])
 
@@ -140,9 +191,9 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
           </p>
         </div>
       ) : (
-        <div className="flex flex-1 overflow-hidden gap-5">
+        <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
           {/* Sidebar Panel for Templates */}
-          <div className="w-[360px] flex flex-col bg-slate-50/30 shadow-sm overflow-hidden shrink-0">
+          <ResizablePanel defaultSize={28} minSize={20} maxSize={45} className="flex flex-col bg-slate-50/30 overflow-hidden">
             <div className="bg-white px-4 py-3 flex flex-col gap-3 sticky top-0 z-10 border-b border-slate-100">
               <div className="flex justify-between items-center">
                 <span className="text-lg font-bold text-slate-900 tracking-tight flex items-center">
@@ -203,6 +254,26 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
                             <FileType className="h-3 w-3 mr-1 opacity-70" /> DOCX/PDF
                           </span>
                         </div>
+                        {(() => {
+                          const progress = templateProgress[reqId]
+                          if (!progress) return (
+                            <span className="text-[9px] text-slate-400 mt-1">Checking template...</span>
+                          )
+                          const pct = progress.total > 0 ? Math.round((progress.filled / progress.total) * 100) : 0
+                          return (
+                            <div className="flex items-center gap-1.5 mt-1.5 w-full max-w-[180px]">
+                              <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div
+                                  className={cn("h-full rounded-full transition-all", pct === 100 ? "bg-emerald-500" : "bg-blue-500")}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                              <span className={cn("text-[9px] font-bold shrink-0", pct === 100 ? "text-emerald-600" : "text-slate-500")}>
+                                {progress.total > 0 ? `${pct}%` : "N/A"}
+                              </span>
+                            </div>
+                          )
+                        })()}
                       </div>
 
                       <Button
@@ -233,17 +304,14 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
                 })
               )}
             </div>
-          </div>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle />
 
           {/* Main Content / Inline Template Generation View */}
-          <div className="flex-1 flex flex-col border rounded-xl bg-white shadow-sm overflow-hidden">
+          <ResizablePanel defaultSize={72} minSize={40} className="flex flex-col border rounded-xl bg-white shadow-sm overflow-hidden ml-1">
             {selectedTemplateReq && generationInfo ? (
               <TemplateGenerationComponent
-                /*
-                  Using 'key' ensures that React unmounts the old component and mounts a entirely 
-                  new one when switching templates. This guarantees that initial state (like formData) 
-                  is completely rebuilt for the new template configuration!
-                */
                 key={selectedTemplateReq.id || generationInfo.template?.id}
                 isOpen={true}
                 task={generationInfo.task}
@@ -274,8 +342,8 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
                 </p>
               </div>
             )}
-          </div>
-        </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
       )}
     </div>
   )
