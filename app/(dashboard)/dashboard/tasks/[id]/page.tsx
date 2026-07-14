@@ -8,9 +8,9 @@ import { Button } from "@/components/ui/button"
 import { JobWorkspace } from "../job-workspace/JobWorkspace"
 import { fetchJobWorkspaceData, type JobWorkspaceData } from "../job-workspace/fetchJobWorkspaceData"
 
-export default function TaskWorkspacePage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams: Promise<{ tab?: string; automationId?: string; openSendDialog?: string; documentId?: string }> }) {
+export default function TaskWorkspacePage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams: Promise<{ tab?: string; automationId?: string; requirementId?: string; openSendDialog?: string; documentId?: string }> }) {
   const { id } = use(params)
-  const { tab, automationId, openSendDialog, documentId } = use(searchParams)
+  const { tab, automationId, requirementId, openSendDialog, documentId } = use(searchParams)
   const router = useRouter()
   const [data, setData] = useState<JobWorkspaceData | null>(null)
 
@@ -46,5 +46,5 @@ export default function TaskWorkspacePage({ params, searchParams }: { params: Pr
     )
   }
 
-  return <JobWorkspace data={data} onRefresh={load} onBack={() => router.back()} initialTab={tab} initialAutomationId={automationId} initialOpenSendDialog={openSendDialog === '1'} initialTemplateDocId={documentId} />
+  return <JobWorkspace data={data} onRefresh={load} onBack={() => router.back()} initialTab={tab} initialAutomationId={automationId} initialRequirementId={requirementId} initialOpenSendDialog={openSendDialog === '1'} initialTemplateDocId={documentId} />
 }

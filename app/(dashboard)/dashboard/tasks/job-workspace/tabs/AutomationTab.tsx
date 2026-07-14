@@ -2,11 +2,7 @@
 "use client"
 
 import React, { useState, useMemo, useCallback, useEffect } from "react"
-import {
-  ChevronDown, ChevronRight, FileText, User, Loader2, RefreshCw,
-  CheckCircle2, AlertCircle, Eye, Briefcase, UserCheck, HeartPulse, ArrowUpDown, ArrowUp, ArrowDown, Users2,
-  Database, Zap, Search, Play, X, StopCircle, Terminal, Calendar, Edit3, Check, Link2
-} from "lucide-react"
+import { ChevronDown, ChevronRight, ChevronUp, FileText, User, Loader2, RefreshCw, CheckCircle2, AlertCircle, Eye, Briefcase, UserCheck, HeartPulse, ArrowUpDown, ArrowUp, ArrowDown, Users2, Database, Zap, Search, Play, X, StopCircle, Terminal, Calendar, Edit3, Check, Link2, Lock, ChevronsDownUp, ChevronsUpDown, Shield } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,10 +10,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandGroup, CommandItem, CommandList } from "@/components/ui/command"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { SearchableSelect } from "@/components/ui/searchable-select"
 import { cn } from "@/lib/utils"
 import { resolveVariableValueImpl, resolveTargetEntityIdImpl, fetchSourceDataImpl, getArrayFieldDataImpl, getFieldValueImpl, type FieldResolutionContext } from "../../utils/fieldResolution"
-import { isValidValue, cleanFieldValue, ETA_SCREENSHOT_DOCUMENT_ID } from "../../utils/AutomationMappingDialog"
+import { isValidValue, cleanFieldValue, updateJsonValue, ETA_SCREENSHOT_DOCUMENT_ID } from "../../utils/AutomationMappingDialog"
 import { executeComputedField } from "../../utils/automationComputedFunctions"
+import { isTemplateEligible } from "../../../tasks-requirements/utils/templateGenerationData"
 import type { JobWorkspaceData } from "../fetchJobWorkspaceData"
 import supabase from "@/lib/supabase/client"
 import { toast } from '@/lib/hooks/use-toast'
@@ -139,57 +138,47 @@ function isFieldApplicable(field: any, col: ColDef): boolean {
 }
 
 export function AutomationTab({ data, onRefresh, highlightAutomationId }: AutomationTabProps) {
-  const { task, automations, automationLinkSources = {} } = data
+  const { task, automations, automationLinkSources = {}, kycDocsMap } = data
   const [expandedAutomations, setExpandedAutomations] = useState<Set<number>>(new Set(automations?.map(a => a.id) || []))
   const [highlightedRowId, setHighlightedRowId] = useState<string | number | null>(null)
   const automationRowRefs = React.useRef<Record<string, HTMLTableRowElement | null>>({})
   const [expandedArrayFields, setExpandedArrayFields] = useState<Set<string>>(new Set())
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
-
   const [fieldSourceDataCache, setFieldSourceDataCache] = useState<Record<string, Record<string, any>>>({})
   const [fieldMasterComputedCache, setFieldMasterComputedCache] = useState<Record<string, any>>({})
   const [resolvedValues, setResolvedValues] = useState<Record<string, any>>({})
   const [resolving, setResolving] = useState<Record<string, boolean>>({})
   const [jobFieldsRecord, setJobFieldsRecord] = useState<Record<string, any>>({})
-
-  // Run automation state
   const [runningAutomationId, setRunningAutomationId] = useState<number | null>(null)
   const [automationJobId, setAutomationJobId] = useState<string | null>(null)
   const [automationProgress, setAutomationProgress] = useState<any>(null)
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null)
   const [showConsole, setShowConsole] = useState(false)
-
-  // Editing state
   const [editingCell, setEditingCell] = useState<any>(null)
   const [editValue, setEditValue] = useState('')
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
   const [arrayOverrides, setArrayOverrides] = useState<Record<string, Record<string, any>>>({})
   const [editingArrayCell, setEditingArrayCell] = useState<any>(null)
   const [arrayEditValue, setArrayEditValue] = useState('')
-
-  // Document field preview state
+  const [isSavingArrayEdit, setIsSavingArrayEdit] = useState(false)
   const [docPreviewOpen, setDocPreviewOpen] = useState(false)
   const [docPreviewData, setDocPreviewData] = useState<any>(null)
   const [docPreviewLoading, setDocPreviewLoading] = useState<string | null>(null)
-
-  // Documents & computed
   const [documentFiles, setDocumentFiles] = useState<any[]>([])
   const [computedFieldsPreview, setComputedFieldsPreview] = useState<Record<string, string>>({})
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false)
   const [isComputing, setIsComputing] = useState(false)
-
-  // Preview state
+  const [docStatusByEntity, setDocStatusByEntity] = useState<Record<string, any[]>>({})
+  const [docStatusLoaded, setDocStatusLoaded] = useState(false)
   const [showPreviewModal, setShowPreviewModal] = useState(false)
   const [previewingDocuments, setPreviewingDocuments] = useState<any>(null)
   const [savedScreenshotDoc, setSavedScreenshotDoc] = useState<any>(null)
   const [isSavingScreenshot, setIsSavingScreenshot] = useState(false)
   const [individualName, setIndividualName] = useState<string>('')
-
   const logsEndRef = React.useRef<HTMLDivElement>(null)
-
   const columns = useMemo(() => buildParticipantColumns(task), [task])
 
-  // Build relationship data (same as Requirements logic)
   const relationshipData = useMemo(() => {
     if (!task) return []
     const participants = task.participants_details || []
@@ -232,7 +221,6 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
     }]
   }, [task])
 
-  // Load job fields
   useEffect(() => {
     const linkedFieldIds = new Set<string>()
       ; (automations || []).forEach(auto => {
@@ -299,6 +287,56 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
     loadAll()
   }, [expandedAutomations, automations, jobFieldsRecord, relationshipData, task])
 
+  useEffect(() => {
+    const reqKycIds = new Set<string>()
+    const personCols: ColDef[] = []
+    const companyCols: ColDef[] = []
+      ; (automations || []).forEach((auto: any) => {
+        if (!expandedAutomations.has(auto.id)) return
+          ; (auto.webdata || []).forEach((f: any) => {
+            const docFields: any[] = []
+            if (f.fieldType === 'document') docFields.push(f)
+            if (f.fieldType === 'array') {
+              ; (f.arrayItems || []).forEach((item: any) => {
+                if (item.type === 'document') docFields.push({ ...item, entityTypes: item.entityTypes || f.entityTypes })
+              })
+            }
+            docFields.forEach((docField: any) => {
+              ; (docField.linkedKycDocuments || []).forEach((docId: string) => reqKycIds.add(docId))
+              columns.forEach(col => {
+                if (!isFieldApplicable(docField, col)) return
+                if (col.type === 'company') companyCols.push(col)
+                else personCols.push(col)
+              })
+            })
+          })
+      })
+    if (reqKycIds.size === 0) { setDocStatusLoaded(true); return }
+    const personIds = Array.from(new Set(personCols.map(c => String(c.id))))
+    const companyIds = Array.from(new Set(companyCols.map(c => String(c.id))))
+    const load = async () => {
+      const results: Record<string, any[]> = {}
+      const addDoc = (key: any, doc: any) => { const k = String(key); if (!results[k]) results[k] = []; results[k].push(doc) }
+      try {
+        if (personIds.length > 0) {
+          const { data } = await supabase.from('acc_portal_directors_documents').select('id, document_id, director_id, file_path').in('director_id', personIds).in('document_id', Array.from(reqKycIds)).neq('status', 'deleted')
+            ; (data || []).forEach((d: any) => addDoc(d.director_id, d))
+        }
+        if (companyIds.length > 0) {
+          const { data } = await supabase.from('acc_portal_kyc_uploads').select('id, document_id, company_id, file_path').in('company_id', companyIds).in('document_id', Array.from(reqKycIds)).neq('status', 'deleted')
+            ; (data || []).forEach((d: any) => addDoc(d.company_id, d))
+        }
+        setDocStatusByEntity(results)
+      } catch (err) { console.error('Error checking document status:', err) } finally { setDocStatusLoaded(true) }
+    }
+    load()
+  }, [automations, expandedAutomations, columns])
+
+  const getDocsForCol = useCallback((linkedKycDocuments: string[] | undefined, col: ColDef) => {
+    const docs = docStatusByEntity[String(col.id)] || []
+    return docs.filter((d: any) => linkedKycDocuments?.includes(d.document_id))
+  }, [docStatusByEntity])
+
   // Single field resolver
   const resolveFieldForCol = useCallback(async (field: any, col: ColDef) => {
     const cacheKey = `${field.variableName || field.name || field.field_name}-${col.id}`
@@ -343,6 +381,28 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
 
   const handleSort = (colKey: string) => {
     setSortCol(prev => prev === colKey ? (setSortDir(d => d === "asc" ? "desc" : "asc"), colKey) : (setSortDir("asc"), colKey))
+  }
+
+  const allArrayExpandKeys = useMemo(() => {
+    const keys: string[] = []
+      ; (automations || []).forEach((auto: any) => {
+        if (!expandedAutomations.has(auto.id)) return
+          ; (auto.webdata || []).forEach((f: any) => {
+            if (f.fieldType === 'array') keys.push(`${auto.id}-${f.variableName || f.name || f.field_name}`)
+          })
+      })
+    return keys
+  }, [automations, expandedAutomations])
+
+  const allArraysExpanded = allArrayExpandKeys.length > 0 && allArrayExpandKeys.every(k => expandedArrayFields.has(k))
+
+  const handleToggleAllArrays = () => {
+    setExpandedArrayFields(prev => {
+      const next = new Set(prev)
+      if (allArraysExpanded) allArrayExpandKeys.forEach(k => next.delete(k))
+      else allArrayExpandKeys.forEach(k => next.add(k))
+      return next
+    })
   }
 
   const deriveAutomationType = useCallback((automation: any): string => {
@@ -556,6 +616,37 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
     resolveTargetEntityIdImpl(field, { relationshipData: relationshipData[0], currentIndividualId: String(task?.individual_id || ""), task } as FieldResolutionContext),
     [relationshipData, task]);
 
+  // Same context shape used for both resolving a per-column cell value and for
+  // re-resolving it after a save, so edits and display always agree. Accepts an
+  // optional sourceData override so a just-written record can be re-resolved
+  // before the fieldSourceDataCache state update has actually landed.
+  const buildColCtx = useCallback((field: any, col: ColDef, sourceDataOverride?: Record<string, Record<string, any>>): FieldResolutionContext => ({
+    sourceData: sourceDataOverride || fieldSourceDataCache,
+    jobFields: jobFieldsRecord,
+    webData: [{ automationId: String(field.automation_id || ""), fields: [field] }],
+    selectedAutomationId: String(field.automation_id || ""),
+    masterFieldComputedValues: fieldMasterComputedCache,
+    relationshipData: relationshipData[0],
+    taskId: String(task?.id || ""),
+    currentIndividualId: col.type === 'company' ? String(task?.individual_id || "") : String(col.id),
+    task,
+  }), [fieldSourceDataCache, jobFieldsRecord, fieldMasterComputedCache, relationshipData, task]);
+
+  // Resolves which DB table/path a specific master field (or, lacking one, a linked
+  // job question) actually persists to - mirrors AutomationMappingDialog's own
+  // persistenceSource derivation so edits made here land in the same place.
+  const getPersistenceSource = useCallback((masterFieldId: any, questionId: any, entityCategory: string) => {
+    if (masterFieldId != null) {
+      const mDef = jobFieldsRecord[String(masterFieldId)]
+      if (!mDef) return null
+      return mDef.sources?.find((s: any) => s.source_type === entityCategory) || mDef.sources?.[0] || null
+    }
+    if (questionId != null) {
+      return { table: 'tm_tasks', path: `job_specific_answers ->> '${questionId}'`, linking_variable: 'id' }
+    }
+    return null
+  }, [jobFieldsRecord]);
+
   const resolveVariableValue = useCallback((fieldDef: any, targetEntityId: string) =>
     resolveVariableValueImpl(fieldDef, targetEntityId, buildFieldResolutionContextForAuto(fieldDef.automation_id || "", [fieldDef])),
     [buildFieldResolutionContextForAuto]);
@@ -563,11 +654,6 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
   const getArrayFieldData = useCallback((field: any) =>
     getArrayFieldDataImpl(field, buildFieldResolutionContextForAuto(field.automation_id || "", [field])),
     [buildFieldResolutionContextForAuto]);
-
-  const getEntityLabelById = useCallback((id: any) => {
-    const col = columns.find(c => String(c.id) === String(id))
-    return col?.label || String(id)
-  }, [columns]);
 
   const getArrayOverrideKey = useCallback((field: any, entityId: any) => {
     const fieldKey = field.variableName || field.name || field.field_name
@@ -581,20 +667,104 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
     })
   }, [arrayOverrides, getArrayOverrideKey]);
 
-  const startEditingArrayCell = (field: any, entityId: any, itemVar: string, currentVal: any) => {
-    setEditingArrayCell({ overrideKey: getArrayOverrideKey(field, entityId), itemVar })
+  const startEditingArrayCell = (field: any, entityId: any, item: any, currentVal: any, masterFieldId?: any, questionId?: any) => {
+    const entityCategory = (item.entityTypes || field.entityTypes || []).includes('company') ? 'company' : 'individual'
+    const resolvedMasterId = masterFieldId !== undefined ? masterFieldId : (item?.linkedMasterFields?.[0] || item?.masterFieldIds?.[0])
+    const resolvedQuestionId = resolvedMasterId == null ? (questionId !== undefined ? questionId : item?.linkedJobQuestionIds?.[0]) : null
+    const persistenceSource = getPersistenceSource(resolvedMasterId, resolvedQuestionId, entityCategory)
+    setEditingArrayCell({ overrideKey: getArrayOverrideKey(field, entityId), itemVar: item.variableName, masterFieldId: resolvedMasterId, persistenceSource, entityId })
     setArrayEditValue(currentVal !== null && currentVal !== undefined && currentVal !== 'Missing' ? String(currentVal) : '')
   };
 
   const cancelEditingArrayCell = () => { setEditingArrayCell(null); setArrayEditValue('') };
 
-  const saveArrayCellEdit = () => {
+  const saveArrayCellEdit = async (isDropdown?: boolean, dropdownOptions?: { label: string, value: string }[]) => {
     if (!editingArrayCell) return;
-    const { overrideKey, itemVar } = editingArrayCell;
-    setArrayOverrides(prev => ({ ...prev, [overrideKey]: { ...(prev[overrideKey] || {}), [itemVar]: arrayEditValue } }));
-    setEditingArrayCell(null);
-    setArrayEditValue('');
+    const { overrideKey, itemVar, persistenceSource, entityId } = editingArrayCell;
+    let valueToSave = arrayEditValue;
+    if (isDropdown && dropdownOptions && dropdownOptions.length > 0) {
+      const selectedOption = dropdownOptions.find(opt => opt.value === arrayEditValue);
+      if (selectedOption) valueToSave = selectedOption.label;
+    }
+
+    if (!persistenceSource?.table || !persistenceSource?.path || entityId == null) {
+      setArrayOverrides(prev => ({ ...prev, [overrideKey]: { ...(prev[overrideKey] || {}), [itemVar]: valueToSave } }));
+      setEditingArrayCell(null);
+      setArrayEditValue('');
+      toast({ title: 'Overridden', description: 'Saved locally - no linked database field to update.' });
+      return;
+    }
+
+    setIsSavingArrayEdit(true);
+    try {
+      const { table, path, linking_variable } = persistenceSource;
+      const eId = String(entityId);
+      let record = fieldSourceDataCache[table]?.[eId];
+      if (!record) {
+        let query = supabase.from(table).select('*');
+        if (table === 'tm_tasks') query = query.eq('id', eId);
+        else if (linking_variable) query = query.eq(linking_variable, eId);
+        else query = query.or(`id.eq.${eId},director_id.eq.${eId},company_id.eq.${eId}`);
+        const { data, error } = await query.maybeSingle();
+        if (error) throw error;
+        if (!data) throw new Error(`Record not found in ${table} for ${eId}`);
+        record = data;
+      }
+      const queryField = table === 'tm_tasks' ? 'id' : linking_variable ? linking_variable : record.director_id ? 'director_id' : record.company_id ? 'company_id' : 'id';
+      const recordPK = table === 'tm_tasks' ? record.id : linking_variable ? eId : (record.director_id || record.company_id || record.id);
+      const updated = updateJsonValue(record, path, valueToSave);
+      const { data: updatedRecord, error: updateError } = await supabase
+        .from(table)
+        .update({ ...updated, updated_at: new Date().toISOString() })
+        .eq(queryField, recordPK)
+        .select()
+        .single();
+      if (updateError) throw updateError;
+
+      setFieldSourceDataCache(prev => ({ ...prev, [table]: { ...(prev[table] || {}), [eId]: updatedRecord } }));
+
+      // The DB now reflects the edited value, and array rows are recomputed live
+      // from fieldSourceDataCache each render - so the local override is no longer
+      // needed and would otherwise shadow the freshly-persisted (and possibly
+      // priority/merge-resolved) value.
+      setArrayOverrides(prev => {
+        if (!prev[overrideKey]) return prev;
+        const nextForKey = { ...prev[overrideKey] };
+        delete nextForKey[itemVar];
+        const next = { ...prev };
+        if (Object.keys(nextForKey).length > 0) next[overrideKey] = nextForKey; else delete next[overrideKey];
+        return next;
+      });
+
+      toast({ title: 'Saved', description: 'Field updated successfully.' });
+    } catch (error: any) {
+      console.error('Error saving array field:', error);
+      toast({ title: 'Error', description: error.message || 'Failed to update field', variant: 'destructive' });
+    } finally {
+      setEditingArrayCell(null);
+      setArrayEditValue('');
+      setIsSavingArrayEdit(false);
+    }
   };
+
+  // A linked requirement that is itself template-backed (e.g. "Invitation Letter")
+  // has its own dedicated generation flow in the Templates tab - redirect straight
+  // there instead of sending the user to Requirements only to have them redirect
+  // again via that tab's own template wand button.
+  const getRequirementRedirectUrl = useCallback((requirementId: string) => {
+    const req = (task?.requirements || []).find((r: any) => String(r.id) === String(requirementId))
+    if (req) {
+      const hasTemplateExplicitly = req.hasTemplate === true || String(req.hasTemplate) === 'true'
+      const docId = req.document_id || req.document_ids?.[0]
+      if (hasTemplateExplicitly && docId) {
+        const docMeta = kycDocsMap?.get?.(docId)
+        if (isTemplateEligible(req, docMeta)) {
+          return `/dashboard/tasks/${task.id}?tab=templates&documentId=${docId}`
+        }
+      }
+    }
+    return `/dashboard/tasks/${task.id}?tab=requirements&requirementId=${requirementId}`
+  }, [task, kycDocsMap])
 
   const handlePreviewDocumentField = useCallback(async (field: any, col: ColDef) => {
     const linkedDocIds: string[] = field.linkedKycDocuments || []
@@ -801,21 +971,89 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
     return `${supabaseUrl}/storage/v1/object/public/${encodedPath}`;
   };
 
-  const startEditing = async (field: any, col: ColDef, currentVal: any) => {
-    setEditingCell({ field, col, currentVal });
+  // masterFieldId identifies exactly which linked master field is being edited (the
+  // one whose source was clicked in the "Linked Sources" popover, or the sole/primary
+  // one for a single-source field) so the edit widget can show that field's own
+  // dropdown options rather than always defaulting to the first linked source, and
+  // so saveEdit knows exactly which DB table/path to persist to.
+  const startEditing = async (field: any, col: ColDef, currentVal: any, masterFieldId?: string | number, questionId?: string) => {
+    const entityCategory = field.entityTypes?.includes('company') ? 'company' : 'individual'
+    const persistenceSource = getPersistenceSource(masterFieldId, masterFieldId == null ? questionId : null, entityCategory)
+    const targetEntityId = resolveTargetEntityIdImpl(field, buildColCtx(field, col))
+    setEditingCell({ field, col, currentVal, masterFieldId, persistenceSource, targetEntityId });
     setEditValue(currentVal !== null && currentVal !== undefined && currentVal !== 'Missing' ? String(currentVal) : '');
   };
 
   const cancelEditing = () => { setEditingCell(null); setEditValue(''); };
 
-  const saveEdit = async () => {
+  const saveEdit = async (isDropdown?: boolean, dropdownOptions?: { label: string, value: string }[]) => {
     if (!editingCell) return;
-    const { col } = editingCell;
-    const cacheKey = `${editingCell.field.variableName || editingCell.field.name || editingCell.field.field_name}-${col.id}`;
-    setResolvedValues(prev => ({ ...prev, [cacheKey]: editValue }));
-    setEditingCell(null);
-    setEditValue('');
-    toast({ title: 'Overridden', description: 'Value saved locally.' });
+    const { field, col, persistenceSource, targetEntityId } = editingCell;
+    let valueToSave = editValue;
+    if (isDropdown && dropdownOptions && dropdownOptions.length > 0) {
+      const selectedOption = dropdownOptions.find(opt => opt.value === editValue);
+      if (selectedOption) valueToSave = selectedOption.label;
+    }
+    const cacheKey = `${field.variableName || field.name || field.field_name}-${col.id}`;
+
+    // No known DB source for this field (e.g. it's computed, or not linked to any
+    // master field/question) - there's nothing to persist to, so keep it as a
+    // local-only override that still flows into automation runs.
+    if (!persistenceSource?.table || !persistenceSource?.path || targetEntityId == null) {
+      setResolvedValues(prev => ({ ...prev, [cacheKey]: valueToSave }));
+      setEditingCell(null);
+      setEditValue('');
+      toast({ title: 'Overridden', description: 'Saved locally - no linked database field to update.' });
+      return;
+    }
+
+    setIsSavingEdit(true);
+    try {
+      const { table, path, linking_variable } = persistenceSource;
+      const entityId = String(targetEntityId);
+      let record = fieldSourceDataCache[table]?.[entityId];
+      if (!record) {
+        let query = supabase.from(table).select('*');
+        if (table === 'tm_tasks') query = query.eq('id', entityId);
+        else if (linking_variable) query = query.eq(linking_variable, entityId);
+        else query = query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`);
+        const { data, error } = await query.maybeSingle();
+        if (error) throw error;
+        if (!data) throw new Error(`Record not found in ${table} for ${entityId}`);
+        record = data;
+      }
+      const queryField = table === 'tm_tasks' ? 'id' : linking_variable ? linking_variable : record.director_id ? 'director_id' : record.company_id ? 'company_id' : 'id';
+      const recordPK = table === 'tm_tasks' ? record.id : linking_variable ? entityId : (record.director_id || record.company_id || record.id);
+      const updated = updateJsonValue(record, path, valueToSave);
+      const { data: updatedRecord, error: updateError } = await supabase
+        .from(table)
+        .update({ ...updated, updated_at: new Date().toISOString() })
+        .eq(queryField, recordPK)
+        .select()
+        .single();
+      if (updateError) throw updateError;
+
+      const nextSourceForTable = { ...(fieldSourceDataCache[table] || {}), [entityId]: updatedRecord };
+      setFieldSourceDataCache(prev => ({ ...prev, [table]: nextSourceForTable }));
+
+      // Re-resolve through the shared priority/merge logic instead of just echoing
+      // the raw edited value back - a lower-priority source's edit shouldn't
+      // clobber the display if a higher-priority source still has a value, and an
+      // "all" sourceLogic field needs every source rejoined, not just this one.
+      const freshCtx = buildColCtx(field, col, { ...fieldSourceDataCache, [table]: nextSourceForTable });
+      const freshTargetId = resolveTargetEntityIdImpl(field, freshCtx);
+      const freshVal = freshTargetId != null ? resolveVariableValueImpl(field, String(freshTargetId), freshCtx) : valueToSave;
+      setResolvedValues(prev => ({ ...prev, [cacheKey]: freshVal }));
+
+      toast({ title: 'Saved', description: 'Field updated successfully.' });
+    } catch (error: any) {
+      console.error('Error saving field:', error);
+      toast({ title: 'Error', description: error.message || 'Failed to update field', variant: 'destructive' });
+    } finally {
+      setEditingCell(null);
+      setEditValue('');
+      setIsSavingEdit(false);
+    }
   };
 
   useEffect(() => {
@@ -893,7 +1131,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
     loadDocs();
   }, [showConsole, automationJobId, automations, runningAutomationId, task, resolveTargetEntityId]);
 
-  const totalCols = columns.length + 2
+  const totalCols = columns.length + 4
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-white px-6 py-4">
@@ -906,6 +1144,12 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
           </Badge>
         </div>
         <div className="flex items-center gap-3">
+          {allArrayExpandKeys.length > 0 && (
+            <Button variant="outline" size="sm" className="h-9 px-4 text-xs font-semibold rounded-lg border-slate-200 text-slate-700 bg-white hover:bg-slate-50 shadow-sm flex items-center gap-1.5" onClick={handleToggleAllArrays}>
+              {allArraysExpanded ? <ChevronsDownUp className="h-3.5 w-3.5 text-slate-500" /> : <ChevronsUpDown className="h-3.5 w-3.5 text-slate-500" />}
+              {allArraysExpanded ? 'Collapse All Arrays' : 'Expand All Arrays'}
+            </Button>
+          )}
           {automationJobId && showConsole && (
             <Button variant="outline" size="sm" className="h-9 px-4 text-xs font-semibold rounded-lg border-slate-200 text-slate-700 bg-white hover:bg-slate-50 shadow-sm flex items-center gap-1.5" onClick={() => setShowConsole(!showConsole)}>
               <Terminal className="h-3.5 w-3.5 text-slate-500" /> {showConsole ? 'Hide Console' : 'Show Console'}
@@ -932,19 +1176,29 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
           <Table className="border-separate border-spacing-0 min-w-full">
             <TableHeader className="sticky top-0 z-30 text-white">
               <TableRow className="bg-custom-blue hover:bg-custom-blue">
-                <TableHead className="w-12 border-b border-r sticky left-0 top-0 bg-custom-blue z-40 p-0 text-white shadow-sm">
+                <TableHead className="w-12 border-b border-r sticky left-0 top-0 bg-custom-blue z-40 p-0 text-white">
                   <div className="flex items-center justify-center h-full text-sm font-medium uppercase tracking-wider">#</div>
                 </TableHead>
-                <TableHead className="w-[300px] border-b border-r sticky left-12 top-0 bg-custom-blue z-40 p-0 text-white shadow-sm">
-                  <div className="flex items-center h-full px-6 text-[11px] font-medium uppercase tracking-wider cursor-pointer hover:bg-blue-700 transition-colors" onClick={() => handleSort("field-name")}>
-                    Field Name & Type
+                <TableHead className="w-[220px] border-b border-r sticky left-12 top-0 bg-custom-blue z-40 p-0 text-white">
+                  <div className="flex items-center h-full px-4 text-[11px] font-medium uppercase tracking-wider cursor-pointer hover:bg-blue-700 transition-colors" onClick={() => handleSort("field-name")}>
+                    Field Name
                     {sortCol === "field-name" && (sortDir === "asc" ? <ArrowUp className="ml-2 h-4 w-4" /> : <ArrowDown className="ml-2 h-4 w-4" />)}
+                  </div>
+                </TableHead>
+                <TableHead className="w-[100px] border-b border-r sticky left-[268px] top-0 bg-custom-blue z-40 p-0 text-white">
+                  <div className="flex items-center h-full px-4 text-[11px] font-medium uppercase tracking-wider">
+                    Type
+                  </div>
+                </TableHead>
+                <TableHead className="w-[220px] border-b border-r sticky left-[368px] top-0 bg-custom-blue z-40 p-0 text-white">
+                  <div className="flex items-center h-full px-4 text-[11px] font-medium uppercase tracking-wider">
+                    Source
                   </div>
                 </TableHead>
                 {columns.map(col => {
                   const { bgColor, Icon } = getEntityTypeConfig(col.type)
                   return (
-                    <TableHead key={col.id} className={cn("min-w-[340px] border-b border-r top-0 p-0 text-white align-top shadow-sm", bgColor)}>
+                    <TableHead key={col.id} className={cn("min-w-[340px] border-b border-r top-0 p-0 text-white align-top", bgColor)}>
                       <div className="flex flex-col h-full w-full">
                         <div className="flex flex-col items-center justify-center gap-1.5 p-4 border-b border-white/20 flex-1">
                           <span className={cn("flex items-center gap-2 text-[11px] font-semibold tracking-wide")}>
@@ -995,19 +1249,14 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
                             <span className="text-[11px] font-medium uppercase tracking-wide text-slate-800">
                               {automation.name || `Automation #${automation.id}`}
                             </span>
-                            <Badge variant="outline" className="text-[10px] font-semibold rounded-full px-3 py-0.5 bg-white border-slate-300 text-slate-600 shadow-sm">
-                              {fields.length} Fields
-                            </Badge>
-                            <Badge variant="outline" className="text-[10px] font-semibold rounded-full px-3 py-0.5 bg-indigo-50 border-indigo-200 text-indigo-600 shadow-sm">
-                              {deriveAutomationType(automation)}
-                            </Badge>
+                            <span className="text-xs text-slate-400">
+                              {fields.length} field{fields.length !== 1 ? 's' : ''} · {deriveAutomationType(automation)}
+                            </span>
                             {linkSourceCount > 0 && (
                               <Popover>
                                 <PopoverTrigger asChild>
-                                  <button type="button" onClick={(e) => e.stopPropagation()}>
-                                    <Badge variant="outline" className="text-[10px] font-semibold rounded-full px-3 py-0.5 bg-emerald-50 border-emerald-200 text-emerald-700 shadow-sm cursor-pointer hover:bg-emerald-100 transition-colors">
-                                      <Link2 className="h-3 w-3 mr-1" /> Linked from {linkSourceCount}
-                                    </Badge>
+                                  <button type="button" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:text-emerald-800 hover:underline">
+                                    <Link2 className="h-3 w-3" /> Linked from {linkSourceCount}
                                   </button>
                                 </PopoverTrigger>
                                 <PopoverContent className="w-72 p-0" align="start" onClick={(e) => e.stopPropagation()}>
@@ -1033,9 +1282,9 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
                               </Popover>
                             )}
                             {isRunning && (
-                              <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[10px] rounded-full animate-pulse px-3 py-0.5">
-                                Agent Active
-                              </Badge>
+                              <span className="flex items-center gap-1.5 text-[10px] font-semibold text-purple-600 uppercase tracking-wide">
+                                <span className="h-1.5 w-1.5 rounded-full bg-purple-500 animate-pulse" /> Agent Active
+                              </span>
                             )}
                           </div>
                           <div className="flex items-center gap-3 pr-2">
@@ -1072,19 +1321,25 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
                       const isArrayExpanded = isArray && expandedArrayFields.has(arrayExpandKey)
                       const arrayRows = isArrayExpanded ? mergeArrayOverrides(field, getArrayFieldData(field)) : []
 
-                      return (
-                      <React.Fragment key={field.id || fIdx}>
-                        <TableRow className="group hover:bg-slate-50/70 transition-colors">
-                          <TableCell className="w-12 py-0 px-0 text-center text-xs font-mono text-slate-400 border-b border-r sticky left-0 bg-white group-hover:bg-slate-50 z-10 align-middle">
-                            <div className="flex items-center justify-center h-full font-medium">{fIdx + 1}</div>
-                          </TableCell>
+                      // Computed once per row (not per participant column) since it
+                      // doesn't vary by column - also feeds the Source column.
+                      const mIds = field.linkedMasterFields || field.masterFieldIds || []
+                      const qIds = field.linkedJobQuestionIds || []
+                      const hasMultipleSources = (mIds.length + qIds.length) > 1
+                      const hasDefault = !!(field.defaultValue && field.defaultValue !== 'Missing' && field.defaultValue !== '')
 
-                          <TableCell className="w-[400px] py-0 px-5 border-b border-r sticky left-12 bg-white group-hover:bg-slate-50 z-10 align-middle">
-                            <div className="flex gap-2 h-full justify-between py-3">
-                              <div className="flex items-center gap-2">
+                      return (
+                        <React.Fragment key={field.id || fIdx}>
+                          <TableRow className="group hover:bg-slate-50/70 transition-colors">
+                            <TableCell className="w-12 py-0 px-0 text-center text-xs font-mono text-slate-400 border-b border-r sticky left-0 bg-white group-hover:bg-slate-50 z-10 align-middle">
+                              <div className="flex items-center justify-center h-full font-medium">{fIdx + 1}</div>
+                            </TableCell>
+
+                            <TableCell className="w-[220px] py-0 px-4 border-b border-r sticky left-12 bg-white group-hover:bg-slate-50 z-10 align-middle">
+                              <div className="flex items-center gap-2 h-full py-3">
                                 {isArray && (
                                   <button
-                                    className="p-1 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors shrink-0 border border-slate-200"
+                                    className="p-1 hover:bg-slate-100 rounded-full transition-colors shrink-0"
                                     onClick={() => setExpandedArrayFields(prev => {
                                       const next = new Set(prev)
                                       if (next.has(arrayExpandKey)) next.delete(arrayExpandKey)
@@ -1100,189 +1355,464 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId }: Automa
                                   {getFieldLabel(field)}
                                 </span>
                               </div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <Badge variant="secondary" className="text-[9px] font-medium uppercase tracking-wider rounded-full px-2 py-0">
-                                  {field.fieldType || 'text'}
-                                </Badge>
+                            </TableCell>
+
+                            <TableCell className="w-[100px] py-0 px-4 border-b border-r sticky left-[268px] bg-white group-hover:bg-slate-50 z-10 align-middle">
+                              <div className="flex items-center h-full py-3">
+                                <span className="text-[11px] font-medium text-slate-500 capitalize truncate">{field.fieldType || 'text'}</span>
                               </div>
-                            </div>
-                          </TableCell>
+                            </TableCell>
 
-                          {columns.map(col => {
-                            const applicable = isFieldApplicable(field, col)
-                            const cacheKey = `${field.variableName || field.name || field.field_name}-${col.id}`
-                            const val = resolvedValues[cacheKey]
-                            const isResolving = resolving[cacheKey]
-                            const isMissing = !isValidValue(val)
-                            const isEditing = editingCell?.field?.variableName === (field.variableName || field.name || field.field_name) && editingCell?.col?.id === col.id
-
-                            return (
-                              <TableCell key={col.id} className="p-0 border-b border-r align-middle bg-white group-hover:bg-slate-50/70 transition-colors">
-                                {!applicable ? (
-                                  <div className="flex h-full items-center justify-center p-3">
-                                    <span className="text-[10px] font-medium text-slate-400 bg-slate-100 rounded-full px-4 py-1.5 uppercase tracking-wide italic border border-slate-200">N/A</span>
-                                  </div>
+                            <TableCell className="w-[220px] py-0 px-4 border-b border-r sticky left-[368px] bg-white group-hover:bg-slate-50 z-10 align-middle">
+                              <div className="flex items-center h-full py-3 text-xs text-slate-500 truncate">
+                                {hasDefault ? (
+                                  <span className="flex items-center gap-1"><Lock className="h-3 w-3 text-slate-400 shrink-0" /> Default value</span>
+                                ) : isDocument ? (
+                                  <span className="truncate">
+                                    {(field.linkedKycDocuments || []).length} doc type{(field.linkedKycDocuments || []).length !== 1 ? 's' : ''}
+                                    {field.linkedRequirementId ? ' · requirement linked' : ''}
+                                  </span>
+                                ) : isComputed ? (
+                                  <span className="truncate">{field.computedFunction || 'Computed logic'}</span>
+                                ) : isArray ? (
+                                  <span className="truncate">{(field.arrayItems || []).length} column{(field.arrayItems || []).length !== 1 ? 's' : ''}</span>
+                                ) : (mIds.length > 0 || qIds.length > 0) ? (
+                                  <span className="truncate">
+                                    {[mIds.length > 0 ? `${mIds.length} DB` : null, qIds.length > 0 ? `${qIds.length} Question` : null].filter(Boolean).join(' + ')}
+                                  </span>
                                 ) : (
-                                  <div className="flex items-center justify-center h-full px-3">
-                                    {isResolving ? (
-                                      <Loader2 className="h-5 w-5 animate-spin text-purple-500" />
-                                    ) : isDocument ? (
-                                      <button
-                                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 shadow-sm text-blue-600 hover:bg-blue-100 transition-colors disabled:opacity-60"
-                                        onClick={() => handlePreviewDocumentField(field, col)}
-                                        disabled={docPreviewLoading === `${field.variableName || field.name}-${col.id}`}
-                                        title="Preview linked document"
-                                      >
-                                        {docPreviewLoading === `${field.variableName || field.name}-${col.id}` ? (
-                                          <Loader2 className="h-3 w-3 animate-spin" />
-                                        ) : (
-                                          <Eye className="h-3 w-3" />
-                                        )}
-                                        <span className="text-[9px] font-semibold uppercase tracking-wider">Preview</span>
-                                      </button>
-                                    ) : isComputed ? (
-                                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 shadow-sm text-amber-600">
-                                        <Zap className="h-3 w-3" />
-                                        <span className="text-[9px] font-semibold uppercase tracking-wider">Logic</span>
-                                      </div>
-                                    ) : isArray ? (
-                                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 shadow-sm text-indigo-600">
-                                        <Database className="h-3 w-3" />
-                                        <span className="text-[9px] font-semibold uppercase tracking-wider">Array</span>
-                                      </div>
-                                    ) : isEditing ? (
-                                      <div className="flex gap-1.5 items-center justify-between w-full">
-                                        <Input
-                                          value={editValue}
-                                          onChange={(e) => setEditValue(e.target.value)}
-                                          className="h-8 text-sm"
-                                          autoFocus
-                                          onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }}
-                                        />
-                                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-green-600 hover:bg-green-50 rounded-full shrink-0" onClick={saveEdit}>
-                                          <Check className="h-3.5 w-3.5" />
-                                        </Button>
-                                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-full shrink-0" onClick={cancelEditing}>
-                                          <X className="h-3.5 w-3.5" />
-                                        </Button>
-                                      </div>
-                                    ) : val !== undefined ? (
-                                      isMissing ? (
-                                        <div className="flex gap-1.5 items-center justify-between w-full">
-                                          <div className="text-sm font-semibold text-white bg-red-500 px-2.5 py-1 shadow-sm max-w-[140px] truncate">Missing</div>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-7 px-4 text-[10px] font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 rounded-full border border-slate-200 transition-all"
-                                            onClick={() => startEditing(field, col, val)}
-                                          >
-                                            <Edit3 className="h-3.5 w-3.5 mr-1.5" /> Edit
-                                          </Button>
-                                        </div>
-                                      ) : (
-                                        <div className="flex gap-1.5 items-center justify-between w-full">
-                                          <div className="text-sm font-semibold text-slate-800 bg-white px-2.5 py-1 shadow-sm max-w-[140px] truncate">{String(cleanFieldValue(val))}</div>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-7 px-4 text-[10px] font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 rounded-full border border-slate-200 transition-all"
-                                            onClick={() => startEditing(field, col, val)}
-                                          >
-                                            <Edit3 className="h-3.5 w-3.5 mr-1.5" /> Edit
-                                          </Button>
-                                        </div>
-                                      )
-                                    ) : val === undefined && applicable ? (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 px-5 text-sm font-semibold text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-full border border-purple-100"
-                                        onClick={() => resolveFieldForCol(field, col)}
-                                      >
-                                        <Eye className="h-4 w-4 mr-1.5" /> Resolve
-                                      </Button>
-                                    ) : null}
-                                  </div>
-                                )}
-                              </TableCell>
-                            )
-                          })}
-                        </TableRow>
-
-                        {/* Array Field Data */}
-                        {isArray && isArrayExpanded && (
-                          <TableRow className="bg-indigo-50/30">
-                            <TableCell colSpan={totalCols} className="p-0 border-b">
-                              <div className="p-4">
-                                {arrayRows.length === 0 ? (
-                                  <p className="text-sm text-slate-400 italic px-2">No array data resolved for this field.</p>
-                                ) : (
-                                  <div className="border rounded-lg overflow-auto bg-white max-w-full">
-                                    <table className="w-full text-sm min-w-max">
-                                      <thead className="bg-slate-50">
-                                        <tr>
-                                          <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase text-slate-500 whitespace-nowrap">Entity</th>
-                                          {(field.arrayItems || []).map((item: any) => (
-                                            <th key={item.variableName} className="px-3 py-2 text-left text-[10px] font-semibold uppercase text-slate-500 whitespace-nowrap">
-                                              {getFieldLabel(item)}
-                                            </th>
-                                          ))}
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {arrayRows.map((row: any, rIdx: number) => (
-                                          <tr key={rIdx} className="border-t hover:bg-slate-50/50">
-                                            <td className="px-3 py-2 text-xs font-medium text-slate-600 whitespace-nowrap">{getEntityLabelById(row.entityId)}</td>
-                                            {(field.arrayItems || []).map((item: any) => {
-                                              const overrideKey = getArrayOverrideKey(field, row.entityId)
-                                              const isCellEditing = editingArrayCell?.overrideKey === overrideKey && editingArrayCell?.itemVar === item.variableName
-                                              const cellVal = row[item.variableName]
-                                              const isOverridden = arrayOverrides[overrideKey]?.[item.variableName] !== undefined
-                                              return (
-                                                <td key={item.variableName} className="px-3 py-2 text-xs text-slate-700 whitespace-nowrap">
-                                                  {isCellEditing ? (
-                                                    <div className="flex items-center gap-1">
-                                                      <Input
-                                                        value={arrayEditValue}
-                                                        onChange={(e) => setArrayEditValue(e.target.value)}
-                                                        className="h-7 text-xs w-32"
-                                                        autoFocus
-                                                        onKeyDown={(e) => { if (e.key === 'Enter') saveArrayCellEdit(); if (e.key === 'Escape') cancelEditingArrayCell(); }}
-                                                      />
-                                                      <button onClick={saveArrayCellEdit} className="text-green-600 hover:text-green-700 shrink-0">
-                                                        <Check className="h-3.5 w-3.5" />
-                                                      </button>
-                                                      <button onClick={cancelEditingArrayCell} className="text-slate-400 hover:text-red-500 shrink-0">
-                                                        <X className="h-3.5 w-3.5" />
-                                                      </button>
-                                                    </div>
-                                                  ) : (
-                                                    <button
-                                                      className={cn(
-                                                        "group/cell inline-flex items-center gap-1 hover:bg-slate-100 rounded px-1.5 py-0.5 -mx-1.5",
-                                                        isOverridden && "text-amber-700 font-semibold"
-                                                      )}
-                                                      onClick={() => startEditingArrayCell(field, row.entityId, item.variableName, cellVal)}
-                                                      title="Click to edit"
-                                                    >
-                                                      <span>{cellVal ?? '-'}</span>
-                                                      <Edit3 className="h-3 w-3 opacity-0 group-hover/cell:opacity-40 shrink-0" />
-                                                    </button>
-                                                  )}
-                                                </td>
-                                              )
-                                            })}
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
+                                  <span className="text-slate-300 italic">No source</span>
                                 )}
                               </div>
                             </TableCell>
+
+                            {columns.map(col => {
+                              const applicable = isFieldApplicable(field, col)
+                              const cacheKey = `${field.variableName || field.name || field.field_name}-${col.id}`
+                              const val = resolvedValues[cacheKey]
+                              const isResolving = resolving[cacheKey]
+                              const isMissing = !isValidValue(val)
+                              const isEditing = editingCell?.field?.variableName === (field.variableName || field.name || field.field_name) && editingCell?.col?.id === col.id
+
+                              const ctxForCol: FieldResolutionContext = {
+                                sourceData: fieldSourceDataCache, jobFields: jobFieldsRecord,
+                                webData: [{ automationId: String(field.automation_id || ""), fields: [field] }],
+                                selectedAutomationId: String(field.automation_id || ""),
+                                masterFieldComputedValues: fieldMasterComputedCache,
+                                relationshipData: relationshipData[0],
+                                taskId: String(task?.id || ""),
+                                currentIndividualId: col.type === 'company' ? String(task?.individual_id || "") : String(col.id),
+                                task,
+                              }
+                              const targetEntityId = !hasDefault && hasMultipleSources ? resolveTargetEntityIdImpl(field, ctxForCol) : null
+
+                              // The specific master field currently being edited - whichever source
+                              // was clicked in the popover, or the primary one for a single-source
+                              // field - determines whether the edit widget is a dropdown and which
+                              // options it offers, instead of always assuming the first linked field.
+                              const editingMasterId = isEditing ? (editingCell?.masterFieldId ?? mIds[0]) : null
+                              const editingMasterField = editingMasterId != null ? jobFieldsRecord[String(editingMasterId)] : null
+                              const editingOptions = Array.isArray(editingMasterField?.options)
+                                ? editingMasterField.options.map((o: any) => typeof o === 'string' ? { label: o, value: o } : o)
+                                : []
+                              const isEditingDropdown = editingOptions.length > 0
+
+                              return (
+                                <TableCell key={col.id} className="p-0 border-b border-r align-middle bg-white group-hover:bg-slate-50/70 transition-colors">
+                                  {!applicable ? (
+                                    <div className="flex h-full items-center justify-center p-3">
+                                      <span className="text-xs font-medium text-slate-300 italic">N/A</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center justify-center h-full px-3">
+                                      {isResolving ? (
+                                        <Loader2 className="h-5 w-5 animate-spin text-purple-500" />
+                                      ) : isDocument ? (
+                                        !docStatusLoaded ? (
+                                          <Loader2 className="h-4 w-4 animate-spin text-slate-300" />
+                                        ) : (
+                                          <div className="flex items-center gap-2">
+                                            {getDocsForCol(field.linkedKycDocuments, col).length > 0 ? (
+                                              <button
+                                                className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 hover:underline disabled:opacity-60"
+                                                onClick={() => handlePreviewDocumentField(field, col)}
+                                                disabled={docPreviewLoading === `${field.variableName || field.name}-${col.id}`}
+                                                title="Preview linked document"
+                                              >
+                                                {docPreviewLoading === `${field.variableName || field.name}-${col.id}` ? (
+                                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                                ) : (
+                                                  <Eye className="h-3 w-3" />
+                                                )}
+                                                Preview
+                                              </button>
+                                            ) : (
+                                              <span className="text-sm font-medium text-red-600">Missing</span>
+                                            )}
+                                            {field.linkedRequirementId && (
+                                              <button
+                                                type="button"
+                                                className="text-green-600 hover:text-green-700 shrink-0"
+                                                onClick={() => window.open(getRequirementRedirectUrl(field.linkedRequirementId), '_blank', 'noopener,noreferrer')}
+                                                title="Go to linked requirement - upload/manage this document there"
+                                              >
+                                                <Shield className="h-3.5 w-3.5" />
+                                              </button>
+                                            )}
+                                          </div>
+                                        )
+                                      ) : isComputed ? (
+                                        <span className="text-xs text-slate-400 italic">Computed</span>
+                                      ) : isArray ? (
+                                        <span className="text-xs text-slate-400 italic">See rows below</span>
+                                      ) : hasDefault ? (
+                                        <div className="flex gap-1.5 items-center justify-start w-full">
+                                          <TooltipProvider>
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
+                                                <Lock className="h-3.5 w-3.5 text-slate-400 cursor-help shrink-0" />
+                                              </TooltipTrigger>
+                                              <TooltipContent side="top" className="text-xs max-w-xs font-normal">
+                                                Preset by automation configuration.
+                                              </TooltipContent>
+                                            </Tooltip>
+                                          </TooltipProvider>
+                                          <span className="text-sm font-medium text-slate-600 truncate">{String(field.defaultValue)}</span>
+                                        </div>
+                                      ) : isEditing ? (
+                                        <div className="flex gap-1.5 items-center justify-between w-full">
+                                          {isEditingDropdown ? (
+                                            <SearchableSelect
+                                              value={editValue}
+                                              onValueChange={(v) => setEditValue(v)}
+                                              options={editingOptions}
+                                              placeholder="Select..."
+                                              buttonClassName="h-8 text-sm w-full bg-white"
+                                              disabled={isSavingEdit}
+                                            />
+                                          ) : (
+                                            <Input
+                                              value={editValue}
+                                              onChange={(e) => setEditValue(e.target.value)}
+                                              className="h-8 text-sm"
+                                              autoFocus
+                                              disabled={isSavingEdit}
+                                              onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(isEditingDropdown, editingOptions); if (e.key === 'Escape') cancelEditing(); }}
+                                            />
+                                          )}
+                                          <Button variant="ghost" size="sm" disabled={isSavingEdit} className="h-8 w-8 p-0 text-green-600 hover:bg-green-50 rounded-full shrink-0" onClick={() => saveEdit(isEditingDropdown, editingOptions)}>
+                                            {isSavingEdit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                          </Button>
+                                          <Button variant="ghost" size="sm" disabled={isSavingEdit} className="h-8 w-8 p-0 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-full shrink-0" onClick={cancelEditing}>
+                                            <X className="h-3.5 w-3.5" />
+                                          </Button>
+                                        </div>
+                                      ) : val !== undefined ? (
+                                        hasMultipleSources ? (
+                                          <Popover>
+                                            <PopoverTrigger asChild>
+                                              <button
+                                                type="button"
+                                                onClick={(e) => e.stopPropagation()}
+                                                className={cn(
+                                                  "flex items-center gap-1 max-w-full hover:bg-slate-50 rounded px-1 -mx-1",
+                                                  isMissing ? "text-red-600 font-medium" : "text-slate-800"
+                                                )}
+                                              >
+                                                <span className="text-sm truncate max-w-[110px]">{isMissing ? 'Missing' : String(cleanFieldValue(val))}</span>
+                                                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                              </button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-72 p-0" align="start" onClick={(e) => e.stopPropagation()}>
+                                              <div className="p-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                                                <span className="text-xs font-semibold text-slate-600">Linked Sources</span>
+                                                <span className="text-xs text-slate-500">{field.sourceLogic === 'all' ? 'Merge All' : 'Priority Logic'}</span>
+                                              </div>
+                                              <div className="p-1.5 space-y-1 bg-white max-h-64 overflow-y-auto">
+                                                {mIds.map((mid: any, idx: number) => {
+                                                  const mDef = jobFieldsRecord[String(mid)]
+                                                  const sourceVal = targetEntityId != null ? getFieldValueImpl(String(mid), String(targetEntityId), 0, 'latest', false, ctxForCol) : 'Missing'
+                                                  const sourceValid = isValidValue(sourceVal)
+                                                  return (
+                                                    <div key={`m-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-md border border-transparent group/src transition-all">
+                                                      <div className="flex flex-col min-w-0">
+                                                        <span className="text-[10px] font-medium text-slate-500 mb-0.5">DB Field {idx + 1}</span>
+                                                        <span className="text-sm text-slate-800 truncate">{mDef?.label || `Field ${mid}`}</span>
+                                                        <span className="text-xs text-slate-400 truncate mt-0.5">{sourceValid ? sourceVal : 'Empty'}</span>
+                                                      </div>
+                                                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 opacity-0 group-hover/src:opacity-100 text-blue-600 hover:bg-blue-50 rounded-md shrink-0" onClick={() => startEditing(field, col, sourceValid ? sourceVal : val, mid)}>
+                                                        <Edit3 className="h-3.5 w-3.5" />
+                                                      </Button>
+                                                    </div>
+                                                  )
+                                                })}
+                                                {qIds.map((qid: any, idx: number) => {
+                                                  const taskRecord = fieldSourceDataCache['tm_tasks']?.[String(task?.id || '')]
+                                                  const answers = taskRecord?.job_specific_answers || {}
+                                                  const sourceVal = answers[String(qid)] ?? answers[Number(qid)]
+                                                  const sourceValid = isValidValue(sourceVal)
+                                                  return (
+                                                    <div key={`q-${qid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-md border border-transparent group/src transition-all">
+                                                      <div className="flex flex-col min-w-0">
+                                                        <span className="text-[10px] font-medium text-slate-500 mb-0.5">Question {idx + 1}</span>
+                                                        <span className="text-sm text-slate-800 truncate">Job Question #{qid}</span>
+                                                        <span className="text-xs text-slate-400 truncate mt-0.5">{sourceValid ? sourceVal : 'Empty'}</span>
+                                                      </div>
+                                                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 opacity-0 group-hover/src:opacity-100 text-blue-600 hover:bg-blue-50 rounded-md shrink-0" onClick={() => startEditing(field, col, sourceValid ? sourceVal : val, null, qid)}>
+                                                        <Edit3 className="h-3.5 w-3.5" />
+                                                      </Button>
+                                                    </div>
+                                                  )
+                                                })}
+                                              </div>
+                                            </PopoverContent>
+                                          </Popover>
+                                        ) : isMissing ? (
+                                          <div className="flex gap-1.5 items-center justify-between w-full group/cell">
+                                            <span className="text-sm font-medium text-red-600 truncate">Missing</span>
+                                            <button
+                                              className="text-slate-400 hover:text-blue-600 opacity-0 group-hover/cell:opacity-100 transition-opacity shrink-0"
+                                              onClick={() => startEditing(field, col, val, mIds[0], qIds[0])}
+                                              title="Edit"
+                                            >
+                                              <Edit3 className="h-3.5 w-3.5" />
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <div className="flex gap-1.5 items-center justify-between w-full group/cell">
+                                            <span className="text-sm text-slate-800 truncate">{String(cleanFieldValue(val))}</span>
+                                            <button
+                                              className="text-slate-400 hover:text-blue-600 opacity-0 group-hover/cell:opacity-100 transition-opacity shrink-0"
+                                              onClick={() => startEditing(field, col, val, mIds[0], qIds[0])}
+                                              title="Edit"
+                                            >
+                                              <Edit3 className="h-3.5 w-3.5" />
+                                            </button>
+                                          </div>
+                                        )
+                                      ) : val === undefined && applicable ? (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-8 px-4 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-blue-600"
+                                          onClick={() => resolveFieldForCol(field, col)}
+                                        >
+                                          <Eye className="h-4 w-4 mr-1.5" /> Resolve
+                                        </Button>
+                                      ) : null}
+                                    </div>
+                                  )}
+                                </TableCell>
+                              )
+                            })}
                           </TableRow>
-                        )}
-                      </React.Fragment>
+
+                          {/* Array Field Data - one row per array item, laid out across the
+                            same participant columns as scalar fields (column-wise), instead
+                            of a separate entity-rows mini-table, so array data reads the
+                            same way as everything else in the matrix. */}
+                          {isArray && isArrayExpanded && (field.arrayItems || []).length === 0 && (
+                            <TableRow className="bg-indigo-50/20">
+                              <TableCell colSpan={totalCols} className="py-3 px-5 border-b text-sm text-slate-400 italic">
+                                No sub-fields configured for this array.
+                              </TableCell>
+                            </TableRow>
+                          )}
+                          {isArray && isArrayExpanded && (field.arrayItems || []).map((item: any, itemIdx: number) => {
+                            const isDocumentItem = item.type === 'document'
+                            const itemMIds = item.linkedMasterFields || item.masterFieldIds || []
+                            const itemQIds = item.linkedJobQuestionIds || []
+                            const itemHasMultipleSources = (itemMIds.length + itemQIds.length) > 1
+                            const itemHasDefault = !!(item.defaultValue && item.defaultValue !== 'Missing' && item.defaultValue !== '')
+
+                            return (
+                              <TableRow key={`${field.id || fIdx}-arr-${itemIdx}`} className="group bg-indigo-50/20 hover:bg-indigo-50/40 transition-colors">
+                                <TableCell className="w-12 py-0 px-0 text-center text-[10px] font-mono text-slate-400 border-b border-r sticky left-0 bg-indigo-50/20 group-hover:bg-indigo-50/40 z-10 align-middle">
+                                  <div className="flex items-center justify-center h-full">{fIdx + 1}.{itemIdx + 1}</div>
+                                </TableCell>
+                                <TableCell className="w-[220px] py-2 px-4 pl-8 border-b border-r sticky left-12 bg-indigo-50/20 group-hover:bg-indigo-50/40 z-10 align-middle relative">
+                                  <div className="absolute left-4 top-1/2 w-3 h-px bg-indigo-300" />
+                                  <span className="text-xs font-medium text-slate-600 truncate">{getFieldLabel(item)}</span>
+                                </TableCell>
+
+                                <TableCell className="w-[100px] py-0 px-4 border-b border-r sticky left-[268px] bg-indigo-50/20 group-hover:bg-indigo-50/40 z-10 align-middle">
+                                  <span className="text-[11px] font-medium text-slate-500 capitalize truncate">{item.type || 'text'}</span>
+                                </TableCell>
+
+                                <TableCell className="w-[220px] py-0 px-4 border-b border-r sticky left-[368px] bg-indigo-50/20 group-hover:bg-indigo-50/40 z-10 align-middle">
+                                  <div className="text-xs text-slate-500 truncate">
+                                    {itemHasDefault ? (
+                                      <span className="flex items-center gap-1"><Lock className="h-3 w-3 text-slate-400 shrink-0" /> Default value</span>
+                                    ) : isDocumentItem ? (
+                                      <span className="truncate">
+                                        {(item.linkedKycDocuments || []).length} doc type{(item.linkedKycDocuments || []).length !== 1 ? 's' : ''}
+                                        {item.linkedRequirementId ? ' · requirement linked' : ''}
+                                      </span>
+                                    ) : (itemMIds.length > 0 || itemQIds.length > 0) ? (
+                                      <span className="truncate">
+                                        {[itemMIds.length > 0 ? `${itemMIds.length} DB` : null, itemQIds.length > 0 ? `${itemQIds.length} Question` : null].filter(Boolean).join(' + ')}
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-300 italic">No source</span>
+                                    )}
+                                  </div>
+                                </TableCell>
+
+                                {columns.map(col => {
+                                  const row = arrayRows.find((r: any) => String(r.entityId) === String(col.id))
+                                  const cellVal = row ? row[item.variableName] : undefined
+                                  const isItemMissing = !isValidValue(cellVal)
+                                  const overrideKey = getArrayOverrideKey(field, col.id)
+                                  const isCellEditing = editingArrayCell?.overrideKey === overrideKey && editingArrayCell?.itemVar === item.variableName
+                                  const itemMasterField = isCellEditing ? jobFieldsRecord[String(editingArrayCell.masterFieldId)] : null
+                                  const itemOptions = Array.isArray(itemMasterField?.options)
+                                    ? itemMasterField.options.map((o: any) => typeof o === 'string' ? { label: o, value: o } : o)
+                                    : []
+                                  const isItemDropdown = itemOptions.length > 0
+                                  const docPreviewKey = `${item.variableName || item.name}-${col.id}`
+
+                                  return (
+                                    <TableCell key={col.id} className="p-0 border-b border-r align-middle bg-white group-hover:bg-indigo-50/10 transition-colors">
+                                      {!row ? (
+                                        <div className="flex h-full items-center justify-center p-3">
+                                          <span className="text-xs font-medium text-slate-300 italic">N/A</span>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center justify-center h-full px-3 py-2">
+                                          {isDocumentItem ? (
+                                            !docStatusLoaded ? (
+                                              <Loader2 className="h-4 w-4 animate-spin text-slate-300" />
+                                            ) : (
+                                              <div className="flex items-center gap-2">
+                                                {getDocsForCol(item.linkedKycDocuments, col).length > 0 ? (
+                                                  <button
+                                                    className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 hover:underline disabled:opacity-60"
+                                                    onClick={() => handlePreviewDocumentField(item, col)}
+                                                    disabled={docPreviewLoading === docPreviewKey}
+                                                    title="Preview linked document"
+                                                  >
+                                                    {docPreviewLoading === docPreviewKey ? <Loader2 className="h-3 w-3 animate-spin" /> : <Eye className="h-3 w-3" />}
+                                                    Preview
+                                                  </button>
+                                                ) : (
+                                                  <span className="text-sm font-medium text-red-600">Missing</span>
+                                                )}
+                                                {item.linkedRequirementId && (
+                                                  <button
+                                                    type="button"
+                                                    className="text-green-600 hover:text-green-700 shrink-0"
+                                                    onClick={() => window.open(getRequirementRedirectUrl(item.linkedRequirementId), '_blank', 'noopener,noreferrer')}
+                                                    title="Go to linked requirement - upload/manage this document there"
+                                                  >
+                                                    <Shield className="h-3.5 w-3.5" />
+                                                  </button>
+                                                )}
+                                              </div>
+                                            )
+                                          ) : itemHasDefault ? (
+                                            <div className="flex gap-1.5 items-center justify-start w-full">
+                                              <TooltipProvider>
+                                                <Tooltip>
+                                                  <TooltipTrigger asChild>
+                                                    <Lock className="h-3.5 w-3.5 text-slate-400 cursor-help shrink-0" />
+                                                  </TooltipTrigger>
+                                                  <TooltipContent side="top" className="text-xs max-w-xs font-normal">Preset by automation configuration.</TooltipContent>
+                                                </Tooltip>
+                                              </TooltipProvider>
+                                              <span className="text-sm font-medium text-slate-600 truncate">{String(item.defaultValue)}</span>
+                                            </div>
+                                          ) : isCellEditing ? (
+                                            <div className="flex gap-1.5 items-center justify-between w-full">
+                                              {isItemDropdown ? (
+                                                <SearchableSelect
+                                                  value={arrayEditValue}
+                                                  onValueChange={(v) => setArrayEditValue(v)}
+                                                  options={itemOptions}
+                                                  placeholder="Select..."
+                                                  buttonClassName="h-8 text-sm w-full bg-white"
+                                                  disabled={isSavingArrayEdit}
+                                                />
+                                              ) : (
+                                                <Input
+                                                  value={arrayEditValue}
+                                                  onChange={(e) => setArrayEditValue(e.target.value)}
+                                                  className="h-8 text-sm"
+                                                  autoFocus
+                                                  disabled={isSavingArrayEdit}
+                                                  onKeyDown={(e) => { if (e.key === 'Enter') saveArrayCellEdit(isItemDropdown, itemOptions); if (e.key === 'Escape') cancelEditingArrayCell(); }}
+                                                />
+                                              )}
+                                              <Button variant="ghost" size="sm" disabled={isSavingArrayEdit} className="h-8 w-8 p-0 text-green-600 hover:bg-green-50 rounded-full shrink-0" onClick={() => saveArrayCellEdit(isItemDropdown, itemOptions)}>
+                                                {isSavingArrayEdit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                              </Button>
+                                              <Button variant="ghost" size="sm" disabled={isSavingArrayEdit} className="h-8 w-8 p-0 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-full shrink-0" onClick={cancelEditingArrayCell}>
+                                                <X className="h-3.5 w-3.5" />
+                                              </Button>
+                                            </div>
+                                          ) : itemHasMultipleSources ? (
+                                            <Popover>
+                                              <PopoverTrigger asChild>
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => e.stopPropagation()}
+                                                  className={cn(
+                                                    "flex items-center gap-1 max-w-full hover:bg-slate-50 rounded px-1 -mx-1",
+                                                    isItemMissing ? "text-red-600 font-medium" : "text-slate-800"
+                                                  )}
+                                                >
+                                                  <span className="text-sm truncate max-w-[110px]">{isItemMissing ? 'Missing' : String(cellVal)}</span>
+                                                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                                </button>
+                                              </PopoverTrigger>
+                                              <PopoverContent className="w-72 p-0" align="start" onClick={(e) => e.stopPropagation()}>
+                                                <div className="p-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                                                  <span className="text-xs font-semibold text-slate-600">Array Sources</span>
+                                                  <span className="text-xs text-slate-500">{item.sourceLogic === 'all' ? 'Merge All' : 'Priority Logic'}</span>
+                                                </div>
+                                                <div className="p-1.5 space-y-1 bg-white max-h-64 overflow-y-auto">
+                                                  {itemMIds.map((mid: any, idx: number) => {
+                                                    const mDef = jobFieldsRecord[String(mid)]
+                                                    const sourceVal = getFieldValueImpl(String(mid), String(col.id), 0, 'latest', false, buildColCtx(field, col))
+                                                    const sourceValid = isValidValue(sourceVal)
+                                                    return (
+                                                      <div key={`am-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-md border border-transparent group/src transition-all">
+                                                        <div className="flex flex-col min-w-0">
+                                                          <span className="text-[10px] font-medium text-slate-500 mb-0.5">Source {idx + 1}</span>
+                                                          <span className="text-sm text-slate-800 truncate">{mDef?.label || `Field ${mid}`}</span>
+                                                          <span className="text-xs text-slate-400 truncate mt-0.5">{sourceValid ? sourceVal : 'Empty'}</span>
+                                                        </div>
+                                                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 opacity-0 group-hover/src:opacity-100 text-blue-600 hover:bg-blue-50 rounded-md shrink-0" onClick={() => startEditingArrayCell(field, col.id, item, sourceValid ? sourceVal : cellVal, mid)}>
+                                                          <Edit3 className="h-3.5 w-3.5" />
+                                                        </Button>
+                                                      </div>
+                                                    )
+                                                  })}
+                                                </div>
+                                              </PopoverContent>
+                                            </Popover>
+                                          ) : (
+                                            <div className="flex gap-1.5 items-center justify-between w-full group/cell">
+                                              <span className={cn("text-sm truncate", isItemMissing ? "text-red-600 font-medium" : "text-slate-800")}>
+                                                {isItemMissing ? 'Missing' : String(cellVal)}
+                                              </span>
+                                              <button
+                                                className="text-slate-400 hover:text-blue-600 opacity-0 group-hover/cell:opacity-100 transition-opacity shrink-0"
+                                                onClick={() => startEditingArrayCell(field, col.id, item, cellVal, itemMIds[0], itemQIds[0])}
+                                                title="Edit"
+                                              >
+                                                <Edit3 className="h-3.5 w-3.5" />
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+                                    </TableCell>
+                                  )
+                                })}
+                              </TableRow>
+                            )
+                          })}
+                        </React.Fragment>
                       )
                     })}
 

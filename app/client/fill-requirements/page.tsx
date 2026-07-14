@@ -10,10 +10,10 @@ import { SearchableSelect } from "@/components/ui/searchable-select"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
-  FileText, Loader2, Eye, Check, X, ShieldCheck, UploadCloud, 
-  AlertCircle, LayoutDashboard, Lock, Database, HelpCircle, 
+  FileText, Loader2, Eye, Check, X, ShieldCheck, UploadCloud,
+  AlertCircle, LayoutDashboard, Lock, Database, HelpCircle,
   Plus, Trash2, ChevronDown, ChevronRight, Info, HelpCircle as QuestionMark,
-  ArrowUpDown, ArrowUp, ArrowDown
+  ArrowUpDown, ArrowUp, ArrowDown, Briefcase, UserCheck, Users2, HeartPulse, User
 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
@@ -25,17 +25,19 @@ import {
   resolveVariableValueImpl,
   getArrayFieldDataImpl,
   fetchSourceDataImpl,
+  getFieldValueImpl,
+  type FieldResolutionContext,
 } from "@/app/(dashboard)/dashboard/tasks/utils/fieldResolution"
 
-// -- Modern Soft SaaS Styling --
+// -- Styling aligned with RequirementsTab (job-workspace) design language --
 const inputBaseClass = "rounded-lg border-slate-300 w-full focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-slate-800 text-sm h-10 px-3 shadow-sm transition-all"
 const inputHighlightClass = (hasValue: boolean) => cn(
   inputBaseClass,
   hasValue ? "bg-emerald-50/40 border-emerald-200 text-emerald-900" : "bg-white"
 )
 
-const tableHeaderClass = "h-11 px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-500 bg-slate-50 border-b border-r border-slate-200 last:border-r-0 whitespace-nowrap select-none"
-const tableCellClass = "px-4 py-3 text-sm text-slate-700 align-top border-b border-r border-slate-200 last:border-r-0 group-hover:bg-slate-50/50 transition-colors"
+const tableHeaderClass = "h-11 px-4 py-2 text-[11px] font-medium uppercase tracking-wider text-white bg-custom-blue border-b border-r border-white/15 last:border-r-0 whitespace-nowrap select-none"
+const tableCellClass = "px-4 py-3 text-sm text-slate-700 align-top border-b border-r border-slate-100 last:border-r-0 group-hover:bg-blue-50/30 transition-colors"
 
 const getAcceptedTypesLabel = (docIds: string[], requiredCount: number, meta: Record<string, any>) => {
   const names = docIds.map(id => meta[id]?.display_name || meta[id]?.name || 'Document')
@@ -43,25 +45,43 @@ const getAcceptedTypesLabel = (docIds: string[], requiredCount: number, meta: Re
   return requiredCount > 1 ? `Any ${requiredCount} of ${names.length}` : `Any 1 of ${names.length}`
 }
 
+// Mirrors getEntityTypeConfig in RequirementsTab so entity badges read the same
+// color per participant type across the internal and client-facing views.
+function getEntityTypeConfig(type: string) {
+  switch (type) {
+    case "company": return { bgColor: "bg-slate-700", Icon: Briefcase }
+    case "director": return { bgColor: "bg-indigo-600", Icon: UserCheck }
+    case "dependant": return { bgColor: "bg-blue-500", Icon: Users2 }
+    case "principal": return { bgColor: "bg-custom-blue", Icon: UserCheck }
+    case "sponsor": return { bgColor: "bg-green-600", Icon: HeartPulse }
+    case "understudy": return { bgColor: "bg-cyan-600", Icon: User }
+    default: return { bgColor: "bg-custom-blue", Icon: User }
+  }
+}
+
+// Mirrors renderStatusBadge in RequirementsTab: a rounded-full pill with icon.
 const StatusIndicator = ({ isMissing, isFlagged }: { isMissing: boolean, isFlagged?: boolean }) => {
   if (isFlagged) {
     return (
-      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1.5 py-1">
-        <QuestionMark className="h-3.5 w-3.5" /> Missing / Not Sure
-      </Badge>
+      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border bg-amber-50 border-amber-200">
+        <QuestionMark className="h-3.5 w-3.5 text-amber-600" />
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-600">Missing / Not Sure</span>
+      </div>
     )
   }
   if (isMissing) {
     return (
-      <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 gap-1.5 py-1">
-        <AlertCircle className="h-3.5 w-3.5" /> Required
-      </Badge>
+      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border bg-red-50 border-red-200">
+        <AlertCircle className="h-3.5 w-3.5 text-red-600" />
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-red-600">Required</span>
+      </div>
     )
   }
   return (
-    <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1.5 py-1">
-      <Check className="h-3.5 w-3.5" /> Provided
-    </Badge>
+    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border bg-emerald-50 border-emerald-200">
+      <Check className="h-3.5 w-3.5 text-emerald-600" />
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-600">Provided</span>
+    </div>
   )
 }
 
@@ -85,6 +105,42 @@ function getFieldLabel(field: any): string {
 
 function isValidExistingValue(val: any): boolean {
   return val !== null && val !== undefined && val !== "" && val !== "Missing"
+}
+
+// A resolved/default value (extracted text, a defaultValue string, etc.) is often
+// the option's human-readable label rather than its stored value/id. SearchableSelect
+// only shows a selection when `value` matches an option's `value` exactly, so without
+// this the dropdown silently falls back to its placeholder even though data is present.
+function matchOptionValue(rawValue: any, options: Array<{ label: string, value: string }> | null | undefined): any {
+  if (!isValidExistingValue(rawValue) || !options || options.length === 0) return rawValue
+  const raw = String(rawValue).trim().toLowerCase()
+  const byValue = options.find((o) => String(o.value).trim().toLowerCase() === raw)
+  if (byValue) return byValue.value
+  const byLabel = options.find((o) => String(o.label).trim().toLowerCase() === raw)
+  if (byLabel) return byLabel.value
+  return rawValue
+}
+
+function getEntityTypes(item: any): string[] {
+  return item?.entityTypes || (item?.entityType ? [item.entityType] : [])
+}
+
+function EntityTypeBadges({ types }: { types: string[] }) {
+  if (!types || types.length === 0) {
+    return <span className="text-xs text-slate-400 italic">Any</span>
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {types.map((t) => {
+        const { bgColor } = getEntityTypeConfig(String(t).toLowerCase())
+        return (
+          <span key={t} className={cn("capitalize text-[9px] font-semibold text-white px-1.5 py-0.5 rounded-full", bgColor)}>
+            {t}
+          </span>
+        )
+      })}
+    </div>
+  )
 }
 
 // Helpers to extract immigration values
@@ -210,6 +266,7 @@ function ClientFillRequirementsContent() {
   const [previewDocument, setPreviewDocument] = useState<any>(null)
   const [expandedMultiDocs, setExpandedMultiDocs] = useState<Set<string>>(new Set())
   const prefilledRef = useRef(false)
+  const questionsDefaultedRef = useRef(false)
 
   // Sorting States
   const [docSort, setDocSort] = useState<{key: string, dir: 'asc'|'desc'}>({ key: 'none', dir: 'asc' })
@@ -269,7 +326,23 @@ function ClientFillRequirementsContent() {
           })
           if (linkedFieldIds.size > 0) {
             const { data: fields } = await supabase.from('tm_job_fields').select('*').in('id', Array.from(linkedFieldIds))
-            if (fields) setJobFields(fields.reduce((acc: any, f: any) => ({ ...acc, [String(f.id)]: f }), {}))
+            const jobFieldsMap: Record<string, any> = (fields || []).reduce((acc: any, f: any) => ({ ...acc, [String(f.id)]: f }), {})
+
+            // Dependent dropdowns (e.g. country -> region) reference a parent master
+            // field id nested inside their own options config, which we only learn
+            // about once the child field itself has been fetched - fetch that parent
+            // field too so getFieldOptions can resolve the mapped child options.
+            const parentIds = new Set<string>()
+            Object.values(jobFieldsMap).forEach((f: any) => {
+              const depId = f?.options?.dependencyConfig?.dependentFieldId
+              if (depId && !jobFieldsMap[String(depId)]) parentIds.add(String(depId))
+            })
+            if (parentIds.size > 0) {
+              const { data: parentFields } = await supabase.from('tm_job_fields').select('*').in('id', Array.from(parentIds))
+              ;(parentFields || []).forEach((f: any) => { jobFieldsMap[String(f.id)] = f })
+            }
+
+            setJobFields(jobFieldsMap)
           }
         }
       } catch (error: any) { toast.error("Failed to load requirements") } finally { setLoading(false) }
@@ -278,30 +351,6 @@ function ClientFillRequirementsContent() {
   }, [taskId])
 
   const columns = useMemo(() => buildParticipantColumns(task), [task])
-
-  const clientFields = useMemo(() => {
-    const rows: any[] = []
-    Object.entries(automations).forEach(([autoId, auto]: [string, any]) => {
-      ;(auto.webdata || []).forEach((field: any) => {
-        if (field.is_client_requirement && !["document", "computed", "array"].includes(field.fieldType)) {
-          rows.push({ ...field, options: getFieldOptions(field, jobFields), automationId: autoId, automationName: auto.name, key: `${autoId}:${field.variableName}` })
-        }
-      })
-    })
-    return rows
-  }, [automations, jobFields])
-
-  const clientArrayFields = useMemo(() => {
-    const rows: any[] = []
-    Object.entries(automations).forEach(([autoId, auto]: [string, any]) => {
-      ;(auto.webdata || []).forEach((field: any) => {
-        if (field.is_client_requirement && field.fieldType === "array") {
-          rows.push({ ...field, arrayItems: (field.arrayItems || []).map((item: any) => ({ ...item, options: getFieldOptions(item, jobFields) })), automationId: autoId, automationName: auto.name, key: `${autoId}:${field.variableName}` })
-        }
-      })
-    })
-    return rows
-  }, [automations, jobFields])
 
   const relationshipData = useMemo(() => {
     // Relationship data build preserved...
@@ -320,6 +369,42 @@ function ClientFillRequirementsContent() {
       sponsor: (() => { const sp = participants.find((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor')); return sp ? { id: sp.id, name: sp.name } : null })()
     }
   }, [task])
+
+  const clientFields = useMemo(() => {
+    const rows: any[] = []
+    Object.entries(automations).forEach(([autoId, auto]: [string, any]) => {
+      ;(auto.webdata || []).forEach((field: any) => {
+        if (field.is_client_requirement && !["document", "computed", "array"].includes(field.fieldType)) {
+          const ctx: FieldResolutionContext = {
+            sourceData: fieldSourceDataCache, jobFields, webData: [{ automationId: autoId, fields: [field] }],
+            selectedAutomationId: autoId, masterFieldComputedValues: fieldMasterComputedCache,
+            relationshipData, taskId: String(task?.id || ""), currentIndividualId: String(task?.individual_id || ""), task,
+          }
+          const targetEntityId = resolveTargetEntityIdImpl(field, ctx)
+          rows.push({ ...field, options: getFieldOptions(field, jobFields, targetEntityId, ctx), automationId: autoId, automationName: auto.name, key: `${autoId}:${field.variableName}` })
+        }
+      })
+    })
+    return rows
+  }, [automations, jobFields, fieldSourceDataCache, fieldMasterComputedCache, relationshipData, task])
+
+  const clientArrayFields = useMemo(() => {
+    const rows: any[] = []
+    Object.entries(automations).forEach(([autoId, auto]: [string, any]) => {
+      ;(auto.webdata || []).forEach((field: any) => {
+        if (field.is_client_requirement && field.fieldType === "array") {
+          const ctx: FieldResolutionContext = {
+            sourceData: fieldSourceDataCache, jobFields, webData: [{ automationId: autoId, fields: [field] }],
+            selectedAutomationId: autoId, masterFieldComputedValues: fieldMasterComputedCache,
+            relationshipData, taskId: String(task?.id || ""), currentIndividualId: String(task?.individual_id || ""), task,
+          }
+          const targetEntityId = resolveTargetEntityIdImpl(field, ctx)
+          rows.push({ ...field, arrayItems: (field.arrayItems || []).map((item: any) => ({ ...item, options: getFieldOptions(item, jobFields, targetEntityId, ctx) })), automationId: autoId, automationName: auto.name, key: `${autoId}:${field.variableName}` })
+        }
+      })
+    })
+    return rows
+  }, [automations, jobFields, fieldSourceDataCache, fieldMasterComputedCache, relationshipData, task])
 
   useEffect(() => {
     // Field resolution execution...
@@ -363,9 +448,15 @@ function ClientFillRequirementsContent() {
     clientFields.forEach((field: any) => {
       const ctx = buildCtx(field.automationId, [field])
       const targetEntityId = resolveTargetEntityIdImpl(field, ctx)
-      if (targetEntityId == null) return
+      if (targetEntityId == null) {
+        // No entity to resolve against (e.g. no matching participant on this task) -
+        // a configured default value still applies since it isn't entity-dependent.
+        const dv = field.defaultValue ?? field.default_value
+        if (isValidExistingValue(dv)) scalarDefaults[field.key] = matchOptionValue(dv, field.options)
+        return
+      }
       const val = resolveVariableValueImpl(field, String(targetEntityId), ctx)
-      if (isValidExistingValue(val)) scalarDefaults[field.key] = val
+      if (isValidExistingValue(val)) scalarDefaults[field.key] = matchOptionValue(val, field.options)
     })
     if (Object.keys(scalarDefaults).length > 0) setFieldValues(prev => ({ ...scalarDefaults, ...prev }))
     
@@ -380,7 +471,7 @@ function ClientFillRequirementsContent() {
         const slotKey = `${field.key}::${col.id}`
         const values: Record<string, any> = { _id: generateId() }
         ;(field.arrayItems || []).forEach((item: any) => {
-          if (isValidExistingValue(row[item.variableName])) values[item.variableName] = row[item.variableName]
+          if (isValidExistingValue(row[item.variableName])) values[item.variableName] = matchOptionValue(row[item.variableName], item.options)
         })
         if (!arrayDefaults[slotKey]) arrayDefaults[slotKey] = []
         arrayDefaults[slotKey].push(values)
@@ -391,12 +482,38 @@ function ClientFillRequirementsContent() {
       slots.forEach((col: ColDef) => {
         const slotKey = `${field.key}::${col.id}`
         if (!arrayDefaults[slotKey] || arrayDefaults[slotKey].length === 0) {
-          arrayDefaults[slotKey] = [{ _id: generateId() }]
+          // No resolved row for this entity - still seed any item-level default
+          // values so the row doesn't render as blank when a default is configured.
+          const defaultRow: Record<string, any> = { _id: generateId() }
+          ;(field.arrayItems || []).forEach((item: any) => {
+            const dv = item.defaultValue ?? item.default_value
+            if (isValidExistingValue(dv)) defaultRow[item.variableName] = matchOptionValue(dv, item.options)
+          })
+          arrayDefaults[slotKey] = [defaultRow]
         }
       })
     })
     setArrayFieldValues(prev => ({ ...arrayDefaults, ...prev }))
   }, [fieldSourceDataCache, fieldMasterComputedCache, clientFields, clientArrayFields, columns, jobFields, relationshipData, task])
+
+  useEffect(() => {
+    // Job-specific questions carry their own default_value, independent of any
+    // entity/automation data - seed it in for any question with no existing answer.
+    if (questionsDefaultedRef.current) return
+    if (questions.length === 0) return
+    questionsDefaultedRef.current = true
+    setAnswers(prev => {
+      const next = { ...prev }
+      questions.forEach((q: any) => {
+        const dv = q.default_value ?? q.defaultValue
+        if (!isValidExistingValue(next[q.id]) && isValidExistingValue(dv)) {
+          const options = (q.options || []).map((o: any) => typeof o === 'string' ? { value: o, label: o } : o)
+          next[q.id] = matchOptionValue(dv, options)
+        }
+      })
+      return next
+    })
+  }, [questions])
 
   useEffect(() => {
     // Existing documents retrieval...
@@ -437,21 +554,20 @@ function ClientFillRequirementsContent() {
   }
   const getExistingDocForReq = (docIds: string[], col: ColDef) => getExistingDocsForReq(docIds, col)[0] || null
 
-  const handleDocPreview = async (docIds: string[], col: ColDef) => {
-    const docs = existingDocsByEntity[String(col.id)] || []
-    const matched = docs.filter((d: any) => docIds.includes(d.document_id))
-    if (matched.length === 0) return
+  // Preview exactly the document the user clicked - not the whole accepted-types
+  // pool for the requirement - so a multi-type requirement (e.g. "Passport OR ID")
+  // always shows the correct document's own type, name, and extracted fields.
+  const handleDocPreview = async (doc: any) => {
+    if (!doc?.file_path) return
     try {
-      const previews = await Promise.all(matched.map(async (doc: any) => {
-        const { data: signData } = await supabase.storage.from('kyc-documents').createSignedUrl(doc.file_path, 3600)
-        let fields: any[] = []
-        if (doc.document_id) {
-          const { data: kycData } = await supabase.from('acc_portal_kyc').select('fields').eq('id', doc.document_id).single()
-          if (kycData) fields = kycData.fields || []
-        }
-        return { id: doc.id, fileUrl: signData?.signedUrl, extractedData: doc.extracted_details || {}, fields, name: documentsMeta[doc.document_id]?.display_name || documentsMeta[doc.document_id]?.name || 'Document', originalDoc: doc }
-      }))
-      setPreviewDocument({ documents: previews.filter(Boolean), currentIndex: 0 })
+      const { data: signData } = await supabase.storage.from('kyc-documents').createSignedUrl(doc.file_path, 3600)
+      let fields: any[] = []
+      if (doc.document_id) {
+        const { data: kycData } = await supabase.from('acc_portal_kyc').select('fields').eq('id', doc.document_id).single()
+        if (kycData) fields = kycData.fields || []
+      }
+      const preview = { id: doc.id, fileUrl: signData?.signedUrl, extractedData: doc.extracted_details || {}, fields, name: documentsMeta[doc.document_id]?.display_name || documentsMeta[doc.document_id]?.name || 'Document', originalDoc: doc }
+      setPreviewDocument({ documents: [preview], currentIndex: 0 })
       setPreviewDialogOpen(true)
     } catch { toast.error('Failed to load preview') }
   }
@@ -620,15 +736,15 @@ function ClientFillRequirementsContent() {
   // Common Header Renderer for Tables
   const SortableHeader = ({ label, sortKey, currentSort, onSort, className }: any) => {
     return (
-      <div 
-        className={cn("flex items-center gap-1.5 cursor-pointer hover:text-slate-800 transition-colors w-max", className)}
+      <div
+        className={cn("flex items-center gap-1.5 cursor-pointer hover:text-white/80 transition-colors w-max", className)}
         onClick={() => onSort(sortKey)}
       >
         {label}
         {currentSort.key === sortKey ? (
           currentSort.dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
         ) : (
-          <ArrowUpDown className="h-3 w-3 text-slate-300" />
+          <ArrowUpDown className="h-3 w-3 text-white/50" />
         )}
       </div>
     )
@@ -678,8 +794,8 @@ function ClientFillRequirementsContent() {
       <header className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 z-40 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm h-auto md:h-[76px]">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <h1 className="text-lg font-bold text-slate-900 tracking-tight">Information Request</h1>
-            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] uppercase tracking-wider font-bold">Secure</Badge>
+            <h1 className="text-xl font-medium text-slate-800 tracking-tight">Information Request</h1>
+            <Badge variant="outline" className="bg-custom-blue/10 text-custom-blue border-custom-blue/20 text-[10px] uppercase tracking-wider font-bold">Secure</Badge>
           </div>
           <p className="text-sm font-medium text-slate-500">{getTaskName(task)}</p>
         </div>
@@ -690,7 +806,7 @@ function ClientFillRequirementsContent() {
             <div className="text-[11px] text-slate-500 font-medium uppercase tracking-wider">{stats.completed} of {stats.total} items ready</div>
           </div>
           <div className="w-32 sm:w-48 h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner">
-            <div className="h-full bg-blue-600 rounded-full transition-all duration-500 ease-in-out" style={{ width: `${stats.percent}%` }} />
+            <div className="h-full bg-custom-blue rounded-full transition-all duration-500 ease-in-out" style={{ width: `${stats.percent}%` }} />
           </div>
         </div>
       </header>
@@ -710,21 +826,22 @@ function ClientFillRequirementsContent() {
         {requirementRows.length > 0 && (
           <section className="relative">
             {/* Sticky Section Header */}
-            <div className="sticky top-[76px] z-30 bg-white/95 backdrop-blur-md border border-slate-200 shadow-sm rounded-xl px-5 py-3 mb-4 flex items-center justify-between">
-              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <FileText className="h-5 w-5 text-blue-600" />
-                Required Documentation
-              </h2>
+            <div className="sticky top-[76px] z-30 bg-slate-50/95 backdrop-blur-md border border-slate-200 shadow-sm rounded-lg px-5 py-2.5 mb-4 flex items-center gap-3">
+              <FileText className="h-4 w-4 text-custom-blue" />
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-700">Required Documentation</span>
+              <Badge variant="outline" className="text-xs font-medium rounded-full px-2.5 py-0.5 bg-white border-slate-200 text-slate-500">{requirementRows.length}</Badge>
             </div>
-            
-            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+
+            <div className="border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
-                <Table className="min-w-[1000px] w-full border-collapse">
+                <Table className="min-w-[1000px] w-full border-separate border-spacing-0">
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
                       <TableHead className={tableHeaderClass}>
                         <SortableHeader label="Requirement" sortKey="name" currentSort={docSort} onSort={handleDocSort} />
                       </TableHead>
+                      <TableHead className={tableHeaderClass}>Docs Required</TableHead>
+                      <TableHead className={tableHeaderClass}>Entity Type</TableHead>
                       <TableHead className={tableHeaderClass}>
                         <SortableHeader label="Applies To" sortKey="applies" currentSort={docSort} onSort={handleDocSort} />
                       </TableHead>
@@ -778,12 +895,38 @@ function ClientFillRequirementsContent() {
                                 </div>
                               )}
                           </TableCell>
-                          
+
+                          {/* Docs Required */}
+                          <TableCell className={tableCellClass}>
+                            <div className="flex flex-col gap-1">
+                              <span className={cn(
+                                "inline-flex items-center gap-1 w-fit text-[11px] font-bold px-2.5 py-0.5 rounded-full border whitespace-nowrap",
+                                hasData ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"
+                              )}>
+                                {requiredCount > 1 ? `${uploadedCount}/${requiredCount} required` : `${requiredCount} required`}
+                              </span>
+                              {isMultiDoc && (
+                                <span className="text-[9px] text-slate-400 font-medium">of {docIds.length} accepted types</span>
+                              )}
+                            </div>
+                          </TableCell>
+
+                          {/* Entity Type */}
+                          <TableCell className={tableCellClass}>
+                            <EntityTypeBadges types={req.entityTypes || (req.entityType ? [req.entityType] : [col.type])} />
+                          </TableCell>
+
                           {/* Applies To */}
                           <TableCell className={tableCellClass}>
-                            <Badge variant="secondary" className="bg-slate-100 text-slate-700 border-slate-200">
-                              {col.label}
-                            </Badge>
+                            {(() => {
+                              const { bgColor, Icon } = getEntityTypeConfig(col.type)
+                              return (
+                                <span className={cn("inline-flex items-center gap-1.5 text-white text-xs font-medium px-2.5 py-1 rounded-full", bgColor)}>
+                                  <Icon className="h-3 w-3 opacity-90" />
+                                  <span className="truncate max-w-[110px]">{col.label}</span>
+                                </span>
+                              )
+                            })()}
                           </TableCell>
 
                           {/* Extracted Data */}
@@ -807,9 +950,16 @@ function ClientFillRequirementsContent() {
                               {existingDocs.map((d: any) => (
                                 <div key={d.id} className="flex items-center gap-2 group/file bg-slate-50 border border-slate-200 rounded px-2 py-1.5 w-max">
                                   <FileText className="h-3.5 w-3.5 text-slate-400" />
-                                  <span className="text-xs font-medium text-slate-700 truncate max-w-[150px]" title={d.file_name}>{d.file_name}</span>
+                                  <div className="flex flex-col min-w-0">
+                                    <span className="text-xs font-medium text-slate-700 truncate max-w-[150px]" title={d.file_name}>{d.file_name}</span>
+                                    {isMultiDoc && (
+                                      <span className="text-[9px] font-semibold uppercase tracking-wide text-custom-blue truncate max-w-[150px]">
+                                        {documentsMeta[d.document_id]?.display_name || documentsMeta[d.document_id]?.name || 'Document'}
+                                      </span>
+                                    )}
+                                  </div>
                                   {!isReplacing && signedUrls[d.id] && (
-                                    <button onClick={() => handleDocPreview(docIds, col)} className="opacity-0 group-hover/file:opacity-100 text-[10px] font-bold text-blue-600 hover:text-blue-800 transition-opacity ml-2">
+                                    <button onClick={() => handleDocPreview(d)} className="opacity-0 group-hover/file:opacity-100 text-[10px] font-bold text-blue-600 hover:text-blue-800 transition-opacity ml-2 shrink-0">
                                       Preview
                                     </button>
                                   )}
@@ -846,8 +996,14 @@ function ClientFillRequirementsContent() {
                                   variant="outline"
                                   size="sm"
                                   onClick={() => fileInputRefs.current[slotKey]?.click()}
-                                  className={cn("h-8 rounded-lg shadow-sm border-slate-300 text-slate-700 hover:bg-slate-50", !hasData && !isFlagged && "bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:text-white")}
+                                  className={cn(
+                                    "h-8 rounded-full shadow-sm transition-all",
+                                    hasData
+                                      ? "border-dashed border-custom-blue/40 text-custom-blue bg-white hover:bg-blue-50"
+                                      : !isFlagged && "bg-custom-blue text-white border-custom-blue hover:bg-blue-700 hover:text-white"
+                                  )}
                                 >
+                                  <UploadCloud className="h-3.5 w-3.5 mr-1.5" />
                                   {hasData ? 'Replace' : 'Upload File'}
                                 </Button>
                               </div>
@@ -872,19 +1028,19 @@ function ClientFillRequirementsContent() {
         {/* Form Fields Section */}
         {(clientFields.length > 0 || questions.length > 0) && (
           <section className="relative">
-            <div className="sticky top-[76px] z-30 bg-white/95 backdrop-blur-md border border-slate-200 shadow-sm rounded-xl px-5 py-3 mb-4 flex items-center justify-between">
-              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <Database className="h-5 w-5 text-indigo-600" />
-                Required Information
-              </h2>
+            <div className="sticky top-[76px] z-30 bg-slate-50/95 backdrop-blur-md border border-slate-200 shadow-sm rounded-lg px-5 py-2.5 mb-4 flex items-center gap-3">
+              <Database className="h-4 w-4 text-custom-blue" />
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-700">Required Information</span>
+              <Badge variant="outline" className="text-xs font-medium rounded-full px-2.5 py-0.5 bg-white border-slate-200 text-slate-500">{clientFields.length + questions.length}</Badge>
             </div>
-            
-            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+
+            <div className="border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
-                <Table className="min-w-[800px] w-full border-collapse">
+                <Table className="min-w-[800px] w-full border-separate border-spacing-0">
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
                       <TableHead className={tableHeaderClass}>Information Requested</TableHead>
+                      <TableHead className={tableHeaderClass}>Entity Type</TableHead>
                       <TableHead className={cn(tableHeaderClass, "w-[400px]")}>Your Value</TableHead>
                       <TableHead className={tableHeaderClass}>Status</TableHead>
                     </TableRow>
@@ -895,12 +1051,20 @@ function ClientFillRequirementsContent() {
                     {questions.map((question: any) => {
                       const hasValue = isValidExistingValue(answers[question.id])
                       const options = (question.options || []).map((o:any) => typeof o === 'string' ? {value:o, label:o} : o)
-                      
+                      const hasDefault = isValidExistingValue(question.default_value ?? question.defaultValue)
+
                       return (
                         <TableRow key={`q-${question.id}`} className="group transition-none border-b border-slate-100">
                           <TableCell className={tableCellClass}>
-                            <div className="font-semibold text-slate-900">{question.label} {question.required && <span className="text-red-500">*</span>}</div>
+                            <div className="font-semibold text-slate-900 flex items-center gap-1.5">
+                              {question.label} {question.required && <span className="text-red-500">*</span>}
+                              {hasDefault && <Lock className="h-3 w-3 text-slate-400 shrink-0" title="Pre-filled with a default value - you can still change it" />}
+                            </div>
                             {question.description && <div className="text-xs text-slate-500 mt-1">{question.description}</div>}
+                          </TableCell>
+
+                          <TableCell className={tableCellClass}>
+                            <EntityTypeBadges types={getEntityTypes(question)} />
                           </TableCell>
 
                           <TableCell className={cn(tableCellClass, "bg-slate-50/30")}>
@@ -936,13 +1100,19 @@ function ClientFillRequirementsContent() {
                     {/* Regular Fields */}
                     {clientFields.map((field: any) => {
                       const hasValue = isValidExistingValue(fieldValues[field.key])
-                      const entityLabel = (field.entityTypes || (field.entityType ? [field.entityType] : [])).join(", ") || "General"
-                      
+                      const hasDefault = isValidExistingValue(field.defaultValue ?? field.default_value)
+
                       return (
                         <TableRow key={`f-${field.key}`} className="group transition-none border-b border-slate-100">
                           <TableCell className={tableCellClass}>
-                            <div className="font-semibold text-slate-900">{getFieldLabel(field)}</div>
-                            <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mt-1">{entityLabel}</div>
+                            <div className="font-semibold text-slate-900 flex items-center gap-1.5">
+                              {getFieldLabel(field)}
+                              {hasDefault && <Lock className="h-3 w-3 text-slate-400 shrink-0" title="Pre-filled with a default value - you can still change it" />}
+                            </div>
+                          </TableCell>
+
+                          <TableCell className={tableCellClass}>
+                            <EntityTypeBadges types={getEntityTypes(field)} />
                           </TableCell>
 
                           <TableCell className={cn(tableCellClass, "bg-slate-50/30")}>
@@ -981,11 +1151,10 @@ function ClientFillRequirementsContent() {
         {/* Array Fields Section */}
         {clientArrayFields.length > 0 && (
           <section className="relative space-y-6">
-            <div className="sticky top-[76px] z-30 bg-white/95 backdrop-blur-md border border-slate-200 shadow-sm rounded-xl px-5 py-3 flex items-center justify-between">
-              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <Database className="h-5 w-5 text-emerald-600" />
-                List Requirements
-              </h2>
+            <div className="sticky top-[76px] z-30 bg-slate-50/95 backdrop-blur-md border border-slate-200 shadow-sm rounded-lg px-5 py-2.5 flex items-center gap-3">
+              <Database className="h-4 w-4 text-custom-blue" />
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-700">List Requirements</span>
+              <Badge variant="outline" className="text-xs font-medium rounded-full px-2.5 py-0.5 bg-white border-slate-200 text-slate-500">{clientArrayFields.length}</Badge>
             </div>
 
             {clientArrayFields.map((field: any) => {
@@ -1004,12 +1173,16 @@ function ClientFillRequirementsContent() {
                     const rows = arrayFieldValues[slotKey] || []
                     const hasData = rows.some(r => field.arrayItems.some((i: any) => isValidExistingValue(r[i.variableName])))
 
+                    const { bgColor: colBgColor, Icon: ColIcon } = getEntityTypeConfig(col.type)
                     return (
-                      <div key={slotKey} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                      <div key={slotKey} className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
                         <div className="flex justify-between items-center px-4 py-3 bg-slate-50 border-b border-slate-200">
                           <div className="flex items-center gap-3">
-                            <span className="text-sm font-bold text-slate-900">{col.label}</span>
-                            {col.subLabel && <Badge variant="outline" className="bg-white">{col.subLabel}</Badge>}
+                            <span className={cn("inline-flex items-center gap-1.5 text-white text-xs font-medium px-2.5 py-1 rounded-full", colBgColor)}>
+                              <ColIcon className="h-3 w-3 opacity-90" />
+                              {col.label}
+                            </span>
+                            {col.subLabel && <Badge variant="outline" className="bg-white text-[10px] uppercase tracking-wide">{col.subLabel}</Badge>}
                           </div>
                           <StatusIndicator isMissing={!hasData} />
                         </div>
@@ -1020,7 +1193,12 @@ function ClientFillRequirementsContent() {
                               <tr>
                                 {field.arrayItems.map((item: any) => (
                                   <th key={item.variableName} className={tableHeaderClass}>
-                                    {getFieldLabel(item)}
+                                    <span className="inline-flex items-center gap-1.5">
+                                      {getFieldLabel(item)}
+                                      {isValidExistingValue(item.defaultValue ?? item.default_value) && (
+                                        <Lock className="h-3 w-3 text-white/70 shrink-0" title="Pre-filled with a default value - you can still change it" />
+                                      )}
+                                    </span>
                                   </th>
                                 ))}
                                 <th className={cn(tableHeaderClass, "w-16")}></th>
@@ -1063,11 +1241,11 @@ function ClientFillRequirementsContent() {
                           </table>
                         </div>
                         <div className="p-3 border-t border-slate-200 bg-slate-50/50">
-                          <Button 
-                            onClick={() => addArrayRow(slotKey)} 
-                            variant="outline" 
-                            size="sm" 
-                            className="text-xs font-bold text-blue-600 border-blue-200 bg-white hover:bg-blue-50 h-8 rounded-lg"
+                          <Button
+                            onClick={() => addArrayRow(slotKey)}
+                            variant="outline"
+                            size="sm"
+                            className="text-xs font-bold text-custom-blue border-custom-blue/30 bg-white hover:bg-blue-50 h-8 rounded-full"
                           >
                             <Plus className="h-3 w-3 mr-1.5" /> Add Row
                           </Button>
@@ -1091,7 +1269,7 @@ function ClientFillRequirementsContent() {
         <Button
           onClick={handleSubmit}
           disabled={submitting}
-          className="h-11 px-8 text-sm font-bold bg-slate-900 hover:bg-black text-white rounded-xl shadow-md w-full sm:w-auto transition-transform active:scale-[0.98]"
+          className="h-11 px-8 text-sm font-medium bg-custom-blue hover:bg-blue-700 text-white rounded-full shadow-md w-full sm:w-auto transition-transform active:scale-[0.98]"
         >
           {submitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
           {submitting ? 'Processing...' : 'Complete Submission'}
@@ -1120,13 +1298,50 @@ function ClientFillRequirementsContent() {
   )
 }
 
-function getFieldOptions(field: any, jobFields: Record<string, any>) {
+function getFieldOptions(field: any, jobFields: Record<string, any>, targetEntityId?: any, ctx?: FieldResolutionContext) {
   const mIds = field.linkedMasterFields || field.masterFieldIds || []
   if (mIds.length === 0 && field.linkedMasterFieldId) mIds.push(field.linkedMasterFieldId)
   if (mIds.length === 0) return null
-  const masterField = jobFields[String(mIds[0])]
-  const opts = masterField?.options
-  return Array.isArray(opts) ? opts.map((o: any) => typeof o === 'string' ? { label: o, value: o } : o) : null
+
+  for (const mid of mIds) {
+    const masterField = jobFields[String(mid)]
+    const opts = masterField?.options
+    if (Array.isArray(opts)) {
+      return opts.map((o: any) => typeof o === 'string' ? { label: o, value: o } : o)
+    }
+    if (opts?.isDependencyConfig) {
+      const resolved = resolveDependentOptions(field, opts, jobFields, targetEntityId, ctx)
+      if (resolved) return resolved
+    }
+  }
+  return null
+}
+
+// Mirrors AutomationMappingDialog's getDependentDropdownOptions so client-facing
+// dependent dropdowns (e.g. country -> region) resolve the same mapped options.
+function resolveDependentOptions(field: any, opts: any, jobFields: Record<string, any>, targetEntityId: any, ctx?: FieldResolutionContext) {
+  const parentFieldId = opts.dependencyConfig?.dependentFieldId
+  if (!parentFieldId || targetEntityId == null || !ctx) return []
+  const parentField = jobFields[String(parentFieldId)]
+  if (!parentField) return []
+
+  let entityCategory = 'individual'
+  if (field.entityTypes?.includes('company')) entityCategory = 'company'
+  let sourceIdx = parentField.sources?.findIndex((s: any) => s.source_type === entityCategory)
+  if (sourceIdx === -1 || sourceIdx === undefined) sourceIdx = 0
+
+  const parentLabelValue = getFieldValueImpl(String(parentFieldId), String(targetEntityId), sourceIdx, 'latest', false, ctx)
+  let parentValueForMapping = parentLabelValue
+  const parentFieldOptions = parentField.options
+  if (Array.isArray(parentFieldOptions) && parentLabelValue && parentLabelValue !== 'Missing' && parentLabelValue !== 'Computing...') {
+    const matchingParentOption = parentFieldOptions.find((opt: any) => {
+      const optLabel = typeof opt === 'string' ? opt : opt.label
+      return optLabel === parentLabelValue
+    })
+    if (matchingParentOption) parentValueForMapping = typeof matchingParentOption === 'string' ? matchingParentOption : matchingParentOption.value
+  }
+  if (!parentValueForMapping || parentValueForMapping === 'Missing' || parentValueForMapping === 'Computing...') return []
+  return opts.manualMapping?.[parentValueForMapping] || []
 }
 
 export default function ClientFillRequirementsPage() {

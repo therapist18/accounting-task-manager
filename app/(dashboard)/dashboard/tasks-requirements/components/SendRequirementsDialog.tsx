@@ -17,7 +17,7 @@ import {
   CheckCircle2, AlertCircle, Copy, Check, ExternalLink,
   Printer, FileText, Send, Database, Link as LinkIcon,
   CheckSquare, ClipboardList, Eye, LayoutDashboard,
-  ArrowRight, ShieldCheck, HelpCircle, Zap
+  ArrowRight, ShieldCheck, HelpCircle, Zap, Loader2
 } from "lucide-react"
 import { resolveTargetEntityIdImpl, resolveVariableValueImpl, getArrayFieldDataImpl } from "../../tasks/utils/fieldResolution"
 import { cn } from "@/lib/utils"
@@ -34,6 +34,71 @@ function humanizeVariableName(name: string): string {
 
 function getFieldLabel(field: any): string {
   return field?.efnsDisplayName || field?.name || humanizeVariableName(field?.variableName) || "Field"
+}
+
+function getEntityTypes(item: any): string[] {
+  return item?.entityTypes || (item?.entityType ? [item.entityType] : (item?.applicantType ? [item.applicantType] : []))
+}
+
+function EntityTypeBadges({ types }: { types: string[] }) {
+  if (!types || types.length === 0) {
+    return <span className="text-xs text-slate-400 italic">Any</span>
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {types.map((t) => (
+        <Badge key={t} variant="outline" className="capitalize text-[9px] font-semibold bg-slate-50 text-slate-600 border-slate-200 px-1.5 py-0">
+          {t}
+        </Badge>
+      ))}
+    </div>
+  )
+}
+
+function getAppliesToNames(item: any, task: any): string[] {
+  const entityTypes = getEntityTypes(item)
+  if (!task) return []
+  const participants = task.participants_details || []
+  const applicant = task.applicant_details || {}
+  const names = new Set<string>()
+
+  const matchesType = (p: any, t: string) => {
+    const roles = Array.isArray(p.role) ? p.role.map((r: string) => String(r).toLowerCase()) : [String(p.role || '').toLowerCase()]
+    if (t === 'principal') return roles.includes('principal') || roles.includes('applicant')
+    if (t === 'director') return roles.includes('director') || roles.includes('shareholder')
+    if (t === 'dependant' || t === 'dependent') return roles.includes('dependant') || roles.includes('dependent')
+    if (t === 'sponsor') return roles.includes('sponsor')
+    if (t === 'understudy') return roles.includes('understudy')
+    return roles.includes(t)
+  }
+
+  const typesToMatch = entityTypes.length > 0 ? entityTypes.map((t: string) => String(t).toLowerCase()) : []
+  typesToMatch.forEach((t: string) => {
+    if (t === 'company') {
+      const companyPart = applicant.type === 'company' ? applicant : participants.find((p: any) => p.type === 'company')
+      if (companyPart?.name) names.add(companyPart.name)
+      else if (task.company_name) names.add(task.company_name)
+      return
+    }
+    if (applicant.type === 'individual' && matchesType(applicant, t)) names.add(applicant.name)
+    participants.filter((p: any) => p.type === 'individual').forEach((p: any) => { if (matchesType(p, t)) names.add(p.name) })
+  })
+
+  return Array.from(names)
+}
+
+function AppliesToCell({ item, task }: { item: any, task: any }) {
+  const names = getAppliesToNames(item, task)
+  if (names.length === 0) {
+    return <span className="text-xs text-slate-400 italic">Everyone</span>
+  }
+  return (
+    <div className="flex flex-col gap-0.5">
+      {names.map((n) => (
+        <span key={n} className="text-xs font-medium text-slate-700 truncate max-w-[160px]">{n}</span>
+      ))}
+    </div>
+  )
 }
 
 interface SendRequirementsDialogProps {
@@ -69,6 +134,7 @@ export function SendRequirementsDialog({
 }: SendRequirementsDialogProps) {
   const [copied, setCopied] = useState(false)
   const [activeTab, setActiveTab] = useState("checklist")
+  const [isExporting, setIsExporting] = useState(false)
   const router = useRouter()
 
   const clientRequirements = useMemo(() => {
@@ -118,7 +184,6 @@ export function SendRequirementsDialog({
         }
       })
 
-      // Fallback: If no client requirements found, show all requirements (for backward compatibility)
       if (docs.length === 0 && classReqs.requirements?.length > 0) {
         classReqs.requirements.forEach((req: any) => {
           docs.push({ ...req, task, groupIndex })
@@ -168,8 +233,6 @@ export function SendRequirementsDialog({
     const latestDoc = (activeDocs.length > 0 ? activeDocs : foundDocs).reduce((prev, curr) => new Date(curr.created_at) > new Date(prev.created_at) ? curr : prev)
     const formattedDate = new Date(latestDoc.created_at).toLocaleDateString('en-GB')
 
-    // A requirement can accept any of several document types (document_ids is the pool);
-    // requiredDocumentCount says how many of the pool must be present, e.g. count=1 means "any one of these".
     if (activeDocs.length >= requiredCount) {
       return {
         label: requiredCount > 1 ? `Verified (${activeDocs.length}/${requiredCount})` : 'Verified',
@@ -260,6 +323,10 @@ export function SendRequirementsDialog({
   }
 
   const handlePrint = async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    const toastId = toast.loading('Generating PDF report...');
+
     const getStatusClass = (statusObj: any) => {
       if (statusObj.status === 'valid') return 'status-valid'
       if (statusObj.status === 'partial') return 'status-partial'
@@ -287,10 +354,10 @@ export function SendRequirementsDialog({
         ? ' <span style="display:inline-block; font-size:8px; font-weight:700; color:#7c3aed; background:#f5f3ff; border:1px solid #ddd6fe; border-radius:9999px; padding:1px 6px; vertical-align:middle;">&#9889; Automated</span>'
         : ''
       return `<tr>
-        <td style="text-align:center; color:#94a3b8; font-family:monospace; font-size:9px;">${String(idx + 1).padStart(2, '0')}</td>
-        <td style="font-weight:600; color:#1e293b;">${doc.name}${automationTag}</td>
-        <td style="color:#64748b; font-size:9.5px;">${formatAcceptedTypes(docTypeNames, requiredCount)}</td>
-        <td style="text-align:center; color:#64748b; font-size:9.5px; white-space:nowrap;">${status.date}</td>
+        <td style="text-align:center; color:#94a3b8; font-family:monospace; font-size:10px;">${String(idx + 1).padStart(2, '0')}</td>
+        <td style="font-weight:600; color:#1e293b; font-size: 11px;">${doc.name}${automationTag}</td>
+        <td style="color:#64748b; font-size:10px;">${formatAcceptedTypes(docTypeNames, requiredCount)}</td>
+        <td style="text-align:center; color:#64748b; font-size:10px; white-space:nowrap;">${status.date}</td>
         <td style="text-align:center;">
           <span class="status-badge ${getStatusClass(status)}">${status.label}</span>
         </td>
@@ -320,10 +387,10 @@ export function SendRequirementsDialog({
           if (isMissing) {
             displayVal = '<span style="color:#cbd5e1;font-style:italic;">Pending Input</span>'
           } else {
-            displayVal = `<ul style="margin:0; padding-left: 14px;">` + arrayRows.map((row: any) => {
+            displayVal = `<ul>` + arrayRows.map((row: any) => {
               const label = getEntityLabelForRow(f.task, row.entityId)
               const items = (f.arrayItems || []).map((item: any) => `<strong>${getFieldLabel(item)}:</strong> ${row[item.variableName] ?? '-'}`).join(', ')
-              return `<li style="margin-bottom:3px;"><strong style="color:#1e293b;">${label}</strong> &rarr; ${items}</li>`
+              return `<li><strong style="color:#1e293b;">${label}</strong> &rarr; ${items}</li>`
             }).join('') + `</ul>`
           }
         } else {
@@ -345,136 +412,137 @@ export function SendRequirementsDialog({
     const htmlContent = `
       <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; color: #0f172a; line-height: 1.4; background: #ffffff; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; color: #0f172a; line-height: 1.4; }
+        
+        .pdf-wrapper { background: #ffffff; padding: 0; position: relative; z-index: 1; }
+        
+        .watermark { position: fixed; top: 40%; left: 50%; transform: translate(-50%, -50%) rotate(-35deg); font-size: 80px; font-weight: 900; color: rgba(37, 99, 235, 0.03); letter-spacing: 0.1em; text-transform: uppercase; pointer-events: none; white-space: nowrap; z-index: -1; }
 
-        /* HEADER: brand + title + progress in one compact band */
-        .header { position: relative; padding: 20px 36px 16px; border-bottom: 3px solid #2563eb; }
+        .header { border-bottom: 3px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px; }
         .header-top { display: flex; justify-content: space-between; align-items: flex-start; }
-        .brand { display: flex; flex-direction: column; gap: 2px; }
-        .brand-logo { font-size: 10px; font-weight: 800; color: #2563eb; text-transform: uppercase; letter-spacing: 0.18em; }
-        .brand-title { font-size: 16px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; margin-top: 2px; }
-        .header-meta { text-align: right; display: flex; gap: 18px; }
-        .meta-item { display: flex; flex-direction: column; gap: 1px; }
-        .meta-label { font-size: 7px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.1em; }
-        .meta-value { font-size: 10.5px; font-weight: 600; color: #334155; }
+        .brand { display: flex; flex-direction: column; gap: 4px; }
+        .brand-logo { font-size: 11px; font-weight: 800; color: #2563eb; text-transform: uppercase; letter-spacing: 0.15em; }
+        .brand-title { font-size: 18px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; }
+        .header-meta { text-align: right; display: flex; gap: 20px; }
+        .meta-item { display: flex; flex-direction: column; gap: 2px; }
+        .meta-label { font-size: 8px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.1em; }
+        .meta-value { font-size: 11px; font-weight: 600; color: #334155; }
 
-        .progress-row { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
-        .progress-bar-bg { flex: 1; height: 7px; background: #e2e8f0; border-radius: 99px; overflow: hidden; }
+        .progress-row { display: flex; align-items: center; gap: 14px; margin-top: 16px; }
+        .progress-bar-bg { flex: 1; height: 8px; background: #e2e8f0; border-radius: 99px; overflow: hidden; }
         .progress-bar-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, #2563eb, #7c3aed); }
-        .progress-summary { font-size: 10px; color: #64748b; font-weight: 600; white-space: nowrap; }
-        .progress-percent { font-size: 15px; font-weight: 800; color: #0f172a; white-space: nowrap; }
+        .progress-summary { font-size: 11px; color: #64748b; font-weight: 600; }
+        .progress-percent { font-size: 16px; font-weight: 800; color: #0f172a; }
 
-        /* CONTENT */
-        .content { padding: 18px 36px 8px; }
-        .section-header { display: flex; align-items: center; gap: 10px; margin: 18px 0 8px; padding-bottom: 6px; border-bottom: 2px solid #e2e8f0; }
+        .section-header { display: flex; align-items: center; gap: 10px; margin: 24px 0 12px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; page-break-after: avoid; }
         .section-header:first-child { margin-top: 0; }
-        .section-number { width: 20px; height: 20px; background: #2563eb; color: white; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; flex-shrink: 0; }
-        .section-title { font-size: 11px; font-weight: 800; color: #1e293b; text-transform: uppercase; letter-spacing: 0.06em; }
-        .section-count { font-size: 9px; font-weight: 600; color: #94a3b8; background: #f1f5f9; padding: 1px 7px; border-radius: 99px; }
+        .section-number { width: 22px; height: 22px; background: #2563eb; color: white; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; flex-shrink: 0; }
+        .section-title { font-size: 12px; font-weight: 800; color: #1e293b; text-transform: uppercase; letter-spacing: 0.05em; }
+        .section-count { font-size: 10px; font-weight: 600; color: #94a3b8; background: #f1f5f9; padding: 2px 8px; border-radius: 99px; }
 
-        /* DOCUMENT TABLE */
-        table { width: 100%; border-collapse: collapse; margin-bottom: 6px; font-size: 10px; }
-        th { background-color: #f1f5f9; padding: 6px 10px; text-align: left; font-weight: 700; color: #475569; border-bottom: 2px solid #e2e8f0; text-transform: uppercase; font-size: 8px; letter-spacing: 0.05em; }
-        td { padding: 6px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; color: #334155; page-break-inside: avoid; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; page-break-inside: auto; }
+        tr { page-break-inside: avoid; page-break-after: auto; }
+        th { background-color: #f8fafc; padding: 10px 12px; text-align: left; font-weight: 700; color: #475569; border-bottom: 2px solid #e2e8f0; text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; }
+        td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; color: #334155; }
         tr:nth-child(even) td { background-color: #fafbfc; }
-        tr:last-child td { border-bottom: none; }
 
-        /* FIELD CARD GRID */
-        .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px; margin-bottom: 10px; }
-        .field-card { border: 1px solid #eef2f7; border-radius: 5px; padding: 5px 9px; background: #fafbfc; page-break-inside: avoid; }
-        .field-card.field-wide { grid-column: 1 / -1; }
-        .field-card.field-missing { background: #fef7f7; border-color: #fbdcdc; }
-        .field-card-top { display: flex; align-items: center; gap: 5px; margin-bottom: 1px; }
-        .field-num { font-size: 7px; color: #94a3b8; font-family: 'Courier New', monospace; }
-        .field-name { font-size: 9.5px; font-weight: 700; color: #1e293b; flex: 1; }
-        .status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+        .field-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+        .field-card { width: calc(50% - 6px); border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; background: #f8fafc; page-break-inside: avoid; display: flex; flex-direction: column; gap: 6px; }
+        .field-card.field-wide { width: 100%; }
+        .field-card.field-missing { background: #fef2f2; border-color: #fecaca; }
+        .field-card-top { display: flex; align-items: center; gap: 8px; }
+        .field-num { font-size: 9px; color: #94a3b8; font-family: monospace; font-weight: 600; }
+        .field-name { font-size: 11px; font-weight: 700; color: #1e293b; flex: 1; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
         .dot-valid { background: #16a34a; }
         .dot-missing { background: #dc2626; }
-        .field-value { font-size: 9.5px; color: #475569; padding-left: 11px; word-break: break-word; }
-        .field-value ul { list-style: none; }
+        .field-value { font-size: 11px; color: #475569; padding-left: 17px; word-break: break-word; }
+        .field-value ul { list-style: none; padding-left: 0; }
+        .field-value li { margin-bottom: 6px; border-bottom: 1px dashed #e2e8f0; padding-bottom: 6px; }
+        .field-value li:last-child { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
 
-        /* STATUS BADGES */
-        .status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
+        .status-badge { display: inline-flex; align-items: center; justify-content: center; padding: 4px 10px; border-radius: 9999px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
         .status-missing { background-color: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
         .status-valid { background-color: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
         .status-partial { background-color: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
         .status-draft { background-color: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
 
-        /* FOOTER */
-        .footer { margin-top: 20px; padding: 12px 36px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; }
-        .footer-left { font-size: 8px; color: #94a3b8; font-weight: 500; }
-        .footer-right { font-size: 8px; color: #94a3b8; font-weight: 500; }
+        .footer { margin-top: 30px; padding-top: 16px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; page-break-inside: avoid; }
+        .footer-left { font-size: 9px; color: #94a3b8; font-weight: 500; }
+        .footer-right { font-size: 9px; color: #94a3b8; font-weight: 500; }
         .footer-brand { font-weight: 700; color: #64748b; }
-
-        /* WATERMARK */
-        .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-35deg); font-size: 70px; font-weight: 900; color: rgba(37, 99, 235, 0.025); letter-spacing: 0.1em; text-transform: uppercase; pointer-events: none; white-space: nowrap; z-index: 0; }
       </style>
-      <div class="watermark">CONFIDENTIAL</div>
+      
+      <div class="pdf-wrapper">
+        <div class="watermark">CONFIDENTIAL</div>
 
-      <div class="header">
-        <div class="header-top">
-          <div class="brand">
-            <div class="brand-logo">Accounting Task Manager</div>
-            <div class="brand-title">Requirement Checklist Report &middot; ${selectedApplicant}</div>
+        <div class="header">
+          <div class="header-top">
+            <div class="brand">
+              <div class="brand-logo">Accounting Task Manager</div>
+              <div class="brand-title">Requirement Checklist Report &middot; ${selectedApplicant}</div>
+            </div>
+            <div class="header-meta">
+              <div class="meta-item"><span class="meta-label">Ref No.</span><span class="meta-value">${refNo}</span></div>
+              <div class="meta-item"><span class="meta-label">Generated</span><span class="meta-value">${dateStr}, ${timeStr}</span></div>
+              <div class="meta-item"><span class="meta-label">Classification</span><span class="meta-value">Confidential</span></div>
+            </div>
           </div>
-          <div class="header-meta">
-            <div class="meta-item"><span class="meta-label">Ref No.</span><span class="meta-value">${refNo}</span></div>
-            <div class="meta-item"><span class="meta-label">Generated</span><span class="meta-value">${dateStr}, ${timeStr}</span></div>
-            <div class="meta-item"><span class="meta-label">Classification</span><span class="meta-value">Confidential</span></div>
+          <div class="progress-row">
+            <div class="progress-bar-bg"><div class="progress-bar-fill" style="width: ${stats.percent}%"></div></div>
+            <span class="progress-summary">${stats.completed} of ${stats.total} items addressed</span>
+            <span class="progress-percent">${stats.percent}%</span>
           </div>
         </div>
-        <div class="progress-row">
-          <div class="progress-bar-bg"><div class="progress-bar-fill" style="width: ${stats.percent}%"></div></div>
-          <span class="progress-summary">${stats.completed} of ${stats.total} items addressed</span>
-          <span class="progress-percent">${stats.percent}%</span>
-        </div>
-      </div>
 
-      <div class="content">
-        <div class="section-header">
-          <div class="section-number">1</div>
-          <div class="section-title">Document Requirements</div>
-          <div class="section-count">${clientRequirements.docs.length} items</div>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th style="width:32px; text-align:center;">#</th>
-              <th>Requirement</th>
-              <th style="width:190px">Accepted Types</th>
-              <th style="width:80px; text-align:center;">Date</th>
-              <th style="width:120px; text-align:center;">Status</th>
-            </tr>
-          </thead>
-          <tbody>${docRows}</tbody>
-        </table>
+        <div class="content">
+          <div class="section-header">
+            <div class="section-number">1</div>
+            <div class="section-title">Document Requirements</div>
+            <div class="section-count">${clientRequirements.docs.length} items</div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width:32px; text-align:center;">#</th>
+                <th>Requirement</th>
+                <th style="width:190px">Accepted Types</th>
+                <th style="width:80px; text-align:center;">Date</th>
+                <th style="width:120px; text-align:center;">Status</th>
+              </tr>
+            </thead>
+            <tbody>${docRows}</tbody>
+          </table>
 
-        <div class="section-header">
-          <div class="section-number">2</div>
-          <div class="section-title">Information & Context Fields</div>
-          <div class="section-count">${clientRequirements.questions.length + clientRequirements.fields.length} items</div>
+          <div class="section-header">
+            <div class="section-number">2</div>
+            <div class="section-title">Information & Context Fields</div>
+            <div class="section-count">${clientRequirements.questions.length + clientRequirements.fields.length} items</div>
+          </div>
+          <div class="field-grid">${fieldCards}</div>
         </div>
-        <div class="field-grid">${fieldCards}</div>
-      </div>
 
-      <div class="footer">
-        <div class="footer-left"><span class="footer-brand">Accounting Task Manager</span> &mdash; Automated Compliance Report</div>
-        <div class="footer-right">${dateStr} &nbsp;&bull;&nbsp; ${refNo}</div>
+        <div class="footer">
+          <div class="footer-left"><span class="footer-brand">Accounting Task Manager</span> &mdash; Automated Compliance Report</div>
+          <div class="footer-right">${dateStr} &nbsp;&bull;&nbsp; ${refNo}</div>
+        </div>
       </div>
     `
 
     const element = document.createElement('div')
     element.innerHTML = htmlContent
     element.style.width = '800px'
-    element.style.position = 'relative'
-    element.style.background = '#ffffff'
+    element.style.position = 'absolute'
+    element.style.left = '-9999px' // Hide off-screen to avoid layout shifts for the user
+    element.style.top = '0'
     document.body.appendChild(element)
 
     try {
       const html2pdf = (await import('html2pdf.js')).default
       await html2pdf()
         .set({
-          margin: [0, 0, 0, 0],
+          margin: 15, // Using html2pdf margins is much safer than manual CSS padding for page breaks
+          pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
           html2canvas: {
             scale: 2,
             useCORS: true,
@@ -490,10 +558,12 @@ export function SendRequirementsDialog({
         })
         .from(element)
         .save()
-      toast.success('PDF exported successfully!')
+      toast.success('PDF exported successfully!', { id: toastId })
     } catch (err) {
-      toast.error('Failed to export PDF. Please try again.')
+      console.error(err)
+      toast.error('Failed to export PDF. Please try again.', { id: toastId })
     } finally {
+      setIsExporting(false)
       document.body.removeChild(element)
     }
   }
@@ -588,15 +658,16 @@ export function SendRequirementsDialog({
                               <TableRow className="hover:bg-transparent">
                                 <TableHead className="w-16 py-3 text-center text-[10px] font-bold uppercase tracking-wider text-slate-500">#</TableHead>
                                 <TableHead className="py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Requirement</TableHead>
-                                <TableHead className="w-[300px] py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Accepted Types</TableHead>
-                                <TableHead className="w-[180px] py-3 text-right pr-6 text-[10px] font-bold uppercase tracking-wider text-slate-500">Status</TableHead>
+                                <TableHead className="w-[130px] py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Entity Type</TableHead>
+                                <TableHead className="w-[150px] py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Applies To</TableHead>
+                                <TableHead className="w-[220px] py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Accepted Types</TableHead>
+                                <TableHead className="w-[160px] py-3 text-right pr-6 text-[10px] font-bold uppercase tracking-wider text-slate-500">Status</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
                               {clientRequirements.docs.map((doc, idx) => {
                                 const status = getDocStatus(doc, doc.task)
                                 const StatusIcon = status.icon
-                                const isMissing = status.status === 'missing'
                                 const docTypeNames = getDocTypeNames(doc)
                                 
                                 return (
@@ -619,6 +690,12 @@ export function SendRequirementsDialog({
                                         </div>
                                         {doc.description && <span className="text-xs text-slate-500 line-clamp-1">{doc.description}</span>}
                                       </div>
+                                    </TableCell>
+                                    <TableCell className="py-4 pr-4">
+                                      <EntityTypeBadges types={getEntityTypes(doc)} />
+                                    </TableCell>
+                                    <TableCell className="py-4 pr-4">
+                                      <AppliesToCell item={doc} task={doc.task} />
                                     </TableCell>
                                     <TableCell className="py-4 pr-4">
                                       <span className="inline-block text-xs font-medium text-slate-600 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-md">
@@ -661,8 +738,10 @@ export function SendRequirementsDialog({
                               <TableRow className="hover:bg-transparent">
                                 <TableHead className="w-16 py-3 text-center text-[10px] font-bold uppercase tracking-wider text-slate-500">#</TableHead>
                                 <TableHead className="py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Requested Field</TableHead>
-                                <TableHead className="w-[350px] py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Current Value</TableHead>
-                                <TableHead className="w-[180px] py-3 text-right pr-6 text-[10px] font-bold uppercase tracking-wider text-slate-500">Status</TableHead>
+                                <TableHead className="w-[120px] py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Entity Type</TableHead>
+                                <TableHead className="w-[140px] py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Applies To</TableHead>
+                                <TableHead className="w-[260px] py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Current Value</TableHead>
+                                <TableHead className="w-[160px] py-3 text-right pr-6 text-[10px] font-bold uppercase tracking-wider text-slate-500">Status</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -680,6 +759,12 @@ export function SendRequirementsDialog({
                                           <HelpCircle className="h-3 w-3" /> Questionnaire
                                         </span>
                                       </div>
+                                    </TableCell>
+                                    <TableCell className="py-4 pr-4 align-top">
+                                      <EntityTypeBadges types={getEntityTypes(q)} />
+                                    </TableCell>
+                                    <TableCell className="py-4 pr-4 align-top">
+                                      <AppliesToCell item={q} task={q.task} />
                                     </TableCell>
                                     <TableCell className="py-4 pr-4 align-top">
                                       {isMissing ? (
@@ -724,6 +809,12 @@ export function SendRequirementsDialog({
                                           </span>
                                         )}
                                       </div>
+                                    </TableCell>
+                                    <TableCell className="py-4 pr-4 align-top">
+                                      <EntityTypeBadges types={getEntityTypes(f)} />
+                                    </TableCell>
+                                    <TableCell className="py-4 pr-4 align-top">
+                                      <AppliesToCell item={f} task={f.task} />
                                     </TableCell>
                                     <TableCell className="py-4 pr-4 align-top">
                                       {isArray ? (
@@ -830,8 +921,17 @@ export function SendRequirementsDialog({
                   </div>
 
                   <div className="pt-6">
-                    <Button variant="default" className="h-14 rounded-2xl px-10 font-bold text-lg bg-orange-500 hover:bg-orange-600 shadow-lg shadow-orange-200 text-white transition-all active:scale-95" onClick={handlePrint}>
-                      <Printer className="h-5 w-5 mr-3" /> Generate PDF Report
+                    <Button 
+                      variant="default" 
+                      className="h-14 rounded-2xl px-10 font-bold text-lg bg-orange-500 hover:bg-orange-600 shadow-lg shadow-orange-200 text-white transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed" 
+                      onClick={handlePrint}
+                      disabled={isExporting}
+                    >
+                      {isExporting ? (
+                        <><Loader2 className="h-5 w-5 mr-3 animate-spin" /> Generating PDF...</>
+                      ) : (
+                        <><Printer className="h-5 w-5 mr-3" /> Generate PDF Report</>
+                      )}
                     </Button>
                   </div>
                 </div>
@@ -850,4 +950,4 @@ export function SendRequirementsDialog({
       </DialogContent>
     </Dialog>
   )
-} 
+}

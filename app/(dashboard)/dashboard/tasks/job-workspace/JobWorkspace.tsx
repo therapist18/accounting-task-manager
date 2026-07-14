@@ -22,6 +22,7 @@ interface JobWorkspaceProps {
   onRefresh?: () => void
   initialTab?: string
   initialAutomationId?: string
+  initialRequirementId?: string
   initialOpenSendDialog?: boolean
   initialTemplateDocId?: string
 }
@@ -60,7 +61,7 @@ const TAB_DEFINITIONS = [
   { value: "notes", label: "Notes", icon: MessageSquare },
 ]
 
-export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutomationId, initialOpenSendDialog, initialTemplateDocId }: JobWorkspaceProps) {
+export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutomationId, initialRequirementId, initialOpenSendDialog, initialTemplateDocId }: JobWorkspaceProps) {
   const { task, department, subdepartment, stages, individual } = data
   const [activeTab, setActiveTab] = useState(initialTab || "workflow")
   const [visitedTabs, setVisitedTabs] = useState<Set<string>>(new Set([initialTab || "workflow"]))
@@ -208,6 +209,7 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
               openSendRequirements={openSendRequirements}
               setOpenSendRequirements={setOpenSendRequirements}
               autoOpenSendDialog={activeTab === "requirements" ? initialOpenSendDialog : undefined}
+              highlightRequirementId={activeTab === "requirements" ? initialRequirementId : undefined}
             />
           </div>
         )}

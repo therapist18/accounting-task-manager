@@ -32,6 +32,7 @@ interface RequirementsTabProps {
   data: JobWorkspaceData
   onRefresh?: () => void
   autoOpenSendDialog?: boolean
+  highlightRequirementId?: string | number
 }
 
 interface ColDef {
@@ -185,10 +186,9 @@ function getDocDataForReq(req: any, col: ColDef, docsByInd: Record<string, any[]
   )
 }
 
-export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: RequirementsTabProps) {
+export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlightRequirementId }: RequirementsTabProps) {
   const { task, kycDocsMap, documentsByIndividual, allDocuments, allCompanyDocuments } = data
   const router = useRouter()
-
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(CATEGORY_ORDER))
   const [expandedRequirements, setExpandedRequirements] = useState<Set<string>>(new Set())
   const [expandedComposites, setExpandedComposites] = useState<Set<string>>(new Set())
@@ -198,11 +198,11 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
   const [previewDocument, setPreviewDocument] = useState<any>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [isSendRequirementsOpen, setIsSendRequirementsOpen] = useState(false)
-
+  const [highlightedRowId, setHighlightedRowId] = useState<string | number | null>(null)
+  const requirementRowRefs = React.useRef<Record<string, HTMLTableRowElement | null>>({})
   useEffect(() => {
     if (autoOpenSendDialog) setIsSendRequirementsOpen(true)
   }, [autoOpenSendDialog])
-
   const [templateMasterFields, setTemplateMasterFields] = useState<Map<number, any> | null>(null)
   const [templateProgress, setTemplateProgress] = useState<Record<string, { filled: number; total: number } | 'loading'>>({})
 
@@ -210,9 +210,6 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
     fetchMasterFields().then(setTemplateMasterFields)
   }, [])
 
-  // Matches the hasTemplateExplicitly restriction used for the Wand2 badge below (and
-  // TemplatesTab.tsx's templateReqs filter) - only requirements explicitly flagged
-  // hasTemplate: true, not the broader doc-level has_template/main_category fallback.
   const templateEligibleReqs = useMemo(() => {
     if (!task?.requirements) return []
     return task.requirements.filter((r: any) => {
@@ -239,12 +236,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
     const colId = principalPart?.id || (task.applicant_details?.type === 'individual' ? task.applicant_details.id : task.individual_id)
     return { colType: 'principal', colId }
   }, [task])
-
-  // Auto-computes a completion percentage per template-eligible requirement (how many of the
-  // template's placeholders currently resolve to a real value), for the progress bar next to
-  // the Wand2 badge. Reuses the exact same resolution buildTemplateGenerationInfo/
-  // resolveTemplatePlaceholders that the Templates tab uses to generate the real preview, so
-  // the percentage can't drift out of sync with what actually gets generated.
+  
   useEffect(() => {
     if (!templateMasterFields || templateEligibleReqs.length === 0 || !task) return
     let cancelled = false
@@ -464,13 +456,10 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
       default: Icon = CheckCircle2; break
     }
 
-    const borderColorClass = status.color ? status.color.replace('text-', 'border-') : 'border-gray-200'
-    const bgColorClass = status.bgColor || 'bg-gray-50'
-
     return (
-      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${bgColorClass} ${borderColorClass}`}>
+      <div className="inline-flex items-center gap-1.5">
         <Icon className={`h-3.5 w-3.5 shrink-0 ${status.color}`} />
-        <span className={`text-[11px] font-semibold uppercase tracking-wide ${status.color}`}>
+        <span className={`text-xs font-medium ${status.color}`}>
           {status.label}
         </span>
       </div>
@@ -509,6 +498,27 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
     })
     return map
   }, [task])
+
+  // Scroll to and highlight a specific requirement when deep-linked from an
+  // automation field's "Linked Requirement" button.
+  useEffect(() => {
+    if (!highlightRequirementId) return
+    let matchCat: string | null = null
+    let matchIdx = -1
+    for (const [cat, reqs] of Object.entries(requirementMap)) {
+      const idx = (reqs as any[]).findIndex((r: any, i: number) => (r.id || `${cat}-${i}`) === String(highlightRequirementId))
+      if (idx !== -1) { matchCat = cat; matchIdx = idx; break }
+    }
+    if (!matchCat) return
+    const reqId = requirementMap[matchCat][matchIdx].id || `${matchCat}-${matchIdx}`
+    setExpandedCategories(prev => new Set(prev).add(matchCat as string))
+    const timer = setTimeout(() => {
+      requirementRowRefs.current[String(reqId)]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setHighlightedRowId(reqId)
+    }, 150)
+    const clearTimer = setTimeout(() => setHighlightedRowId(null), 3000)
+    return () => { clearTimeout(timer); clearTimeout(clearTimer) }
+  }, [highlightRequirementId, requirementMap])
 
   const handlePreview = useCallback(async (req: any, col: ColDef, locked?: boolean, specificDocId?: string) => {
     const docIds = specificDocId ? [specificDocId] : (req.document_ids || (req.document_id ? [req.document_id] : []))
@@ -674,7 +684,14 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                     return (
                       <React.Fragment key={reqId}>
                         {/* Main Requirement Row */}
-                        <TableRow className={cn("group transition-colors", stripeBg, "hover:bg-blue-50/30")}>
+                        <TableRow
+                          ref={(el) => { requirementRowRefs.current[String(reqId)] = el }}
+                          className={cn(
+                            "group transition-colors",
+                            stripeBg, "hover:bg-blue-50/30",
+                            highlightedRowId === reqId && "ring-2 ring-inset ring-blue-500 bg-blue-50/90 animate-pulse"
+                          )}
+                        >
                           <TableCell className={cn("w-12 py-0 px-0 text-center text-xs font-mono text-slate-400 border-b border-r border-slate-100 sticky left-0 z-10 align-middle", stripeBg, "group-hover:bg-blue-50/30")}>
                             <div className="flex items-center justify-center h-full font-medium">
                               {idx + 1}
@@ -788,26 +805,20 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                                     </div>
                                     <div className="p-3 border-r border-slate-100 flex items-center justify-center text-center">
                                       {status.type === 'view' ? (
-                                        docStatus ? renderStatusBadge(docStatus) : <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                                        docStatus ? renderStatusBadge(docStatus) : <Loader2 className="h-4 w-4 animate-spin text-slate-300" />
                                       ) : (
                                         isLocked ? (
-                                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border bg-red-50 border-red-200">
-                                            <AlertCircle className="h-3.5 w-3.5 text-red-500" />
-                                            <span className="text-[11px] font-semibold uppercase text-red-600 tracking-wide">Missing</span>
-                                          </div>
+                                          <span className="text-xs font-medium text-red-600">Missing</span>
                                         ) : (
-                                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border bg-amber-50 border-amber-200">
-                                            <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
-                                            <span className="text-[11px] font-semibold uppercase text-amber-600 tracking-wide">Pending</span>
-                                          </div>
+                                          <span className="text-xs font-medium text-amber-600">Pending</span>
                                         )
                                       )}
                                     </div>
                                     <div className="p-3 flex items-center justify-center text-center">
                                       {status.type === 'view' ? (
-                                        <Button variant="ghost" size="sm" className="h-8 px-4 text-sm font-medium text-blue-600 bg-blue-50/50 hover:bg-blue-100 hover:text-blue-700 rounded-full border border-transparent hover:border-blue-200 transition-all" onClick={() => handlePreview(req, col, isLocked, isComposite ? latestDocId : undefined)}>
-                                          <Eye className="h-4 w-4 mr-1.5" /> View
-                                        </Button>
+                                        <button className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline" onClick={() => handlePreview(req, col, isLocked, isComposite ? latestDocId : undefined)}>
+                                          <Eye className="h-4 w-4" /> View
+                                        </button>
                                       ) : (
                                         isLocked ? (
                                           <span className="text-sm font-medium text-slate-400 uppercase tracking-wide">Locked</span>
@@ -815,7 +826,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog }: Require
                                           <Button
                                             variant="outline"
                                             size="sm"
-                                            className="h-8 px-4 text-xs font-medium text-blue-600 bg-white hover:bg-blue-50 border-dashed border-blue-300 hover:border-blue-500 rounded-full transition-all"
+                                            className="h-8 px-4 text-xs font-medium text-blue-600 bg-white hover:bg-blue-50 border-dashed border-blue-300 hover:border-blue-500 rounded-lg transition-all"
                                             onClick={() => {
                                               setSelectedDocForUpload({ ...req, person: { id: col.id, full_name: col.label } });
                                               setUploadModalOpen(true);

@@ -91,12 +91,25 @@ interface RateData {
   ksh: number
 }
 
+interface DiscountOption {
+  id: string
+  name: string
+  type: 'percentage' | 'fixed'
+  value: number
+  applicable: boolean
+}
+
 interface RateEntry {
   id: string
   entityType: 'subdepartment' | 'class' | 'subclass'
   entityId: string
   entityName: string
   entityPath: string
+  defaultRate: {
+    amount: number | string // Allow text
+    currency: 'USD' | 'KSH'
+    rate: number
+  }
   processingFee: {
     amount: number | string // Allow text
     currency: 'USD' | 'KSH'
@@ -155,6 +168,7 @@ interface RateEntry {
       value: number
     }
   }
+  applicableDiscounts: DiscountOption[]
 }
 
 interface RatePeriod {
@@ -258,12 +272,14 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
   const [columnVisibility, setColumnVisibility] = useState({
     index: true,
     entity: true,
+    defaultRate: true,
     processingFee: true,
     issuanceFee: true,
     bclConsultancy: true,
     officer: true,
     extraConsideration: true,
     convenienceFee: true,
+    applicableDiscounts: true,
   })
 
   // Entity visibility state
@@ -286,6 +302,13 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
       disabled: true, // Always show entity
       isDefault: true,
       group: 'Basic'
+    },
+    {
+      id: 'defaultRate',
+      label: 'Default Rate',
+      visible: columnVisibility.defaultRate,
+      isDefault: true,
+      group: 'Fees'
     },
     {
       id: 'processingFee',
@@ -328,6 +351,13 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
       visible: columnVisibility.convenienceFee,
       isDefault: false,
       group: 'Additional'
+    },
+    {
+      id: 'applicableDiscounts',
+      label: 'Applicable Discounts',
+      visible: columnVisibility.applicableDiscounts,
+      isDefault: false,
+      group: 'Additional'
     }
   ], [columnVisibility])
 
@@ -342,12 +372,14 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
     setColumnVisibility({
       index: true,
       entity: true,
+      defaultRate: true,
       processingFee: true,
       issuanceFee: true,
       bclConsultancy: true,
       officer: true,
       extraConsideration: true,
       convenienceFee: true,
+      applicableDiscounts: true,
     })
   }
 
@@ -355,12 +387,14 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
     setColumnVisibility({
       index: true, // Keep required columns
       entity: true, // Keep required columns
+      defaultRate: false,
       processingFee: false,
       issuanceFee: false,
       bclConsultancy: false,
       officer: false,
       extraConsideration: false,
       convenienceFee: false,
+      applicableDiscounts: false,
     })
   }
 
@@ -368,12 +402,14 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
     setColumnVisibility({
       index: true,
       entity: true,
+      defaultRate: true,
       processingFee: true,
       issuanceFee: true,
       bclConsultancy: true,
       officer: true,
       extraConsideration: false,
       convenienceFee: false,
+      applicableDiscounts: false,
     })
   }
 
@@ -694,6 +730,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
     // Only calculate totals for visible entries
     const currentDept = getProcessedDepartments().find(d => d.id === selectedDepartment)
     if (!currentDept) return {
+      defaultRateRate: 0,
       processingFeeRate: 0, issuanceFeeRate: 0, bclTier1: 0, bclTier2: 0, bclTier3: 0,
       officerBossFixed: 0, officerPaTier1: 0, officerPaEditable: 0,
       extraTccCompany: 0, extraTccIndividual: 0, extraAuditorsFee: 0, extraDegree: 0, extraTfFile: 0,
@@ -724,12 +761,14 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
 
     return visibleEntries.reduce((totals, entry) => {
       // Safe access to nested properties
+      const defaultRate = entry.defaultRate || { rate: 0 }
       const processingFee = entry.processingFee || { rate: 0 }
       const issuanceFee = entry.issuanceFee || { rate: 0 }
       const bclConsultancy = entry.bclConsultancy || { tier1: 0, tier2: 0, tier3: 0 }
       const officer = entry.officer || { bossFixed: 0, paTier1: 0, paEditable: 0 }
 
       return {
+        defaultRateRate: totals.defaultRateRate + (defaultRate.rate || 0),
         processingFeeRate: totals.processingFeeRate + (processingFee.rate || 0),
         issuanceFeeRate: totals.issuanceFeeRate + (issuanceFee.rate || 0),
         bclTier1: totals.bclTier1 + (bclConsultancy.tier1 || 0),
@@ -750,6 +789,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
         conveniencePassportEndorsement: totals.conveniencePassportEndorsement + (getConvenienceFeeField(entry, 'passportEndorsement').applicable ? getConvenienceFeeField(entry, 'passportEndorsement').value : 0),
       }
     }, {
+      defaultRateRate: 0,
       processingFeeRate: 0,
       issuanceFeeRate: 0,
       bclTier1: 0,
@@ -900,12 +940,14 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
       const headerConfig = {
         index: { main: '#', sub: [''], span: 1, width: 6 },
         entity: { main: 'Entity', sub: [''], span: 1, width: 45 },
+        defaultRate: { main: 'Default Rate', sub: ['Amount', 'Currency', 'Rate (KSH)'], span: 3, widths: [18, 12, 18] },
         processingFee: { main: 'Processing Fee', sub: ['Amount', 'Currency', 'Fee (KSH)'], span: 3, widths: [18, 12, 18] },
         issuanceFee: { main: 'Issuance Fee', sub: ['Amount', 'Currency', 'Fee (KSH)', 'Period Type', 'Period Count'], span: 5, widths: [18, 12, 18, 20, 20] },
         bclConsultancy: { main: 'BCL Consultancy', sub: ['Tier 1', 'Tier 2', 'Tier 3'], span: 3, widths: [15, 15, 15] },
         officer: { main: 'Officer', sub: ['Boss Fixed', 'PA Tier 1', 'PA Editable'], span: 3, widths: [15, 15, 15] },
         extraConsideration: { main: 'Extra Consideration', sub: ['TCC Company', 'TCC Individual', 'Auditors Fee', 'Degree', 'TF File'], span: 5, widths: [22, 22, 22, 22, 22] },
         convenienceFee: { main: 'Convenience Fee', sub: ['Alien Assistance', 'Re-Entry', 'Passport Endorsement'], span: 3, widths: [22, 22, 22] },
+        applicableDiscounts: { main: 'Applicable Discounts', sub: ['Discounts'], span: 1, width: 40 },
       };
 
       const visibleColumns = Object.keys(columnVisibility).filter(key => columnVisibility[key]);
@@ -961,6 +1003,11 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
           entityCell.value = entry.entityName;
           styleCell(entityCell, { alignment: { indent: level } });
         }
+        if (columnVisibility.defaultRate) {
+          add(isNaN(parseFloat(entry.defaultRate.amount)) ? entry.defaultRate.amount : parseFloat(entry.defaultRate.amount));
+          add(entry.defaultRate.currency);
+          add(entry.defaultRate.rate);
+        }
         if (columnVisibility.processingFee) {
           add(isNaN(parseFloat(entry.processingFee.amount)) ? entry.processingFee.amount : parseFloat(entry.processingFee.amount));
           add(entry.processingFee.currency);
@@ -995,6 +1042,13 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
           add(entry.convenienceFee.alienAssistance.applicable ? entry.convenienceFee.alienAssistance.value : 'N/A');
           add(entry.convenienceFee.reEntryApproval.applicable ? entry.convenienceFee.reEntryApproval.value : 'N/A');
           add(entry.convenienceFee.passportEndorsement.applicable ? entry.convenienceFee.passportEndorsement.value : 'N/A');
+        }
+        if (columnVisibility.applicableDiscounts) {
+          const discounts = (entry.applicableDiscounts || [])
+            .filter((d: any) => d.applicable)
+            .map((d: any) => `${d.name || 'Discount'}: ${d.value}${d.type === 'percentage' ? '%' : ' KSH'}`)
+            .join('; ');
+          add(discounts || 'None');
         }
       };
       const groupedData = getGroupedEntries(currentDept);
@@ -1110,6 +1164,11 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                     };
 
                     // Add all the entry data
+                    if (columnVisibility.defaultRate) {
+                      add(isNaN(parseFloat(entry.defaultRate.amount)) ? entry.defaultRate.amount : parseFloat(entry.defaultRate.amount));
+                      add(entry.defaultRate.currency);
+                      add(entry.defaultRate.rate);
+                    }
                     if (columnVisibility.processingFee) {
                       add(isNaN(parseFloat(entry.processingFee.amount)) ? entry.processingFee.amount : parseFloat(entry.processingFee.amount));
                       add(entry.processingFee.currency);
@@ -1145,6 +1204,13 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                       add(entry.convenienceFee?.reEntryApproval?.applicable ? entry.convenienceFee.reEntryApproval.value : 'N/A');
                       add(entry.convenienceFee?.passportEndorsement?.applicable ? entry.convenienceFee.passportEndorsement.value : 'N/A');
                     }
+                    if (columnVisibility.applicableDiscounts) {
+                      const discounts = (entry.applicableDiscounts || [])
+                        .filter((d: any) => d.applicable)
+                        .map((d: any) => `${d.name || 'Discount'}: ${d.value}${d.type === 'percentage' ? '%' : ' KSH'}`)
+                        .join('; ');
+                      add(discounts || 'None');
+                    }
 
                     // Style the row
                     row.outlineLevel = 1; // Same level as class entries
@@ -1165,12 +1231,14 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
       let totalCellIndex = 1;
       if (columnVisibility.index) totalCellIndex++;
       if (columnVisibility.entity) totalsRow.getCell(totalCellIndex++).value = 'TOTALS';
+      if (columnVisibility.defaultRate) { totalsRow.getCell(totalCellIndex + 2).value = totals.defaultRateRate; totalCellIndex += 3; }
       if (columnVisibility.processingFee) { totalsRow.getCell(totalCellIndex + 2).value = totals.processingFeeRate; totalCellIndex += 3; }
       if (columnVisibility.issuanceFee) { totalsRow.getCell(totalCellIndex + 2).value = totals.issuanceFeeRate; totalCellIndex += 5; }
       if (columnVisibility.bclConsultancy) { totalsRow.getCell(totalCellIndex++).value = totals.bclTier1; totalsRow.getCell(totalCellIndex++).value = totals.bclTier2; totalsRow.getCell(totalCellIndex++).value = totals.bclTier3; }
       if (columnVisibility.officer) { totalsRow.getCell(totalCellIndex++).value = totals.officerBossFixed; totalsRow.getCell(totalCellIndex++).value = totals.officerPaTier1; totalsRow.getCell(totalCellIndex++).value = totals.officerPaEditable; }
       if (columnVisibility.extraConsideration) { totalsRow.getCell(totalCellIndex++).value = totals.extraTccCompany; totalsRow.getCell(totalCellIndex++).value = totals.extraTccIndividual; totalsRow.getCell(totalCellIndex++).value = totals.extraAuditorsFee; totalsRow.getCell(totalCellIndex++).value = totals.extraDegree; totalsRow.getCell(totalCellIndex++).value = totals.extraTfFile; }
       if (columnVisibility.convenienceFee) { totalsRow.getCell(totalCellIndex++).value = totals.convenienceAlienAssistance; totalsRow.getCell(totalCellIndex++).value = totals.convenienceReEntryApproval; totalsRow.getCell(totalCellIndex++).value = totals.conveniencePassportEndorsement; }
+      if (columnVisibility.applicableDiscounts) { totalCellIndex++; }
 
       totalsRow.eachCell({ includeEmpty: true }, cell => styleCell(cell, { fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } } }));
 
@@ -1378,6 +1446,11 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
     entityId,
     entityName,
     entityPath,
+    defaultRate: {
+      amount: 5000,
+      currency: 'KSH',
+      rate: 5000
+    },
     processingFee: {
       amount: 5000,
       currency: 'KSH',
@@ -1411,7 +1484,8 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
       alienAssistance: { applicable: false, value: 1000 },
       reEntryApproval: { applicable: false, value: 1000 },
       passportEndorsement: { applicable: false, value: 1000 }
-    }
+    },
+    applicableDiscounts: []
   })
 
   const toggleRowExpansion = (rowId: string) => {
@@ -1438,7 +1512,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
     setHasUnsavedChanges(true)
   }
 
-  const updateCurrency = (entryId: string, feeType: 'processingFee' | 'issuanceFee', currency: 'USD' | 'KSH') => {
+  const updateCurrency = (entryId: string, feeType: 'defaultRate' | 'processingFee' | 'issuanceFee', currency: 'USD' | 'KSH') => {
     if (isReadOnly) return
 
     const entry = currentPeriod.data.find(e => e.id === entryId)
@@ -1477,6 +1551,63 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
         [field]: newValues
       }
     })
+  }
+
+  const addDiscount = (entryId: string) => {
+    if (isReadOnly) return
+
+    const entry = currentPeriod.data.find(e => e.id === entryId)
+    if (!entry) return
+
+    const newDiscount: DiscountOption = {
+      id: generateRateId(),
+      name: '',
+      type: 'percentage',
+      value: 0,
+      applicable: true
+    }
+
+    updateRateEntry(entryId, {
+      applicableDiscounts: [...(entry.applicableDiscounts || []), newDiscount]
+    })
+  }
+
+  const updateDiscount = (entryId: string, discountId: string, updates: Partial<DiscountOption>) => {
+    if (isReadOnly) return
+
+    const entry = currentPeriod.data.find(e => e.id === entryId)
+    if (!entry) return
+
+    updateRateEntry(entryId, {
+      applicableDiscounts: (entry.applicableDiscounts || []).map(discount =>
+        discount.id === discountId ? { ...discount, ...updates } : discount
+      )
+    })
+  }
+
+  const removeDiscount = (entryId: string, discountId: string) => {
+    if (isReadOnly) return
+
+    const entry = currentPeriod.data.find(e => e.id === entryId)
+    if (!entry) return
+
+    updateRateEntry(entryId, {
+      applicableDiscounts: (entry.applicableDiscounts || []).filter(discount => discount.id !== discountId)
+    })
+  }
+
+  // Total number of fee sub-columns currently visible, used to size spacer cells in group header rows
+  const getVisibleFeeColSpan = () => {
+    let span = 0
+    if (columnVisibility.defaultRate) span += 3
+    if (columnVisibility.processingFee) span += 3
+    if (columnVisibility.issuanceFee) span += 5
+    if (columnVisibility.bclConsultancy) span += 3
+    if (columnVisibility.officer) span += 3
+    if (columnVisibility.extraConsideration) span += 5
+    if (columnVisibility.convenienceFee) span += 3
+    if (columnVisibility.applicableDiscounts) span += 1
+    return span
   }
 
   const handleCreateNewPeriod = async () => {
@@ -1615,6 +1746,108 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
     </Popover>
   )
 
+  const DiscountsPopover = ({ entry }: { entry: RateEntry }) => {
+    const discounts = entry.applicableDiscounts || []
+    const applicableCount = discounts.filter(d => d.applicable).length
+
+    return (
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            className="w-full justify-between text-left font-normal h-8 text-xs"
+            disabled={isReadOnly}
+          >
+            <span className="truncate">
+              {discounts.length === 0 ? (
+                <span className="text-muted-foreground">No discounts</span>
+              ) : (
+                `${applicableCount}/${discounts.length} active`
+              )}
+            </span>
+            <ChevronDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-96 p-3">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium">Applicable Discounts</div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2"
+                onClick={() => addDiscount(entry.id)}
+                disabled={isReadOnly}
+              >
+                <Plus className="h-3 w-3 mr-1" />
+                Add
+              </Button>
+            </div>
+            {discounts.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No discounts configured. Add one to make it selectable when billing a job.
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {discounts.map((discount) => (
+                  <div key={discount.id} className="flex items-center gap-1 border rounded p-2">
+                    <Checkbox
+                      checked={discount.applicable}
+                      onCheckedChange={(checked) => updateDiscount(entry.id, discount.id, { applicable: checked as boolean })}
+                      disabled={isReadOnly}
+                    />
+                    <Input
+                      type="text"
+                      placeholder="Discount name"
+                      value={discount.name}
+                      onChange={(e) => updateDiscount(entry.id, discount.id, { name: e.target.value })}
+                      className="h-7 text-xs flex-1 min-w-0"
+                      disabled={isReadOnly}
+                    />
+                    <Select
+                      value={discount.type}
+                      onValueChange={(value: 'percentage' | 'fixed') => updateDiscount(entry.id, discount.id, { type: value })}
+                      disabled={isReadOnly}
+                    >
+                      <SelectTrigger className="h-7 w-16 text-xs px-2">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="percentage">%</SelectItem>
+                        <SelectItem value="fixed">KSH</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type="text"
+                      value={discount.value.toString()}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                          updateDiscount(entry.id, discount.id, { value: value === '' ? 0 : parseFloat(value) })
+                        }
+                      }}
+                      className="h-7 w-14 text-xs text-center"
+                      disabled={isReadOnly}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                      onClick={() => removeDiscount(entry.id, discount.id)}
+                      disabled={isReadOnly}
+                    >
+                      <Minus className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
+    )
+  }
+
   const renderRateRow = (entry: RateEntry, index: string, isChild: boolean, depth: number = 0) => {
     const rowHeight = density === 'compact' ? 'h-10' : density === 'spacious' ? 'h-16' : 'h-12'
     const inputHeight = density === 'compact' ? 'h-7' : density === 'spacious' ? 'h-10' : 'h-8'
@@ -1669,6 +1902,52 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
               </div>
             </div>
           </TableCell>
+        )}
+
+        {/* Default Rate Section */}
+        {columnVisibility.defaultRate && (
+          <>
+            <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
+              <AmountInput
+                value={entry.defaultRate?.amount ?? ''}
+                onChange={(value) => {
+                  const numValue = parseFloat(value);
+                  const isValidNumber = !isNaN(numValue) && isFinite(numValue);
+                  updateRateEntry(entry.id, {
+                    defaultRate: {
+                      ...entry.defaultRate,
+                      amount: value, // Store raw value
+                      rate: isValidNumber
+                        ? (entry.defaultRate?.currency === 'USD' ? numValue * rates.usd : numValue)
+                        : 0
+                    }
+                  });
+                }}
+                disabled={isReadOnly}
+                className={cn(inputHeight, "text-center", fontSize, "border-0 bg-white/70 focus:bg-white transition-colors")}
+              />
+            </TableCell>
+            <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
+              <Select
+                value={entry.defaultRate?.currency || 'KSH'}
+                onValueChange={(value: 'USD' | 'KSH') => updateCurrency(entry.id, 'defaultRate', value)}
+                disabled={isReadOnly}
+              >
+                <SelectTrigger className={cn(inputHeight, "border-0 bg-white/70 focus:bg-white", fontSize, "transition-colors")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="USD">USD</SelectItem>
+                  <SelectItem value="KSH">KSH</SelectItem>
+                </SelectContent>
+              </Select>
+            </TableCell>
+            <TableCell className="border-r-4 border-gray-300 bg-blue-50/30 p-2">
+              <div className={cn(inputHeight, fontSize, "bg-blue-100/50 rounded px-2 flex items-center justify-center text-blue-800 font-semibold")}>
+                {(entry.defaultRate?.rate || 0).toLocaleString()}
+              </div>
+            </TableCell>
+          </>
         )}
 
         {/* Processing Fee Section */}
@@ -2001,6 +2280,13 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
               </TableCell>
             ))}
           </>
+        )}
+
+        {/* Applicable Discounts Section */}
+        {columnVisibility.applicableDiscounts && (
+          <TableCell className="p-2 bg-amber-50/40">
+            <DiscountsPopover entry={entry} />
+          </TableCell>
         )}
       </TableRow>
     )
@@ -2364,6 +2650,12 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                         </TableHead>
                       )}
 
+                      {/* Default Rate */}
+                      {columnVisibility.defaultRate && (
+                        <TableHead colSpan={3} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-700 p-2">
+                          Default Rate
+                        </TableHead>
+                      )}
                       {/* Processing Fee - Blue background */}
                       {columnVisibility.processingFee && (
                         <TableHead colSpan={3} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-700 p-2">
@@ -2396,8 +2688,14 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                       )}
                       {/* Convenience Fee - Indigo background */}
                       {columnVisibility.convenienceFee && (
-                        <TableHead colSpan={3} className="text-center text-white font-semibold bg-blue-700 p-2">
+                        <TableHead colSpan={3} className={cn("text-center text-white font-semibold bg-blue-700 p-2", columnVisibility.applicableDiscounts ? "border-r-4 border-slate-300" : "")}>
                           Convenience Fee
+                        </TableHead>
+                      )}
+                      {/* Applicable Discounts */}
+                      {columnVisibility.applicableDiscounts && (
+                        <TableHead className="text-center text-white font-semibold bg-blue-700 p-2">
+                          Applicable Discounts
                         </TableHead>
                       )}
                     </TableRow>
@@ -2412,6 +2710,21 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                           "sticky bg-blue-500 border-r z-50 p-2",
                           columnVisibility.index ? "left-16" : "left-0"
                         )}></TableHead>
+                      )}
+
+                      {/* Default Rate Sub-headers */}
+                      {columnVisibility.defaultRate && (
+                        <>
+                          <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                            Amount
+                          </TableHead>
+                          <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                            Currency
+                          </TableHead>
+                          <TableHead className="border-r-4 border-slate-300 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                            Rate (KSH)
+                          </TableHead>
+                        </>
                       )}
 
                       {/* Processing Fee Sub-headers */}
@@ -2510,10 +2823,17 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                           <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
                             Re-Entry
                           </TableHead>
-                          <TableHead className="text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                          <TableHead className={cn("text-center text-xs text-white font-semibold bg-blue-500 p-2", columnVisibility.applicableDiscounts ? "border-r-4 border-slate-300" : "")}>
                             Passport Endorsement
                           </TableHead>
                         </>
+                      )}
+
+                      {/* Applicable Discounts Sub-headers */}
+                      {columnVisibility.applicableDiscounts && (
+                        <TableHead className="text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                          Discounts
+                        </TableHead>
                       )}
                     </TableRow>
                   </TableHeader>
@@ -2564,7 +2884,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                                 </div>
                               </TableCell>
                             )}
-                            <TableCell colSpan={22} className="text-slate-600 italic text-sm px-3 p-2">
+                            <TableCell colSpan={getVisibleFeeColSpan()} className="text-slate-600 italic text-sm px-3 p-2">
                               <div className="flex items-center gap-2">
                                 {/* Click to {isExpanded ? 'collapse' : 'expand'} and view rate entries */}
                               </div>
@@ -2626,7 +2946,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                                         </div>
                                       </TableCell>
                                     )}
-                                    <TableCell colSpan={22} className="text-blue-600 italic text-sm px-3 p-2">
+                                    <TableCell colSpan={getVisibleFeeColSpan()} className="text-blue-600 italic text-sm px-3 p-2">
                                       <div className="flex items-center gap-2">
                                         {/* Click to {isClassExpanded ? 'collapse' : 'expand'} and view {hasSubclasses ? 'subclass' : 'class'} entries */}
                                       </div>
@@ -2685,7 +3005,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                                               </div>
                                             </TableCell>
                                           )}
-                                          <TableCell colSpan={22} className="text-blue-600 italic text-sm px-3 p-2">
+                                          <TableCell colSpan={getVisibleFeeColSpan()} className="text-blue-600 italic text-sm px-3 p-2">
                                             <div className="flex items-center gap-2">
                                               {/* Click to {isSubclassExpanded ? 'collapse' : 'expand'} and view subclass entries */}
                                             </div>
@@ -2749,6 +3069,17 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                               )} visible entries)
                             </span>
                           </TableCell>
+                        )}
+
+                        {/* Default Rate Totals */}
+                        {columnVisibility.defaultRate && (
+                          <>
+                            <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">-</TableCell>
+                            <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">-</TableCell>
+                            <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">
+                              {totals.defaultRateRate.toLocaleString()}
+                            </TableCell>
+                          </>
                         )}
 
                         {/* Processing Fee Totals */}
@@ -2839,6 +3170,11 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                               {totals.conveniencePassportEndorsement.toLocaleString()}
                             </TableCell>
                           </>
+                        )}
+
+                        {/* Applicable Discounts Totals */}
+                        {columnVisibility.applicableDiscounts && (
+                          <TableCell className="bg-amber-100/70 p-3 text-center font-bold text-amber-800">-</TableCell>
                         )}
                       </TableRow>
                     )}

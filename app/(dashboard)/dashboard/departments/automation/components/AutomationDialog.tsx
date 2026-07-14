@@ -114,6 +114,7 @@ interface WebDataGroup {
     linkedMasterFieldId?: number;
     linkedMasterFields?: number[];
     linkedKycDocuments?: string[];
+    linkedRequirementId?: string; // Requirement (tm_class_requirements.requirements[].id) this document sub-field maps to
     sourceLogic?: 'all' | 'priority';
     linkedJobQuestionIds?: string[];
     documentLogic?: 'merge' | 'fallback';
@@ -128,6 +129,7 @@ interface WebDataGroup {
   sourceLogic?: 'all' | 'priority';
   kycDocumentId?: string; // Legacy support
   linkedKycDocuments?: string[]; // Array of IDs
+  linkedRequirementId?: string; // Requirement (tm_class_requirements.requirements[].id) this document field maps to
   documentLogic?: 'merge' | 'fallback';
   documentCount?: number; // Number of documents required
   computedFunction?: string;
@@ -410,11 +412,12 @@ function MultiJobQuestionPicker({
   )
 }
 
-function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, onUpdate }: {
+function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, classRequirements, onUpdate }: {
   group: WebDataGroup;
   masterFields: JobField[];
   kycDocuments: KYCDocument[];
   jobQuestions: any[];
+  classRequirements?: any;
   onUpdate: (items: any[]) => void;
 }) {
   const items = group.arrayItems || [];
@@ -523,6 +526,18 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, on
     onUpdate(newItems);
   };
 
+  const linkRequirement = (idx: number, req: any) => {
+    const newItems = [...items];
+    newItems[idx] = { ...newItems[idx], linkedRequirementId: req.id };
+    onUpdate(newItems);
+  };
+
+  const unlinkRequirement = (idx: number) => {
+    const newItems = [...items];
+    newItems[idx] = { ...newItems[idx], linkedRequirementId: undefined };
+    onUpdate(newItems);
+  };
+
   const [open, setOpen] = useState(false);
 
   return (
@@ -621,6 +636,13 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, on
                                   availableDocuments={kycDocuments}
                                   linkedDocumentIds={item.linkedKycDocuments || []}
                                   onSelect={(doc) => linkDocument(i, doc.id)}
+                                />
+                                <RequirementPicker
+                                  availableRequirements={(classRequirements?.requirements || []).filter((r: any) => (r.document_ids?.length || 0) > 0)}
+                                  fieldEntityTypes={item.entityTypes || group.entityTypes}
+                                  linkedRequirementId={item.linkedRequirementId}
+                                  onSelect={(req) => linkRequirement(i, req)}
+                                  onClear={() => unlinkRequirement(i)}
                                 />
                               </div>
                             ) : (
@@ -962,7 +984,8 @@ function WebDataGroupEditDialog({
   onSave,
   masterFields,
   kycDocuments,
-  jobQuestions
+  jobQuestions,
+  classRequirements
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -971,6 +994,7 @@ function WebDataGroupEditDialog({
   masterFields: JobField[];
   kycDocuments: KYCDocument[];
   jobQuestions: any[];
+  classRequirements?: any;
 }) {
   const [editingGroup, setEditingGroup] = useState<WebDataGroup | null>(null);
   const [addDocOpen, setAddDocOpen] = useState(false);
@@ -1223,6 +1247,16 @@ function WebDataGroupEditDialog({
                         </Popover>
                       </div>
                     </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] font-bold text-slate-500 uppercase">Linked Requirement</Label>
+                      <RequirementPicker
+                        availableRequirements={(classRequirements?.requirements || []).filter((r: any) => (r.document_ids?.length || 0) > 0)}
+                        fieldEntityTypes={editingGroup.entityTypes}
+                        linkedRequirementId={editingGroup.linkedRequirementId}
+                        onSelect={(req) => updateField('linkedRequirementId', req.id)}
+                        onClear={() => updateField('linkedRequirementId', undefined)}
+                      />
+                    </div>
                   </div>
                 ) : isComputed ? (
                   <ComputedFieldConfig
@@ -1236,6 +1270,7 @@ function WebDataGroupEditDialog({
                     masterFields={masterFields}
                     kycDocuments={kycDocuments}
                     jobQuestions={jobQuestions}
+                    classRequirements={classRequirements}
                     onUpdate={(items) => updateField('arrayItems', items)}
                   />
                 ) : (
@@ -1663,6 +1698,107 @@ function MultiDocumentPicker({
       </PopoverContent>
     </Popover>
   )
+}
+
+// Lets a document field/array item declare which requirement (tm_class_requirements
+// requirements[]) it actually satisfies, instead of only listing raw KYC document
+// ids - AutomationTab uses this to deep-link back to the matching requirement row
+// instead of re-implementing requirement status/upload logic independently.
+function RequirementPicker({
+  availableRequirements,
+  fieldEntityTypes,
+  linkedRequirementId,
+  onSelect,
+  onClear,
+}: {
+  availableRequirements: any[];
+  fieldEntityTypes?: string[];
+  linkedRequirementId?: string;
+  onSelect: (req: any) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const isCompatible = (req: any) => {
+    const reqTypes: string[] = req.entityTypes || (req.applicantType ? [req.applicantType] : []);
+    if (reqTypes.length === 0 || !fieldEntityTypes || fieldEntityTypes.length === 0) return true;
+    return reqTypes.some((t: string) => fieldEntityTypes.includes(t));
+  };
+
+  const filtered = availableRequirements
+    .filter(req => (req.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
+    .sort((a, b) => Number(isCompatible(b)) - Number(isCompatible(a)));
+
+  const linkedReq = availableRequirements.find(r => r.id === linkedRequirementId);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          type="button"
+          className={cn(
+            "w-full justify-between h-8 text-xs font-normal",
+            linkedReq ? "border-green-200 bg-green-50 text-green-700" : "text-slate-500 border-dashed"
+          )}
+        >
+          <span className="flex items-center gap-1.5 truncate">
+            <Shield className="h-3 w-3 shrink-0" />
+            {linkedReq ? linkedReq.name : "Link to requirement..."}
+          </span>
+          <ChevronRight className="h-3 w-3 opacity-50 shrink-0" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[300px] p-0" align="start">
+        <div className="p-3 border-b">
+          <Input
+            placeholder="Search requirements..."
+            className="h-9 text-sm"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <ScrollArea className="h-[220px]">
+          <div className="p-1">
+            {linkedReq && (
+              <div
+                className="flex items-center gap-2 p-2 rounded-sm cursor-pointer text-sm hover:bg-red-50 text-red-600"
+                onClick={() => { onClear(); setOpen(false); }}
+              >
+                <X className="h-3 w-3 mr-2" /> Unlink requirement
+              </div>
+            )}
+            {filtered.length === 0 ? (
+              <div className="py-6 text-center text-sm text-slate-500">No requirements found.</div>
+            ) : (
+              filtered.map((req) => {
+                const compatible = isCompatible(req);
+                const isLinked = req.id === linkedRequirementId;
+                return (
+                  <div
+                    key={req.id}
+                    className={cn(
+                      "flex items-center gap-2 p-2 rounded-sm cursor-pointer text-sm",
+                      isLinked ? "bg-green-50" : "hover:bg-slate-100",
+                      !compatible && "opacity-50"
+                    )}
+                    onClick={() => { onSelect(req); setOpen(false); }}
+                  >
+                    <Shield className="h-3 w-3 shrink-0 text-green-500" />
+                    <span className="flex-1 truncate">{req.name}</span>
+                    {!compatible && <span className="text-[9px] text-slate-400 italic shrink-0">diff. entity</span>}
+                    {isLinked && <Check className="h-3 w-3 text-green-600 shrink-0" />}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 // --- NEW COMPONENT: Bulk Paste Fields Dialog ---
@@ -2309,28 +2445,39 @@ export function AutomationDialog({
       setMasterFields(fieldsRes.data || []);
       setKycDocuments(kycRes.data || []);
 
-      // 2. Fetch Job Questions matching the automation's job_level
+      // 2. Fetch Job Questions/Requirements matching the automation's job_level.
+      // Uses the same hierarchical (exact -> subclass-null -> class-null) fallback
+      // and union-across-matching-rows logic as fetchJobWorkspaceData.ts, so a
+      // requirement picked here always has the same .id a task's own
+      // task.requirements ends up containing - otherwise a `linkedRequirementId`
+      // set here could reference an id that never appears for tasks that use
+      // this automation, silently breaking the "jump to requirement" deep link.
       if (initialData?.job_level) {
-        const jobLevelString = typeof initialData.job_level === 'string'
-          ? initialData.job_level
-          : JSON.stringify(initialData.job_level);
-
-        const { data, error } = await supabase
+        const jl = initialData.job_level;
+        const { data: allRows, error } = await supabase
           .from('tm_class_requirements')
           .select('*')
-          .eq('job_level', jobLevelString)
-          .maybeSingle();
+          .eq('job_level->>department_id', String(jl.department_id))
+          .eq('job_level->>subdepartment_id', String(jl.subdepartment_id));
 
         if (error) {
           console.error(`❌ [Automation Dialog] Error fetching requirements for "${initialData.name}":`, error);
         } else {
-          // LOG: Contextual Questions for this specific automation
-          console.log(`🎯 [Automation Dialog] Contextual Load for "${initialData.name}"`);
-          console.log(`   - Job Level:`, initialData.job_level);
-          console.log(`   - Questions Found:`, data?.job_specific_questions || []);
+          const matchingRows = (allRows || []).filter((row: any) => {
+            const rjl = row.job_level || {};
+            if (String(rjl.class_id || 'null') === String(jl.class_id || 'null') &&
+              String(rjl.subclass_id || 'null') === String(jl.subclass_id || 'null')) return true;
+            if (jl.subclass_id && !rjl.subclass_id && String(rjl.class_id || 'null') === String(jl.class_id || 'null')) return true;
+            if (jl.class_id && !rjl.class_id) return true;
+            return false;
+          });
+          const merged = {
+            requirements: matchingRows.flatMap((r: any) => r.requirements || []),
+            job_specific_questions: matchingRows.flatMap((r: any) => r.job_specific_questions || []),
+          };
 
-          setJobQuestions(data?.job_specific_questions || []);
-          setClassRequirements(data || null);
+          setJobQuestions(merged.job_specific_questions);
+          setClassRequirements(matchingRows.length > 0 ? merged : null);
         }
       } else {
         console.log(`ℹ️ [Automation Dialog] No Job Level defined for "${initialData?.name || 'New Automation'}". Using global question list.`);
@@ -2613,11 +2760,11 @@ export function AutomationDialog({
         efnsDisplayName: formatDisplayName(data.name),
         variableName: formatVariableName(data.name),
         fieldType: 'document',
-        entityTypes: (data.applicantTypes && data.applicantTypes.length > 0) ? data.applicantTypes : ['principal'],
+        entityTypes: (data.entityTypes && data.entityTypes.length > 0) ? data.entityTypes : ['principal'],
         linkedMasterFields: [],
         linkedKycDocuments: data.document_ids || [],
+        linkedRequirementId: data.id,
         documentLogic: 'merge',
-        linkedJobQuestionIds: [data.id]
       }]);
     } else {
       const newRow: WebDataGroup = {
@@ -3111,19 +3258,31 @@ export function AutomationDialog({
                                     </TableCell>
 
                                     <TableCell className="p-3 border-r border-slate-100 align-middle">
-                                      {group.linkedJobQuestionIds && group.linkedJobQuestionIds.length > 0 ? (
+                                      {group.linkedRequirementId ? (
+                                        <div className="flex flex-col justify-center gap-1">
+                                          <div className="flex items-center gap-2">
+                                            <Shield className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                                            <span className="text-sm font-medium text-green-700 truncate max-w-[200px]">
+                                              {(classRequirements?.requirements || []).find((r: any) => r.id === group.linkedRequirementId)?.name || 'Linked Requirement'}
+                                            </span>
+                                            <Badge variant="outline" className="text-[9px] ml-auto bg-green-50 text-green-600 border-green-200">Requirement</Badge>
+                                          </div>
+                                          {isDocument && (group.linkedKycDocuments || []).length > 0 && (
+                                            <div className="flex items-center gap-2 pl-5">
+                                              <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">
+                                                {(group.linkedKycDocuments || []).length} Doc Type{(group.linkedKycDocuments || []).length !== 1 ? 's' : ''}
+                                              </Badge>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : group.linkedJobQuestionIds && group.linkedJobQuestionIds.length > 0 ? (
                                         <div className="flex items-center gap-2">
                                           <HelpCircle className="h-3.5 w-3.5 text-purple-600" />
                                           <span className="text-sm font-medium text-purple-700 truncate max-w-[200px]">
                                             {group.linkedJobQuestionIds.join(', ')}
                                           </span>
-                                          <Badge variant="outline" className={cn(
-                                            "text-[9px] ml-auto",
-                                            group.fieldType === 'document' && group.linkedKycDocuments?.length > 0
-                                              ? "bg-green-50 text-green-600 border-green-200"
-                                              : "bg-purple-50 text-purple-600 border-purple-200"
-                                          )}>
-                                            {group.fieldType === 'document' && group.linkedKycDocuments?.length > 0 ? 'Requirement' : 'Job Question'}
+                                          <Badge variant="outline" className="text-[9px] ml-auto bg-purple-50 text-purple-600 border-purple-200">
+                                            Job Question
                                           </Badge>
                                         </div>
                                       ) : isDocument ? (
@@ -3399,6 +3558,7 @@ export function AutomationDialog({
         masterFields={masterFields}
         kycDocuments={kycDocuments}
         jobQuestions={jobQuestions}
+        classRequirements={classRequirements}
       />
 
       {/* NEW Add Data Field Dialog */}
