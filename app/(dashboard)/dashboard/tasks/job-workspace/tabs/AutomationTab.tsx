@@ -1415,17 +1415,14 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                   const { bgColor, Icon } = getEntityTypeConfig(col.type)
                   const colKey = String(col.id)
                   return (
-                    <TableHead key={col.id} className={cn("min-w-[380px] border-b border-r top-0 p-0 text-white align-top cursor-pointer hover:brightness-110 transition-all", bgColor)}>
-                      <div className="flex flex-col h-full w-full">
-                        <div className="flex flex-col items-center justify-center gap-1.5 p-4 border-b border-white/20 flex-1" onClick={() => handleSort(colKey)}>
-                          <span className={cn("flex items-center gap-2 text-[11px] font-semibold tracking-wide")}>
-                            <Icon className="h-4 w-4 opacity-90" />
-                            <span className="truncate max-w-[200px]">{col.label}</span>
-                            {sortCol === colKey && (sortDir === "asc" ? <ArrowUp className="h-3.5 w-3.5 shrink-0 opacity-80" /> : <ArrowDown className="h-3.5 w-3.5 shrink-0 opacity-80" />)}
-                          </span>
-                          <span className="text-[10px] font-medium uppercase tracking-wide opacity-80">{col.subLabel}</span>
-                        </div>
-                        <div className="text-[10px] uppercase font-semibold tracking-wider bg-black/20 shrink-0 px-4 py-2.5 text-center">Action</div>
+                    <TableHead key={col.id} className={cn("min-w-[220px] border-b border-r top-0 p-0 text-white align-middle cursor-pointer hover:brightness-110 transition-all", bgColor)}>
+                      <div className="flex flex-col items-center justify-center gap-1.5 p-3 h-full" onClick={() => handleSort(colKey)}>
+                        <span className={cn("flex items-center gap-2 text-[11px] font-semibold tracking-wide text-white")}>
+                          <Icon className="h-4 w-4 opacity-90 text-white" />
+                          <span className="truncate max-w-[150px] text-white">{col.label}</span>
+                          {sortCol === colKey && (sortDir === "asc" ? <ArrowUp className="h-3.5 w-3.5 shrink-0 opacity-80 text-white" /> : <ArrowDown className="h-3.5 w-3.5 shrink-0 opacity-80 text-white" />)}
+                        </span>
+                        <span className="text-[10px] font-medium uppercase tracking-wide opacity-80 text-white/95">{col.subLabel}</span>
                       </div>
                     </TableHead>
                   )
@@ -1683,29 +1680,11 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
 
                             <TableCell className={cn("w-[220px] py-0 px-4 border-b border-r sticky left-[368px] z-10 align-middle transition-colors", zebraBg, "group-hover:bg-slate-100/80")}>
                               <div className="flex flex-col justify-center h-full py-2 gap-0.5">
-                                {field.customFieldSource && (
+                                {field.customFieldSource ? (
                                   <span className="text-[10px] font-semibold text-blue-600 truncate">{field.customFieldSource}</span>
+                                ) : (
+                                  <span className="text-slate-300 italic">No source</span>
                                 )}
-                                <div className="text-xs text-slate-500 truncate">
-                                  {hasDefault ? (
-                                    <span className="flex items-center gap-1"><Lock className="h-3 w-3 text-slate-400 shrink-0" /> Default value</span>
-                                  ) : isDocument ? (
-                                    <span className="truncate">
-                                      {(field.linkedKycDocuments || []).length} doc type{(field.linkedKycDocuments || []).length !== 1 ? 's' : ''}
-                                      {field.linkedRequirementId ? ' · requirement linked' : ''}
-                                    </span>
-                                  ) : isComputed ? (
-                                    <span className="truncate">{field.computedFunction || 'Computed logic'}</span>
-                                  ) : isArray ? (
-                                    <span className="truncate">{(field.arrayItems || []).length} column{(field.arrayItems || []).length !== 1 ? 's' : ''}</span>
-                                  ) : (mIds.length > 0 || qIds.length > 0) ? (
-                                    <span className="truncate">
-                                      {[mIds.length > 0 ? `${mIds.length} DB` : null, qIds.length > 0 ? `${qIds.length} Question` : null].filter(Boolean).join(' + ')}
-                                    </span>
-                                  ) : !field.customFieldSource ? (
-                                    <span className="text-slate-300 italic">No source</span>
-                                  ) : null}
-                                </div>
                               </div>
                             </TableCell>
 
@@ -1741,7 +1720,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                               const isEditingDropdown = editingOptions.length > 0
 
                               return (
-                                <TableCell key={col.id} className={cn("p-0 border-b border-r align-middle transition-colors min-w-[380px]", zebraBg, "group-hover:bg-slate-100/80")}>
+                                <TableCell key={col.id} className={cn("p-0 border-b border-r align-middle transition-colors min-w-[220px]", zebraBg, "group-hover:bg-slate-100/80")}>
                                   {!applicable ? (
                                     <div className="flex h-full items-center justify-center p-3">
                                       <span className="text-xs font-medium text-slate-300 italic">N/A</span>
@@ -1995,7 +1974,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                   const docPreviewKey = `${item.variableName || item.name}-${col.id}`
 
                                   return (
-                                    <TableCell key={col.id} className="p-0 border-b border-r align-middle bg-white group-hover:bg-indigo-50/10 transition-colors min-w-[380px]">
+                                    <TableCell key={col.id} className="p-0 border-b border-r align-middle bg-white group-hover:bg-indigo-50/10 transition-colors min-w-[220px]">
                                       {!row ? (
                                         <div className="flex h-full items-center justify-center p-3">
                                           <span className="text-xs font-medium text-slate-300 italic">N/A</span>

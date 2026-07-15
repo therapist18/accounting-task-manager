@@ -249,10 +249,21 @@ useEffect(() => {
         {/* MAIN CONTENT PANEL */}
         <ResizablePanel defaultSize={80}>
           <main className="h-full overflow-hidden p-6 space-y-6 flex flex-col">
-          <header>
-  <h1 className="text-3xl font-bold tracking-tight">Template Management</h1>
-  <p className="text-muted-foreground">{breadcrumb || 'Select a department to begin'}</p>
-</header>
+            <header className="border-b border-slate-100 pb-4 shrink-0 flex items-center justify-between gap-4">
+              <div className="space-y-1">
+                <h1 className="text-2xl font-bold tracking-tight text-slate-800">Template Management</h1>
+                <p className="text-xs text-slate-500 font-medium flex items-center gap-1">
+                  {breadcrumb ? (
+                    <>
+                      <span className="text-slate-400 font-normal">Path:</span>
+                      <span className="text-blue-600 font-semibold">{breadcrumb}</span>
+                    </>
+                  ) : (
+                    "Select a department from the sidebar to configure templates"
+                  )}
+                </p>
+              </div>
+            </header>
           {isLoading && !jobLevelObject ? (
   <div className="flex justify-center items-center h-2/3">
     <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -272,18 +283,18 @@ useEffect(() => {
   </Card>
 ) : (
               <div className="grid grid-cols-12 gap-6 h-[calc(100%-80px)]">
-                <Card className="col-span-4 h-full flex flex-col">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <Card className="col-span-4 h-full flex flex-col rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-slate-50 pb-4">
                     <div>
-                      <CardTitle>Template Types</CardTitle>
-                      <CardDescription>Required templates.</CardDescription>
+                      <CardTitle className="text-base font-bold text-slate-800">Template Types</CardTitle>
+                      <CardDescription className="text-xs text-slate-400">Required templates.</CardDescription>
                     </div>
                   </CardHeader>
 
-                  <CardContent className="flex-1 overflow-hidden p-2">
+                  <CardContent className="flex-1 overflow-hidden p-3 bg-slate-50/10">
                     <ScrollArea className="h-full">
                       {isLoading ? (
-                        <div className="flex justify-center items-center h-full"><Loader2 className="h-6 w-6 animate-spin" /></div>
+                        <div className="flex justify-center items-center h-full"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>
                       ) : letterTypes.length > 0 ? (
                         <div className="space-y-1">
                           {letterTypes.filter(letter => letter.has_template === "true").map(letter => {
@@ -293,8 +304,8 @@ useEffect(() => {
                               <div key={letter.id}>
                                 <button
                                   className={cn(
-                                    "flex items-center w-full rounded-md transition-colors hover:bg-accent group py-2 pr-3 text-left text-sm font-medium outline-none",
-                                    isDocActive ? "bg-secondary text-secondary-foreground" : "transparent"
+                                    "flex items-center w-full rounded-xl transition-all duration-200 hover:bg-slate-50 group px-4 py-3 text-left text-xs font-bold outline-none border",
+                                    isDocActive ? "bg-blue-50 text-blue-700 border-blue-100 shadow-sm" : "bg-transparent text-slate-600 border-transparent"
                                   )}
                                   onClick={() => handleLetterClick(letter)}
                                 >
@@ -305,7 +316,7 @@ useEffect(() => {
                           })}
                         </div>
                       ) : (
-                        <div className="text-center py-10 text-sm text-muted-foreground">No template types found.</div>
+                        <div className="text-center py-10 text-xs text-slate-400">No template types found.</div>
                       )}
                     </ScrollArea>
                   </CardContent>
@@ -372,18 +383,18 @@ function TemplateCard({ template, onEdit, onDelete }) {
   };
 
   return (
-    <Card key={template.id} className="shadow-sm">
-      <CardHeader>
-        <CardTitle className="flex justify-between items-center text-lg">
+    <Card key={template.id} className="border border-slate-100 rounded-2xl shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden">
+      <CardHeader className="p-5">
+        <CardTitle className="flex justify-between items-center text-sm font-bold text-slate-800">
           {template.file_name}
-          <div className="flex gap-1">
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => onEdit(template)}>
-              <Settings className="h-4 w-4" />
+          <div className="flex gap-1.5">
+            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-50" onClick={() => onEdit(template)}>
+              <Settings className="h-3.5 w-3.5" />
             </Button>
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              className="h-7 w-7 rounded-full text-slate-400 hover:text-red-600 hover:bg-red-50"
               onClick={(e) => {
                 e.stopPropagation();
                 setShowDeleteDialog(true);
@@ -391,54 +402,56 @@ function TemplateCard({ template, onEdit, onDelete }) {
               disabled={isDeleting}
             >
               {isDeleting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
-                <Trash2 className="h-4 w-4" />
+                <Trash2 className="h-3.5 w-3.5" />
               )}
             </Button>
           </div>
 
           <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-            <AlertDialogContent>
+            <AlertDialogContent className="rounded-2xl max-w-sm">
               <AlertDialogHeader>
-                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                <AlertDialogDescription>
+                <AlertDialogTitle className="text-base font-bold text-slate-800">Are you sure?</AlertDialogTitle>
+                <AlertDialogDescription className="text-xs text-slate-500">
                   This will permanently delete the "{template.file_name}" template. This action cannot be undone.
                 </AlertDialogDescription>
               </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogFooter className="gap-2 mt-4">
+                <AlertDialogCancel className="h-9 px-4 rounded-full text-xs font-semibold">Cancel</AlertDialogCancel>
                 <AlertDialogAction
                   onClick={handleDelete}
-                  className="bg-destructive hover:bg-destructive/90"
+                  className="h-9 px-4 rounded-full bg-red-600 hover:bg-red-700 text-white text-xs font-semibold shadow-md shadow-red-500/10 border-0"
                   disabled={isDeleting}
                 >
                   {isDeleting ? (
                     <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
                       Deleting...
                     </>
-                  ) : 'Delete'}
+                  ) : "Delete"}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
         </CardTitle>
-        <CardDescription className="flex flex-col gap-2">
-          <div className="flex">
+        <CardDescription className="flex flex-col gap-3 pt-2">
+          <div className="flex flex-wrap gap-1.5">
             {template.entity_types && template.entity_types.length > 0
               ? template.entity_types.map(et => {
                 const entityConfig = ENTITY_TYPES.find(entityType => entityType.value === et);
                 return (
-                  <Badge key={et} variant="outline">
+                  <Badge key={et} variant="outline" className="text-[10px] font-semibold bg-slate-50 text-slate-600 border-slate-200 rounded-full px-2 py-0.5">
                     {entityConfig?.label || et}
                   </Badge>
                 );
               })
-              : <Badge variant="outline">Uncategorized</Badge>
+              : <Badge variant="outline" className="text-[10px] font-semibold bg-slate-50 text-slate-600 border-slate-200 rounded-full px-2 py-0.5">Uncategorized</Badge>
             }
           </div>
-          {template.description || `Type: ${template.file_type === 'text/html' ? 'Text Editor' : 'DOCX File'}`}
+          <span className="text-xs text-slate-500 leading-normal">
+            {template.description || `Type: ${template.file_type === 'text/html' ? 'Text Editor' : 'DOCX File'}`}
+          </span>
         </CardDescription>
       </CardHeader>
     </Card>
@@ -523,28 +536,31 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
   }, [filteredTemplates]);
 
   return (
-    <Card className="h-full flex flex-col">
-      <CardHeader className="flex-row items-center justify-between">
+    <Card className="h-full flex flex-col rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+      <CardHeader className="flex flex-row items-center justify-between border-b border-slate-50 pb-4">
         <div>
-          <CardTitle>{selectedLetter.display_name}</CardTitle>
-          <CardDescription>Templates for this document type.</CardDescription>
+          <CardTitle className="text-base font-bold text-slate-800">{selectedLetter.display_name}</CardTitle>
+          <CardDescription className="text-xs text-slate-400">Templates for this document type.</CardDescription>
         </div>
-        <Button onClick={onCreateNew}>
-          <PlusCircle className="mr-2 h-4 w-4" /> Create New
+        <Button 
+          onClick={onCreateNew}
+          className="h-9 px-4 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-md shadow-blue-500/10 border-0 hover:scale-[1.02] active:scale-[0.98] transition-all"
+        >
+          <PlusCircle className="mr-1.5 h-4 w-4" /> Create New
         </Button>
       </CardHeader>
-      <CardContent className="flex-1 overflow-hidden">
+      <CardContent className="flex-1 overflow-hidden p-5">
         {isLoading ? (
-          <div className="flex justify-center items-center h-full"><Loader2 className="h-6 w-6 animate-spin" /></div>
+          <div className="flex justify-center items-center h-full"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>
         ) : filteredTemplates.length > 0 ? (
           <Tabs defaultValue="all" className="flex flex-col h-full">
-            <TabsList>
-              <TabsTrigger value="all">All</TabsTrigger>
+            <TabsList className="bg-slate-100/80 p-0.5 rounded-full border border-slate-200/30 self-start">
+              <TabsTrigger value="all" className="rounded-full text-xs px-4 h-7 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm">All</TabsTrigger>
               {categorizedTemplates.tabs.map(tab => (
-                <TabsTrigger key={tab} value={tab} className="capitalize">{tab}</TabsTrigger>
+                <TabsTrigger key={tab} value={tab} className="capitalize rounded-full text-xs px-4 h-7 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm">{tab}</TabsTrigger>
               ))}
               {categorizedTemplates.categorized.uncategorized.length > 0 && (
-                <TabsTrigger value="uncategorized">Uncategorized</TabsTrigger>
+                <TabsTrigger value="uncategorized" className="rounded-full text-xs px-4 h-7 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm">Uncategorized</TabsTrigger>
               )}
             </TabsList>
 

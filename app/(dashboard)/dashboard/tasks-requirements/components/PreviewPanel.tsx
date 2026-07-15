@@ -4,10 +4,11 @@
 
 'use client';
 
-import React, { useEffect, useRef } from 'react';
-import { Loader2, FileText, Eye, Sparkles } from 'lucide-react';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { Loader2, FileText, Eye, Sparkles, ZoomIn, ZoomOut, Maximize, StretchHorizontal, RotateCcw, ChevronDown } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
 interface PreviewPanelProps {
@@ -21,6 +22,10 @@ interface PreviewPanelProps {
   docxBuffer?: ArrayBuffer | null;
 }
 
+type PreviewFitMode = 'zoom' | 'fit-width' | 'fit-page';
+
+const ZOOM_PRESETS = [25, 50, 75, 100, 125, 150, 200, 300];
+
 export const PreviewPanel = ({
   previewContent,
   isPreviewLoading,
@@ -32,8 +37,61 @@ export const PreviewPanel = ({
   docxBuffer,
 }: PreviewPanelProps) => {
   const docxContainerRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const contentWrapperRef = useRef<HTMLDivElement>(null);
   const hasHtmlContent = !isWordTemplate && previewContent && previewContent.trim().length > 0;
   const hasWordContent = isWordTemplate && !!docxBuffer;
+
+  const [fitMode, setFitMode] = useState<PreviewFitMode>('fit-width');
+  const [zoomLevel, setZoomLevel] = useState(100);
+
+  const applyFitMode = useCallback((mode: PreviewFitMode) => {
+    setFitMode(mode);
+    if (mode === 'zoom') return;
+
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    requestAnimationFrame(() => {
+      const containerWidth = container.clientWidth - 48;
+      if (mode === 'fit-width') {
+        const scale = Math.min(containerWidth / 800, 1.5);
+        const pct = Math.round(scale * 100);
+        setZoomLevel(pct);
+      } else if (mode === 'fit-page') {
+        const containerHeight = container.clientHeight - 48;
+        const scaleW = containerWidth / 800;
+        const scaleH = containerHeight / 1100;
+        const scale = Math.min(scaleW, scaleH, 1.5);
+        const pct = Math.round(scale * 100);
+        setZoomLevel(pct);
+      }
+    });
+  }, []);
+
+  const setZoom = useCallback((pct: number) => {
+    setFitMode('zoom');
+    setZoomLevel(Math.max(10, Math.min(400, pct)));
+  }, []);
+
+  const zoomIn = useCallback(() => setZoom(zoomLevel + 10), [zoomLevel, setZoom]);
+  const zoomOut = useCallback(() => setZoom(zoomLevel - 10), [zoomLevel, setZoom]);
+  const resetZoom = useCallback(() => { setFitMode('fit-width'); applyFitMode('fit-width'); }, [applyFitMode]);
+
+  useEffect(() => {
+    if (fitMode !== 'zoom') {
+      applyFitMode(fitMode);
+    }
+  }, [fitMode, applyFitMode]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || fitMode === 'zoom') return;
+
+    const observer = new ResizeObserver(() => applyFitMode(fitMode));
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [fitMode, applyFitMode]);
 
   useEffect(() => {
     if (!isWordTemplate || !docxBuffer || !docxContainerRef.current) return;
@@ -69,7 +127,7 @@ export const PreviewPanel = ({
     <div className={`${panelClasses} border-r relative bg-gradient-to-br from-slate-50 to-slate-100 overflow-hidden flex flex-col`}>
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-slate-200 shadow-sm">
-        <div className="px-4 py-3">
+        <div className="px-3 py-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
@@ -94,15 +152,66 @@ export const PreviewPanel = ({
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               {documentType && (
-                <Badge variant="outline" className="text-xs font-medium bg-slate-50 border-slate-200">
+                <Badge variant="outline" className="text-[10px] font-medium bg-slate-50 border-slate-200 mr-1">
                   {documentType}
                 </Badge>
               )}
-              <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 rounded-md border border-emerald-200">
+
+              {/* Fit mode buttons */}
+              <div className="flex items-center bg-slate-100/80 p-0.5 rounded-full border border-slate-200/50">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn("h-6 w-6 p-0 rounded-full text-xs transition-all", fitMode === 'fit-width' && "bg-white text-blue-600 shadow-sm border border-slate-200/20")}
+                  onClick={() => applyFitMode('fit-width')}
+                  title="Fit to width"
+                >
+                  <StretchHorizontal className="h-3 w-3" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn("h-6 w-6 p-0 rounded-full text-xs transition-all", fitMode === 'fit-page' && "bg-white text-blue-600 shadow-sm border border-slate-200/20")}
+                  onClick={() => applyFitMode('fit-page')}
+                  title="Fit to page"
+                >
+                  <Maximize className="h-3 w-3" />
+                </Button>
+              </div>
+
+              {/* Zoom controls */}
+              <div className="flex items-center gap-0.5">
+                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={zoomOut} title="Zoom out">
+                  <ZoomOut className="h-3 w-3" />
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-6 px-1.5 min-w-[48px] text-[10px] font-medium tabular-nums">
+                      {zoomLevel}%
+                      <ChevronDown className="h-2.5 w-2.5 ml-0.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="center" className="min-w-[100px]">
+                    {ZOOM_PRESETS.map(preset => (
+                      <DropdownMenuItem key={preset} onClick={() => setZoom(preset)} className="text-xs justify-center tabular-nums">
+                        {preset}%
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={zoomIn} title="Zoom in">
+                  <ZoomIn className="h-3 w-3" />
+                </Button>
+                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={resetZoom} title="Reset to fit width">
+                  <RotateCcw className="h-3 w-3" />
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 rounded-md border border-emerald-200 ml-1">
                 <Eye className="h-3 w-3 text-emerald-600" />
-                <span className="text-xs font-medium text-emerald-700">
+                <span className="text-[10px] font-medium text-emerald-700">
                   {isWordTemplate ? 'Doc' : 'Live'}
                 </span>
               </div>
@@ -114,12 +223,18 @@ export const PreviewPanel = ({
       {/* Content */}
       {isWordTemplate ? (
         /* Native DOCX rendering via docx-preview */
-        <div className="flex-1 overflow-auto bg-slate-100/80 dark:bg-slate-900/80 p-6 md:p-8 flex justify-center items-start">
+        <div ref={scrollContainerRef} className="flex-1 overflow-auto bg-slate-100/80 dark:bg-slate-900/80 p-6 md:p-8 flex justify-center items-start">
           {docxBuffer ? (
             <div
-              ref={docxContainerRef}
-              className="docx-preview-container shadow-2xl rounded-xl border border-slate-200/50 dark:border-slate-800 bg-white max-w-[800px] w-full"
-            />
+              ref={contentWrapperRef}
+              className="transition-transform duration-150 origin-top"
+              style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: fitMode === 'fit-page' ? 'top center' : 'top left' }}
+            >
+              <div
+                ref={docxContainerRef}
+                className="docx-preview-container shadow-2xl rounded-xl border border-slate-200/50 dark:border-slate-800 bg-white w-[800px]"
+              />
+            </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-20 px-6 w-full">
               {isPreviewLoading ? (
@@ -140,29 +255,36 @@ export const PreviewPanel = ({
         </div>
       ) : (
         /* HTML live preview */
-        <ScrollArea className="flex-1 bg-slate-100/80 dark:bg-slate-900/80">
+        <div ref={scrollContainerRef} className="flex-1 overflow-auto bg-slate-100/80 dark:bg-slate-900/80">
           <div className="max-w-4xl mx-auto p-6 md:p-8">
             {hasHtmlContent ? (
-              <div className="relative">
-                <div
-                  className={cn(
-                    "bg-white shadow-2xl rounded-xl overflow-hidden",
-                    "border border-slate-200/60 dark:border-slate-800/60",
-                    "min-h-[11in] px-8 md:px-12 pt-8 pb-8",
-                    EDITOR_PREVIEW_STYLES
-                  )}
-                  style={{ whiteSpace: 'pre-wrap' }}
-                  dangerouslySetInnerHTML={{ __html: previewContent }}
-                  ref={(el) => {
-                    if (el) {
-                      const firstChild = el.firstElementChild;
-                      if (firstChild) {
-                        (firstChild as HTMLElement).style.marginTop = '0';
-                        (firstChild as HTMLElement).style.paddingTop = '0';
+              <div
+                ref={contentWrapperRef}
+                className="transition-transform duration-150 origin-top"
+                style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: fitMode === 'fit-page' ? 'top center' : 'top left' }}
+              >
+                <div className="relative">
+                  <div
+                    className={cn(
+                      "bg-white shadow-2xl rounded-xl overflow-hidden",
+                      "border border-slate-200/60 dark:border-slate-800/60",
+                      "min-h-[11in] px-8 md:px-12 pt-8 pb-8",
+                      "w-[800px]",
+                      EDITOR_PREVIEW_STYLES
+                    )}
+                    style={{ whiteSpace: 'pre-wrap' }}
+                    dangerouslySetInnerHTML={{ __html: previewContent }}
+                    ref={(el) => {
+                      if (el) {
+                        const firstChild = el.firstElementChild;
+                        if (firstChild) {
+                          (firstChild as HTMLElement).style.marginTop = '0';
+                          (firstChild as HTMLElement).style.paddingTop = '0';
+                        }
                       }
-                    }
-                  }}
-                />
+                    }}
+                  />
+                </div>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-20 px-6 bg-white dark:bg-slate-900 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-800 shadow-sm">
@@ -176,7 +298,7 @@ export const PreviewPanel = ({
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
       )}
     </div>
   );

@@ -118,21 +118,28 @@ export function PlaceholderFormDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col p-0 border-none shadow-2xl">
-        <DialogHeader className="px-6 py-4 bg-white border-b shrink-0">
-          <DialogTitle className="text-xl font-bold flex items-center gap-2">
-            {isEditing ? <Pencil className="h-5 w-5 text-blue-600" /> : <PlusCircle className="h-5 w-5 text-blue-600" />}
-            {isEditing ? 'Edit' : 'Add'} Placeholder
-          </DialogTitle>
-          <DialogDescription>
-            Define the data sources and logic for document tag <span className="font-mono text-blue-600 font-bold">{'{'}{placeholder.name || '...'}{'}'}</span>
-          </DialogDescription>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col p-0 border-none shadow-2xl rounded-2xl bg-white">
+        <DialogHeader className="px-6 py-4 bg-white border-b border-slate-100 shrink-0 flex flex-row items-center gap-4">
+          <div className="p-2.5 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-xl shadow-md shadow-blue-500/10 shrink-0 flex items-center justify-center">
+            {isEditing ? <Pencil className="h-5 w-5 text-white" /> : <PlusCircle className="h-5 w-5 text-white" />}
+          </div>
+          <div className="flex flex-col min-w-0 flex-1">
+            <DialogTitle className="text-lg font-bold text-slate-800 tracking-tight">
+              {isEditing ? 'Edit' : 'Add'} Placeholder
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+              Define data sources and logic for tag 
+              <span className="font-mono text-xs px-2 py-0.5 bg-blue-50 text-blue-600 rounded-md border border-blue-200/50 font-bold tracking-tight">
+                {'{'}{placeholder.name || '...'}{'}'}
+              </span>
+            </DialogDescription>
+          </div>
         </DialogHeader>
 
         <ScrollArea className="flex-1 bg-slate-50/30 px-6 py-4 overflow-auto">
           <div className="space-y-6 pb-6">
             {/* Identity & Basic Info */}
-            <div className="grid grid-cols-2 gap-4 bg-white p-4 rounded-xl border shadow-sm">
+            <div className="grid grid-cols-2 gap-4 bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
               <div className="space-y-2">
                 <Label htmlFor="name" className="text-[11px] font-black uppercase text-slate-400">JSON Variable Key</Label>
                 <Input
@@ -283,7 +290,7 @@ export function PlaceholderFormDialog({
 
             {/* Director & Dependant Configuration */}
             {(placeholder.entity_type?.includes('director') || placeholder.entity_type?.includes('dependant')) && (
-              <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 space-y-4">
+              <div className="bg-purple-50/50 p-5 rounded-2xl border border-purple-100/50 space-y-4">
                 <Label className="text-[11px] font-black uppercase text-purple-600">Entity-Specific Configuration</Label>
 
                 {placeholder.entity_type?.includes('director') && (
@@ -343,7 +350,7 @@ export function PlaceholderFormDialog({
 
             {/* CONDITIONAL LOGIC BLOCKS */}
             {placeholder.type === 'conditional' && (
-              <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 space-y-4">
+              <div className="bg-indigo-50/50 p-5 rounded-2xl border border-indigo-100/50 space-y-4">
                 <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
                   <div className="space-y-0.5">
                     <Label className="text-[11px] font-black uppercase text-indigo-600">Logic Blocks (Conditional Sections)</Label>
@@ -568,7 +575,7 @@ export function PlaceholderFormDialog({
 
             {/* BOOLEAN / CHECKBOX CONFIGURATION */}
             {placeholder.type === 'boolean' && (
-              <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 space-y-4">
+              <div className="bg-emerald-50/50 p-5 rounded-2xl border border-emerald-100/50 space-y-4">
                 <div className="flex items-center justify-between">
                   <Label className="text-[11px] font-black uppercase text-emerald-700">Boolean / Checkbox Options</Label>
                   <Button
@@ -733,7 +740,7 @@ export function PlaceholderFormDialog({
 
             {/* DOCUMENT CHECKLIST CONFIGURATION */}
             {placeholder.type === 'document_checklist' && (
-              <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 space-y-4">
+              <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100/50 space-y-4">
                 <Label className="text-[11px] font-black uppercase text-blue-700">Document Checklist Configuration</Label>
 
                 <div className="grid grid-cols-3 gap-3">
@@ -956,7 +963,7 @@ export function PlaceholderFormDialog({
 
             {/* ARRAY/ORDINAL FORMATTING */}
             {(placeholder.type === 'array' || placeholder.type === 'ordinal') && (
-              <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 space-y-4">
+              <div className="bg-orange-50/50 p-5 rounded-2xl border border-orange-100/50 space-y-4">
                 <Label className="text-[11px] font-black uppercase text-orange-600">List Formatting & Direction</Label>
                 <div className="grid grid-cols-2 gap-4">
                   {placeholder.type === 'array' && (
@@ -1111,7 +1118,7 @@ export function PlaceholderFormDialog({
 
               {placeholder.type === 'image' && (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4 p-4 bg-green-50 rounded-xl border border-green-100">
+                  <div className="grid grid-cols-2 gap-4 p-5 bg-green-50/50 rounded-2xl border border-green-100/50">
                     <div className="space-y-2">
                       <Label className="text-[11px] font-bold text-green-700">Image Width</Label>
                       <Input className="bg-white" value={placeholder.image_width} onChange={e => onChange({ image_width: e.target.value })} placeholder="e.g. 200px" />
@@ -1144,14 +1151,14 @@ export function PlaceholderFormDialog({
                 </div>
               )}
 
-              <div className="flex items-center space-x-3 p-3 bg-white rounded-lg border">
+              <div className="flex items-center space-x-3 p-4 bg-white rounded-2xl border border-slate-100 shadow-sm">
                 <Checkbox id="required" checked={placeholder.required} onCheckedChange={c => onChange({ required: !!c })} />
                 <Label htmlFor="required" className="text-sm font-semibold">Mandatory Field (Validation will block generation if empty)</Label>
               </div>
 
               {/* UI Visibility & Grouping */}
               <div className="space-y-4 border-t pt-4">
-                <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 space-y-4">
+                <div className="bg-amber-50/50 p-5 rounded-2xl border border-amber-100/50 space-y-4">
                   <Label className="text-[11px] font-black uppercase text-amber-700 flex items-center gap-2">
                     <View className="h-3.5 w-3.5" /> UI Visibility Settings
                   </Label>
@@ -1247,7 +1254,7 @@ export function PlaceholderFormDialog({
                 </div>
                 {placeholder.is_ai_generated && (
                   <Textarea
-                    className="bg-purple-50/30 border-purple-100"
+                    className="bg-purple-50/10 border-purple-100/30 rounded-xl"
                     placeholder="Prompt: Rewrite the source data to be more professional..."
                     value={placeholder.ai_prompt}
                     onChange={e => onChange({ ai_prompt: e.target.value })}
@@ -1257,7 +1264,7 @@ export function PlaceholderFormDialog({
             </div>
 
             {/* Linking Tools Card */}
-            <div className="bg-white p-4 rounded-xl border space-y-4">
+            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
               <Label className="text-[11px] font-black uppercase text-slate-800 tracking-wider flex items-center gap-2">
                 <Link2 className="h-3.5 w-3.5 text-blue-600" /> Data Linking Tools
               </Label>
@@ -1354,9 +1361,20 @@ export function PlaceholderFormDialog({
           </div>
         </ScrollArea>
 
-        <div className="px-6 py-4 bg-white border-t flex justify-end gap-2 shrink-0">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave}>Save Placeholder</Button>
+        <div className="px-6 py-4 bg-slate-50/90 backdrop-blur-sm border-t border-slate-100 flex justify-end gap-2.5 shrink-0 z-10">
+          <Button 
+            variant="ghost" 
+            onClick={onClose}
+            className="h-9 px-4 rounded-full text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors text-xs font-semibold"
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleSave}
+            className="h-9 px-5 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-semibold shadow-md shadow-blue-500/10 border-0 hover:scale-[1.02] active:scale-[0.98] transition-all"
+          >
+            Save Placeholder
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
