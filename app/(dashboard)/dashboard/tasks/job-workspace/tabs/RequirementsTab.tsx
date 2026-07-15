@@ -151,6 +151,21 @@ function getCellStatus(req: any, col: ColDef, docsByInd: Record<string, any[]>, 
   return { type: found.length > 0 ? "view" as const : "upload" as const, docs: found }
 }
 
+function HighlightText({ text, query }: { text: string; query: string }) {
+  if (!query || !text) return <>{text}</>
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const parts = text.split(new RegExp(`(${escaped})`, 'gi'))
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1
+          ? <mark key={i} className="bg-yellow-200 text-yellow-900 rounded px-0.5">{part}</mark>
+          : <React.Fragment key={i}>{part}</React.Fragment>
+      )}
+    </>
+  )
+}
+
 function getDocTypeDisplay(req: any, kycDocsMap: Map<string, any>) {
   const docIds = req.document_ids || (req.document_id ? [req.document_id] : [])
   if (docIds.length === 0) return null
@@ -203,8 +218,10 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
   useEffect(() => {
     if (autoOpenSendDialog) setIsSendRequirementsOpen(true)
   }, [autoOpenSendDialog])
+  const [searchQuery, setSearchQuery] = useState("")
   const [templateMasterFields, setTemplateMasterFields] = useState<Map<number, any> | null>(null)
   const [templateProgress, setTemplateProgress] = useState<Record<string, { filled: number; total: number } | 'loading'>>({})
+
 
   useEffect(() => {
     fetchMasterFields().then(setTemplateMasterFields)
@@ -499,6 +516,32 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
     return map
   }, [task])
 
+  const filteredRequirementMap = useMemo(() => {
+    if (!searchQuery.trim()) return requirementMap
+    const q = searchQuery.toLowerCase().trim()
+    const filtered: Record<string, any[]> = {}
+    for (const [cat, reqs] of Object.entries(requirementMap)) {
+      const matched = reqs.filter((req: any) => {
+        const name = (req.name || req.display_name || "").toLowerCase()
+        const desc = (req.description || "").toLowerCase()
+        const docMeta = kycDocsMap.get(req.document_id || req.document_ids?.[0])
+        const docName = (docMeta?.display_name || docMeta?.name || "").toLowerCase()
+        return name.includes(q) || desc.includes(q) || docName.includes(q)
+      })
+      if (matched.length > 0) filtered[cat] = matched
+    }
+    return filtered
+  }, [requirementMap, searchQuery, kycDocsMap])
+
+  useEffect(() => {
+    if (!searchQuery.trim()) return
+    const cats = new Set<string>(expandedCategories)
+    for (const cat of Object.keys(filteredRequirementMap)) {
+      cats.add(cat)
+    }
+    setExpandedCategories(cats)
+  }, [searchQuery, filteredRequirementMap])
+
   // Scroll to and highlight a specific requirement when deep-linked from an
   // automation field's "Linked Requirement" button.
   useEffect(() => {
@@ -580,6 +623,24 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
             {lockState.processingLocked && <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-xs font-medium rounded-full px-3 py-0.5"><Lock className="h-3.5 w-3.5 mr-1.5" />Processing Locked</Badge>}
             {lockState.issuanceLocked && <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-xs font-medium rounded-full px-3 py-0.5"><Lock className="h-3.5 w-3.5 mr-1.5" />Issuance Locked</Badge>}
           </div>
+          <div className="relative ml-2">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search requirements..."
+              className="h-9 w-64 pl-9 pr-8 text-sm rounded-full border border-slate-200 bg-slate-50 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-all"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-3">
           {clientDraft && clientDraft.status !== "applied" && (
@@ -636,7 +697,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
           </TableHeader>
           <TableBody>
             {CATEGORY_ORDER.map(cat => {
-              const reqs = requirementMap[cat] || []
+              const reqs = (searchQuery.trim() ? filteredRequirementMap : requirementMap)[cat] || []
               if (reqs.length === 0) return null
               const isLocked = isSectionLocked(task, cat)
               const isExpanded = expandedCategories.has(cat)
@@ -703,7 +764,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
                               <div className="flex flex-col min-w-0">
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-[11px] font-semibold text-slate-800 line-clamp-2 leading-tight">
-                                    {req.name || req.display_name || "Untitled Requirement"}
+                                    <HighlightText text={req.name || req.display_name || "Untitled Requirement"} query={searchQuery} />
                                   </span>
                                   {req.web_automation?.automationId && (
                                     <button
@@ -778,9 +839,9 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
                           <TableCell className={cn("max-w-[280px] py-0 px-5 border-b border-r border-slate-100 sticky left-[348px] z-10 align-middle", stripeBg, "group-hover:bg-blue-50/30")}>
                             <div className="flex flex-col gap-1.5 h-full justify-center py-3">
                               <span className="text-[11px] font-medium text-slate-700 line-clamp-2 leading-snug">
-                                {docTypeInfo?.primary?.display_name || docTypeInfo?.primary?.name || docName}
+                                <HighlightText text={docTypeInfo?.primary?.display_name || docTypeInfo?.primary?.name || docName} query={searchQuery} />
                               </span>
-                              {req.description && <span className="text-sm font-medium text-slate-500 line-clamp-2 leading-relaxed">{req.description}</span>}
+                              {req.description && <span className="text-sm font-medium text-slate-500 line-clamp-2 leading-relaxed"><HighlightText text={req.description} query={searchQuery} /></span>}
                             </div>
                           </TableCell>
 

@@ -554,9 +554,14 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       }
     }
 
+    // The runner's own result can say the underlying task wasn't actually finished
+    // (e.g. a form was filled but submission is still manual) even though the DB job
+    // status is 'completed' - don't tell the user it succeeded when it didn't.
+    const needsReview = job.result?.status === 'needs_review';
     toast({
-      title: '✅ Automation Completed!',
-      description: job.message || job.result?.message || 'Automation completed successfully.',
+      title: needsReview ? '⚠️ Needs Review' : '✅ Automation Completed!',
+      description: job.result?.message || job.message || 'Automation completed successfully.',
+      variant: needsReview ? 'warning' : undefined,
     });
   }, [getPrimaryTargetEntityId, individualName, onRefresh, saveScreenshotToSupabase]);
 
@@ -1436,8 +1441,13 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                           )}
                           {!isRunning && lastRunByAutomation[String(automation.id)] && (() => {
                             const lastJob = lastRunByAutomation[String(automation.id)]
-                            const isSuccess = lastJob.status === 'completed'
                             const isFailed = lastJob.status === 'failed'
+                            // A runner can report status:'completed' at the DB level while its own
+                            // result payload says the underlying task wasn't actually finished (e.g.
+                            // special-pass fills the form but leaves submission for manual review) -
+                            // trust that self-reported outcome over the coarse DB status when present.
+                            const needsReview = !isFailed && lastJob.result?.status === 'needs_review'
+                            const isSuccess = !isFailed && !needsReview && lastJob.status === 'completed'
                             return (
                               <Popover>
                                 <PopoverTrigger asChild>
@@ -1448,11 +1458,12 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                       "flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide rounded-full px-2.5 py-1 border transition-colors",
                                       isSuccess ? "text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100" :
                                         isFailed ? "text-red-700 bg-red-50 border-red-200 hover:bg-red-100" :
-                                          "text-slate-600 bg-slate-100 border-slate-200 hover:bg-slate-200"
+                                          needsReview ? "text-amber-700 bg-amber-50 border-amber-200 hover:bg-amber-100" :
+                                            "text-slate-600 bg-slate-100 border-slate-200 hover:bg-slate-200"
                                     )}
                                   >
-                                    {isSuccess ? <CheckCircle2 className="h-3 w-3" /> : isFailed ? <AlertCircle className="h-3 w-3" /> : <Loader2 className="h-3 w-3" />}
-                                    {isSuccess ? 'Completed' : isFailed ? 'Failed' : lastJob.status}
+                                    {isSuccess ? <CheckCircle2 className="h-3 w-3" /> : (isFailed || needsReview) ? <AlertCircle className="h-3 w-3" /> : <Loader2 className="h-3 w-3" />}
+                                    {isSuccess ? 'Completed' : isFailed ? 'Failed' : needsReview ? 'Needs Review' : lastJob.status}
                                     <span className="opacity-60 normal-case font-normal">
                                       · {formatRelativeTime(lastJob.completed_at || lastJob.updated_at)}
                                     </span>
@@ -1464,9 +1475,10 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                     <Badge className={cn(
                                       "text-[10px] uppercase",
                                       isSuccess ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                                        isFailed ? "bg-red-50 text-red-700 border-red-200" : "bg-slate-100 text-slate-600 border-slate-200"
+                                        isFailed ? "bg-red-50 text-red-700 border-red-200" :
+                                          needsReview ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-slate-100 text-slate-600 border-slate-200"
                                     )}>
-                                      {lastJob.status}
+                                      {needsReview ? 'needs review' : lastJob.status}
                                     </Badge>
                                   </div>
                                   <div className="space-y-1 text-slate-500">
@@ -1474,6 +1486,14 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                     <div>Started: <span className="text-slate-700">{lastJob.started_at ? new Date(lastJob.started_at).toLocaleString() : '—'}</span></div>
                                     <div>{isFailed ? 'Failed' : 'Completed'}: <span className="text-slate-700">{lastJob.completed_at ? new Date(lastJob.completed_at).toLocaleString() : '—'}</span></div>
                                   </div>
+                                  {lastJob.result?.message && (
+                                    <div className={cn(
+                                      "rounded p-2 border break-words",
+                                      needsReview ? "text-amber-700 bg-amber-50 border-amber-100" : "text-slate-600 bg-slate-50 border-slate-100"
+                                    )}>
+                                      {lastJob.result.message}
+                                    </div>
+                                  )}
                                   {lastJob.error && (
                                     <div className="text-red-600 bg-red-50 rounded p-2 border border-red-100 break-words">{lastJob.error}</div>
                                   )}

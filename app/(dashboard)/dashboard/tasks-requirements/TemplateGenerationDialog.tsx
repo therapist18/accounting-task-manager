@@ -709,6 +709,70 @@ const processCurrentDateField = (placeholder, masterFields) => {
     return { value: '', source: null };
 };
 
+// Resolves one comparison clause's field value and checks it against clause.value/operator.
+// Shared by the primary `comparison` and any AND-ed `additional_comparisons` on a condition.
+const evaluateComparisonClause = (clause, targetEntity, targetId, combinedCache, masterFields, computedFieldCache) => {
+    const { field, operator, value: compareValue, master_field_id } = clause;
+    if (!field && !master_field_id) return false;
+
+    let fieldValue = null;
+
+    if (master_field_id) {
+        const mf = masterFields.get(parseInt(master_field_id, 10));
+        if (mf?.sources) {
+            for (const source of mf.sources) {
+                // Handle computed fields
+                if (source.is_computed && computedFieldCache) {
+                    const extractionMode = 'latest';
+                    const cacheKey = `${mf.id}_${targetId}_${extractionMode}`;
+                    const computedVal = computedFieldCache[cacheKey];
+
+                    if (computedVal !== undefined && computedVal !== null && computedVal !== '' &&
+                        !['Document Not Found', 'Missing Document', 'Field Not Found', 'Missing', 'No Source'].includes(computedVal)) {
+                        fieldValue = computedVal;
+                        break;
+                    }
+                    continue;
+                }
+
+                // Handle regular database fields
+                const tableData = combinedCache[source.table];
+                if (!tableData) continue;
+
+                const linkingVar = source.linking_variable || 'id';
+                const record = Object.values(tableData).find(rec =>
+                    String(rec[linkingVar] || rec.id) === targetId
+                );
+
+                if (record) {
+                    fieldValue = source.path
+                        ? parseJsonValue(record, source.path)
+                        : record[field || mf.field_key];
+
+                    if (fieldValue && typeof fieldValue === 'object') {
+                        fieldValue = fieldValue.number || fieldValue.value || fieldValue.name || String(fieldValue);
+                    }
+                    break;
+                }
+            }
+        }
+    } else {
+        fieldValue = targetEntity[field];
+    }
+
+    if (fieldValue === null || fieldValue === undefined) return false;
+
+    const strFieldValue = String(fieldValue).trim().toLowerCase();
+    const strCompareValue = String(compareValue || '').trim().toLowerCase();
+
+    switch (operator) {
+        case 'equals': return strFieldValue === strCompareValue;
+        case 'not_equals': return strFieldValue !== strCompareValue;
+        case 'contains': return strFieldValue.includes(strCompareValue);
+        default: return Boolean(fieldValue);
+    }
+};
+
 const processConditionalField = (placeholder, targetEntity, combinedCache, masterFields, computedFieldCache) => {
     if (!placeholder.conditions || !targetEntity) return { value: '', source: null };
 
@@ -716,78 +780,16 @@ const processConditionalField = (placeholder, targetEntity, combinedCache, maste
 
     for (const condition of placeholder.conditions) {
         if (condition.comparison) {
-            const { field, operator, value: compareValue } = condition.comparison;
+            // All clauses (primary + any AND-ed additional_comparisons) must match, e.g.
+            // Gender=Female AND MaritalStatus=Married -> "Mrs"
+            const clauses = [condition.comparison, ...(condition.additional_comparisons || [])];
+            const allMatch = clauses.every(clause =>
+                evaluateComparisonClause(clause, targetEntity, targetId, combinedCache, masterFields, computedFieldCache)
+            );
 
-            if (!field) continue;
-
-            let fieldValue = null;
-
-            if (condition.master_field_id) {
-                const mf = masterFields.get(parseInt(condition.master_field_id, 10));
-                if (mf?.sources) {
-                    for (const source of mf.sources) {
-                        // Handle computed fields
-                        if (source.is_computed && computedFieldCache) {
-                            const extractionMode = 'latest';
-                            const cacheKey = `${mf.id}_${targetId}_${extractionMode}`;
-                            const computedVal = computedFieldCache[cacheKey];
-
-                            if (computedVal !== undefined && computedVal !== null && computedVal !== '' &&
-                                !['Document Not Found', 'Missing Document', 'Field Not Found', 'Missing', 'No Source'].includes(computedVal)) {
-                                fieldValue = computedVal;
-                                break;
-                            }
-                            continue;
-                        }
-
-                        // Handle regular database fields
-                        const tableData = combinedCache[source.table];
-                        if (!tableData) continue;
-
-                        const linkingVar = source.linking_variable || 'id';
-                        const record = Object.values(tableData).find(rec =>
-                            String(rec[linkingVar] || rec.id) === targetId
-                        );
-
-                        if (record) {
-                            fieldValue = source.path
-                                ? parseJsonValue(record, source.path)
-                                : record[field || mf.field_key];
-
-                            if (fieldValue && typeof fieldValue === 'object') {
-                                fieldValue = fieldValue.number || fieldValue.value || fieldValue.name || String(fieldValue);
-                            }
-                            break;
-                        }
-                    }
-                }
-            } else {
-                fieldValue = targetEntity[field];
-            }
-
-            if (fieldValue === null || fieldValue === undefined) continue;
-
-            const strFieldValue = String(fieldValue).trim().toLowerCase();
-            const strCompareValue = String(compareValue || '').trim().toLowerCase();
-
-            let conditionMet = false;
-            switch (operator) {
-                case 'equals':
-                    conditionMet = strFieldValue === strCompareValue;
-                    break;
-                case 'not_equals':
-                    conditionMet = strFieldValue !== strCompareValue;
-                    break;
-                case 'contains':
-                    conditionMet = strFieldValue.includes(strCompareValue);
-                    break;
-                default:
-                    conditionMet = Boolean(fieldValue);
-            }
-
-            if (conditionMet) {
+            if (allMatch) {
                 return {
-                    value: `${condition.label || ''}${fieldValue}`,
+                    value: condition.label || '',
                     source: 'Conditional Match'
                 };
             }
@@ -1944,7 +1946,7 @@ const PlaceholderInput = ({
             <div className="relative">
                 <Input
                     ref={inputRef}
-                    value={value || ''}
+                    value={(value && typeof value === 'object') ? extractDisplayValue(value) : (value || '')}
                     onChange={(e) => onChange(e.target.value)}
                     className={cn("bg-white h-8 text-xs transition-all pr-8", hasChanged && canSave ? "border-amber-400 ring-2 ring-amber-50" : "focus:border-blue-400")}
                 />

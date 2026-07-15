@@ -152,6 +152,85 @@ export const processCurrentDateField = (placeholder: any, masterFields: Map<numb
   return { value: '', source: null };
 };
 
+// Resolves one comparison clause's field value and checks it against clause.value/operator.
+// Shared by the primary `comparison` and any AND-ed `additional_comparisons` on a condition.
+const evaluateComparisonClause = (
+  clause: { field?: string; operator: 'equals' | 'not_equals' | 'contains'; value: string; master_field_id?: number },
+  targetEntity: any,
+  targetId: string,
+  combinedCache: Record<string, any>,
+  masterFields: Map<number, any>,
+  computedFieldCache: Record<string, any> | null
+): boolean => {
+  const { field, operator, value: compareValue, master_field_id } = clause;
+  if (!field && !master_field_id) return false;
+
+  let fieldValue: any = null;
+
+  if (master_field_id) {
+    const mf = masterFields.get(parseInt(String(master_field_id), 10));
+    if (mf?.sources) {
+      for (const source of mf.sources) {
+        // Handle computed fields
+        if (source.is_computed && computedFieldCache) {
+          const extractionMode = 'latest';
+          const cacheKey = `${mf.id}_${targetId}_${extractionMode}`;
+          const computedVal = computedFieldCache[cacheKey];
+
+          if (computedVal !== undefined && computedVal !== null && computedVal !== '' &&
+            !['Document Not Found', 'Missing Document', 'Field Not Found', 'Missing', 'No Source'].includes(computedVal)) {
+            fieldValue = computedVal;
+            break;
+          }
+          continue;
+        }
+
+        // Handle regular database fields
+        const tableData = combinedCache[source.table];
+        if (!tableData) continue;
+
+        const linkingVar = source.linking_variable || 'id';
+        const record = Object.values(tableData).find((rec: any) =>
+          String(rec[linkingVar] || rec.id) === targetId
+        );
+
+        if (record) {
+          const fieldName = (field as string) || mf.field_key || '';
+          fieldValue = source.path
+            ? parseJsonValue(record, source.path)
+            // @ts-ignore - Dynamic field access
+            : record[fieldName];
+
+          if (fieldValue && typeof fieldValue === 'object') {
+            // @ts-ignore - Dynamic property access
+            fieldValue = fieldValue.number || fieldValue.value || fieldValue.name || String(fieldValue);
+          }
+          break;
+        }
+      }
+    }
+  } else {
+    // @ts-ignore - Dynamic field access on targetEntity
+    fieldValue = targetEntity[(field as string)];
+  }
+
+  if (fieldValue === null || fieldValue === undefined) return false;
+
+  const strFieldValue = String(fieldValue).trim().toLowerCase();
+  const strCompareValue = String(compareValue || '').trim().toLowerCase();
+
+  switch (operator) {
+    case 'equals':
+      return strFieldValue === strCompareValue;
+    case 'not_equals':
+      return strFieldValue !== strCompareValue;
+    case 'contains':
+      return strFieldValue.includes(strCompareValue);
+    default:
+      return Boolean(fieldValue);
+  }
+};
+
 export const processConditionalField = (
   placeholder: any,
   targetEntity: any,
@@ -165,84 +244,65 @@ export const processConditionalField = (
 
   for (const condition of placeholder.conditions) {
     if (condition.comparison) {
-      const { field, operator, value: compareValue } = condition.comparison;
+      // All clauses (primary + any AND-ed additional_comparisons) must match, e.g.
+      // Gender=Female AND MaritalStatus=Married -> "Mrs"
+      const clauses = [condition.comparison, ...(condition.additional_comparisons || [])];
+      const allMatch = clauses.every((clause: any) =>
+        evaluateComparisonClause(clause, targetEntity, targetId, combinedCache, masterFields, computedFieldCache)
+      );
 
-      if (!field) continue;
-
-      let fieldValue = null;
-
-      if (condition.master_field_id) {
-        const mf = masterFields.get(parseInt(condition.master_field_id, 10));
-        if (mf?.sources) {
-          for (const source of mf.sources) {
-            // Handle computed fields
-            if (source.is_computed && computedFieldCache) {
-              const extractionMode = 'latest';
-              const cacheKey = `${mf.id}_${targetId}_${extractionMode}`;
-              const computedVal = computedFieldCache[cacheKey];
-
-              if (computedVal !== undefined && computedVal !== null && computedVal !== '' &&
-                !['Document Not Found', 'Missing Document', 'Field Not Found', 'Missing', 'No Source'].includes(computedVal)) {
-                fieldValue = computedVal;
-                break;
-              }
-              continue;
-            }
-
-            // Handle regular database fields
-            const tableData = combinedCache[source.table];
-            if (!tableData) continue;
-
-            const linkingVar = source.linking_variable || 'id';
-            const record = Object.values(tableData).find((rec: any) =>
-              String(rec[linkingVar] || rec.id) === targetId
-            );
-
-            if (record) {
-              const fieldName = (field as string) || mf.field_key || '';
-              fieldValue = source.path
-                ? parseJsonValue(record, source.path)
-                // @ts-ignore - Dynamic field access
-                : record[fieldName];
-
-              if (fieldValue && typeof fieldValue === 'object') {
-                // @ts-ignore - Dynamic property access
-                fieldValue = fieldValue.number || fieldValue.value || fieldValue.name || String(fieldValue);
-              }
-              break;
-            }
-          }
-        }
-      } else {
-        // @ts-ignore - Dynamic field access on targetEntity
-        fieldValue = targetEntity[(field as string)];
-      }
-
-      if (fieldValue === null || fieldValue === undefined) continue;
-
-      const strFieldValue = String(fieldValue).trim().toLowerCase();
-      const strCompareValue = String(compareValue || '').trim().toLowerCase();
-
-      let conditionMet = false;
-      switch (operator) {
-        case 'equals':
-          conditionMet = strFieldValue === strCompareValue;
-          break;
-        case 'not_equals':
-          conditionMet = strFieldValue !== strCompareValue;
-          break;
-        case 'contains':
-          conditionMet = strFieldValue.includes(strCompareValue);
-          break;
-        default:
-          conditionMet = Boolean(fieldValue);
-      }
-
-      if (conditionMet) {
+      if (allMatch) {
         return {
-          value: `${condition.label || ''}${fieldValue}`,
+          value: condition.label || '',
           source: 'Conditional Match'
         };
+      }
+    } else if (condition.master_field_id) {
+      const mf = masterFields.get(parseInt(condition.master_field_id, 10));
+      if (!mf?.sources) continue;
+
+      for (const source of mf.sources) {
+        if (source.is_computed && computedFieldCache) {
+          const extractionMode = 'latest';
+          const cacheKey = `${mf.id}_${targetId}_${extractionMode}`;
+          const computedVal = computedFieldCache[cacheKey];
+
+          if (computedVal !== undefined && computedVal !== null && computedVal !== '' &&
+            !['Document Not Found', 'Missing Document', 'Field Not Found', 'Missing', 'No Source'].includes(computedVal)) {
+            return {
+              value: `${condition.label || ''}${computedVal}`,
+              source: `Conditional: ${mf.label || 'Computed'}`
+            };
+          }
+          continue;
+        }
+
+        const tableData = combinedCache[source.table];
+        if (!tableData) continue;
+
+        const linkingVar = source.linking_variable || 'id';
+        const record = Object.values(tableData).find((rec: any) =>
+          String(rec[linkingVar] || rec.id) === targetId
+        );
+
+        if (record) {
+          let rawVal = source.path
+            ? parseJsonValue(record, source.path)
+            // @ts-ignore - Dynamic field access
+            : record[condition.tag || mf.field_key];
+
+          if (rawVal && typeof rawVal === 'object') {
+            // @ts-ignore - Dynamic property access
+            rawVal = rawVal.number || rawVal.value || rawVal.name || JSON.stringify(rawVal);
+          }
+
+          if (rawVal && String(rawVal).trim() !== '' && String(rawVal) !== '[object Object]') {
+            return {
+              value: `${condition.label || ''}${rawVal}`,
+              source: `Conditional: ${mf.label || source.table}`
+            };
+          }
+        }
       }
     }
   }

@@ -55,15 +55,20 @@ export interface Requirement {
   document_ids?: string[];
 }
 
+export type ComparisonClause = {
+  field?: string;
+  operator: 'equals' | 'not_equals' | 'contains';
+  value: string;
+  master_field_id?: number;
+};
+
 export type ConditionalCondition = {
   tag: string;
   label: string;
   master_field_id?: number;
-  comparison?: {
-    field?: string;
-    operator: 'equals' | 'not_equals' | 'contains';
-    value: string;
-  };
+  comparison?: ComparisonClause;
+  // Extra clauses AND-ed with `comparison` (e.g. Gender=Female AND MaritalStatus=Married -> "Mrs")
+  additional_comparisons?: ComparisonClause[];
 };
 
 export type BooleanCondition = {

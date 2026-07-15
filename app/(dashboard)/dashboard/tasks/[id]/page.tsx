@@ -2,15 +2,20 @@
 "use client"
 
 import { use, useCallback, useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Loader2, ArrowLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { JobWorkspace } from "../job-workspace/JobWorkspace"
 import { fetchJobWorkspaceData, type JobWorkspaceData } from "../job-workspace/fetchJobWorkspaceData"
 
-export default function TaskWorkspacePage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams: Promise<{ tab?: string; automationId?: string; requirementId?: string; openSendDialog?: string; documentId?: string }> }) {
+export default function TaskWorkspacePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const { tab, automationId, requirementId, openSendDialog, documentId } = use(searchParams)
+  const searchParams = useSearchParams()
+  const tab = searchParams.get("tab") || undefined
+  const automationId = searchParams.get("automationId") || undefined
+  const requirementId = searchParams.get("requirementId") || undefined
+  const openSendDialog = searchParams.get("openSendDialog") || undefined
+  const documentId = searchParams.get("documentId") || undefined
   const router = useRouter()
   const [data, setData] = useState<JobWorkspaceData | null>(null)
 
