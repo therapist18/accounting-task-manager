@@ -147,11 +147,16 @@ export function SearchableSelect({
                   >
                     <Check
                       className={cn(
-                        "mr-2 h-4 w-4",
+                        "mr-2 h-4 w-4 shrink-0",
                         value === option.value ? "opacity-100" : "opacity-0"
                       )}
                     />
-                    {option.label}
+                    <span className="flex-1 truncate">{option.label}</span>
+                    {option.description && (
+                      <span className="ml-2 shrink-0 text-[10px] font-medium uppercase tracking-wide text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-full border border-slate-200">
+                        {option.description}
+                      </span>
+                    )}
                   </CommandItem>
                 ))}
               </CommandGroup>

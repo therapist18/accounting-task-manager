@@ -12,6 +12,22 @@ export function isTemplateEligible(req: any, docMeta: any): boolean {
   return eligible
 }
 
+// Postgres jsonb containment (`cs`/`@>`) requires an exact value match on every
+// key present in the filter object - a filter key of "" (task.job_level.class_id
+// when no class is selected) does NOT match a stored template's class_id: null,
+// even though both mean "not applicable". Stripping empty/null/undefined keys
+// before filtering lets containment succeed on the keys that actually carry a
+// value (level/department_id/subdepartment_id) instead of falsely excluding
+// every template whose unset fields were persisted as null rather than "".
+export function normalizeJobLevelFilter(jobLevel: any): any {
+  if (!jobLevel || typeof jobLevel !== 'object') return jobLevel
+  const cleaned: any = {}
+  Object.entries(jobLevel).forEach(([key, value]) => {
+    if (value !== null && value !== undefined && value !== '') cleaned[key] = value
+  })
+  return cleaned
+}
+
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const parseAndCleanUUIDs = (input: any): string[] => {
@@ -42,7 +58,7 @@ export async function fetchDocumentTemplates(documentId: string, task: any, jobL
       .eq('document_id', documentId)
 
     if (jobLevel) {
-      query = query.filter('job_level', 'cs', JSON.stringify([jobLevel]))
+      query = query.filter('job_level', 'cs', JSON.stringify([normalizeJobLevelFilter(jobLevel)]))
     }
     query = query.order('file_name', { ascending: true })
     if (bankId) {

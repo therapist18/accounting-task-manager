@@ -21,6 +21,7 @@ import {
   type DocumentCache
 } from "../tasks/utils/automationComputedFunctions"
 import { REQUIREMENTS_LOCK_STAGE_IDS } from "../tasks/utils/taskManagerData"
+import { normalizeJobLevelFilter } from "./utils/templateGenerationData"
 let htmlDocx: any = null;
 import('html-docx-js/dist/html-docx')
   .then(module => {
@@ -921,7 +922,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         .eq('document_id', documentId);
 
       if (jobLevel) {
-        const jobLevelJson = JSON.stringify([jobLevel]);
+        const jobLevelJson = JSON.stringify([normalizeJobLevelFilter(jobLevel)]);
         query = query.filter('job_level', 'cs', jobLevelJson);
       }
       query = query.order('file_name', { ascending: true });

@@ -976,6 +976,26 @@ function JobQuestionPicker({
   );
 }
 
+function SectionHeader({
+  icon: Icon,
+  title,
+  action
+}: {
+  icon: React.ElementType;
+  title: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center gap-1.5">
+        <Icon className="h-3.5 w-3.5 text-slate-400" />
+        <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{title}</Label>
+      </div>
+      {action}
+    </div>
+  );
+}
+
 // --- Main Component ---
 function WebDataGroupEditDialog({
   open,
@@ -1084,106 +1104,114 @@ function WebDataGroupEditDialog({
         </DialogHeader>
 
         <ScrollArea className="flex-1 bg-slate-50/30">
-          <div className="p-6 space-y-8">
+          <div className="p-6 space-y-6">
             {/* --- Section 1: Basic Identity --- */}
-            <div className="grid grid-cols-3 gap-6 bg-white p-4 rounded-xl border shadow-sm">
-              <div className="space-y-1.5">
-                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">JSON Variable Key</Label>
-                <div className="relative">
-                  <Key className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <div className="bg-white p-4 rounded-xl border shadow-sm">
+              <SectionHeader icon={Type} title="Basic Identity" />
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">JSON Variable Key</Label>
+                  <div className="relative">
+                    <Key className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                    <Input
+                      value={editingGroup.variableName}
+                      onChange={(e) => updateField('variableName', e.target.value)}
+                      className="pl-9 font-mono text-sm bg-slate-50 border-slate-200"
+                      placeholder="e.g. passport_number"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">UI Display Label</Label>
                   <Input
-                    value={editingGroup.variableName}
-                    onChange={(e) => updateField('variableName', e.target.value)}
-                    className="pl-9 font-mono text-sm bg-slate-50 border-slate-200"
-                    placeholder="e.g. passport_number"
+                    value={editingGroup.efnsDisplayName}
+                    onChange={(e) => updateField('efnsDisplayName', e.target.value)}
+                    placeholder="e.g. Passport Number"
+                    className="text-sm font-medium"
                   />
                 </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">UI Display Label</Label>
-                <Input
-                  value={editingGroup.efnsDisplayName}
-                  onChange={(e) => updateField('efnsDisplayName', e.target.value)}
-                  placeholder="e.g. Passport Number"
-                  className="text-sm font-medium"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Default Value</Label>
-                <Input
-                  value={editingGroup.defaultValue || ''}
-                  onChange={(e) => updateField('defaultValue', e.target.value)}
-                  placeholder="e.g. Not Provided"
-                  className="text-sm"
-                />
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Default Value</Label>
+                  <Input
+                    value={editingGroup.defaultValue || ''}
+                    onChange={(e) => updateField('defaultValue', e.target.value)}
+                    placeholder="e.g. Not Provided"
+                    className="text-sm"
+                  />
+                </div>
               </div>
             </div>
 
             {/* --- Section 2: Type & Scope --- */}
-            <div className="grid grid-cols-2 gap-6 items-end">
-              <div className="space-y-1.5">
-                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Data Type</Label>
-                <Select value={editingGroup.fieldType} onValueChange={(v) => updateField('fieldType', v)}>
-                  <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="text">Text (String)</SelectItem>
-                    <SelectItem value="number">Number</SelectItem>
-                    <SelectItem value="date">Date</SelectItem>
-                    <SelectItem value="array">Array (List)</SelectItem>
-                    <SelectItem value="document">Document (File)</SelectItem>
-                    <SelectItem value="computed">Computed (Script)</SelectItem>
-                  </SelectContent>
-                </Select>
+            <div className="bg-white p-4 rounded-xl border shadow-sm">
+              <SectionHeader icon={Settings2} title="Type & Scope" />
+              <div className="grid grid-cols-2 gap-4 items-start">
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Data Type</Label>
+                  <Select value={editingGroup.fieldType} onValueChange={(v) => updateField('fieldType', v)}>
+                    <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="text">Text (String)</SelectItem>
+                      <SelectItem value="number">Number</SelectItem>
+                      <SelectItem value="date">Date</SelectItem>
+                      <SelectItem value="array">Array (List)</SelectItem>
+                      <SelectItem value="document">Document (File)</SelectItem>
+                      <SelectItem value="computed">Computed (Script)</SelectItem>
+                    </SelectContent>
+                  </Select>
 
-                {editingGroup.fieldType === 'date' && (
-                  <div className="flex items-center gap-2 mt-2 bg-blue-50/50 p-2 rounded border border-blue-100 animate-in slide-in-from-top-1">
-                    <Label className="text-[10px] font-bold text-blue-700">Format:</Label>
-                    <Select value={editingGroup.dateFormat || 'iso'} onValueChange={(v) => updateField('dateFormat', v)}>
-                      <SelectTrigger className="h-7 text-[10px] border-none bg-transparent focus:ring-0 w-full"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="iso">YYYY-MM-DD</SelectItem>
-                        <SelectItem value="object_split">Object &#123;d,m,y&#125;</SelectItem>
-                        <SelectItem value="dd_mm_yyyy">DD/MM/YYYY</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Entity Application</Label>
-                <EntityConfigurator
-                  group={editingGroup}
-                  onUpdate={(updates) => Object.entries(updates).forEach(([k, v]) => updateField(k as any, v))}
-                />
+                  {editingGroup.fieldType === 'date' && (
+                    <div className="flex items-center gap-2 bg-blue-50/50 p-2 rounded border border-blue-100 animate-in slide-in-from-top-1">
+                      <Label className="text-[10px] font-bold text-blue-700 shrink-0">Format:</Label>
+                      <Select value={editingGroup.dateFormat || 'iso'} onValueChange={(v) => updateField('dateFormat', v)}>
+                        <SelectTrigger className="h-7 text-[10px] border-none bg-transparent focus:ring-0 w-full"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="iso">YYYY-MM-DD</SelectItem>
+                          <SelectItem value="object_split">Object &#123;d,m,y&#125;</SelectItem>
+                          <SelectItem value="dd_mm_yyyy">DD/MM/YYYY</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Entity Application</Label>
+                  <EntityConfigurator
+                    group={editingGroup}
+                    onUpdate={(updates) => Object.entries(updates).forEach(([k, v]) => updateField(k as any, v))}
+                  />
+                </div>
               </div>
             </div>
 
             {/* --- Section 3: Source Mapping (The Core) --- */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Label className="text-sm font-bold text-slate-800 uppercase tracking-wider">Source Configuration</Label>
-                  <Badge variant="outline" className="text-[10px] bg-slate-100">{totalSources} Linked</Badge>
-                </div>
-
-                {totalSources > 1 && (
-                  <div className="flex items-center gap-2 bg-white px-2 py-1 rounded-lg border shadow-sm animate-in fade-in zoom-in-95">
-                    <Label className="text-[10px] font-bold text-slate-400 uppercase">Logic:</Label>
-                    <Select
-                      value={editingGroup.sourceLogic || 'priority'}
-                      onValueChange={(v) => updateField('sourceLogic', v)}
-                    >
-                      <SelectTrigger className="h-7 w-[160px] text-xs border-none shadow-none focus:ring-0">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="priority">Fallback (Check Priority)</SelectItem>
-                        <SelectItem value="all">Return All (Array)</SelectItem>
-                      </SelectContent>
-                    </Select>
+            <div className="bg-white p-4 rounded-xl border shadow-sm">
+              <SectionHeader
+                icon={Database}
+                title="Source Configuration"
+                action={
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-[10px] bg-slate-100">{totalSources} Linked</Badge>
+                    {totalSources > 1 && (
+                      <div className="flex items-center gap-1.5 bg-slate-50 pl-2 pr-1 py-1 rounded-lg border animate-in fade-in zoom-in-95">
+                        <Label className="text-[10px] font-bold text-slate-400 uppercase">Logic:</Label>
+                        <Select
+                          value={editingGroup.sourceLogic || 'priority'}
+                          onValueChange={(v) => updateField('sourceLogic', v)}
+                        >
+                          <SelectTrigger className="h-7 w-[160px] text-xs border-none shadow-none focus:ring-0">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="priority">Fallback (Check Priority)</SelectItem>
+                            <SelectItem value="all">Return All (Array)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                }
+              />
 
               <div className="bg-slate-100/50 border rounded-xl p-4 shadow-inner min-h-[120px]">
                 {isDocument ? (
@@ -1312,7 +1340,7 @@ function WebDataGroupEditDialog({
 
               {/* Warnings and Info */}
               {totalSources > 1 && (
-                <div className="p-3 bg-blue-50/80 border border-blue-100 rounded-lg flex gap-3 text-blue-700 animate-in slide-in-from-bottom-2">
+                <div className="mt-4 p-3 bg-blue-50/80 border border-blue-100 rounded-lg flex gap-3 text-blue-700 animate-in slide-in-from-bottom-2">
                   <Info className="h-4 w-4 shrink-0 mt-0.5" />
                   <div className="text-[11px] leading-relaxed">
                     <strong>Note:</strong> {editingGroup.sourceLogic === 'all'
@@ -1322,40 +1350,39 @@ function WebDataGroupEditDialog({
                   </div>
                 </div>
               )}
-            </div>
 
-            {/* --- Section 4: Extraction Options --- */}
-            <div className="space-y-4 pt-2">
-              <div className="space-y-1.5">
-                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Grouping Label (UI Helper)</Label>
-                <Input
-                  value={editingGroup.customFieldSource || ''}
-                  onChange={(e) => updateField('customFieldSource', e.target.value)}
-                  placeholder="e.g. Identity Documents"
-                  className="bg-white"
-                />
-              </div>
-
-              {showExtractionMode && !isDocument && (
-                <div className="flex items-center justify-between p-3 bg-slate-100 rounded-lg border">
-                  <div className="space-y-0.5">
-                    <Label className="text-sm font-bold text-slate-700">Extraction Mode</Label>
-                    <p className="text-[10px] text-slate-500 leading-tight">Does the automation receive one value or an array?</p>
-                  </div>
-                  <Select
-                    value={editingGroup.extractionMode || 'latest'}
-                    onValueChange={(v) => updateField('extractionMode', v)}
-                  >
-                    <SelectTrigger className="w-[140px] h-9 bg-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="latest">Single (Latest)</SelectItem>
-                      <SelectItem value="all">Multiple (All)</SelectItem>
-                    </SelectContent>
-                  </Select>
+              {/* --- Metadata: Custom Source & Extraction --- */}
+              <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-2 gap-4 items-start">
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Custom Source</Label>
+                  <Input
+                    value={editingGroup.customFieldSource || ''}
+                    onChange={(e) => updateField('customFieldSource', e.target.value)}
+                    placeholder="e.g. Identity Documents"
+                    className="bg-white text-sm"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-tight">Optional label used to group this field in reports and exports.</p>
                 </div>
-              )}
+
+                {showExtractionMode && !isDocument ? (
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Extraction Mode</Label>
+                    <Select
+                      value={editingGroup.extractionMode || 'latest'}
+                      onValueChange={(v) => updateField('extractionMode', v)}
+                    >
+                      <SelectTrigger className="bg-white text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="latest">Single (Latest)</SelectItem>
+                        <SelectItem value="all">Multiple (All)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[10px] text-slate-400 leading-tight">Does the automation receive one value or an array?</p>
+                  </div>
+                ) : <div />}
+              </div>
             </div>
           </div>
         </ScrollArea>

@@ -106,6 +106,19 @@ function humanizeVariableName(name: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+function formatRelativeTime(iso: string | null | undefined): string {
+  if (!iso) return "—"
+  const diffMs = Date.now() - new Date(iso).getTime()
+  const mins = Math.floor(diffMs / 60000)
+  if (mins < 1) return "just now"
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d ago`
+  return new Date(iso).toLocaleDateString()
+}
+
 function getFieldLabel(field: any): string {
   return field?.efnsDisplayName || field?.name || humanizeVariableName(field?.variableName) || "Field"
 }
@@ -159,6 +172,10 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
   const [automationJobId, setAutomationJobId] = useState<string | null>(null)
   const [automationProgress, setAutomationProgress] = useState<any>(null)
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null)
+  // Latest automation_jobs row per automation.id for this task, keyed by String(automation_id).
+  // Persisted in Supabase so "last run" status/audit survives a page refresh, unlike
+  // runningAutomationId/automationProgress which are ephemeral React state.
+  const [lastRunByAutomation, setLastRunByAutomation] = useState<Record<string, any>>({})
   const [showConsole, setShowConsole] = useState(false)
   const [editingCell, setEditingCell] = useState<any>(null)
   const [editValue, setEditValue] = useState('')
@@ -388,6 +405,23 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
     setSortCol(prev => prev === colKey ? (setSortDir(d => d === "asc" ? "desc" : "asc"), colKey) : (setSortDir("asc"), colKey))
   }
 
+  const getFieldSortValue = useCallback((field: any, colKey: string): string => {
+    if (colKey === "field-name") return getFieldLabel(field).toLowerCase()
+    if (colKey === "type") return (field.fieldType || "text").toLowerCase()
+    if (colKey === "source") return (field.customFieldSource || "").toLowerCase()
+    return ""
+  }, [])
+
+  const getSortedFields = useCallback((fields: any[]) => {
+    if (!sortCol) return fields
+    return [...fields].sort((a, b) => {
+      const av = getFieldSortValue(a, sortCol)
+      const bv = getFieldSortValue(b, sortCol)
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0
+      return sortDir === "asc" ? cmp : -cmp
+    })
+  }, [sortCol, sortDir, getFieldSortValue])
+
   const allArrayExpandKeys = useMemo(() => {
     const keys: string[] = []
       ; (automations || []).forEach((auto: any) => {
@@ -550,6 +584,13 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
         status: job.status,
       });
 
+      if (job.status === 'completed' || job.status === 'failed') {
+        // Record the terminal result so the last-run badge reflects it immediately,
+        // without waiting for a page refresh to re-query job history.
+        const autoId = job.context?.automation_id;
+        if (autoId) setLastRunByAutomation(prev => ({ ...prev, [String(autoId)]: job }));
+      }
+
       if (job.status === 'completed') {
         clearPolling();
         setRunningAutomationId(null);
@@ -570,22 +611,79 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
 
   const stopAutomation = useCallback(async () => {
     if (!automationJobId) return;
-    await supabase.from('automation_jobs').update({
+    const completedAt = new Date().toISOString();
+    const { data: stoppedJob } = await supabase.from('automation_jobs').update({
       status: 'failed',
       error: 'Cancelled by user',
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }).eq('id', automationJobId);
+      completed_at: completedAt,
+      updated_at: completedAt,
+    }).eq('id', automationJobId).select().single();
+    const autoId = stoppedJob?.context?.automation_id ?? runningAutomationId;
+    if (autoId != null) {
+      setLastRunByAutomation(prev => ({
+        ...prev,
+        [String(autoId)]: stoppedJob || { ...(prev[String(autoId)] || {}), status: 'failed', error: 'Cancelled by user', completed_at: completedAt },
+      }));
+    }
     clearPolling();
     setRunningAutomationId(null);
     setAutomationProgress(prev => prev ? { ...prev, isRunning: false, message: 'Stopped by user' } : prev);
-  }, [automationJobId, clearPolling]);
+  }, [automationJobId, runningAutomationId, clearPolling]);
 
   useEffect(() => {
     return () => {
       if (pollingInterval) clearInterval(pollingInterval);
     };
   }, [pollingInterval]);
+
+  // On mount (and whenever we land on a different task), pull this task's automation
+  // job history so "last run" status/audit survives a page refresh, and transparently
+  // resume live polling if a job is still in flight - otherwise a refresh mid-run looks
+  // like the automation was never started.
+  useEffect(() => {
+    if (!task?.id) return;
+    let cancelled = false;
+    const loadJobHistory = async () => {
+      try {
+        const { data: jobs, error } = await supabase
+          .from('automation_jobs')
+          .select('*')
+          .eq('context->>task_id', String(task.id))
+          .order('created_at', { ascending: false })
+          .limit(200);
+        if (error || !jobs || cancelled) return;
+
+        const latest: Record<string, any> = {};
+        jobs.forEach((j: any) => {
+          const autoId = j.context?.automation_id;
+          if (autoId && !latest[autoId]) latest[autoId] = j;
+        });
+        setLastRunByAutomation(latest);
+
+        const activeJob = jobs.find((j: any) => ['pending', 'claiming', 'running'].includes(j.status));
+        if (activeJob) {
+          setAutomationJobId(activeJob.id);
+          setRunningAutomationId(activeJob.context?.automation_id);
+          setShowConsole(true);
+          setAutomationProgress({
+            isRunning: true,
+            progress: activeJob.progress || 0,
+            currentStep: activeJob.current_step || '',
+            message: activeJob.message || 'Resuming...',
+            logs: activeJob.logs || [],
+            evidence: activeJob.evidence || [],
+            status: activeJob.status,
+          });
+          const interval = setInterval(() => pollSupabaseJob(activeJob.id), 2000);
+          setPollingInterval(interval);
+        }
+      } catch (err) {
+        console.error('Error loading automation job history:', err);
+      }
+    };
+    loadJobHistory();
+    return () => { cancelled = true; };
+  }, [task?.id, pollSupabaseJob]);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -869,6 +967,26 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
     return cleaned;
   };
 
+  // Follows the app's established client-side auth pattern (see sidebar.tsx's
+  // useCurrentUser): no Supabase auth here, session lives behind /api/auth/session.
+  const getCurrentUserInfo = useCallback(async () => {
+    try {
+      const res = await fetch('/api/auth/session');
+      const json = await res.json();
+      if (json?.authenticated && json?.user) {
+        const u = json.user;
+        return {
+          id: u.id || null,
+          name: u.displayName || [u.firstName, u.lastName].filter(Boolean).join(' ') || u.username || null,
+          email: u.email || null,
+        };
+      }
+    } catch (err) {
+      console.error('Error fetching current user for audit trail:', err);
+    }
+    return { id: null, name: null, email: null };
+  }, []);
+
   const handleRunAutomation = useCallback(async (automation: any) => {
     const automationId = automation.id;
     if (!automationId) { toast({ title: "Validation Error", description: "Missing automation selection", variant: "destructive" }); return; }
@@ -924,6 +1042,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       };
 
       const jobType = deriveAutomationType(automation);
+      const currentUser = await getCurrentUserInfo();
 
       const { data: job, error } = await supabase
         .from('automation_jobs')
@@ -931,6 +1050,13 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
           type: jobType,
           status: 'pending',
           data: payload,
+          context: {
+            task_id: String(task?.id || ''),
+            automation_id: String(automationId),
+            ran_by_user_id: currentUser.id,
+            ran_by_name: currentUser.name,
+            ran_by_email: currentUser.email,
+          },
           retry_count_max: 3,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -965,7 +1091,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       toast({ title: 'Automation Error', description: e.message || 'Unknown error', variant: 'destructive' });
       setRunningAutomationId(null);
     }
-  }, [task, resolveTargetEntityId, getArrayFieldData, mergeArrayOverrides, documentFiles, computedFieldsPreview, resolvedValues, resolveVariableValue, cleanFormData, deriveAutomationType, pollSupabaseJob]);
+  }, [task, resolveTargetEntityId, getArrayFieldData, mergeArrayOverrides, documentFiles, computedFieldsPreview, resolvedValues, resolveVariableValue, cleanFormData, deriveAutomationType, pollSupabaseJob, getCurrentUserInfo]);
 
   const getFileUrl = (filePath: string) => {
     if (!filePath) return '';
@@ -1197,13 +1323,15 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                   </div>
                 </TableHead>
                 <TableHead className="w-[100px] border-b border-r sticky left-[268px] top-0 bg-custom-blue z-40 p-0 text-white">
-                  <div className="flex items-center h-full px-4 text-[11px] font-medium uppercase tracking-wider">
+                  <div className="flex items-center h-full px-4 text-[11px] font-medium uppercase tracking-wider cursor-pointer hover:bg-blue-700 transition-colors" onClick={() => handleSort("type")}>
                     Type
+                    {sortCol === "type" && (sortDir === "asc" ? <ArrowUp className="ml-2 h-4 w-4" /> : <ArrowDown className="ml-2 h-4 w-4" />)}
                   </div>
                 </TableHead>
                 <TableHead className="w-[220px] border-b border-r sticky left-[368px] top-0 bg-custom-blue z-40 p-0 text-white">
-                  <div className="flex items-center h-full px-4 text-[11px] font-medium uppercase tracking-wider">
+                  <div className="flex items-center h-full px-4 text-[11px] font-medium uppercase tracking-wider cursor-pointer hover:bg-blue-700 transition-colors" onClick={() => handleSort("source")}>
                     Source
+                    {sortCol === "source" && (sortDir === "asc" ? <ArrowUp className="ml-2 h-4 w-4" /> : <ArrowDown className="ml-2 h-4 w-4" />)}
                   </div>
                 </TableHead>
                 {columns.map(col => {
@@ -1239,8 +1367,9 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                     <TableRow
                       ref={(el) => { automationRowRefs.current[String(automation.id)] = el }}
                       className={cn(
-                        "hover:bg-slate-200/90 cursor-pointer transition-colors",
-                        isRunning ? "bg-purple-50/90 shadow-[inset_0_0_0_1px_rgba(147,51,234,0.1)]" : "bg-slate-100/90",
+                        "group cursor-pointer transition-colors",
+                        isRunning ? "bg-purple-50/90" : "bg-slate-100/90",
+                        "hover:bg-slate-200/90",
                         highlightedRowId === automation.id && "ring-2 ring-inset ring-blue-500 bg-blue-50/90 animate-pulse"
                       )}
                       onClick={() => setExpandedAutomations(prev => {
@@ -1250,80 +1379,153 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                         return next
                       })}
                     >
-                      <TableCell colSpan={totalCols} className="py-3 px-5 border-b border-slate-300 sticky left-0 z-20">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            {isExpanded ? <ChevronDown className="h-5 w-5 text-slate-500" /> : <ChevronRight className="h-5 w-5 text-slate-500" />}
-                            <div className={cn("p-1.5 rounded-md", isRunning ? "bg-purple-100 text-purple-600" : "bg-slate-200 text-slate-600")}>
-                              {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-                            </div>
-                            <span className="text-[11px] font-medium uppercase tracking-wide text-slate-800">
-                              {automation.name || `Automation #${automation.id}`}
+                      {/* Sticky left: identity block, frozen the same way the field rows' # / Field Name / Type / Source columns are, so the automation name stays visible while scrolling through participant columns. */}
+                      <TableCell
+                        colSpan={columns.length > 0 ? 4 : totalCols}
+                        className={cn(
+                          "py-3 px-5 border-b border-slate-300 sticky left-0 z-20 transition-colors",
+                          isRunning ? "bg-purple-50/90" : "bg-slate-100/90",
+                          "group-hover:bg-slate-200/90",
+                          highlightedRowId === automation.id && "bg-blue-50/90"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          {isExpanded ? <ChevronDown className="h-5 w-5 text-slate-500" /> : <ChevronRight className="h-5 w-5 text-slate-500" />}
+                          <div className={cn("p-1.5 rounded-md", isRunning ? "bg-purple-100 text-purple-600" : "bg-slate-200 text-slate-600")}>
+                            {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                          </div>
+                          <span className="text-[11px] font-medium uppercase tracking-wide text-slate-800">
+                            {automation.name || `Automation #${automation.id}`}
+                          </span>
+                          <span className="text-xs text-slate-400">
+                            {fields.length} field{fields.length !== 1 ? 's' : ''} · {deriveAutomationType(automation)}
+                          </span>
+                          {linkSourceCount > 0 && (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <button type="button" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:text-emerald-800 hover:underline">
+                                  <Link2 className="h-3 w-3" /> Linked from {linkSourceCount}
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-72 p-0" align="start" onClick={(e) => e.stopPropagation()}>
+                                <Command>
+                                  <CommandList>
+                                    {linkSources.stages.length > 0 && (
+                                      <CommandGroup heading="Stage document">
+                                        {linkSources.stages.map((s: any) => (
+                                          <CommandItem key={s.id} className="text-xs">{s.name}</CommandItem>
+                                        ))}
+                                      </CommandGroup>
+                                    )}
+                                    {linkSources.requirements.length > 0 && (
+                                      <CommandGroup heading="Requirement">
+                                        {linkSources.requirements.map((r: any) => (
+                                          <CommandItem key={r.id} className="text-xs">{r.name}</CommandItem>
+                                        ))}
+                                      </CommandGroup>
+                                    )}
+                                  </CommandList>
+                                </Command>
+                              </PopoverContent>
+                            </Popover>
+                          )}
+                          {isRunning && (
+                            <span className="flex items-center gap-1.5 text-[10px] font-semibold text-purple-600 uppercase tracking-wide">
+                              <span className="h-1.5 w-1.5 rounded-full bg-purple-500 animate-pulse" /> Agent Active
                             </span>
-                            <span className="text-xs text-slate-400">
-                              {fields.length} field{fields.length !== 1 ? 's' : ''} · {deriveAutomationType(automation)}
-                            </span>
-                            {linkSourceCount > 0 && (
+                          )}
+                          {!isRunning && lastRunByAutomation[String(automation.id)] && (() => {
+                            const lastJob = lastRunByAutomation[String(automation.id)]
+                            const isSuccess = lastJob.status === 'completed'
+                            const isFailed = lastJob.status === 'failed'
+                            return (
                               <Popover>
                                 <PopoverTrigger asChild>
-                                  <button type="button" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:text-emerald-800 hover:underline">
-                                    <Link2 className="h-3 w-3" /> Linked from {linkSourceCount}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className={cn(
+                                      "flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide rounded-full px-2.5 py-1 border transition-colors",
+                                      isSuccess ? "text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100" :
+                                        isFailed ? "text-red-700 bg-red-50 border-red-200 hover:bg-red-100" :
+                                          "text-slate-600 bg-slate-100 border-slate-200 hover:bg-slate-200"
+                                    )}
+                                  >
+                                    {isSuccess ? <CheckCircle2 className="h-3 w-3" /> : isFailed ? <AlertCircle className="h-3 w-3" /> : <Loader2 className="h-3 w-3" />}
+                                    {isSuccess ? 'Completed' : isFailed ? 'Failed' : lastJob.status}
+                                    <span className="opacity-60 normal-case font-normal">
+                                      · {formatRelativeTime(lastJob.completed_at || lastJob.updated_at)}
+                                    </span>
                                   </button>
                                 </PopoverTrigger>
-                                <PopoverContent className="w-72 p-0" align="start" onClick={(e) => e.stopPropagation()}>
-                                  <Command>
-                                    <CommandList>
-                                      {linkSources.stages.length > 0 && (
-                                        <CommandGroup heading="Stage document">
-                                          {linkSources.stages.map((s: any) => (
-                                            <CommandItem key={s.id} className="text-xs">{s.name}</CommandItem>
-                                          ))}
-                                        </CommandGroup>
-                                      )}
-                                      {linkSources.requirements.length > 0 && (
-                                        <CommandGroup heading="Requirement">
-                                          {linkSources.requirements.map((r: any) => (
-                                            <CommandItem key={r.id} className="text-xs">{r.name}</CommandItem>
-                                          ))}
-                                        </CommandGroup>
-                                      )}
-                                    </CommandList>
-                                  </Command>
+                                <PopoverContent className="w-80 p-4 text-xs space-y-3" align="start" onClick={(e) => e.stopPropagation()}>
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-semibold text-slate-700 text-sm">Last Run</span>
+                                    <Badge className={cn(
+                                      "text-[10px] uppercase",
+                                      isSuccess ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                                        isFailed ? "bg-red-50 text-red-700 border-red-200" : "bg-slate-100 text-slate-600 border-slate-200"
+                                    )}>
+                                      {lastJob.status}
+                                    </Badge>
+                                  </div>
+                                  <div className="space-y-1 text-slate-500">
+                                    <div>Ran by: <span className="font-medium text-slate-700">{lastJob.context?.ran_by_name || lastJob.context?.ran_by_email || 'Unknown'}</span></div>
+                                    <div>Started: <span className="text-slate-700">{lastJob.started_at ? new Date(lastJob.started_at).toLocaleString() : '—'}</span></div>
+                                    <div>{isFailed ? 'Failed' : 'Completed'}: <span className="text-slate-700">{lastJob.completed_at ? new Date(lastJob.completed_at).toLocaleString() : '—'}</span></div>
+                                  </div>
+                                  {lastJob.error && (
+                                    <div className="text-red-600 bg-red-50 rounded p-2 border border-red-100 break-words">{lastJob.error}</div>
+                                  )}
+                                  {lastJob.logs?.length > 0 && (
+                                    <div className="max-h-40 overflow-y-auto border rounded bg-slate-50 p-2 font-mono text-[10px] space-y-0.5">
+                                      {lastJob.logs.slice(-30).map((log: any, i: number) => (
+                                        <div key={i} className={cn(
+                                          log.level === 'error' ? 'text-red-600' : log.level === 'warn' ? 'text-amber-600' : 'text-slate-600'
+                                        )}>
+                                          {log.message}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
                                 </PopoverContent>
                               </Popover>
-                            )}
-                            {isRunning && (
-                              <span className="flex items-center gap-1.5 text-[10px] font-semibold text-purple-600 uppercase tracking-wide">
-                                <span className="h-1.5 w-1.5 rounded-full bg-purple-500 animate-pulse" /> Agent Active
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3 pr-2">
-                            {isRunning ? (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-9 px-5 text-xs font-medium text-red-600 hover:bg-red-50 hover:text-red-700 rounded-full border border-red-100"
-                                onClick={(e) => { e.stopPropagation(); stopAutomation(); }}
-                              >
-                                <StopCircle className="h-4 w-4 mr-2" /> Stop Agent
-                              </Button>
-                            ) : (
-                              <Button
-                                size="sm"
-                                className="h-9 px-6 text-xs font-medium bg-custom-blue hover:bg-blue-700 rounded-full shadow-md transition-all active:scale-95"
-                                onClick={(e) => { e.stopPropagation(); handleRunAutomation(automation); }}
-                              >
-                                <Play className="h-4 w-4 mr-2" /> Run Automation
-                              </Button>
-                            )}
-                          </div>
+                            )
+                          })()}
                         </div>
                       </TableCell>
+
+                      {/* Sticky right: run/stop action, kept reachable via sticky-right instead of sitting unreachable at the far end of a colSpan row when there are many participant columns to scroll through. */}
+                      {columns.length > 0 && (
+                        <TableCell colSpan={columns.length} className="py-3 px-5 border-b border-slate-300">
+                          <div className="flex justify-end">
+                            <div className="sticky right-4 flex items-center gap-3 w-fit">
+                              {isRunning ? (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-9 px-5 text-xs font-medium text-red-600 hover:bg-red-50 hover:text-red-700 rounded-full border border-red-100 bg-white shadow-sm"
+                                  onClick={(e) => { e.stopPropagation(); stopAutomation(); }}
+                                >
+                                  <StopCircle className="h-4 w-4 mr-2" /> Stop Agent
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  className="h-9 px-6 text-xs font-medium bg-custom-blue hover:bg-blue-700 rounded-full shadow-md transition-all active:scale-95"
+                                  onClick={(e) => { e.stopPropagation(); handleRunAutomation(automation); }}
+                                >
+                                  <Play className="h-4 w-4 mr-2" /> Run Automation
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </TableCell>
+                      )}
                     </TableRow>
 
                     {/* Field Rows */}
-                    {isExpanded && fields.map((field: any, fIdx: number) => {
+                    {isExpanded && getSortedFields(fields).map((field: any, fIdx: number) => {
                       const isDocument = field.fieldType === 'document'
                       const isComputed = field.fieldType === 'computed'
                       const isArray = field.fieldType === 'array'
@@ -1338,15 +1540,16 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                       const qIds = field.linkedJobQuestionIds || []
                       const hasMultipleSources = (mIds.length + qIds.length) > 1
                       const hasDefault = !!(field.defaultValue && field.defaultValue !== 'Missing' && field.defaultValue !== '')
+                      const zebraBg = fIdx % 2 === 1 ? "bg-slate-50/60" : "bg-white"
 
                       return (
                         <React.Fragment key={field.id || fIdx}>
-                          <TableRow className="group hover:bg-slate-50/70 transition-colors">
-                            <TableCell className="w-12 py-0 px-0 text-center text-xs font-mono text-slate-400 border-b border-r sticky left-0 bg-white group-hover:bg-slate-50 z-10 align-middle">
+                          <TableRow className={cn("group transition-colors", zebraBg, "hover:bg-slate-100/80")}>
+                            <TableCell className={cn("w-12 py-0 px-0 text-center text-xs font-mono text-slate-400 border-b border-r sticky left-0 z-10 align-middle transition-colors", zebraBg, "group-hover:bg-slate-100/80")}>
                               <div className="flex items-center justify-center h-full font-medium">{fIdx + 1}</div>
                             </TableCell>
 
-                            <TableCell className="w-[220px] py-0 px-4 border-b border-r sticky left-12 bg-white group-hover:bg-slate-50 z-10 align-middle">
+                            <TableCell className={cn("w-[220px] py-0 px-4 border-b border-r sticky left-12 z-10 align-middle transition-colors", zebraBg, "group-hover:bg-slate-100/80")}>
                               <div className="flex items-center gap-2 h-full py-3">
                                 {isArray && (
                                   <button
@@ -1368,32 +1571,37 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                               </div>
                             </TableCell>
 
-                            <TableCell className="w-[100px] py-0 px-4 border-b border-r sticky left-[268px] bg-white group-hover:bg-slate-50 z-10 align-middle">
+                            <TableCell className={cn("w-[100px] py-0 px-4 border-b border-r sticky left-[268px] z-10 align-middle transition-colors", zebraBg, "group-hover:bg-slate-100/80")}>
                               <div className="flex items-center h-full py-3">
                                 <span className="text-[11px] font-medium text-slate-500 capitalize truncate">{field.fieldType || 'text'}</span>
                               </div>
                             </TableCell>
 
-                            <TableCell className="w-[220px] py-0 px-4 border-b border-r sticky left-[368px] bg-white group-hover:bg-slate-50 z-10 align-middle">
-                              <div className="flex items-center h-full py-3 text-xs text-slate-500 truncate">
-                                {hasDefault ? (
-                                  <span className="flex items-center gap-1"><Lock className="h-3 w-3 text-slate-400 shrink-0" /> Default value</span>
-                                ) : isDocument ? (
-                                  <span className="truncate">
-                                    {(field.linkedKycDocuments || []).length} doc type{(field.linkedKycDocuments || []).length !== 1 ? 's' : ''}
-                                    {field.linkedRequirementId ? ' · requirement linked' : ''}
-                                  </span>
-                                ) : isComputed ? (
-                                  <span className="truncate">{field.computedFunction || 'Computed logic'}</span>
-                                ) : isArray ? (
-                                  <span className="truncate">{(field.arrayItems || []).length} column{(field.arrayItems || []).length !== 1 ? 's' : ''}</span>
-                                ) : (mIds.length > 0 || qIds.length > 0) ? (
-                                  <span className="truncate">
-                                    {[mIds.length > 0 ? `${mIds.length} DB` : null, qIds.length > 0 ? `${qIds.length} Question` : null].filter(Boolean).join(' + ')}
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-300 italic">No source</span>
+                            <TableCell className={cn("w-[220px] py-0 px-4 border-b border-r sticky left-[368px] z-10 align-middle transition-colors", zebraBg, "group-hover:bg-slate-100/80")}>
+                              <div className="flex flex-col justify-center h-full py-2 gap-0.5">
+                                {field.customFieldSource && (
+                                  <span className="text-[10px] font-semibold text-blue-600 truncate">{field.customFieldSource}</span>
                                 )}
+                                <div className="text-xs text-slate-500 truncate">
+                                  {hasDefault ? (
+                                    <span className="flex items-center gap-1"><Lock className="h-3 w-3 text-slate-400 shrink-0" /> Default value</span>
+                                  ) : isDocument ? (
+                                    <span className="truncate">
+                                      {(field.linkedKycDocuments || []).length} doc type{(field.linkedKycDocuments || []).length !== 1 ? 's' : ''}
+                                      {field.linkedRequirementId ? ' · requirement linked' : ''}
+                                    </span>
+                                  ) : isComputed ? (
+                                    <span className="truncate">{field.computedFunction || 'Computed logic'}</span>
+                                  ) : isArray ? (
+                                    <span className="truncate">{(field.arrayItems || []).length} column{(field.arrayItems || []).length !== 1 ? 's' : ''}</span>
+                                  ) : (mIds.length > 0 || qIds.length > 0) ? (
+                                    <span className="truncate">
+                                      {[mIds.length > 0 ? `${mIds.length} DB` : null, qIds.length > 0 ? `${qIds.length} Question` : null].filter(Boolean).join(' + ')}
+                                    </span>
+                                  ) : !field.customFieldSource ? (
+                                    <span className="text-slate-300 italic">No source</span>
+                                  ) : null}
+                                </div>
                               </div>
                             </TableCell>
 
@@ -1429,7 +1637,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                               const isEditingDropdown = editingOptions.length > 0
 
                               return (
-                                <TableCell key={col.id} className="p-0 border-b border-r align-middle bg-white group-hover:bg-slate-50/70 transition-colors">
+                                <TableCell key={col.id} className={cn("p-0 border-b border-r align-middle transition-colors", zebraBg, "group-hover:bg-slate-100/80")}>
                                   {!applicable ? (
                                     <div className="flex h-full items-center justify-center p-3">
                                       <span className="text-xs font-medium text-slate-300 italic">N/A</span>
@@ -1491,31 +1699,31 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                           <span className="text-sm font-medium text-slate-600 truncate">{String(field.defaultValue)}</span>
                                         </div>
                                       ) : isEditing ? (
-                                        <div className="flex gap-1.5 items-center justify-between w-full">
+                                        <div className="flex gap-2 items-center w-full py-1.5">
                                           {isEditingDropdown ? (
                                             <SearchableSelect
                                               value={editValue}
                                               onValueChange={(v) => setEditValue(v)}
                                               options={editingOptions}
                                               placeholder="Select..."
-                                              buttonClassName="h-8 text-sm w-full bg-white"
+                                              buttonClassName="h-10 text-sm w-full bg-white flex-1"
                                               disabled={isSavingEdit}
                                             />
                                           ) : (
                                             <Input
                                               value={editValue}
                                               onChange={(e) => setEditValue(e.target.value)}
-                                              className="h-8 text-sm"
+                                              className="h-10 text-sm flex-1"
                                               autoFocus
                                               disabled={isSavingEdit}
                                               onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(isEditingDropdown, editingOptions); if (e.key === 'Escape') cancelEditing(); }}
                                             />
                                           )}
-                                          <Button variant="ghost" size="sm" disabled={isSavingEdit} className="h-8 w-8 p-0 text-green-600 hover:bg-green-50 rounded-full shrink-0" onClick={() => saveEdit(isEditingDropdown, editingOptions)}>
-                                            {isSavingEdit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                          <Button variant="ghost" size="sm" disabled={isSavingEdit} className="h-9 w-9 p-0 text-green-600 hover:bg-green-50 rounded-full shrink-0" onClick={() => saveEdit(isEditingDropdown, editingOptions)}>
+                                            {isSavingEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                                           </Button>
-                                          <Button variant="ghost" size="sm" disabled={isSavingEdit} className="h-8 w-8 p-0 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-full shrink-0" onClick={cancelEditing}>
-                                            <X className="h-3.5 w-3.5" />
+                                          <Button variant="ghost" size="sm" disabled={isSavingEdit} className="h-9 w-9 p-0 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-full shrink-0" onClick={cancelEditing}>
+                                            <X className="h-4 w-4" />
                                           </Button>
                                         </div>
                                       ) : val !== undefined ? (
@@ -1733,31 +1941,31 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                               <span className="text-sm font-medium text-slate-600 truncate">{String(item.defaultValue)}</span>
                                             </div>
                                           ) : isCellEditing ? (
-                                            <div className="flex gap-1.5 items-center justify-between w-full">
+                                            <div className="flex gap-2 items-center w-full py-1.5">
                                               {isItemDropdown ? (
                                                 <SearchableSelect
                                                   value={arrayEditValue}
                                                   onValueChange={(v) => setArrayEditValue(v)}
                                                   options={itemOptions}
                                                   placeholder="Select..."
-                                                  buttonClassName="h-8 text-sm w-full bg-white"
+                                                  buttonClassName="h-10 text-sm w-full bg-white flex-1"
                                                   disabled={isSavingArrayEdit}
                                                 />
                                               ) : (
                                                 <Input
                                                   value={arrayEditValue}
                                                   onChange={(e) => setArrayEditValue(e.target.value)}
-                                                  className="h-8 text-sm"
+                                                  className="h-10 text-sm flex-1"
                                                   autoFocus
                                                   disabled={isSavingArrayEdit}
                                                   onKeyDown={(e) => { if (e.key === 'Enter') saveArrayCellEdit(isItemDropdown, itemOptions); if (e.key === 'Escape') cancelEditingArrayCell(); }}
                                                 />
                                               )}
-                                              <Button variant="ghost" size="sm" disabled={isSavingArrayEdit} className="h-8 w-8 p-0 text-green-600 hover:bg-green-50 rounded-full shrink-0" onClick={() => saveArrayCellEdit(isItemDropdown, itemOptions)}>
-                                                {isSavingArrayEdit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                              <Button variant="ghost" size="sm" disabled={isSavingArrayEdit} className="h-9 w-9 p-0 text-green-600 hover:bg-green-50 rounded-full shrink-0" onClick={() => saveArrayCellEdit(isItemDropdown, itemOptions)}>
+                                                {isSavingArrayEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                                               </Button>
-                                              <Button variant="ghost" size="sm" disabled={isSavingArrayEdit} className="h-8 w-8 p-0 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-full shrink-0" onClick={cancelEditingArrayCell}>
-                                                <X className="h-3.5 w-3.5" />
+                                              <Button variant="ghost" size="sm" disabled={isSavingArrayEdit} className="h-9 w-9 p-0 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-full shrink-0" onClick={cancelEditingArrayCell}>
+                                                <X className="h-4 w-4" />
                                               </Button>
                                             </div>
                                           ) : itemHasMultipleSources ? (

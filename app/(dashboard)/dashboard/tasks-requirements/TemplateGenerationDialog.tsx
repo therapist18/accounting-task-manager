@@ -3302,6 +3302,11 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 window.__availableDocuments = data || [];
             } catch (error) {
                 console.error('Error fetching available documents:', error);
+                toast({
+                    title: "Error",
+                    description: "Could not load the list of available documents.",
+                    variant: "destructive"
+                });
             }
         };
 
@@ -4155,6 +4160,11 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
                         if (error) {
                             console.error('Error creating signed URL:', error);
+                            toast({
+                                title: "Preview Error",
+                                description: "Could not generate a preview link for this template file.",
+                                variant: "destructive"
+                            });
                             setIsPreviewLoading(false);
                             return;
                         }
@@ -4198,6 +4208,11 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                     setPreviewContent(populateHtmlContent(base64Data, current?.placeholders || [], imageStyles));
                 } catch (err) {
                     console.error('Preview error:', err);
+                    toast({
+                        title: "Preview Error",
+                        description: err.message || "Could not render the document preview.",
+                        variant: "destructive"
+                    });
                 } finally {
                     setIsPreviewLoading(false);
                 }
@@ -4628,7 +4643,11 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
         } catch (e) {
             console.error('Save Error:', e);
-            toast({ title: "Save Error", description: e.message, variant: "destructive" });
+            toast({
+                title: "Save Error",
+                description: placeholder?.name ? `Could not save "${placeholder.name}": ${e.message}` : e.message,
+                variant: "destructive"
+            });
         } finally {
             setIsSavingProfile(false);
         }
@@ -4825,7 +4844,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                     .eq('company_id', companyId)
                     .eq('is_default', true)
                     .eq('is_active', true)
-                    .single();
+                    .maybeSingle();
 
                 if (lhQueryError || !letterheads) {
                     toast({ title: "Error", description: "No default letterhead found for this company", variant: "destructive" });
@@ -5080,7 +5099,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                     .eq('company_id', companyId)
                     .eq('is_default', true)
                     .eq('is_active', true)
-                    .single();
+                    .maybeSingle();
 
                 if (lhQueryError || !letterheads) {
                     toast({ title: "Error", description: "No default letterhead found for this company. Please set a default letterhead in the Letterheads page.", variant: "destructive" });
