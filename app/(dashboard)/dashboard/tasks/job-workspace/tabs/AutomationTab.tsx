@@ -42,6 +42,21 @@ interface ColDef {
   priority: number
 }
 
+function HighlightText({ text, query }: { text: string; query: string }) {
+  if (!query || !text) return <>{text}</>
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const parts = text.split(new RegExp(`(${escaped})`, 'gi'))
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1
+          ? <mark key={i} className="bg-yellow-200 text-yellow-900 rounded px-0.5">{part}</mark>
+          : <React.Fragment key={i}>{part}</React.Fragment>
+      )}
+    </>
+  )
+}
+
 function buildParticipantColumns(task: any): ColDef[] {
   if (!task) return []
   const cols: ColDef[] = []
@@ -198,6 +213,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
   const [savedScreenshotDoc, setSavedScreenshotDoc] = useState<any>(null)
   const [isSavingScreenshot, setIsSavingScreenshot] = useState(false)
   const [individualName, setIndividualName] = useState<string>('')
+  const [searchQuery, setSearchQuery] = useState('')
   const logsEndRef = React.useRef<HTMLDivElement>(null)
   const columns = useMemo(() => buildParticipantColumns(task), [task])
 
@@ -409,8 +425,15 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
     if (colKey === "field-name") return getFieldLabel(field).toLowerCase()
     if (colKey === "type") return (field.fieldType || "text").toLowerCase()
     if (colKey === "source") return (field.customFieldSource || "").toLowerCase()
+    const col = columns.find(c => String(c.id) === colKey)
+    if (col) {
+      const cacheKey = `${field.variableName || field.name || field.field_name}-${col.id}`
+      const val = resolvedValues[cacheKey]
+      if (val === undefined || val === null) return ""
+      return String(val).toLowerCase()
+    }
     return ""
-  }, [])
+  }, [columns, resolvedValues])
 
   const getSortedFields = useCallback((fields: any[]) => {
     if (!sortCol) return fields
@@ -443,7 +466,6 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       return next
     })
   }
-
   const deriveAutomationType = useCallback((automation: any): string => {
     if (automation?.automation_type) return automation.automation_type;
     const url = automation?.webhook_url || '';
@@ -454,6 +476,31 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
     if (secondLast && secondLast !== 'permit' && !secondLast.includes(':')) return secondLast;
     return 'class-d';
   }, []);
+
+  const filteredAutomations = useMemo(() => {
+    if (!searchQuery.trim()) return automations || []
+    const q = searchQuery.toLowerCase().trim()
+    return (automations || []).filter((auto: any) => {
+      const name = (auto.name || '').toLowerCase()
+      const type = deriveAutomationType(auto).toLowerCase()
+      if (name.includes(q) || type.includes(q)) return true
+      return (auto.webdata || []).some((field: any) => {
+        const fLabel = getFieldLabel(field).toLowerCase()
+        const fType = (field.fieldType || '').toLowerCase()
+        const fSource = (field.customFieldSource || '').toLowerCase()
+        return fLabel.includes(q) || fType.includes(q) || fSource.includes(q)
+      })
+    })
+  }, [automations, searchQuery, deriveAutomationType])
+
+  useEffect(() => {
+    if (!searchQuery.trim()) return
+    setExpandedAutomations(prev => {
+      const next = new Set(prev)
+      filteredAutomations.forEach((a: any) => next.add(a.id))
+      return next
+    })
+  }, [searchQuery, filteredAutomations])
 
   const clearPolling = useCallback(() => {
     setPollingInterval(prev => {
@@ -1282,8 +1329,23 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
         <div className="flex items-center gap-4">
           <h3 className="text-lg font-bold text-slate-900 tracking-tight">Field Resolution Matrix</h3>
           <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-xs rounded-full px-3 py-0.5">
-            {automations?.length || 0} Automations
+            {searchQuery.trim() ? `${filteredAutomations.length} of ${automations?.length || 0}` : automations?.length || 0} Automations
           </Badge>
+          <div className="relative ml-2">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search fields, automations..."
+              className="h-9 w-72 pl-9 pr-8 text-sm rounded-full border border-slate-200 bg-slate-50 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-all"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-3">
           {allArrayExpandKeys.length > 0 && (
@@ -1313,9 +1375,19 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
             This task does not have any web automation fields configured for mapping.
           </p>
         </div>
+      ) : searchQuery.trim() && filteredAutomations.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
+          <div className="bg-white p-6 rounded-full shadow-md mb-4 border border-slate-100">
+            <Search className="h-10 w-10 text-slate-300" />
+          </div>
+          <p className="text-lg font-medium text-slate-600">No Matching Fields</p>
+          <p className="text-sm font-medium text-slate-400 mt-2 max-w-sm leading-relaxed">
+            No automations or fields match "{searchQuery}". Try a different search term.
+          </p>
+        </div>
       ) : (
         <div className="flex-1 overflow-auto relative custom-scrollbar border rounded-lg bg-white shadow-sm">
-          <Table className="border-separate border-spacing-0 min-w-full">
+          <table className="w-full caption-bottom text-sm border-collapse border-separate border-spacing-0 min-w-full">
             <TableHeader className="sticky top-0 z-30 text-white">
               <TableRow className="bg-custom-blue hover:bg-custom-blue">
                 <TableHead className="w-12 border-b border-r sticky left-0 top-0 bg-custom-blue z-40 p-0 text-white">
@@ -1341,13 +1413,15 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                 </TableHead>
                 {columns.map(col => {
                   const { bgColor, Icon } = getEntityTypeConfig(col.type)
+                  const colKey = String(col.id)
                   return (
-                    <TableHead key={col.id} className={cn("min-w-[340px] border-b border-r top-0 p-0 text-white align-top", bgColor)}>
+                    <TableHead key={col.id} className={cn("min-w-[380px] border-b border-r top-0 p-0 text-white align-top cursor-pointer hover:brightness-110 transition-all", bgColor)}>
                       <div className="flex flex-col h-full w-full">
-                        <div className="flex flex-col items-center justify-center gap-1.5 p-4 border-b border-white/20 flex-1">
+                        <div className="flex flex-col items-center justify-center gap-1.5 p-4 border-b border-white/20 flex-1" onClick={() => handleSort(colKey)}>
                           <span className={cn("flex items-center gap-2 text-[11px] font-semibold tracking-wide")}>
                             <Icon className="h-4 w-4 opacity-90" />
                             <span className="truncate max-w-[200px]">{col.label}</span>
+                            {sortCol === colKey && (sortDir === "asc" ? <ArrowUp className="h-3.5 w-3.5 shrink-0 opacity-80" /> : <ArrowDown className="h-3.5 w-3.5 shrink-0 opacity-80" />)}
                           </span>
                           <span className="text-[10px] font-medium uppercase tracking-wide opacity-80">{col.subLabel}</span>
                         </div>
@@ -1359,7 +1433,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
               </TableRow>
             </TableHeader>
             <TableBody>
-              {automations.map((automation: any) => {
+              {(searchQuery.trim() ? filteredAutomations : automations).map((automation: any) => {
                 const isExpanded = expandedAutomations.has(automation.id)
                 const fields = automation.webdata || []
                 const isRunning = runningAutomationId === automation.id
@@ -1387,11 +1461,12 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                       {/* Sticky left: identity block, frozen the same way the field rows' # / Field Name / Type / Source columns are, so the automation name stays visible while scrolling through participant columns. */}
                       <TableCell
                         colSpan={columns.length > 0 ? 4 : totalCols}
+                        style={{ position: 'sticky', left: 0, top: 0, zIndex: 20 }}
                         className={cn(
-                          "py-3 px-5 border-b border-slate-300 sticky left-0 z-20 transition-colors",
-                          isRunning ? "bg-purple-50/90" : "bg-slate-100/90",
-                          "group-hover:bg-slate-200/90",
-                          highlightedRowId === automation.id && "bg-blue-50/90"
+                          "py-3 px-5 border-b border-slate-300 transition-colors",
+                          isRunning ? "bg-purple-100" : "bg-slate-100",
+                          "group-hover:bg-slate-200",
+                          highlightedRowId === automation.id && "bg-blue-100"
                         )}
                       >
                         <div className="flex items-center gap-3">
@@ -1517,7 +1592,16 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
 
                       {/* Sticky right: run/stop action, kept reachable via sticky-right instead of sitting unreachable at the far end of a colSpan row when there are many participant columns to scroll through. */}
                       {columns.length > 0 && (
-                        <TableCell colSpan={columns.length} className="py-3 px-5 border-b border-slate-300">
+                        <TableCell
+                          colSpan={columns.length}
+                          style={{ position: 'sticky', top: 0, zIndex: 20 }}
+                          className={cn(
+                            "py-3 px-5 border-b border-slate-300 transition-colors",
+                            isRunning ? "bg-purple-100" : "bg-slate-100",
+                            "group-hover:bg-slate-200",
+                            highlightedRowId === automation.id && "bg-blue-100"
+                          )}
+                        >
                           <div className="flex justify-end">
                             <div className="sticky right-4 flex items-center gap-3 w-fit">
                               {isRunning ? (
@@ -1586,7 +1670,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                   </button>
                                 )}
                                 <span className="text-[11px] font-semibold text-slate-800 line-clamp-2 leading-tight">
-                                  {getFieldLabel(field)}
+                                  <HighlightText text={getFieldLabel(field)} query={searchQuery} />
                                 </span>
                               </div>
                             </TableCell>
@@ -1657,13 +1741,13 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                               const isEditingDropdown = editingOptions.length > 0
 
                               return (
-                                <TableCell key={col.id} className={cn("p-0 border-b border-r align-middle transition-colors", zebraBg, "group-hover:bg-slate-100/80")}>
+                                <TableCell key={col.id} className={cn("p-0 border-b border-r align-middle transition-colors min-w-[380px]", zebraBg, "group-hover:bg-slate-100/80")}>
                                   {!applicable ? (
                                     <div className="flex h-full items-center justify-center p-3">
                                       <span className="text-xs font-medium text-slate-300 italic">N/A</span>
                                     </div>
                                   ) : (
-                                    <div className="flex items-center justify-center h-full px-3">
+                                    <div className="flex items-center justify-start h-full px-4">
                                       {isResolving ? (
                                         <Loader2 className="h-5 w-5 animate-spin text-purple-500" />
                                       ) : isDocument ? (
@@ -1719,21 +1803,21 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                           <span className="text-sm font-medium text-slate-600 truncate">{String(field.defaultValue)}</span>
                                         </div>
                                       ) : isEditing ? (
-                                        <div className="flex gap-2 items-center w-full py-1.5">
+                                        <div className="flex gap-2 items-center w-full py-1 px-1">
                                           {isEditingDropdown ? (
                                             <SearchableSelect
                                               value={editValue}
                                               onValueChange={(v) => setEditValue(v)}
                                               options={editingOptions}
                                               placeholder="Select..."
-                                              buttonClassName="h-10 text-sm w-full bg-white flex-1"
+                                              buttonClassName="h-11 text-sm w-full bg-white flex-1 min-w-0"
                                               disabled={isSavingEdit}
                                             />
                                           ) : (
                                             <Input
                                               value={editValue}
                                               onChange={(e) => setEditValue(e.target.value)}
-                                              className="h-10 text-sm flex-1"
+                                              className="h-11 text-sm w-full min-w-0 flex-1"
                                               autoFocus
                                               disabled={isSavingEdit}
                                               onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(isEditingDropdown, editingOptions); if (e.key === 'Escape') cancelEditing(); }}
@@ -1871,7 +1955,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                 </TableCell>
                                 <TableCell className="w-[220px] py-2 px-4 pl-8 border-b border-r sticky left-12 bg-indigo-50/20 group-hover:bg-indigo-50/40 z-10 align-middle relative">
                                   <div className="absolute left-4 top-1/2 w-3 h-px bg-indigo-300" />
-                                  <span className="text-xs font-medium text-slate-600 truncate">{getFieldLabel(item)}</span>
+                                  <span className="text-xs font-medium text-slate-600 truncate"><HighlightText text={getFieldLabel(item)} query={searchQuery} /></span>
                                 </TableCell>
 
                                 <TableCell className="w-[100px] py-0 px-4 border-b border-r sticky left-[268px] bg-indigo-50/20 group-hover:bg-indigo-50/40 z-10 align-middle">
@@ -1911,13 +1995,13 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                   const docPreviewKey = `${item.variableName || item.name}-${col.id}`
 
                                   return (
-                                    <TableCell key={col.id} className="p-0 border-b border-r align-middle bg-white group-hover:bg-indigo-50/10 transition-colors">
+                                    <TableCell key={col.id} className="p-0 border-b border-r align-middle bg-white group-hover:bg-indigo-50/10 transition-colors min-w-[380px]">
                                       {!row ? (
                                         <div className="flex h-full items-center justify-center p-3">
                                           <span className="text-xs font-medium text-slate-300 italic">N/A</span>
                                         </div>
                                       ) : (
-                                        <div className="flex items-center justify-center h-full px-3 py-2">
+                                        <div className="flex items-center justify-start h-full px-4 py-2">
                                           {isDocumentItem ? (
                                             !docStatusLoaded ? (
                                               <Loader2 className="h-4 w-4 animate-spin text-slate-300" />
@@ -1961,21 +2045,21 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                               <span className="text-sm font-medium text-slate-600 truncate">{String(item.defaultValue)}</span>
                                             </div>
                                           ) : isCellEditing ? (
-                                            <div className="flex gap-2 items-center w-full py-1.5">
+                                            <div className="flex gap-2 items-center w-full py-1 px-1">
                                               {isItemDropdown ? (
                                                 <SearchableSelect
                                                   value={arrayEditValue}
                                                   onValueChange={(v) => setArrayEditValue(v)}
                                                   options={itemOptions}
                                                   placeholder="Select..."
-                                                  buttonClassName="h-10 text-sm w-full bg-white flex-1"
+                                                  buttonClassName="h-11 text-sm w-full bg-white flex-1 min-w-0"
                                                   disabled={isSavingArrayEdit}
                                                 />
                                               ) : (
                                                 <Input
                                                   value={arrayEditValue}
                                                   onChange={(e) => setArrayEditValue(e.target.value)}
-                                                  className="h-10 text-sm flex-1"
+                                                  className="h-11 text-sm w-full min-w-0 flex-1"
                                                   autoFocus
                                                   disabled={isSavingArrayEdit}
                                                   onKeyDown={(e) => { if (e.key === 'Enter') saveArrayCellEdit(isItemDropdown, itemOptions); if (e.key === 'Escape') cancelEditingArrayCell(); }}
@@ -2113,7 +2197,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                 )
               })}
             </TableBody>
-          </Table>
+          </table>
         </div>
       )}
 
