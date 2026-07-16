@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
+import { supabase } from "@/lib/supabase/client"
 import type { JobWorkspaceData } from "./fetchJobWorkspaceData"
 import { WorkflowTab } from "./tabs/WorkflowTab"
 import { AutomationTab } from "./tabs/AutomationTab"
-import { RequirementsTab } from "./tabs/RequirementsTab"
+import { RequirementsTab, buildParticipantColumns, getCellStatus } from "./tabs/RequirementsTab"
 import { TemplatesTab } from "./tabs/TemplatesTab"
 import { BillingTab } from "./tabs/BillingTab"
 import { HistoryTab } from "./tabs/HistoryTab"
@@ -50,6 +51,15 @@ function getCurrentStage(task: any, stages: any[]) {
   return lastCompleted === -1 ? sorted[0] : sorted[lastCompleted + 1] ?? sorted[lastCompleted]
 }
 
+// Mirrors the isFailed/needsReview/isRunning classification in AutomationTab's per-row
+// status pill, so this badge never disagrees with what the tab itself shows.
+function classifyAutomationJob(job: any) {
+  const isFailed = job.status === "failed"
+  const needsReview = !isFailed && job.result?.status === "needs_review"
+  const isRunning = ["pending", "claiming", "running"].includes(job.status)
+  return { isFailed, needsReview, isRunning }
+}
+
 const TAB_DEFINITIONS = [
   { value: "overview", label: "Overview", icon: LayoutList },
   { value: "workflow", label: "Workflow", icon: Clock },
@@ -72,6 +82,42 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
   // without a page reload - tabs stay mounted, data stays in memory.
   const [requirementHighlightId, setRequirementHighlightId] = useState(initialRequirementId)
   const [templateHighlightId, setTemplateHighlightId] = useState(initialTemplateDocId)
+  const [automationSummary, setAutomationSummary] = useState<{ failed: number; needsReview: number; running: number } | null>(null)
+  // Populated by TemplatesTab itself once visited (see its onSummaryChange prop) - stays
+  // populated across tab switches since it lives here, not in the (lazily-mounted) tab.
+  const [templatesSummary, setTemplatesSummary] = useState<{ ready: number; total: number } | null>(null)
+
+  // Lightweight, tab-bar-only summary of automation run state (failed/needs-review/running),
+  // scoped to this task's own automations - independent of whether the Automation tab has been
+  // opened, so the badge is accurate even before the (heavier) tab itself ever mounts.
+  useEffect(() => {
+    if (!task?.id || !data.automations?.length) { setAutomationSummary(null); return }
+    let cancelled = false
+    const knownAutomationIds = new Set(data.automations.map((a: any) => String(a.id)))
+    supabase
+      .from("automation_jobs")
+      .select("*")
+      .eq("context->>task_id", String(task.id))
+      .order("created_at", { ascending: false })
+      .limit(200)
+      .then(({ data: jobs, error }) => {
+        if (error || !jobs || cancelled) return
+        const latest: Record<string, any> = {}
+        jobs.forEach((j: any) => {
+          const autoId = j.context?.automation_id != null ? String(j.context.automation_id) : null
+          if (autoId && knownAutomationIds.has(autoId) && !latest[autoId]) latest[autoId] = j
+        })
+        const summary = { failed: 0, needsReview: 0, running: 0 }
+        Object.values(latest).forEach((job: any) => {
+          const { isFailed, needsReview, isRunning } = classifyAutomationJob(job)
+          if (isFailed) summary.failed++
+          else if (needsReview) summary.needsReview++
+          else if (isRunning) summary.running++
+        })
+        if (!cancelled) setAutomationSummary(summary)
+      })
+    return () => { cancelled = true }
+  }, [task?.id, data.automations])
 
   // Sync activeTab when URL-driven initialTab prop changes (e.g. from zap icon redirect)
   useEffect(() => {
@@ -98,6 +144,29 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
 
   const stageProgress = useMemo(() => getStageProgress(task, stages), [task, stages])
   const currentStage = useMemo(() => getCurrentStage(task, stages), [task, stages])
+
+  // Reuses RequirementsTab's own column-building and cell-matching logic (rather than
+  // re-deriving "does this requirement have a document" separately) so this badge can never
+  // drift from what the tab itself shows, while staying cheap enough to compute up front.
+  const requirementsSummary = useMemo(() => {
+    if (!task?.requirements?.length) return null
+    const columns = buildParticipantColumns(task)
+    const allCompanyDocumentsMap: Record<string, any[]> = {}
+    ;(data.allCompanyDocuments || []).forEach((doc: any) => {
+      if (doc.company_id) (allCompanyDocumentsMap[doc.company_id] ||= []).push(doc)
+    })
+    let total = 0
+    let satisfied = 0
+    task.requirements.forEach((req: any) => {
+      columns.forEach(col => {
+        const status = getCellStatus(req, col, data.documentsByIndividual, allCompanyDocumentsMap)
+        if (status.type === "na") return
+        total++
+        if (status.type === "view") satisfied++
+      })
+    })
+    return total > 0 ? { total, satisfied } : null
+  }, [task, data.documentsByIndividual, data.allCompanyDocuments])
 
   const jobLevelLabel = useMemo(() => {
     const jobLevel = task?.job_level
@@ -178,6 +247,13 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
           {TAB_DEFINITIONS.map(tab => {
             const isActive = activeTab === tab.value
             const Icon = tab.icon
+
+            const autoBadge = tab.value === "automation" ? automationSummary : null
+            const autoBadgeCount = autoBadge ? autoBadge.failed + autoBadge.needsReview + autoBadge.running : 0
+
+            const reqBadge = tab.value === "requirements" ? requirementsSummary : null
+            const tplBadge = tab.value === "templates" ? templatesSummary : null
+
             return (
               <button
                 key={tab.value}
@@ -191,6 +267,43 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
               >
                 <Icon className={cn("h-4 w-4", isActive ? "text-blue-600" : "text-slate-400")} />
                 {tab.label}
+                {reqBadge && (
+                  <span
+                    title={`${reqBadge.satisfied} of ${reqBadge.total} requirements have a document on file`}
+                    className={cn(
+                      "px-1.5 h-[18px] rounded-full text-[10px] font-bold flex items-center justify-center",
+                      reqBadge.satisfied === reqBadge.total ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"
+                    )}
+                  >
+                    {reqBadge.satisfied}/{reqBadge.total}
+                  </span>
+                )}
+                {tplBadge && (
+                  <span
+                    title={`${tplBadge.ready} of ${tplBadge.total} templates have all placeholder data available`}
+                    className={cn(
+                      "px-1.5 h-[18px] rounded-full text-[10px] font-bold flex items-center justify-center",
+                      tplBadge.ready === tplBadge.total ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"
+                    )}
+                  >
+                    {tplBadge.ready}/{tplBadge.total}
+                  </span>
+                )}
+                {autoBadgeCount > 0 && (
+                  <span
+                    title={[
+                      autoBadge.failed > 0 ? `${autoBadge.failed} failed` : null,
+                      autoBadge.needsReview > 0 ? `${autoBadge.needsReview} needs review` : null,
+                      autoBadge.running > 0 ? `${autoBadge.running} running` : null,
+                    ].filter(Boolean).join(", ")}
+                    className={cn(
+                      "min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold text-white flex items-center justify-center",
+                      autoBadge.failed > 0 ? "bg-red-500" : autoBadge.needsReview > 0 ? "bg-amber-500" : "bg-blue-500 animate-pulse"
+                    )}
+                  >
+                    {autoBadgeCount}
+                  </span>
+                )}
                 {isActive && (
                   <span className="absolute left-2 right-2 -bottom-[7px] h-[3px] rounded-full bg-blue-600" />
                 )}
@@ -230,7 +343,7 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
         )}
         {visitedTabs.has("templates") && (
           <div className={cn("h-full overflow-y-auto", activeTab !== "templates" && "hidden")}>
-            <TemplatesTab data={data} targetDocumentId={activeTab === "templates" ? templateHighlightId : undefined} />
+            <TemplatesTab data={data} targetDocumentId={activeTab === "templates" ? templateHighlightId : undefined} onSummaryChange={setTemplatesSummary} />
           </div>
         )}
         {visitedTabs.has("billing") && (

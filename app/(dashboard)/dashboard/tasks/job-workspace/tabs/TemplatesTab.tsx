@@ -16,9 +16,13 @@ import TemplateGenerationComponent, { resolveTemplatePlaceholders } from "../../
 interface TemplatesTabProps {
   data: JobWorkspaceData
   targetDocumentId?: string
+  // Reports this tab's own fill-progress aggregate up to the JobWorkspace tab bar, so the
+  // badge there is exact (reuses this component's own computation) without JobWorkspace
+  // having to re-run the same per-requirement placeholder-resolution queries itself.
+  onSummaryChange?: (summary: { ready: number; total: number } | null) => void
 }
 
-export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
+export function TemplatesTab({ data, targetDocumentId, onSummaryChange }: TemplatesTabProps) {
   const { task, kycDocsMap } = data
   const [selectedTemplateReq, setSelectedTemplateReq] = useState<any>(null)
   const [generationInfo, setGenerationInfo] = useState<any>(null)
@@ -130,6 +134,17 @@ export function TemplatesTab({ data, targetDocumentId }: TemplatesTabProps) {
     })
     return () => { cancelled = true }
   }, [masterFields, templateReqs, task, kycDocsMap, resolveEntityForReq])
+
+  useEffect(() => {
+    if (!onSummaryChange) return
+    if (templateReqs.length === 0) { onSummaryChange(null); return }
+    let ready = 0
+    templateReqs.forEach((req: any, idx: number) => {
+      const progress = templateProgress[String(req.id || idx)]
+      if (progress && progress !== 'loading' && progress.total > 0 && progress.filled === progress.total) ready++
+    })
+    onSummaryChange({ ready, total: templateReqs.length })
+  }, [templateReqs, templateProgress, onSummaryChange])
 
   const handleGenerateTemplate = useCallback(async (req: any, reqId: string) => {
     if (!masterFields) return

@@ -97,7 +97,8 @@
       "PowerShell(keytool -genkey -v -keystore \"C:\\\\Users\\\\user\\\\bcl-meetings-release.jks\" -keyalg RSA -keysize 2048 -validity 10000 -alias bcl-meetings -storepass \"FnlQHZ!4hTU8G7Nqxe\" -keypass \"FnlQHZ!4hTU8G7Nqxe\" -dname \"CN=BCL Meetings, OU=BCL, O=BCL, L=Unknown, ST=Unknown, C=ZA\" 2>&1)",
       "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"E:\\\\Bclmeetingsapp\\\\app\\\\src\\\\main\\\\res\\\\drawable\\\\header_bg.png\"\\); $header = $bytes[0..7] | ForEach-Object { $_.ToString\\(\"X2\"\\) }; Write-Output \"Header bytes: $\\($header -join ' '\\)\"; Write-Output \"File size: $\\($bytes.Length\\) bytes\")",
       "PowerShell(Add-Type -AssemblyName System.Drawing; $src = \"E:\\\\Bclmeetingsapp\\\\app\\\\src\\\\main\\\\res\\\\drawable\\\\header_bg.png\"; $img = [System.Drawing.Image]::FromFile\\($src\\); $img.Save\\($src, [System.Drawing.Imaging.ImageFormat]::Png\\); $img.Dispose\\(\\); Write-Output \"Converted successfully. New size: $\\(\\(Get-Item $src\\).Length\\) bytes\")",
-      "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"E:\\\\Bclmeetingsapp\\\\app\\\\src\\\\main\\\\res\\\\drawable\\\\header_bg.png\"\\); $header = $bytes[0..3] | ForEach-Object { $_.ToString\\(\"X2\"\\) }; Write-Output \"Header: $\\($header -join ' '\\)\")"
+      "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"E:\\\\Bclmeetingsapp\\\\app\\\\src\\\\main\\\\res\\\\drawable\\\\header_bg.png\"\\); $header = $bytes[0..3] | ForEach-Object { $_.ToString\\(\"X2\"\\) }; Write-Output \"Header: $\\($header -join ' '\\)\")",
+      "Bash(sleep 10; tail -n 60 /tmp/bcl-dev.log)"
     ],
     "additionalDirectories": [
       "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals"

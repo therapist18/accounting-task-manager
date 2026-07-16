@@ -214,6 +214,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
   const [isSavingScreenshot, setIsSavingScreenshot] = useState(false)
   const [individualName, setIndividualName] = useState<string>('')
   const [searchQuery, setSearchQuery] = useState('')
+  const [showMissingOnly, setShowMissingOnly] = useState(false)
   const logsEndRef = React.useRef<HTMLDivElement>(null)
   const columns = useMemo(() => buildParticipantColumns(task), [task])
 
@@ -501,6 +502,44 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       return next
     })
   }, [searchQuery, filteredAutomations])
+
+  useEffect(() => {
+    if (!showMissingOnly || missingStats.missingAutoIds.size === 0) return
+    setExpandedAutomations(prev => {
+      const next = new Set(prev)
+      missingStats.missingAutoIds.forEach(id => next.add(id))
+      return next
+    })
+  }, [showMissingOnly, missingStats.missingAutoIds])
+
+  const missingStats = useMemo(() => {
+    let totalApplicable = 0
+    let missingCount = 0
+    const missingAutoIds = new Set<number>()
+    ;(automations || []).forEach((auto: any) => {
+      (auto.webdata || []).forEach((field: any) => {
+        if (field.fieldType === 'array' || field.fieldType === 'document' || field.fieldType === 'computed') return
+        const mIds = field.linkedMasterFields || field.masterFieldIds || []
+        const qIds = field.linkedJobQuestionIds || []
+        if (mIds.length === 0 && qIds.length === 0 && !field.customFieldSource) return
+        columns.forEach((col: any) => {
+          if (!isFieldApplicable(field, col)) return
+          totalApplicable++
+          const cacheKey = `${field.variableName || field.name || field.field_name}-${col.id}`
+          const val = resolvedValues[cacheKey]
+          if (!isValidValue(val)) {
+            missingCount++
+            missingAutoIds.add(auto.id)
+          }
+        })
+      })
+    })
+    return { totalApplicable, missingCount, filledCount: totalApplicable - missingCount, missingAutoIds }
+  }, [automations, columns, resolvedValues])
+
+  const missingProgress = missingStats.totalApplicable > 0
+    ? Math.round((missingStats.filledCount / missingStats.totalApplicable) * 100)
+    : 100
 
   const clearPolling = useCallback(() => {
     setPollingInterval(prev => {
@@ -1329,7 +1368,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
         <div className="flex items-center gap-4">
           <h3 className="text-lg font-bold text-slate-900 tracking-tight">Field Resolution Matrix</h3>
           <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-xs rounded-full px-3 py-0.5">
-            {searchQuery.trim() ? `${filteredAutomations.length} of ${automations?.length || 0}` : automations?.length || 0} Automations
+            {searchQuery.trim() || showMissingOnly ? `${(searchQuery.trim() ? filteredAutomations : automations).filter((a: any) => !showMissingOnly || missingStats.missingAutoIds.has(a.id)).length} of ${automations?.length || 0}` : automations?.length || 0} Automations
           </Badge>
           <div className="relative ml-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
@@ -1354,6 +1393,20 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
               {allArraysExpanded ? 'Collapse All Arrays' : 'Expand All Arrays'}
             </Button>
           )}
+          <Button
+            variant={showMissingOnly ? "default" : "outline"}
+            size="sm"
+            className={`h-9 px-4 text-xs font-semibold rounded-lg shadow-sm flex items-center gap-1.5 ${showMissingOnly ? 'bg-orange-500 text-white hover:bg-orange-600 border-orange-500' : 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50'}`}
+            onClick={() => setShowMissingOnly(!showMissingOnly)}
+          >
+            {showMissingOnly ? 'Show All' : 'Show Missing'}
+            {!showMissingOnly && missingStats.missingCount > 0 && (
+              <Badge className="ml-1 bg-orange-500 text-white text-[10px] h-5 min-w-[20px] px-1 rounded-full">{missingStats.missingCount}</Badge>
+            )}
+            {!showMissingOnly && (
+              <span className="text-slate-400 font-normal ml-1">{missingProgress}%</span>
+            )}
+          </Button>
           {automationJobId && showConsole && (
             <Button variant="outline" size="sm" className="h-9 px-4 text-xs font-semibold rounded-lg border-slate-200 text-slate-700 bg-white hover:bg-slate-50 shadow-sm flex items-center gap-1.5" onClick={() => setShowConsole(!showConsole)}>
               <Terminal className="h-3.5 w-3.5 text-slate-500" /> {showConsole ? 'Hide Console' : 'Show Console'}
@@ -1373,6 +1426,16 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
           <p className="text-lg font-medium text-slate-600">No Automations Configured</p>
           <p className="text-sm font-medium text-slate-400 mt-2 max-w-sm leading-relaxed">
             This task does not have any web automation fields configured for mapping.
+          </p>
+        </div>
+      ) : showMissingOnly && missingStats.missingCount === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
+          <div className="bg-white p-6 rounded-full shadow-md mb-4 border border-slate-100">
+            <CheckCircle2 className="h-10 w-10 text-emerald-400" />
+          </div>
+          <p className="text-lg font-medium text-slate-600">All Fields Filled</p>
+          <p className="text-sm font-medium text-slate-400 mt-2 max-w-sm leading-relaxed">
+            Every automation field has a value assigned. Great job!
           </p>
         </div>
       ) : searchQuery.trim() && filteredAutomations.length === 0 ? (
@@ -1430,7 +1493,10 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(searchQuery.trim() ? filteredAutomations : automations).map((automation: any) => {
+              {(searchQuery.trim() ? filteredAutomations : automations).filter((auto: any) => {
+                if (!showMissingOnly) return true
+                return missingStats.missingAutoIds.has(auto.id)
+              }).map((automation: any) => {
                 const isExpanded = expandedAutomations.has(automation.id)
                 const fields = automation.webdata || []
                 const isRunning = runningAutomationId === automation.id
@@ -1626,7 +1692,22 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                     </TableRow>
 
                     {/* Field Rows */}
-                    {isExpanded && getSortedFields(fields).map((field: any, fIdx: number) => {
+                    {isExpanded && getSortedFields(fields).filter((field: any) => {
+                      if (!showMissingOnly) return true
+                      const isDoc = field.fieldType === 'document'
+                      const isComputed = field.fieldType === 'computed'
+                      if (isDoc || isComputed) return false
+                      const isDropdownField = field.fieldType === 'dropdown'
+                      const isPhoneField = field.fieldName === 'phone' || field.field_name === 'phone'
+                      return columns.some((col: any) => {
+                        if (isPhoneField && col.field_name !== 'phone') return false
+                        if (!isFieldApplicable(field, col)) return false
+                        if (!isDropdownField && !isPhoneField) return true
+                        const cacheKey = `${field.variableName || field.name || field.field_name}-${col.id}`
+                        const val = resolvedValues[cacheKey]
+                        return !isValidValue(val)
+                      })
+                    }).map((field: any, fIdx: number) => {
                       const isDocument = field.fieldType === 'document'
                       const isComputed = field.fieldType === 'computed'
                       const isArray = field.fieldType === 'array'
@@ -1789,7 +1870,8 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                               onValueChange={(v) => setEditValue(v)}
                                               options={editingOptions}
                                               placeholder="Select..."
-                                              buttonClassName="h-11 text-sm w-full bg-white flex-1 min-w-0"
+                                              className="flex-1 min-w-0"
+                                              buttonClassName="h-11 text-sm w-full bg-white"
                                               disabled={isSavingEdit}
                                             />
                                           ) : (
@@ -1821,11 +1903,11 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                                   isMissing ? "text-red-600 font-medium" : "text-slate-800"
                                                 )}
                                               >
-                                                <span className="text-sm truncate max-w-[110px]">{isMissing ? 'Missing' : String(cleanFieldValue(val))}</span>
+                                                <span className="text-sm truncate max-w-[280px]">{isMissing ? 'Missing' : String(cleanFieldValue(val))}</span>
                                                 <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                                               </button>
                                             </PopoverTrigger>
-                                            <PopoverContent className="w-72 p-0" align="start" onClick={(e) => e.stopPropagation()}>
+                                            <PopoverContent className="w-96 p-0" align="start" onClick={(e) => e.stopPropagation()}>
                                               <div className="p-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
                                                 <span className="text-xs font-semibold text-slate-600">Linked Sources</span>
                                                 <span className="text-xs text-slate-500">{field.sourceLogic === 'all' ? 'Merge All' : 'Priority Logic'}</span>
@@ -2031,7 +2113,8 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                                   onValueChange={(v) => setArrayEditValue(v)}
                                                   options={itemOptions}
                                                   placeholder="Select..."
-                                                  buttonClassName="h-11 text-sm w-full bg-white flex-1 min-w-0"
+                                                  className="flex-1 min-w-0"
+                                                  buttonClassName="h-11 text-sm w-full bg-white"
                                                   disabled={isSavingArrayEdit}
                                                 />
                                               ) : (
@@ -2062,11 +2145,11 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                                     isItemMissing ? "text-red-600 font-medium" : "text-slate-800"
                                                   )}
                                                 >
-                                                  <span className="text-sm truncate max-w-[110px]">{isItemMissing ? 'Missing' : String(cellVal)}</span>
+                                                  <span className="text-sm truncate max-w-[280px]">{isItemMissing ? 'Missing' : String(cellVal)}</span>
                                                   <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                                                 </button>
                                               </PopoverTrigger>
-                                              <PopoverContent className="w-72 p-0" align="start" onClick={(e) => e.stopPropagation()}>
+                                              <PopoverContent className="w-96 p-0" align="start" onClick={(e) => e.stopPropagation()}>
                                                 <div className="p-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
                                                   <span className="text-xs font-semibold text-slate-600">Array Sources</span>
                                                   <span className="text-xs text-slate-500">{item.sourceLogic === 'all' ? 'Merge All' : 'Priority Logic'}</span>

@@ -93,7 +93,7 @@ function checkApplicability(colType: string, requirement: any): boolean {
   return allowedTypes.includes(colType)
 }
 
-function buildParticipantColumns(task: any): ColDef[] {
+export function buildParticipantColumns(task: any): ColDef[] {
   if (!task) return []
   const cols: ColDef[] = []
   const participants = task.participants_details || []
@@ -135,7 +135,7 @@ function buildParticipantColumns(task: any): ColDef[] {
   return cols.sort((a, b) => a.priority - b.priority)
 }
 
-function getCellStatus(req: any, col: ColDef, docsByInd: Record<string, any[]>, allCompanyDocs: Record<string, any[]>) {
+export function getCellStatus(req: any, col: ColDef, docsByInd: Record<string, any[]>, allCompanyDocs: Record<string, any[]>) {
   if (!checkApplicability(col.type, req)) return { type: "na" as const, docs: [] }
 
   const docIds = req.document_ids || (req.document_id ? [req.document_id] : [])
