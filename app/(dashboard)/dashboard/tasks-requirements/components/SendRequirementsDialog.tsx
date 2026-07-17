@@ -55,36 +55,81 @@ function EntityTypeBadges({ types }: { types: string[] }) {
   )
 }
 
-function getAppliesToNames(item: any, task: any): string[] {
-  const entityTypes = getEntityTypes(item)
+function roleMatchesEntityType(p: any, t: string): boolean {
+  const roles = Array.isArray(p.role) ? p.role.map((r: string) => String(r).toLowerCase()) : [String(p.role || '').toLowerCase()]
+  if (t === 'principal') return roles.includes('principal') || roles.includes('applicant')
+  if (t === 'director') return roles.includes('director') || roles.includes('shareholder')
+  if (t === 'dependant' || t === 'dependent') return roles.includes('dependant') || roles.includes('dependent')
+  if (t === 'sponsor') return roles.includes('sponsor')
+  if (t === 'understudy') return roles.includes('understudy')
+  return roles.includes(t)
+}
+
+type TaskEntity = { id: any; name: string; type: 'company' | 'individual' }
+
+function getAllTaskEntities(task: any): TaskEntity[] {
   if (!task) return []
   const participants = task.participants_details || []
   const applicant = task.applicant_details || {}
-  const names = new Set<string>()
+  const entities: TaskEntity[] = []
+  const seen = new Set<string>()
+  const add = (id: any, name: string, type: 'company' | 'individual') => {
+    if (id === null || id === undefined) return
+    const key = `${type}-${id}`
+    if (seen.has(key)) return
+    seen.add(key)
+    entities.push({ id, name, type })
+  }
+  if (applicant.type === 'company') add(applicant.id, applicant.name, 'company')
+  if (applicant.type === 'individual') add(applicant.id, applicant.name, 'individual')
+  participants.forEach((p: any) => add(p.id, p.name, p.type === 'company' ? 'company' : 'individual'))
+  if (task.company_id) add(task.company_id, task.company_name || 'Company', 'company')
+  if (task.individual_id) add(task.individual_id, applicant.name || 'Individual', 'individual')
+  return entities
+}
 
-  const matchesType = (p: any, t: string) => {
-    const roles = Array.isArray(p.role) ? p.role.map((r: string) => String(r).toLowerCase()) : [String(p.role || '').toLowerCase()]
-    if (t === 'principal') return roles.includes('principal') || roles.includes('applicant')
-    if (t === 'director') return roles.includes('director') || roles.includes('shareholder')
-    if (t === 'dependant' || t === 'dependent') return roles.includes('dependant') || roles.includes('dependent')
-    if (t === 'sponsor') return roles.includes('sponsor')
-    if (t === 'understudy') return roles.includes('understudy')
-    return roles.includes(t)
+// The single source of truth for "which participant(s) does this requirement apply
+// to" - used both for the Applies To column and for resolving whose documents count
+// toward the requirement's status. Previously the status lookup only ever checked
+// task.company_id/task.individual_id, so a requirement satisfied by a *different*
+// participant (e.g. a director/dependant whose docs live under their own id) showed
+// as missing even though the Requirements Matrix tab - which checks every applicable
+// participant column - showed it as satisfied.
+function getApplicableEntitiesForRequirement(item: any, task: any): TaskEntity[] {
+  const entityTypes = getEntityTypes(item)
+  if (!task) return []
+  if (entityTypes.length === 0) return getAllTaskEntities(task)
+
+  const participants = task.participants_details || []
+  const applicant = task.applicant_details || {}
+  const entities: TaskEntity[] = []
+  const seen = new Set<string>()
+  const add = (id: any, name: string, type: 'company' | 'individual') => {
+    if (id === null || id === undefined) return
+    const key = `${type}-${id}`
+    if (seen.has(key)) return
+    seen.add(key)
+    entities.push({ id, name, type })
   }
 
-  const typesToMatch = entityTypes.length > 0 ? entityTypes.map((t: string) => String(t).toLowerCase()) : []
-  typesToMatch.forEach((t: string) => {
+  entityTypes.map((t: string) => String(t).toLowerCase()).forEach((t: string) => {
     if (t === 'company') {
       const companyPart = applicant.type === 'company' ? applicant : participants.find((p: any) => p.type === 'company')
-      if (companyPart?.name) names.add(companyPart.name)
-      else if (task.company_name) names.add(task.company_name)
+      if (companyPart?.id) add(companyPart.id, companyPart.name, 'company')
+      else if (task.company_id) add(task.company_id, task.company_name || 'Company', 'company')
       return
     }
-    if (applicant.type === 'individual' && matchesType(applicant, t)) names.add(applicant.name)
-    participants.filter((p: any) => p.type === 'individual').forEach((p: any) => { if (matchesType(p, t)) names.add(p.name) })
+    if (applicant.type === 'individual' && roleMatchesEntityType(applicant, t)) add(applicant.id, applicant.name, 'individual')
+    participants.filter((p: any) => p.type === 'individual').forEach((p: any) => { if (roleMatchesEntityType(p, t)) add(p.id, p.name, 'individual') })
   })
 
-  return Array.from(names)
+  return entities
+}
+
+function getAppliesToNames(item: any, task: any): string[] {
+  const entityTypes = getEntityTypes(item)
+  if (!task || entityTypes.length === 0) return []
+  return Array.from(new Set(getApplicableEntitiesForRequirement(item, task).map(e => e.name).filter(Boolean)))
 }
 
 function AppliesToCell({ item, task }: { item: any, task: any }) {
@@ -215,21 +260,38 @@ export function SendRequirementsDialog({
     const docIds = docRequirement.document_ids || (docRequirement.document_id ? [docRequirement.document_id] : [])
     const requiredCount = docRequirement.requiredDocumentCount || 1
     const missing = { label: 'Action Required', color: 'text-red-600', bgColor: 'bg-red-50', status: 'missing', icon: AlertCircle, date: '-', satisfiedCount: 0, requiredCount }
-    if (docIds.length === 0) return missing
+    // No document type is linked to this requirement at all, so it can never be
+    // fulfilled by anyone - the Requirements Matrix tab shows this as "N/A" rather
+    // than flagging it for action, since there's nothing a client/staff member can
+    // do about it here (it's a class-requirement configuration gap, not a missing
+    // submission). Mirror that instead of showing a misleading red "Action Required".
+    if (docIds.length === 0) {
+      return { label: 'Not Configured', color: 'text-slate-500', bgColor: 'bg-slate-100', status: 'unconfigured', icon: HelpCircle, date: '-', satisfiedCount: 0, requiredCount }
+    }
 
-    let foundDocs: any[] = []
-    const companyId = task.company_id
-    if (companyId && allCompanyDocuments[companyId]) {
-      foundDocs.push(...allCompanyDocuments[companyId].filter(doc => docIds.includes(doc.document_id) && doc.status !== 'deleted'))
-    }
-    const individualId = task.individual_id
-    if (individualId && allIndividualDocuments[individualId]) {
-      foundDocs.push(...allIndividualDocuments[individualId].filter(doc => docIds.includes(doc.document_id) && doc.status !== 'deleted'))
-    }
+    const entities = getApplicableEntitiesForRequirement(docRequirement, task)
+    const foundDocs: any[] = []
+    const seenDocIds = new Set<any>()
+    const entityTrace = entities.map((entity) => {
+      const source = entity.type === 'company' ? allCompanyDocuments[entity.id] : allIndividualDocuments[entity.id]
+      const matched = (source || []).filter((doc: any) => docIds.includes(doc.document_id) && doc.status !== 'deleted')
+      matched.forEach((doc: any) => {
+        if (seenDocIds.has(doc.id)) return
+        seenDocIds.add(doc.id)
+        foundDocs.push(doc)
+      })
+      return {
+        entity: `${entity.type}:${entity.id}:${entity.name}`,
+        docsAvailableForEntity: source?.length ?? 0,
+        docsAvailableTypes: (source || []).map((d: any) => d.document_id),
+        matchedCount: matched.length,
+        matchedStatuses: matched.map((d: any) => d.status),
+      }
+    })
 
     if (foundDocs.length === 0) return missing
 
-    const activeDocs = foundDocs.filter(d => d.status === 'active')
+    const activeDocs = foundDocs.filter(d => d.status !== 'draft')
     const latestDoc = (activeDocs.length > 0 ? activeDocs : foundDocs).reduce((prev, curr) => new Date(curr.created_at) > new Date(prev.created_at) ? curr : prev)
     const formattedDate = new Date(latestDoc.created_at).toLocaleDateString('en-GB')
 
@@ -272,13 +334,14 @@ export function SendRequirementsDialog({
     if (['array', 'document', 'computed'].includes(field.fieldType)) return "Complex Mapping"
     const ctx = buildCtx(field.automationId, [field], groupIndex, task)
     const targetEntityId = resolveTargetEntityIdImpl(field, ctx)
-    if (targetEntityId == null) return null
-    return resolveVariableValueImpl(field, String(targetEntityId), ctx)
+    const value = targetEntityId == null ? null : resolveVariableValueImpl(field, String(targetEntityId), ctx)
+       return value
   }
 
   const getArrayVal = (field: any, task: any, groupIndex: number): any[] => {
     const ctx = buildCtx(field.automationId, [field], groupIndex, task)
-    return getArrayFieldDataImpl(field, ctx) || []
+    const rows = getArrayFieldDataImpl(field, ctx) || []
+      return rows
   }
 
   const getEntityLabelForRow = (task: any, entityId: any) => {
@@ -291,23 +354,48 @@ export function SendRequirementsDialog({
 
   const isFieldMissingVal = (val: any) => val === null || val === undefined || val === "" || val === "Missing"
 
+  const docsWithStatus = useMemo(() => {
+    const results = clientRequirements.docs.map((doc) => {
+      const status = getDocStatus(doc, doc.task)
+      const docTypeNames = getDocTypeNames(doc)
+      const requiredCount = doc.requiredDocumentCount || 1
+      return { doc, status, docTypeNames, acceptedTypesLabel: getAcceptedTypesLabel(docTypeNames, requiredCount) }
+    })
+    return results
+  }, [clientRequirements.docs, allCompanyDocuments, allIndividualDocuments, kycDocsMap])
+
+  const questionsWithValues = useMemo(() => {
+    return clientRequirements.questions.map((q) => {
+      const value = q.task.job_specific_answers?.[q.id]
+      return { question: q, value, isMissing: !value }
+    })
+  }, [clientRequirements.questions])
+
+  const fieldsWithValues = useMemo(() => {
+    return clientRequirements.fields.map((f) => {
+      if (f.fieldType === 'array') {
+        const arrayRows = getArrayVal(f, f.task, f.groupIndex)
+        return { field: f, isArray: true as const, arrayRows, value: null, isMissing: arrayRows.length === 0 }
+      }
+      const value = getFieldVal(f, f.task, f.groupIndex)
+      return { field: f, isArray: false as const, arrayRows: [] as any[], value, isMissing: isFieldMissingVal(value) }
+    })
+  }, [clientRequirements.fields, fieldSourceDataCache, jobFieldsRecord, fieldMasterComputedCache, relationshipData])
+
   const stats = useMemo(() => {
-    const total = clientRequirements.docs.length + clientRequirements.questions.length + clientRequirements.fields.length;
+    // Requirements with no document type linked ('unconfigured') can never be
+    // fulfilled by anyone, so they're excluded from the completion count - same as
+    // how the Requirements Matrix tab doesn't treat its "N/A" rows as outstanding work.
+    const configuredDocCount = docsWithStatus.filter(({ status }) => status.status !== 'unconfigured').length;
+    const total = configuredDocCount + clientRequirements.questions.length + clientRequirements.fields.length;
     let completed = 0;
 
-    clientRequirements.docs.forEach(doc => {
-      if (getDocStatus(doc, doc.task).status === 'valid') completed++;
-    });
-    clientRequirements.questions.forEach(q => {
-      if (q.task.job_specific_answers?.[q.id]) completed++;
-    });
-    clientRequirements.fields.forEach(f => {
-      const val = f.fieldType === 'array' ? getArrayVal(f, f.task, f.groupIndex) : getFieldVal(f, f.task, f.groupIndex);
-      if (f.fieldType === 'array' ? val.length > 0 : !isFieldMissingVal(val)) completed++;
-    });
+    docsWithStatus.forEach(({ status }) => { if (status.status === 'valid') completed++; });
+    questionsWithValues.forEach(({ isMissing }) => { if (!isMissing) completed++; });
+    fieldsWithValues.forEach(({ isArray, arrayRows, isMissing }) => { if (isArray ? arrayRows.length > 0 : !isMissing) completed++; });
 
     return { total, completed, percent: total > 0 ? Math.round((completed / total) * 100) : 0 };
-  }, [clientRequirements]);
+  }, [clientRequirements, docsWithStatus, questionsWithValues, fieldsWithValues]);
 
   const clientUrl = useMemo(() => {
     if (typeof window === "undefined" || !tasks?.[0]?.id) return ""
@@ -331,6 +419,7 @@ export function SendRequirementsDialog({
       if (statusObj.status === 'valid') return 'status-valid'
       if (statusObj.status === 'partial') return 'status-partial'
       if (statusObj.status === 'draft') return 'status-draft'
+      if (statusObj.status === 'unconfigured') return 'status-unconfigured'
       return 'status-missing'
     }
 
@@ -346,9 +435,7 @@ export function SendRequirementsDialog({
       return `<strong style="color:#1e293b;">${label}</strong><br/><span style="color:#94a3b8; font-size:9px;">${preview}</span>`
     }
 
-    const docRows = clientRequirements.docs.map((doc, idx) => {
-      const status = getDocStatus(doc, doc.task)
-      const docTypeNames = getDocTypeNames(doc)
+    const docRows = docsWithStatus.map(({ doc, status, docTypeNames }, idx) => {
       const requiredCount = doc.requiredDocumentCount || 1
       const automationTag = doc.web_automation?.automationId
         ? ' <span style="display:inline-block; font-size:8px; font-weight:700; color:#7c3aed; background:#f5f3ff; border:1px solid #ddd6fe; border-radius:9999px; padding:1px 6px; vertical-align:middle;">&#9889; Automated</span>'
@@ -365,9 +452,7 @@ export function SendRequirementsDialog({
     }).join('')
 
     const fieldCards = [
-      ...clientRequirements.questions.map((q, idx) => {
-        const val = q.task.job_specific_answers?.[q.id]
-        const isMissing = !val
+      ...questionsWithValues.map(({ question: q, value: val, isMissing }, idx) => {
         return `<div class="field-card ${isMissing ? 'field-missing' : 'field-ok'}">
           <div class="field-card-top">
             <span class="field-num">${String(idx + 1).padStart(2, '0')}</span>
@@ -377,30 +462,22 @@ export function SendRequirementsDialog({
           <div class="field-value">${val || '<span style="color:#cbd5e1;font-style:italic;">Pending Input</span>'}</div>
         </div>`
       }),
-      ...clientRequirements.fields.map((f, idx) => {
-        const isArray = f.fieldType === 'array'
+      ...fieldsWithValues.map(({ field: f, isArray, arrayRows, value: val, isMissing }, idx) => {
         let displayVal: string
-        let isMissing: boolean
         if (isArray) {
-          const arrayRows = getArrayVal(f, f.task, f.groupIndex)
-          isMissing = arrayRows.length === 0
-          if (isMissing) {
-            displayVal = '<span style="color:#cbd5e1;font-style:italic;">Pending Input</span>'
-          } else {
-            displayVal = `<ul>` + arrayRows.map((row: any) => {
+          displayVal = isMissing
+            ? '<span style="color:#cbd5e1;font-style:italic;">Pending Input</span>'
+            : `<ul>` + arrayRows.map((row: any) => {
               const label = getEntityLabelForRow(f.task, row.entityId)
               const items = (f.arrayItems || []).map((item: any) => `<strong>${getFieldLabel(item)}:</strong> ${row[item.variableName] ?? '-'}`).join(', ')
               return `<li><strong style="color:#1e293b;">${label}</strong> &rarr; ${items}</li>`
             }).join('') + `</ul>`
-          }
         } else {
-          const val = getFieldVal(f, f.task, f.groupIndex)
-          isMissing = isFieldMissingVal(val)
           displayVal = val || '<span style="color:#cbd5e1;font-style:italic;">Pending Input</span>'
         }
         return `<div class="field-card ${isMissing ? 'field-missing' : 'field-ok'} ${isArray ? 'field-wide' : ''}">
           <div class="field-card-top">
-            <span class="field-num">${String(clientRequirements.questions.length + idx + 1).padStart(2, '0')}</span>
+            <span class="field-num">${String(questionsWithValues.length + idx + 1).padStart(2, '0')}</span>
             <span class="field-name">${getFieldLabel(f)}</span>
             <span class="status-dot ${isMissing ? 'dot-missing' : 'dot-valid'}"></span>
           </div>
@@ -466,6 +543,7 @@ export function SendRequirementsDialog({
         .status-valid { background-color: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
         .status-partial { background-color: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
         .status-draft { background-color: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
+        .status-unconfigured { background-color: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; }
 
         .footer { margin-top: 30px; padding-top: 16px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; page-break-inside: avoid; }
         .footer-left { font-size: 9px; color: #94a3b8; font-weight: 500; }
@@ -665,11 +743,9 @@ export function SendRequirementsDialog({
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {clientRequirements.docs.map((doc, idx) => {
-                                const status = getDocStatus(doc, doc.task)
+                              {docsWithStatus.map(({ doc, status, docTypeNames, acceptedTypesLabel }, idx) => {
                                 const StatusIcon = status.icon
-                                const docTypeNames = getDocTypeNames(doc)
-                                
+
                                 return (
                                   <TableRow key={idx} className="group hover:bg-slate-50/60 border-slate-100 transition-colors">
                                     <TableCell className="text-center font-mono text-xs text-slate-400 font-medium">{idx + 1}</TableCell>
@@ -699,7 +775,7 @@ export function SendRequirementsDialog({
                                     </TableCell>
                                     <TableCell className="py-4 pr-4">
                                       <span className="inline-block text-xs font-medium text-slate-600 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-md">
-                                        {getAcceptedTypesLabel(docTypeNames, doc.requiredDocumentCount || 1)}
+                                        {acceptedTypesLabel}
                                       </span>
                                     </TableCell>
                                     <TableCell className="py-4 pr-6 text-right">
@@ -746,9 +822,7 @@ export function SendRequirementsDialog({
                             </TableHeader>
                             <TableBody>
                               {/* Questions */}
-                              {clientRequirements.questions.map((q, idx) => {
-                                const val = q.task.job_specific_answers?.[q.id]
-                                const isMissing = !val
+                              {questionsWithValues.map(({ question: q, value: val, isMissing }, idx) => {
                                 return (
                                   <TableRow key={`q-${idx}`} className="group hover:bg-slate-50/60 border-slate-100 transition-colors">
                                     <TableCell className="text-center font-mono text-xs text-slate-400 font-medium align-top pt-5">{idx + 1}</TableCell>
@@ -789,16 +863,11 @@ export function SendRequirementsDialog({
                               })}
 
                               {/* Fields */}
-                              {clientRequirements.fields.map((f, idx) => {
-                                const isArray = f.fieldType === 'array'
-                                const arrayRows = isArray ? getArrayVal(f, f.task, f.groupIndex) : []
-                                const val = isArray ? null : getFieldVal(f, f.task, f.groupIndex)
-                                const isMissing = isArray ? arrayRows.length === 0 : isFieldMissingVal(val)
-                                
+                              {fieldsWithValues.map(({ field: f, isArray, arrayRows, value: val, isMissing }, idx) => {
                                 return (
                                   <TableRow key={`f-${idx}`} className="group hover:bg-slate-50/60 border-slate-100 transition-colors">
                                     <TableCell className="text-center font-mono text-xs text-slate-400 font-medium align-top pt-5">
-                                      {clientRequirements.questions.length + idx + 1}
+                                      {questionsWithValues.length + idx + 1}
                                     </TableCell>
                                     <TableCell className="py-4 pr-4 align-top">
                                       <div className="flex flex-col gap-1">

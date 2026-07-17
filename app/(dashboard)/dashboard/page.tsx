@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 
 const quickLinks = [
   { label: "CV Generator", href: "/dashboard/cv-generator", icon: FileText, desc: "Generate professional CVs" },
+  { label: "Employment Contracts", href: "/dashboard/employment-contracts", icon: FileText, desc: "Generate contracts" },
   { label: "New Individual", href: "/dashboard/individuals", icon: UserPlus, desc: "Add a new registry entry" },
   { label: "Create Task", href: "/dashboard/tasks", icon: ClipboardList, desc: "Assign a new task" },
   { label: "Upload File", href: "/dashboard/letters", icon: FileUp, desc: "Import documents" },

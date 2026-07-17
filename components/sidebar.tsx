@@ -59,6 +59,14 @@ const navItems = [
     },
     { title: "Templates", href: "/dashboard/templates", icon: FileText, permission: "templates.view" },
     { title: "CV Generator", href: "/dashboard/cv-generator", icon: FileText },
+    {
+        title: "Employment Contracts",
+        icon: FileText,
+        items: [
+            { title: "Generate Contracts", href: "/dashboard/employment-contracts" },
+            { title: "Contract Templates", href: "/dashboard/employment-contracts/templates" },
+        ],
+    },
     { title: "Master Fields", href: "/dashboard/master-fields", icon: Database, permission: "master_fields.view" },
     {
         title: "Letters",
