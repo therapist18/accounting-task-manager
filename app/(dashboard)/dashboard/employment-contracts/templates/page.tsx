@@ -146,8 +146,41 @@ export default function EmploymentContractTemplatesPage() {
                     </CardTitle>
                     <CardDescription className="flex flex-col gap-3 pt-2">
                       <div className="flex flex-wrap gap-1.5">
+                        {template.classification?.is_general ? (
+                          <Badge variant="default" className="text-[10px] font-semibold bg-blue-100 text-blue-700 hover:bg-blue-200 border-blue-200 rounded-full px-2 py-0.5">
+                            General Template
+                          </Badge>
+                        ) : (
+                          <>
+                            {template.classification?.contract_duration && (
+                              <Badge variant="outline" className="text-[10px] font-semibold bg-purple-50 text-purple-700 border-purple-200 rounded-full px-2 py-0.5">
+                                {template.classification.contract_duration}
+                              </Badge>
+                            )}
+                            {template.classification?.position_id && (
+                              <Badge variant="outline" className="text-[10px] font-semibold bg-amber-50 text-amber-700 border-amber-200 rounded-full px-2 py-0.5">
+                                Pos: {template.classification.position_id}
+                              </Badge>
+                            )}
+                            {template.classification?.department_id && (
+                              <Badge variant="outline" className="text-[10px] font-semibold bg-green-50 text-green-700 border-green-200 rounded-full px-2 py-0.5">
+                                Dept: {template.classification.department_id}
+                              </Badge>
+                            )}
+                            {template.classification?.company_id && (
+                              <Badge variant="outline" className="text-[10px] font-semibold bg-indigo-50 text-indigo-700 border-indigo-200 rounded-full px-2 py-0.5">
+                                Co: {template.classification.company_id}
+                              </Badge>
+                            )}
+                            {template.classification?.work_arrangement && (
+                              <Badge variant="outline" className="text-[10px] font-semibold bg-pink-50 text-pink-700 border-pink-200 rounded-full px-2 py-0.5">
+                                {template.classification.work_arrangement}
+                              </Badge>
+                            )}
+                          </>
+                        )}
                         <Badge variant="outline" className="text-[10px] font-semibold bg-slate-50 text-slate-600 border-slate-200 rounded-full px-2 py-0.5">
-                          {template.file_type === 'text/html' ? 'Text Editor' : 'DOCX File'}
+                          {template.file_type === 'text/html' ? 'Text' : 'DOCX'}
                         </Badge>
                         <Badge variant="outline" className="text-[10px] font-semibold bg-slate-50 text-slate-600 border-slate-200 rounded-full px-2 py-0.5">
                           {(template.placeholders?.length || 0)} placeholders

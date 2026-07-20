@@ -16,6 +16,7 @@ export type ContractEmployeeInfo = {
   department: string;
   jobTitle: string;
   employmentType: string;
+  workArrangement: string;
   status: string;
   basicSalary: number;
   grossSalary: number; // Sum of basic + allowances
@@ -87,6 +88,7 @@ function mapEmployeeRow(
     department: emp.department || '',
     jobTitle: emp.job_title || '',
     employmentType: emp.employment_type || '',
+    workArrangement: emp.work_arrangement || '',
     status: emp.employment_lifecycle?.status || 'Active',
     basicSalary: basic,
     grossSalary: basic, // Defaulting gross to basic for now

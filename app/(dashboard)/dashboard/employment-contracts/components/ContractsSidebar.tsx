@@ -196,7 +196,7 @@ export function ContractsSidebar({
                                 </span>
                               </div>
                               <span className={cn(
-                                "block text-[10px] truncate",
+                                "block text-sm truncate",
                                 isSelected ? "text-blue-100" : "text-slate-400"
                               )}>
                                 {emp.jobTitle || 'Employee'}
@@ -212,7 +212,7 @@ export function ContractsSidebar({
                           {activeEmps.length > 0 && inactiveEmps.length > 0 && (
                             <div className="flex items-center gap-2 py-1 px-1">
                               <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
-                              <span className="text-[9px] text-slate-400 uppercase tracking-wider font-medium shrink-0">Inactive</span>
+                              <span className="text-sm text-slate-400 uppercase tracking-wider font-medium shrink-0">Inactive</span>
                               <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
                             </div>
                           )}

@@ -39,7 +39,7 @@ export default function EmploymentContractsPage() {
   };
 
   return (
-    <div className="h-full w-full overflow-hidden bg-slate-50 dark:bg-slate-950 flex flex-col rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+    <div className="max-h-[calc(100vh-1rem)] w-full overflow-hidden bg-slate-50 dark:bg-slate-950 flex flex-col rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
         <div className="flex items-center gap-3">
           <h1 className="text-sm font-bold text-slate-800 dark:text-slate-100">Employment Contracts</h1>
@@ -95,7 +95,7 @@ export default function EmploymentContractsPage() {
           collapsedSize={0}
           onCollapse={() => setCollapsed(prev => ({ ...prev, sidebar: true }))}
           onExpand={() => setCollapsed(prev => ({ ...prev, sidebar: false }))}
-          className="bg-white dark:bg-slate-900 flex flex-col z-10"
+          className="bg-white dark:bg-slate-900 flex flex-col z-10 overflow-auto"
         >
           <ContractsSidebar
             selectedCompanyId={selectedCompanyId}
@@ -116,7 +116,7 @@ export default function EmploymentContractsPage() {
           collapsedSize={0}
           onCollapse={() => setCollapsed(prev => ({ ...prev, editor: true }))}
           onExpand={() => setCollapsed(prev => ({ ...prev, editor: false }))}
-          className="bg-slate-50 dark:bg-slate-950 flex flex-col z-10"
+          className="bg-slate-50 dark:bg-slate-950 flex flex-col z-10 !overflow-auto"
         >
           <ContractEditor
             companyId={selectedCompanyId}
@@ -140,11 +140,12 @@ export default function EmploymentContractsPage() {
           collapsedSize={0}
           onCollapse={() => setCollapsed(prev => ({ ...prev, preview: true }))}
           onExpand={() => setCollapsed(prev => ({ ...prev, preview: false }))}
-          className="bg-slate-100 dark:bg-slate-900 flex flex-col z-10 border-l border-slate-200 dark:border-slate-800"
+          className="bg-slate-100 dark:bg-slate-900 flex flex-col z-10 border-l border-slate-200 dark:border-slate-800 !overflow-auto"
         >
           <ContractPreview
             key={previewKey}
             contractData={contractData}
+            setContractData={setContractData}
             selectedTemplate={selectedTemplate}
           />
         </Panel>

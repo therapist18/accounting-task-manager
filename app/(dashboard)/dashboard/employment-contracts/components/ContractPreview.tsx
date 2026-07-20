@@ -1,32 +1,34 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import supabase from '@/lib/supabase/client';
 import { PreviewPanel } from '../../tasks-requirements/components/PreviewPanel';
 import { generateWordDocument } from '../../tasks-requirements/utils/documentGenerator';
 import { replacePlaceholders } from '../../tasks-requirements/utils/templateFormatters';
 import { EDITOR_PREVIEW_STYLES } from '../../tasks-requirements/utils/templateUtils';
-import { applyThemeToHtml } from '../utils/themeEngine';
 import { Button } from '@/components/ui/button';
-import { Download, Loader2, Save, FileText, FileWarning, ChevronDown } from 'lucide-react';
+import { Download, Loader2, Save, FileText, FileWarning, Palette, FileDown } from 'lucide-react';
 import { saveAs } from 'file-saver';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { cn } from '@/lib/utils';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
+import { ContractThemePanel } from './ContractThemePanel';
+import { ContractThemeSettings, DEFAULT_CONTRACT_THEME, applyThemeToHtml } from '../utils/themeEngine';
 
 const WORD_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 interface ContractPreviewProps {
   contractData: any;
+  setContractData?: (updater: any) => void;
   selectedTemplate: any;
 }
 
-export function ContractPreview({ contractData, selectedTemplate }: ContractPreviewProps) {
+export function ContractPreview({ contractData, setContractData, selectedTemplate }: ContractPreviewProps) {
   const isWordTemplate = selectedTemplate?.file_type === WORD_MIME;
   const isHtmlTemplate = selectedTemplate?.file_type === 'text/html';
+
+  const themeSettings: ContractThemeSettings = contractData.themeSettings || DEFAULT_CONTRACT_THEME;
+  const [themePanelOpen, setThemePanelOpen] = useState(false);
 
   const [mergedDocxBlob, setMergedDocxBlob] = useState<Blob | null>(null);
   const [mergedDocxBuffer, setMergedDocxBuffer] = useState<ArrayBuffer | null>(null);
@@ -38,7 +40,24 @@ export function ContractPreview({ contractData, selectedTemplate }: ContractPrev
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+
+  // Hidden, unscaled render targets used only for html2canvas capture - decoupled from the
+  // interactive, zoomable PreviewPanel (which doesn't expose its internal ref), so PDF capture
+  // never has to fight PreviewPanel's zoom transform.
+  const htmlCaptureRef = useRef<HTMLDivElement>(null);
+  const docxCaptureRef = useRef<HTMLDivElement>(null);
+
+  // Theme first (which may inject a letterhead header containing its own {{company_name}}
+  // etc. tokens), then run placeholder substitution over the whole result - if this ran the
+  // other way around, tokens injected by the theme's header would never get replaced.
+  const themedMergedHtml = isHtmlTemplate && selectedTemplate?.content
+    ? replacePlaceholders(applyThemeToHtml(selectedTemplate.content, themeSettings), contractData.placeholderValues || {})
+    : '';
+
+  const updateThemeSettings = (settings: ContractThemeSettings) => {
+    setContractData?.((prev: any) => ({ ...prev, themeSettings: settings }));
+  };
 
   useEffect(() => {
     async function updatePreview() {
@@ -73,15 +92,8 @@ export function ContractPreview({ contractData, selectedTemplate }: ContractPrev
           setMergedDocxBlob(merged);
           setMergedDocxBuffer(await merged.arrayBuffer());
         } else if (isHtmlTemplate) {
-          let content = selectedTemplate.content || '';
-          
-          // Apply theme and branding strategy
-          const theme = contractData.documentTheme || 'corporate';
-          const strategy = contractData.brandingStrategy || 'none';
-          
-          content = applyThemeToHtml(content, theme, strategy);
-
-          setOriginalHtml(selectedTemplate.content || '');
+          const content = selectedTemplate.content || '';
+          setOriginalHtml(content);
           setMergedHtml(replacePlaceholders(content, values));
         } else {
           throw new Error('Unsupported template type for contract generation.');
@@ -97,6 +109,26 @@ export function ContractPreview({ contractData, selectedTemplate }: ContractPrev
     updatePreview();
   }, [selectedTemplate, contractData, isWordTemplate, isHtmlTemplate]);
 
+  // Render a hidden, unscaled copy of the merged docx into docxCaptureRef purely for PDF capture.
+  useEffect(() => {
+    if (!isWordTemplate || !mergedDocxBuffer || !docxCaptureRef.current) return;
+    let cancelled = false;
+    import('docx-preview').then(({ renderAsync }) => {
+      if (cancelled || !docxCaptureRef.current) return;
+      docxCaptureRef.current.innerHTML = '';
+      renderAsync(mergedDocxBuffer, docxCaptureRef.current, undefined, {
+        className: 'docx-preview',
+        inWrapper: true,
+        ignoreWidth: false,
+        ignoreHeight: false,
+        breakPages: true,
+        renderHeaders: true,
+        renderFooters: true,
+      }).catch((err) => console.error('[ContractPreview] docx-preview capture render error:', err));
+    });
+    return () => { cancelled = true; };
+  }, [isWordTemplate, mergedDocxBuffer]);
+
   const buildOutput = (): { blob: Blob; fileName: string } | null => {
     if (!contractData.employee) return null;
     const baseName = contractData.employee.fullName.replace(/\s+/g, '_');
@@ -105,72 +137,54 @@ export function ContractPreview({ contractData, selectedTemplate }: ContractPrev
       return { blob: mergedDocxBlob, fileName: `${baseName}_Employment_Contract.docx` };
     }
     if (isHtmlTemplate && mergedHtml) {
-      const htmlDoc = `<!doctype html><html><head><meta charset="utf-8"><title>${baseName} Employment Contract</title></head><body>${mergedHtml}</body></html>`;
-      return { blob: new Blob([htmlDoc], { type: 'text/html' }), fileName: `${baseName}_Employment_Contract.html` };
+      // Word-openable HTML document (not true OOXML) - but it embeds the full theme <style>
+      // block, so unlike a from-scratch docx generator it actually preserves the selected
+      // layout/colors/fonts when opened in Word, instead of silently dropping most of them.
+      const htmlDoc = `<!doctype html><html><head><meta charset="utf-8"><title>${baseName} Employment Contract</title></head><body>${themedMergedHtml}</body></html>`;
+      return { blob: new Blob([htmlDoc], { type: 'application/msword' }), fileName: `${baseName}_Employment_Contract.doc` };
     }
     return null;
   };
 
-  const handleDownloadPdf = async () => {
-    const html = mergedHtml;
-    if (!html || !contractData.employee) return;
-    setIsDownloading(true);
-    try {
-      const html2pdf = (await import('html2pdf.js')).default;
-      const baseName = contractData.employee.fullName.replace(/\s+/g, '_');
-      const container = document.createElement('div');
-      container.innerHTML = html;
-      container.style.position = 'fixed';
-      container.style.left = '-9999px';
-      container.style.width = '210mm';
-      document.body.appendChild(container);
-
-      await html2pdf()
-        .set({
-          margin: 10,
-          filename: `${baseName}_Employment_Contract.pdf`,
-          html2canvas: { scale: 2, useCORS: true },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        })
-        .from(container)
-        .save();
-
-      document.body.removeChild(container);
-    } catch (err: any) {
-      console.error('PDF generation error:', err);
-      toast.error('Failed to generate PDF');
-    } finally {
-      setIsDownloading(false);
-    }
-  };
-
-  const handleDownloadWord = async () => {
-    const html = mergedHtml;
-    if (!html || !contractData.employee) return;
-    setIsDownloading(true);
-    try {
-      const { default: mammoth } = await import('mammoth');
-      const baseName = contractData.employee.fullName.replace(/\s+/g, '_');
-
-      // Convert HTML to a simple docx via the existing generateWordDocument pipeline
-      // by wrapping the HTML content into a minimal DOCX structure.
-      // Since we don't have an original docx template for HTML templates, we use
-      // the HTML content directly and let the browser handle it via Blob.
-      const docContent = `<!doctype html><html><head><meta charset="utf-8"><title>${baseName} Employment Contract</title></head><body>${html}</body></html>`;
-      const blob = new Blob([docContent], { type: 'application/msword' });
-      saveAs(blob, `${baseName}_Employment_Contract.doc`);
-    } catch (err: any) {
-      console.error('Word generation error:', err);
-      toast.error('Failed to generate Word document');
-    } finally {
-      setIsDownloading(false);
-    }
-  };
-
-  const handleDownload = () => {
-    if (isHtmlTemplate) return; // Use dropdown instead
+  const handleDownloadWord = () => {
     const output = buildOutput();
     if (output) saveAs(output.blob, output.fileName);
+  };
+
+  const handleDownloadPdf = async () => {
+    const element = isWordTemplate ? docxCaptureRef.current : htmlCaptureRef.current;
+    if (!element || !contractData.employee) return;
+
+    setIsGeneratingPdf(true);
+    try {
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = pageWidth;
+      const imgHeight = (canvas.height * pageWidth) / canvas.width;
+      const totalPages = Math.ceil(imgHeight / pageHeight);
+
+      for (let i = 0; i < totalPages; i++) {
+        if (i > 0) pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, -(i * pageHeight), imgWidth, imgHeight);
+      }
+
+      const baseName = contractData.employee.fullName.replace(/\s+/g, '_');
+      pdf.save(`${baseName}_Employment_Contract.pdf`);
+    } catch (err: any) {
+      console.error('PDF generation failed:', err);
+      toast.error('Failed to generate PDF. Please try again.');
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   };
 
   const handleSaveToDb = async () => {
@@ -179,7 +193,7 @@ export function ContractPreview({ contractData, selectedTemplate }: ContractPrev
     setIsSaving(true);
     try {
       // 1. Upload the generated document to storage
-      const ext = isWordTemplate ? 'docx' : 'html';
+      const ext = isWordTemplate ? 'docx' : 'doc';
       const fileName = `generated/${contractData.employee.companyId}/${contractData.employee.individualId}/${Date.now()}_contract.${ext}`;
       const { error: uploadError } = await supabase.storage
         .from("kyc-templates") // Can use a separate bucket like "contracts" in real deployment
@@ -239,7 +253,7 @@ export function ContractPreview({ contractData, selectedTemplate }: ContractPrev
   const hasOutput = isWordTemplate ? !!mergedDocxBlob : !!mergedHtml;
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 border-l border-slate-200 dark:border-slate-800 relative">
+    <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 border-l border-slate-200 dark:border-slate-800 relative overflow-hidden">
       <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between shrink-0">
         <div>
           <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
@@ -248,29 +262,22 @@ export function ContractPreview({ contractData, selectedTemplate }: ContractPrev
           <p className="text-xs text-slate-500">Live preview of the generated contract</p>
         </div>
         <div className="flex items-center gap-2">
-          {isHtmlTemplate ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" disabled={!hasOutput || loading || isDownloading}>
-                  {isDownloading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
-                  Download
-                  <ChevronDown className="w-3 h-3 ml-1" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem onClick={handleDownloadPdf} disabled={isDownloading}>
-                  Download as PDF
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleDownloadWord} disabled={isDownloading}>
-                  Download as Word
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
-            <Button variant="outline" size="sm" onClick={handleDownload} disabled={!hasOutput || loading}>
-              <Download className="w-4 h-4 mr-2" /> Download
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setThemePanelOpen(true)}
+            disabled={!isHtmlTemplate}
+            title={isHtmlTemplate ? 'Customize document theme' : 'Theming is only available for text-editor templates - DOCX templates use their own file styling'}
+            className={cn(themePanelOpen && "border-custom-blue text-custom-blue")}
+          >
+            <Palette className="w-4 h-4 mr-2" /> Theme
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleDownloadPdf} disabled={!hasOutput || loading || isGeneratingPdf}>
+            {isGeneratingPdf ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileDown className="w-4 h-4 mr-2" />} PDF
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleDownloadWord} disabled={!hasOutput || loading}>
+            <Download className="w-4 h-4 mr-2" /> Word
+          </Button>
           <Button size="sm" className="bg-custom-blue hover:bg-custom-blue/90 text-white" onClick={handleSaveToDb} disabled={!hasOutput || loading || isSaving}>
             {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
             Generate & Save
@@ -278,26 +285,14 @@ export function ContractPreview({ contractData, selectedTemplate }: ContractPrev
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden relative">
+      <div className="flex-1 overflow-hidden relative flex flex-col min-h-0">
         {error ? (
           <div className="flex flex-col items-center justify-center h-full text-red-500 p-8 text-center bg-red-50/50 dark:bg-red-950/50">
             <FileWarning className="w-12 h-12 mb-4 text-red-400" />
             <p className="text-sm font-medium">{error}</p>
           </div>
-        ) : isHtmlTemplate ? (
-          <div className="h-full overflow-auto">
-            <PreviewPanel
-              previewContent={mergedHtml}
-              isPreviewLoading={loading}
-              panelClasses="h-full"
-              EDITOR_PREVIEW_STYLES={EDITOR_PREVIEW_STYLES}
-              templateName={selectedTemplate.file_name}
-              isWordTemplate={false}
-              docxBuffer={null}
-            />
-          </div>
         ) : (
-          <Tabs defaultValue="preview" className="h-full flex flex-col w-full">
+          <Tabs defaultValue="preview" className="h-full flex flex-col w-full min-h-0 overflow-hidden">
             <div className="px-4 pt-2 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0">
               <TabsList className="bg-slate-100 dark:bg-slate-800">
                 <TabsTrigger value="preview" className="text-xs">Live Preview</TabsTrigger>
@@ -305,9 +300,9 @@ export function ContractPreview({ contractData, selectedTemplate }: ContractPrev
               </TabsList>
             </div>
 
-            <TabsContent value="preview" className="flex-1 m-0 overflow-auto">
+            <TabsContent value="preview" className="flex-1 m-0 overflow-auto min-h-0 h-full">
               <PreviewPanel
-                previewContent={mergedHtml}
+                previewContent={themedMergedHtml}
                 isPreviewLoading={loading}
                 panelClasses="h-full"
                 EDITOR_PREVIEW_STYLES={EDITOR_PREVIEW_STYLES}
@@ -317,7 +312,7 @@ export function ContractPreview({ contractData, selectedTemplate }: ContractPrev
               />
             </TabsContent>
 
-            <TabsContent value="original" className="flex-1 m-0 overflow-auto">
+            <TabsContent value="original" className="flex-1 m-0 overflow-auto min-h-0 h-full">
               <PreviewPanel
                 previewContent={originalHtml}
                 isPreviewLoading={loading}
@@ -329,6 +324,24 @@ export function ContractPreview({ contractData, selectedTemplate }: ContractPrev
               />
             </TabsContent>
           </Tabs>
+        )}
+      </div>
+
+      <ContractThemePanel
+        open={themePanelOpen}
+        onClose={() => setThemePanelOpen(false)}
+        settings={themeSettings}
+        onChange={updateThemeSettings}
+      />
+
+      {/* Hidden, unscaled capture targets for PDF export - kept out of view but laid out
+          at natural size so html2canvas doesn't have to fight any zoom/scale transform. */}
+      <div className="fixed left-[-99999px] top-0 pointer-events-none" aria-hidden="true">
+        {isHtmlTemplate && (
+          <div ref={htmlCaptureRef} className="bg-white w-[800px] p-10" dangerouslySetInnerHTML={{ __html: themedMergedHtml }} />
+        )}
+        {isWordTemplate && (
+          <div ref={docxCaptureRef} className="bg-white w-[800px]" />
         )}
       </div>
     </div>

@@ -44,6 +44,7 @@ export const PreviewPanel = ({
 
   const [fitMode, setFitMode] = useState<PreviewFitMode>('fit-width');
   const [zoomLevel, setZoomLevel] = useState(100);
+  const [naturalSize, setNaturalSize] = useState({ width: 800, height: 0 });
 
   const applyFitMode = useCallback((mode: PreviewFitMode) => {
     setFitMode(mode);
@@ -92,6 +93,23 @@ export const PreviewPanel = ({
     observer.observe(container);
     return () => observer.disconnect();
   }, [fitMode, applyFitMode]);
+
+  // Track the content's untransformed size (ResizeObserver's contentRect ignores CSS
+  // transforms) so the scaled wrapper below can reserve exactly the visually-scaled
+  // footprint instead of the pre-scale one, which otherwise leaves dead space around
+  // zoomed-out content.
+  useEffect(() => {
+    const el = contentWrapperRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      setNaturalSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isWordTemplate, docxBuffer, hasHtmlContent]);
 
   useEffect(() => {
     if (!isWordTemplate || !docxBuffer || !docxContainerRef.current) return;
@@ -226,14 +244,21 @@ export const PreviewPanel = ({
         <div ref={scrollContainerRef} className="flex-1 overflow-auto bg-slate-100/80 dark:bg-slate-900/80 p-6 md:p-8 flex justify-center items-start">
           {docxBuffer ? (
             <div
-              ref={contentWrapperRef}
-              className="transition-transform duration-150 origin-top"
-              style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: fitMode === 'fit-page' ? 'top center' : 'top left' }}
+              style={{
+                width: naturalSize.width * (zoomLevel / 100),
+                height: naturalSize.height * (zoomLevel / 100) || undefined,
+              }}
             >
               <div
-                ref={docxContainerRef}
-                className="docx-preview-container shadow-2xl rounded-xl border border-slate-200/50 dark:border-slate-800 bg-white w-[800px]"
-              />
+                ref={contentWrapperRef}
+                className="transition-transform duration-150 origin-top-left w-[800px]"
+                style={{ transform: `scale(${zoomLevel / 100})` }}
+              >
+                <div
+                  ref={docxContainerRef}
+                  className="docx-preview-container shadow-2xl rounded-xl border border-slate-200/50 dark:border-slate-800 bg-white w-[800px]"
+                />
+              </div>
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-20 px-6 w-full">
@@ -259,31 +284,38 @@ export const PreviewPanel = ({
           <div className="max-w-4xl mx-auto p-6 md:p-8">
             {hasHtmlContent ? (
               <div
-                ref={contentWrapperRef}
-                className="transition-transform duration-150 origin-top"
-                style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: fitMode === 'fit-page' ? 'top center' : 'top left' }}
+                style={{
+                  width: naturalSize.width * (zoomLevel / 100),
+                  height: naturalSize.height * (zoomLevel / 100) || undefined,
+                }}
               >
-                <div className="relative">
-                  <div
-                    className={cn(
-                      "bg-white shadow-2xl rounded-xl overflow-hidden",
-                      "border border-slate-200/60 dark:border-slate-800/60",
-                      "min-h-[11in] px-8 md:px-12 pt-8 pb-8",
-                      "w-[800px]",
-                      EDITOR_PREVIEW_STYLES
-                    )}
-                    style={{ whiteSpace: 'pre-wrap' }}
-                    dangerouslySetInnerHTML={{ __html: previewContent }}
-                    ref={(el) => {
-                      if (el) {
-                        const firstChild = el.firstElementChild;
-                        if (firstChild) {
-                          (firstChild as HTMLElement).style.marginTop = '0';
-                          (firstChild as HTMLElement).style.paddingTop = '0';
+                <div
+                  ref={contentWrapperRef}
+                  className="transition-transform duration-150 origin-top-left w-[800px]"
+                  style={{ transform: `scale(${zoomLevel / 100})` }}
+                >
+                  <div className="relative">
+                    <div
+                      className={cn(
+                        "bg-white shadow-2xl rounded-xl overflow-hidden",
+                        "border border-slate-200/60 dark:border-slate-800/60",
+                        "min-h-[11in] px-8 md:px-12 pt-8 pb-8",
+                        "w-[800px]",
+                        EDITOR_PREVIEW_STYLES
+                      )}
+                      style={{ whiteSpace: 'pre-wrap' }}
+                      dangerouslySetInnerHTML={{ __html: previewContent }}
+                      ref={(el) => {
+                        if (el) {
+                          const firstChild = el.firstElementChild;
+                          if (firstChild) {
+                            (firstChild as HTMLElement).style.marginTop = '0';
+                            (firstChild as HTMLElement).style.paddingTop = '0';
+                          }
                         }
-                      }
-                    }}
-                  />
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
             ) : (

@@ -1,21 +1,27 @@
 "use client";
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { RefreshCw, ChevronDown, FileText, Download, X, Loader2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ComboBox } from "@/components/ui/combobox";
+import { RefreshCw, ChevronDown, FileText, Download, X, Loader2, Tag } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { ENTITY_TYPES } from "@/lib/constants/entity-types";
 import TemplateEditor from "@/components/TemplateEditor";
 import { DocxLivePreview } from "@/components/DocxLivePreview";
+import supabase from "@/lib/supabase/client";
 import type { DocumentTemplate, EntityType } from "../types";
 
 interface TemplateEditorPanelProps {
   currentTemplate: DocumentTemplate | null;
   templateFiles: Map<string, File>;
   onTemplateNameChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onTemplateFieldChange?: (field: string, value: any) => void;
+  onClassificationFieldChange?: (field: string, value: any) => void;
   onEditorChange: (content: { html: string; header?: string; footer?: string } | string) => void;
   onEditorBlur: () => void;
   onRescanPlaceholders: () => void;
@@ -31,6 +37,8 @@ export function TemplateEditorPanel({
   currentTemplate,
   templateFiles,
   onTemplateNameChange,
+  onTemplateFieldChange,
+  onClassificationFieldChange,
   onEditorChange,
   onEditorBlur,
   onRescanPlaceholders,
@@ -41,6 +49,30 @@ export function TemplateEditorPanel({
   onToggleLetterhead,
   isProcessing
 }: TemplateEditorPanelProps) {
+  const [classificationOpen, setClassificationOpen] = useState(false);
+  const [positionOptions, setPositionOptions] = useState<string[]>([]);
+  const [departmentOptions, setDepartmentOptions] = useState<string[]>([]);
+  const [loadingClassificationOptions, setLoadingClassificationOptions] = useState(false);
+  const classificationOptionsFetched = useRef(false);
+
+  useEffect(() => {
+    if (!classificationOpen || classificationOptionsFetched.current) return;
+    classificationOptionsFetched.current = true;
+    setLoadingClassificationOptions(true);
+    supabase
+      .from('registry_employees')
+      .select('job_title, department')
+      .then(({ data, error }: { data: any[] | null; error: any }) => {
+        if (!error && data) {
+          const positions = Array.from(new Set(data.map((d: any) => d.job_title).filter(Boolean))) as string[];
+          const departments = Array.from(new Set(data.map((d: any) => d.department).filter(Boolean))) as string[];
+          setPositionOptions(positions.sort());
+          setDepartmentOptions(departments.sort());
+        }
+        setLoadingClassificationOptions(false);
+      });
+  }, [classificationOpen]);
+
   if (!currentTemplate) {
     return (
       <div className="h-full flex items-center justify-center text-center border-2 border-dashed rounded-lg">
@@ -51,6 +83,17 @@ export function TemplateEditorPanel({
       </div>
     );
   }
+
+  const classification = currentTemplate.classification || {};
+  const classificationBadges: string[] = classification.is_general
+    ? ['General']
+    : [
+        classification.contract_duration,
+        classification.position_id && `Pos: ${classification.position_id}`,
+        classification.department_id && `Dept: ${classification.department_id}`,
+        classification.company_id && `Co: ${classification.company_id}`,
+        classification.work_arrangement,
+      ].filter(Boolean) as string[];
 
   return (
     <Card className="h-full flex flex-col">
@@ -154,6 +197,117 @@ export function TemplateEditorPanel({
               Manual Rescan
             </Button>
           </div>
+        </div>
+
+        <div className="border-t border-b">
+          <button
+            type="button"
+            onClick={() => setClassificationOpen(o => !o)}
+            className="w-full flex items-center justify-between py-3"
+          >
+            <div className="flex items-center gap-3">
+              <Tag className="h-4 w-4 text-muted-foreground shrink-0" />
+              <div className="text-left">
+                <Label className="text-base font-semibold cursor-pointer">Classification Settings</Label>
+                <p className="text-xs text-muted-foreground">Set conditions for when this template should be used.</p>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {classificationBadges.length > 0 ? (
+                  classificationBadges.map(b => (
+                    <Badge key={b} variant="outline" className="text-[10px] font-medium">{b}</Badge>
+                  ))
+                ) : (
+                  <Badge variant="outline" className="text-[10px] font-medium text-muted-foreground">Any / Unset</Badge>
+                )}
+              </div>
+            </div>
+            <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${classificationOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {classificationOpen && (
+            <div className="grid grid-cols-3 gap-4 pb-4">
+              <div className="space-y-2 flex items-center gap-2 col-span-3">
+                <Label>General Template</Label>
+                <Switch
+                  checked={currentTemplate.classification?.is_general ?? false}
+                  onCheckedChange={(checked) => onClassificationFieldChange?.('is_general', checked)}
+                />
+              </div>
+
+              {!currentTemplate.classification?.is_general && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Contract Duration</Label>
+                    <Select
+                      value={currentTemplate.classification?.contract_duration || ''}
+                      onValueChange={(val) => onClassificationFieldChange?.('contract_duration', val === 'none' ? null : val)}
+                    >
+                      <SelectTrigger><SelectValue placeholder="Any Duration" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Any Duration</SelectItem>
+                        <SelectItem value="Probation">Probation</SelectItem>
+                        <SelectItem value="Permanent">Permanent</SelectItem>
+                        <SelectItem value="Fixed-Term">Fixed-Term</SelectItem>
+                        <SelectItem value="Annual">Annual</SelectItem>
+                        <SelectItem value="Internship">Internship</SelectItem>
+                        <SelectItem value="Casual">Casual</SelectItem>
+                        <SelectItem value="Part-Time">Part-Time</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Position</Label>
+                    <ComboBox
+                      options={[{ value: '', label: 'Any position' }, ...positionOptions.map(p => ({ value: p, label: p }))]}
+                      value={currentTemplate.classification?.position_id || ''}
+                      onValueChange={(val) => onClassificationFieldChange?.('position_id', val || null)}
+                      placeholder="Any position"
+                      emptyText="No job titles found on employee records"
+                      loading={loadingClassificationOptions}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Department</Label>
+                    <ComboBox
+                      options={[{ value: '', label: 'Any department' }, ...departmentOptions.map(d => ({ value: d, label: d }))]}
+                      value={currentTemplate.classification?.department_id || ''}
+                      onValueChange={(val) => onClassificationFieldChange?.('department_id', val || null)}
+                      placeholder="Any department"
+                      emptyText="No departments found on employee records"
+                      loading={loadingClassificationOptions}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Company ID</Label>
+                    <Input
+                      placeholder="Company ID (Any if empty)"
+                      value={currentTemplate.classification?.company_id || ''}
+                      onChange={(e) => onClassificationFieldChange?.('company_id', e.target.value || null)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Work Arrangement</Label>
+                    <Select
+                      value={currentTemplate.classification?.work_arrangement || ''}
+                      onValueChange={(val) => onClassificationFieldChange?.('work_arrangement', val === 'none' ? null : val)}
+                    >
+                      <SelectTrigger><SelectValue placeholder="Any Arrangement" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Any Arrangement</SelectItem>
+                        <SelectItem value="On-site">On-site</SelectItem>
+                        <SelectItem value="Remote">Remote</SelectItem>
+                        <SelectItem value="Hybrid">Hybrid</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex-1 min-h-[400px] border rounded-md overflow-hidden">

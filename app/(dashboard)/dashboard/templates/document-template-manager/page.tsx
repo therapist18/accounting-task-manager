@@ -303,6 +303,23 @@ export function DocumentTemplateManager({
     setTemplates(newTemplates);
   };
 
+  const handleTemplateFieldChange = (field: string, value: any) => {
+    if (currentTemplateIndex === null) return;
+    const newTemplates = [...templates];
+    newTemplates[currentTemplateIndex] = { ...newTemplates[currentTemplateIndex], [field]: value };
+    setTemplates(newTemplates);
+  };
+
+  const handleClassificationFieldChange = (field: string, value: any) => {
+    if (currentTemplateIndex === null) return;
+    const newTemplates = [...templates];
+    newTemplates[currentTemplateIndex] = {
+      ...newTemplates[currentTemplateIndex],
+      classification: { ...newTemplates[currentTemplateIndex].classification, [field]: value },
+    };
+    setTemplates(newTemplates);
+  };
+
   const handleEditorChange = (content: { html: string; header?: string; footer?: string } | string) => {
     if (currentTemplateIndex === null) return;
     const newTemplates = [...templates];
@@ -524,7 +541,8 @@ export function DocumentTemplateManager({
               entity_types: template.entity_types,
               banks_associated: template.banks_associated,
               job_level: template.job_level,
-              use_letterhead: template.use_letterhead ?? false
+              use_letterhead: template.use_letterhead ?? false,
+              classification: template.classification ?? {}
             });
 
           if (dbError) throw dbError;
@@ -542,7 +560,8 @@ export function DocumentTemplateManager({
               entity_types: template.entity_types,
               banks_associated: template.banks_associated,
               job_level: template.job_level,
-              use_letterhead: template.use_letterhead ?? false
+              use_letterhead: template.use_letterhead ?? false,
+              classification: template.classification ?? {}
             });
 
           if (dbError) throw dbError;
@@ -563,7 +582,8 @@ export function DocumentTemplateManager({
               entity_types: template.entity_types,
               banks_associated: template.banks_associated,
               job_level: template.job_level,
-              use_letterhead: template.use_letterhead ?? false
+              use_letterhead: template.use_letterhead ?? false,
+              classification: template.classification ?? {}
             });
 
           if (dbError) throw dbError;
@@ -684,6 +704,8 @@ export function DocumentTemplateManager({
               currentTemplate={currentTemplate}
               templateFiles={templateFiles}
               onTemplateNameChange={handleTemplateNameChange}
+              onTemplateFieldChange={handleTemplateFieldChange}
+              onClassificationFieldChange={handleClassificationFieldChange}
               onEditorChange={handleEditorChange}
               onEditorBlur={handleEditorBlur}
               onRescanPlaceholders={handleRescanPlaceholders}

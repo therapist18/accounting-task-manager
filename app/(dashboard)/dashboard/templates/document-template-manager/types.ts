@@ -23,6 +23,16 @@ export interface DocumentTemplate {
     subclass_id?: number | null;
   }>;
   use_letterhead?: boolean;
+  classification?: TemplateClassification;
+}
+
+export interface TemplateClassification {
+  is_general?: boolean;
+  contract_duration?: string | null;
+  position_id?: string | null;
+  department_id?: string | null;
+  company_id?: string | null;
+  work_arrangement?: string | null;
 }
 
 export interface JobField {
