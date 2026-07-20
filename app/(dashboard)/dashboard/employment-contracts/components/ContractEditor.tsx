@@ -138,9 +138,11 @@ export function ContractEditor({
 
           {/* Employee Context Read-only Panel - Compact */}
           <div className="bg-slate-50/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2">
-            <div className="flex items-center gap-2 mb-1.5">
-              <UserRound className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-600">Employee Context</span>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-2">
+                <UserRound className="w-3.5 h-3.5 text-slate-400" />
+                <span className="text-xs font-semibold text-slate-600">Employee Context</span>
+              </div>
             </div>
             <div className="grid grid-cols-3 gap-x-4 gap-y-1 text-xs">
               <div className="flex items-baseline gap-1.5">
@@ -187,6 +189,50 @@ export function ContractEditor({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Document Themes & Branding Strategy */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-3">
+              <Label className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                Document Theme
+              </Label>
+              <Select
+                value={contractData.documentTheme || 'corporate'}
+                onValueChange={(val) => setContractData({ ...contractData, documentTheme: val })}
+              >
+                <SelectTrigger className="bg-white">
+                  <SelectValue placeholder="Select a theme..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="corporate">Corporate</SelectItem>
+                  <SelectItem value="legal">Legal</SelectItem>
+                  <SelectItem value="modern">Modern</SelectItem>
+                  <SelectItem value="executive">Executive</SelectItem>
+                  <SelectItem value="minimal">Minimal</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-3">
+              <Label className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                Branding Strategy
+              </Label>
+              <Select
+                value={contractData.brandingStrategy || 'none'}
+                onValueChange={(val) => setContractData({ ...contractData, brandingStrategy: val })}
+              >
+                <SelectTrigger className="bg-white">
+                  <SelectValue placeholder="Select branding strategy..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="embedded">Embedded in Template</SelectItem>
+                  <SelectItem value="company_letterhead">Use Company Letterhead</SelectItem>
+                  <SelectItem value="theme_header">Use Theme Header</SelectItem>
+                  <SelectItem value="none">None (Clean Document)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* Contract Dates */}

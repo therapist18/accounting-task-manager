@@ -4,6 +4,7 @@ import { PreviewPanel } from '../../tasks-requirements/components/PreviewPanel';
 import { generateWordDocument } from '../../tasks-requirements/utils/documentGenerator';
 import { replacePlaceholders } from '../../tasks-requirements/utils/templateFormatters';
 import { EDITOR_PREVIEW_STYLES } from '../../tasks-requirements/utils/templateUtils';
+import { applyThemeToHtml } from '../utils/themeEngine';
 import { Button } from '@/components/ui/button';
 import { Download, Loader2, Save, FileText, FileWarning, ChevronDown } from 'lucide-react';
 import { saveAs } from 'file-saver';
@@ -72,8 +73,15 @@ export function ContractPreview({ contractData, selectedTemplate }: ContractPrev
           setMergedDocxBlob(merged);
           setMergedDocxBuffer(await merged.arrayBuffer());
         } else if (isHtmlTemplate) {
-          const content = selectedTemplate.content || '';
-          setOriginalHtml(content);
+          let content = selectedTemplate.content || '';
+          
+          // Apply theme and branding strategy
+          const theme = contractData.documentTheme || 'corporate';
+          const strategy = contractData.brandingStrategy || 'none';
+          
+          content = applyThemeToHtml(content, theme, strategy);
+
+          setOriginalHtml(selectedTemplate.content || '');
           setMergedHtml(replacePlaceholders(content, values));
         } else {
           throw new Error('Unsupported template type for contract generation.');
