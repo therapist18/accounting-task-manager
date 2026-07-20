@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { fetchCompanies, type Company } from '../../companies/database';
 import { CompanySidebar } from '../../companies/company-sidebar';
+import { DEFAULT_CATEGORY_FILTERS, type FilterState } from '@/app/generic-components/companyCategoryFilters';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -52,6 +53,9 @@ export default function LetterheadsPage() {
   const [activeCompanyId, setActiveCompanyId] = useState<string>('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(false);
+  // CompanySidebar renders the category-filter button by default but does nothing with
+  // it unless these are wired through — previously missing here entirely.
+  const [categoryFilters, setCategoryFilters] = useState<FilterState | null>(DEFAULT_CATEGORY_FILTERS);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -240,6 +244,9 @@ export default function LetterheadsPage() {
           onCollapseToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
           showDefaultDisplayOnly={showDefaultDisplayOnly}
           onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
+          showCategoryFilter={true}
+          onCategoryFilterChange={setCategoryFilters}
+          initialCategoryFilters={categoryFilters}
         />
       </div>
 

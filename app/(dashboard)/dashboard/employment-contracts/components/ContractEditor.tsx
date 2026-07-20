@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import supabase from '@/lib/supabase/client';
 import { fetchCompanyEmployees, ContractEmployeeInfo } from '../utils/data';
+import { buildPlaceholderContext, resolveContractPlaceholders } from '../utils/placeholderContext';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, RefreshCw, Settings2, UserRound, FileText } from 'lucide-react';
 import { EMPLOYMENT_CONTRACT_DOCUMENT_ID } from '../utils/constants';
+import { ContractPlaceholderList } from './ContractPlaceholderList';
 
 interface ContractEditorProps {
   companyId: string | null;
@@ -32,6 +32,8 @@ export function ContractEditor({
   const [employee, setEmployee] = useState<ContractEmployeeInfo | null>(null);
   const [templates, setTemplates] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingPlaceholders, setLoadingPlaceholders] = useState(false);
+  const [resolvedNames, setResolvedNames] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     async function loadData() {
@@ -40,12 +42,12 @@ export function ContractEditor({
         return;
       }
       setLoading(true);
-      
+
       // Fetch employee data
       const emps = await fetchCompanyEmployees(companyId);
       const target = emps.find(e => String(e.individualId) === employeeId) || null;
       setEmployee(target);
-      
+
       if (target) {
         // Initialize contract fields
         setContractData((prev: any) => ({
@@ -53,11 +55,7 @@ export function ContractEditor({
           employee: target,
           startDate: target.startDate || new Date().toISOString().split('T')[0],
           endDate: '',
-          probationPeriod: '3 Months',
-          noticePeriod: '1 Month',
-          leaveDays: '21',
-          workingHours: '8:00 AM - 5:00 PM',
-          useLetterhead: false,
+          placeholderValues: {},
         }));
       }
 
@@ -76,6 +74,33 @@ export function ContractEditor({
     }
     loadData();
   }, [companyId, employeeId]);
+
+  // When a template is picked, resolve its placeholders from company/employee data using the
+  // same master-field resolution engine as the tasks-requirements template generator, so this
+  // module doesn't re-implement that lookup logic.
+  useEffect(() => {
+    async function resolvePlaceholders() {
+      if (!selectedTemplate?.placeholders?.length || !employee || !companyId) {
+        setResolvedNames(new Set());
+        return;
+      }
+
+      setLoadingPlaceholders(true);
+      try {
+        const { ctx } = await buildPlaceholderContext(companyId, employee.individualId);
+        const { values, resolvedNames: resolved } = resolveContractPlaceholders(selectedTemplate, ctx);
+        setContractData((prev: any) => ({
+          ...prev,
+          placeholderValues: values,
+        }));
+        setResolvedNames(resolved);
+      } finally {
+        setLoadingPlaceholders(false);
+      }
+    }
+    resolvePlaceholders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTemplate?.id, employee?.individualId, companyId]);
 
   if (!companyId || !employeeId) {
     return (
@@ -108,50 +133,46 @@ export function ContractEditor({
         </div>
       </div>
 
-      <ScrollArea className="flex-1 p-4">
+      <ScrollArea className="flex-1 p-4 overflow-auto">
         <div className="max-w-2xl mx-auto space-y-6 pb-20">
-          
-          {/* Employee Context Read-only Panel */}
-          <Card className="border-slate-200 dark:border-slate-800 shadow-sm bg-slate-50/50 dark:bg-slate-900/50">
-            <CardHeader className="pb-3 pt-4 px-4">
-              <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                <UserRound className="w-4 h-4 text-slate-400" />
-                Employee Context
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="block text-xs text-slate-400">Name</span>
-                  <span className="font-medium">{employee?.fullName}</span>
-                </div>
-                <div>
-                  <span className="block text-xs text-slate-400">Employee Number</span>
-                  <span className="font-medium">{employee?.employeeNumber}</span>
-                </div>
-                <div>
-                  <span className="block text-xs text-slate-400">Position</span>
-                  <span className="font-medium">{employee?.jobTitle || '-'}</span>
-                </div>
-                <div>
-                  <span className="block text-xs text-slate-400">Department</span>
-                  <span className="font-medium">{employee?.department || '-'}</span>
-                </div>
-                <div>
-                  <span className="block text-xs text-slate-400">Basic Salary</span>
-                  <span className="font-medium">KES {employee?.basicSalary?.toLocaleString() || 0}</span>
-                </div>
+
+          {/* Employee Context Read-only Panel - Compact */}
+          <div className="bg-slate-50/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2 mb-1.5">
+              <UserRound className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-xs font-semibold text-slate-600">Employee Context</span>
+            </div>
+            <div className="grid grid-cols-3 gap-x-4 gap-y-1 text-xs">
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-slate-400 shrink-0">Name</span>
+                <span className="font-medium truncate">{employee?.fullName}</span>
               </div>
-            </CardContent>
-          </Card>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-slate-400 shrink-0">No.</span>
+                <span className="font-medium truncate">{employee?.employeeNumber}</span>
+              </div>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-slate-400 shrink-0">Dept</span>
+                <span className="font-medium truncate">{employee?.department || '-'}</span>
+              </div>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-slate-400 shrink-0">Position</span>
+                <span className="font-medium truncate">{employee?.jobTitle || '-'}</span>
+              </div>
+              <div className="flex items-baseline gap-1.5 col-span-2">
+                <span className="text-slate-400 shrink-0">Salary</span>
+                <span className="font-medium">KES {employee?.basicSalary?.toLocaleString() || 0}</span>
+              </div>
+            </div>
+          </div>
 
           {/* Template Selection */}
           <div className="space-y-3">
             <Label className="text-sm font-bold text-slate-700 flex items-center gap-2">
               <FileText className="w-4 h-4" /> Template Selection
             </Label>
-            <Select 
-              value={selectedTemplate?.id || ''} 
+            <Select
+              value={selectedTemplate?.id || ''}
               onValueChange={(val) => {
                 const t = templates.find(x => x.id === val);
                 setSelectedTemplate(t);
@@ -161,90 +182,51 @@ export function ContractEditor({
                 <SelectValue placeholder="Choose a contract template..." />
               </SelectTrigger>
               <SelectContent>
-                {templates.map(t => {
-                  const isSupported = t.file_type !== 'text/html';
-                  return (
-                    <SelectItem key={t.id} value={t.id} disabled={!isSupported}>
-                      {t.file_name}{!isSupported && ' (unsupported - text template)'}
-                    </SelectItem>
-                  );
-                })}
+                {templates.map(t => (
+                  <SelectItem key={t.id} value={t.id}>{t.file_name}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
 
-          {/* Configurable Parameters */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-bold text-slate-700 border-b pb-2">Contract Variables</h3>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Start Date</Label>
-                <Input 
-                  type="date" 
-                  value={contractData.startDate || ''} 
-                  onChange={(e) => setContractData({...contractData, startDate: e.target.value})}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">End Date</Label>
-                <Input 
-                  type="date" 
-                  value={contractData.endDate || ''} 
-                  onChange={(e) => setContractData({...contractData, endDate: e.target.value})}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Probation Period</Label>
-                <Input 
-                  value={contractData.probationPeriod || ''} 
-                  onChange={(e) => setContractData({...contractData, probationPeriod: e.target.value})}
-                  placeholder="e.g. 3 Months"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Notice Period</Label>
-                <Input 
-                  value={contractData.noticePeriod || ''} 
-                  onChange={(e) => setContractData({...contractData, noticePeriod: e.target.value})}
-                  placeholder="e.g. 1 Month"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Leave Days per Year</Label>
-                <Input 
-                  type="number"
-                  value={contractData.leaveDays || ''} 
-                  onChange={(e) => setContractData({...contractData, leaveDays: e.target.value})}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Working Hours</Label>
-                <Input 
-                  value={contractData.workingHours || ''} 
-                  onChange={(e) => setContractData({...contractData, workingHours: e.target.value})}
-                />
-              </div>
+          {/* Contract Dates */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Start Date</Label>
+              <Input
+                type="date"
+                value={contractData.startDate || ''}
+                onChange={(e) => setContractData({ ...contractData, startDate: e.target.value })}
+              />
             </div>
-
-            <div className="flex items-center justify-between p-3 rounded-lg border border-slate-200 dark:border-slate-800 mt-4">
-              <div className="space-y-0.5">
-                <Label className="text-sm font-medium">Use Company Letterhead</Label>
-                <p className="text-[11px] text-slate-500">Insert company logo and branding</p>
-              </div>
-              <Switch 
-                checked={contractData.useLetterhead || false}
-                onCheckedChange={(c) => setContractData({...contractData, useLetterhead: c})}
+            <div className="space-y-1.5">
+              <Label className="text-xs">End Date</Label>
+              <Input
+                type="date"
+                value={contractData.endDate || ''}
+                onChange={(e) => setContractData({ ...contractData, endDate: e.target.value })}
               />
             </div>
           </div>
+
+          {/* Placeholders resolved from the selected template */}
+          <ContractPlaceholderList
+            placeholders={selectedTemplate?.placeholders || []}
+            values={contractData.placeholderValues || {}}
+            resolvedNames={resolvedNames}
+            loading={loadingPlaceholders}
+            onChange={(name, value) => setContractData({
+              ...contractData,
+              placeholderValues: { ...(contractData.placeholderValues || {}), [name]: value },
+            })}
+          />
 
         </div>
       </ScrollArea>
 
       {/* Floating Action Bar */}
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 flex justify-end">
-        <button 
+        <button
           onClick={onRefreshPreview}
           disabled={!selectedTemplate}
           className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"

@@ -12,18 +12,11 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
 import ClientCategoryFilter from "@/app/generic-components/ClientCategoryFilter"
-
-// Type definitions for category filters
-interface CategorySettings {
-  clientStatus: Record<string, boolean>;
-  sectionStatus?: Record<string, boolean>;
-  operationalStatus?: Record<string, boolean>;
-}
-
-interface FilterState {
-  categories: Record<string, boolean>;
-  categorySettings: Record<string, CategorySettings>;
-}
+import {
+  companyMatchesCategoryFilters,
+  type FilterState,
+  type CategorySettings,
+} from "@/app/generic-components/companyCategoryFilters"
 
 type Company = {
   id: string | number;
@@ -49,13 +42,6 @@ interface CompanySidebarProps {
   initialCategoryFilters?: FilterState | null;
   showCategoryFilter?: boolean;
 }
-
-const CATEGORY_DEFINITIONS = [
-  { value: "acc", label: "ACC" },
-  { value: "imm", label: "IMM" },
-  { value: "audit", label: "Audit" },
-  { value: "sheria", label: "Sheria" },
-]
 
 // Helper component to render index with company-specific colors
 const CompanyIndexBadge = ({
@@ -129,77 +115,6 @@ const shouldShowCompany = (company: { default_display?: boolean }, showDefaultOn
   return company.default_display === true
 }
 
-// Helper function to calculate status using date parsing
-const calculateStatus = (fromDateStr: string | null | undefined, toDateStr: string | null | undefined): 'Active' | 'Inactive' | 'N/A' => {
-  if (!fromDateStr || fromDateStr === 'N/A') return 'N/A';
-
-  const fromDate = new Date(fromDateStr.includes('/') ? fromDateStr.split('/').reverse().join('-') : fromDateStr);
-  const toDate = toDateStr && toDateStr !== 'N/A' ? new Date(toDateStr.includes('/') ? toDateStr.split('/').reverse().join('-') : toDateStr) : null;
-  const now = new Date();
-
-  if (!fromDate || isNaN(fromDate.getTime())) return 'N/A';
-
-  // If we have a toDate, check if current date is within the range
-  if (toDate && !isNaN(toDate.getTime())) {
-    return (now >= fromDate && now <= toDate) ? 'Active' : 'Inactive';
-  }
-
-  // If no toDate, just check if current date is after fromDate
-  return now >= fromDate ? 'Active' : 'Inactive';
-};
-
-// Operational status is derived from client status first
-const calculateOperationalStatus = (clientFromDate: string | null | undefined, clientToDate: string | null | undefined, ceaseDate: string | null | undefined): 'Operational' | 'Ceased' | 'Terminated' | 'N/A' => {
-  const clientStatus = calculateStatus(clientFromDate, clientToDate);
-
-  if (clientStatus === 'N/A') return 'N/A';
-  if (clientStatus === 'Inactive') return 'Terminated';
-  if (ceaseDate && ceaseDate !== 'N/A') return 'Ceased';
-
-  return 'Operational';
-};
-
-// Helper to extract cease details for a specific category
-const getCeaseDetailsForCategory = (ceaseDetails: any, category: string) => {
-  if (!ceaseDetails) return { ceased_date: null, cease_reason: null };
-
-  const parsed = typeof ceaseDetails === 'string' ? JSON.parse(ceaseDetails) : ceaseDetails;
-
-  // Handle array format
-  if (Array.isArray(parsed)) {
-    const item = parsed.find((item: any) => item.category === category);
-    return item ? { ceased_date: item.ceased_date, cease_reason: item.cease_reason } : { ceased_date: null, cease_reason: null };
-  }
-
-  // Handle object format for backward compatibility
-  return {
-    ceased_date: parsed?.[category]?.ceased_date || null,
-    cease_reason: parsed?.[category]?.cease_reason || null
-  };
-};
-
-const matchesClientStatusFilter = (
-  currentStatus: 'Active' | 'Inactive' | 'N/A',
-  clientFilters?: Record<string, boolean>
-) => {
-  if (!clientFilters || clientFilters.All) return true
-  if (currentStatus === 'N/A') return false // N/A doesn't match any specific status
-  if (currentStatus === 'Inactive') {
-    return !!(clientFilters.Inactive || clientFilters['Inactive (terminated)'])
-  }
-
-  return !!clientFilters[currentStatus]
-}
-
-const matchesOperationalStatusFilter = (
-  currentStatus: 'Operational' | 'Ceased' | 'Terminated' | 'N/A',
-  operationalFilters?: Record<string, boolean>
-) => {
-  if (!operationalFilters || operationalFilters.All) return true
-  if (currentStatus === 'N/A') return false // N/A doesn't match any specific status
-  return !!operationalFilters[currentStatus]
-}
-
 export function CompanySidebar({
   companies,
   activeCompany,
@@ -244,38 +159,9 @@ export function CompanySidebar({
       comps = comps.filter(company => shouldShowCompany(company, showDefaultDisplayOnly))
     }
 
-    // 3. Apply category filtering (same logic as company-categories page)
+    // 3. Apply category filtering (shared with ContractsSidebar — see companyCategoryFilters.ts)
     if (initialCategoryFilters) {
-      const activeCategoryLabels = Object.entries(initialCategoryFilters.categories)
-        .filter(([label, isActive]) => isActive && label !== 'All Categories')
-        .map(([label]) => label);
-
-       if (activeCategoryLabels.length > 0) {
-        const beforeCategory = comps.length;
-        comps = comps.filter(company => {
-          return activeCategoryLabels.some(label => {
-            const cat = CATEGORY_DEFINITIONS.find(category => category.label === label)
-            if (!cat) return false
-
-            // 1. Check Client Status (Active/Inactive)
-            const currentStatus = calculateStatus(company[`${cat.value}_client_effective_from`], company[`${cat.value}_client_effective_to`]);
-            const clientFilters = initialCategoryFilters.categorySettings[label]?.clientStatus;
-            const matchesClientStatus = !clientFilters || clientFilters.All || !!clientFilters[currentStatus];
-
-            // 2. Check Operational Status (Operational/Ceased/Terminated/N/A)
-            const ceaseData = getCeaseDetailsForCategory(company.cease_details, cat.value);
-            const currentOperationalStatus = calculateOperationalStatus(
-              company[`${cat.value}_client_effective_from`],
-              company[`${cat.value}_client_effective_to`],
-              ceaseData.ceased_date
-            );
-            const operationalFilters = initialCategoryFilters.categorySettings[label]?.operationalStatus;
-            const matchesOperationalStatus = !operationalFilters || operationalFilters.All || !!operationalFilters[currentOperationalStatus];
-            const matches = matchesClientStatus && matchesOperationalStatus;
-                     return matches;
-          });
-        });
-         }
+      comps = comps.filter(company => companyMatchesCategoryFilters(company, initialCategoryFilters))
     }
 
     // 4. Apply search filter

@@ -1,11 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fetchCompanies, Company } from '../../companies/database';
-import { fetchCompanyEmployees, ContractEmployeeInfo } from '../utils/data';
-import { Search, Building2, UserCircle, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { fetchAllEmployeesGrouped, ContractEmployeeInfo } from '../utils/data';
+import { Search, Building2, UserCircle, Loader2, ChevronDown, ChevronRight, Filter } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import ClientCategoryFilter from '@/app/generic-components/ClientCategoryFilter';
+import {
+  companyMatchesCategoryFilters,
+  DEFAULT_CATEGORY_FILTERS,
+  type FilterState,
+} from '@/app/generic-components/companyCategoryFilters';
 
 interface ContractsSidebarProps {
   selectedCompanyId: string | null;
@@ -23,9 +30,13 @@ export function ContractsSidebar({
   const [companies, setCompanies] = useState<Company[]>([]);
   const [employeesByCompany, setEmployeesByCompany] = useState<Record<string, ContractEmployeeInfo[]>>({});
   const [loadingCompanies, setLoadingCompanies] = useState(true);
-  const [loadingEmployeesFor, setLoadingEmployeesFor] = useState<string | null>(null);
+  const [loadingEmployees, setLoadingEmployees] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [openCompanies, setOpenCompanies] = useState<Set<string>>(new Set());
+  // Defaults to ACC / Active / Operational — same baseline as the other company
+  // pickers (CompanySidebar) — see companyCategoryFilters.ts.
+  const [categoryFilters, setCategoryFilters] = useState<FilterState | null>(DEFAULT_CATEGORY_FILTERS);
+  const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
 
   useEffect(() => {
     async function loadCompanies() {
@@ -35,45 +46,69 @@ export function ContractsSidebar({
       setLoadingCompanies(false);
     }
     loadCompanies();
+
+    // Load employees for every company up front instead of per company click.
+    async function loadAllEmployees() {
+      setLoadingEmployees(true);
+      const grouped = await fetchAllEmployeesGrouped();
+      setEmployeesByCompany(grouped);
+      setLoadingEmployees(false);
+    }
+    loadAllEmployees();
   }, []);
 
-  const handleToggleCompany = async (companyId: string) => {
+  const handleToggleCompany = (companyId: string) => {
     const newOpen = new Set(openCompanies);
     if (newOpen.has(companyId)) {
       newOpen.delete(companyId);
       setOpenCompanies(newOpen);
       return;
     }
-    
+
     newOpen.add(companyId);
     setOpenCompanies(newOpen);
     onCompanySelect(companyId);
-
-    if (!employeesByCompany[companyId]) {
-      setLoadingEmployeesFor(companyId);
-      const emps = await fetchCompanyEmployees(companyId);
-      setEmployeesByCompany(prev => ({ ...prev, [companyId]: emps }));
-      setLoadingEmployeesFor(null);
-    }
   };
 
-  const filteredCompanies = companies.filter(c => 
-    c.company_name?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredCompanies = useMemo(() => {
+    return companies
+      .filter(c => c.company_name?.toLowerCase().includes(searchQuery.toLowerCase()))
+      .filter(c => companyMatchesCategoryFilters(c, categoryFilters));
+  }, [companies, searchQuery, categoryFilters]);
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800">
       <div className="p-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
-        <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-          <Building2 className="w-5 h-5 text-custom-blue" />
-          Entities
-        </h2>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+            <Building2 className="w-5 h-5 text-custom-blue" />
+            Entities
+          </h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-slate-400 hover:text-slate-700"
+            onClick={() => setCategoryFilterOpen(true)}
+            title="Filter by client category"
+          >
+            <Filter className="h-4 w-4" />
+          </Button>
+          <ClientCategoryFilter
+            open={categoryFilterOpen}
+            onOpenChange={setCategoryFilterOpen}
+            onFilterChange={setCategoryFilters}
+            initialFilters={categoryFilters}
+            showSectionStatus={false}
+            showOperationalStatus={true}
+            hideCategoryFilterButton
+          />
+        </div>
         <p className="text-xs text-slate-500 mb-3">Select employee for contract</p>
-        
+
         <div className="relative">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-          <Input 
-            placeholder="Search company..." 
+          <Input
+            placeholder="Search company..."
             className="pl-9 h-9 text-sm bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus-visible:ring-custom-blue"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -97,7 +132,7 @@ export function ContractsSidebar({
               const compId = String(company.id);
               const isOpen = openCompanies.has(compId);
               const emps = employeesByCompany[compId] || [];
-              const isLoadingEmps = loadingEmployeesFor === compId;
+              const isLoadingEmps = loadingEmployees;
 
               return (
                 <Collapsible 
@@ -117,7 +152,7 @@ export function ContractsSidebar({
                     <span className="truncate flex-1 text-left">{company.company_name}</span>
                   </CollapsibleTrigger>
                   
-                  <CollapsibleContent className="pl-6 pr-2 py-1 space-y-1">
+                      <CollapsibleContent className="pl-6 pr-2 py-1 space-y-1">
                     {isLoadingEmps ? (
                       <div className="flex items-center p-2 text-xs text-slate-400">
                         <Loader2 className="w-3 h-3 animate-spin mr-2" />
@@ -127,9 +162,15 @@ export function ContractsSidebar({
                       <div className="p-2 text-xs text-slate-400 italic">
                         No employees found.
                       </div>
-                    ) : (
-                      emps.map(emp => {
+                    ) : (() => {
+                      const isActive = (e: ContractEmployeeInfo) =>
+                        (e.status || 'Active').toLowerCase() === 'active';
+                      const activeEmps = emps.filter(isActive);
+                      const inactiveEmps = emps.filter(e => !isActive(e));
+
+                      const renderEmp = (emp: ContractEmployeeInfo) => {
                         const isSelected = selectedEmployeeId === String(emp.individualId) && selectedCompanyId === compId;
+                        const active = isActive(emp);
                         return (
                           <div
                             key={emp.id}
@@ -142,8 +183,18 @@ export function ContractsSidebar({
                             )}
                           >
                             <UserCircle className={cn("w-4 h-4 mr-2 shrink-0", isSelected ? "text-white/80" : "text-slate-400")} />
-                            <div className="flex-1 truncate">
-                              <span className="block truncate">{emp.fullName}</span>
+                            <div className="flex-1 truncate min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="truncate">{emp.fullName}</span>
+                                <span className={cn(
+                                  "shrink-0 text-[8px] font-semibold px-1 py-px rounded-full leading-tight uppercase tracking-wide",
+                                  isSelected
+                                    ? (active ? "bg-green-200 text-green-800" : "bg-red-200 text-red-800")
+                                    : (active ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-500")
+                                )}>
+                                  {active ? 'A' : 'I'}
+                                </span>
+                              </div>
                               <span className={cn(
                                 "block text-[10px] truncate",
                                 isSelected ? "text-blue-100" : "text-slate-400"
@@ -152,9 +203,23 @@ export function ContractsSidebar({
                               </span>
                             </div>
                           </div>
-                        )
-                      })
-                    )}
+                        );
+                      };
+
+                      return (
+                        <>
+                          {activeEmps.map(renderEmp)}
+                          {activeEmps.length > 0 && inactiveEmps.length > 0 && (
+                            <div className="flex items-center gap-2 py-1 px-1">
+                              <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
+                              <span className="text-[9px] text-slate-400 uppercase tracking-wider font-medium shrink-0">Inactive</span>
+                              <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
+                            </div>
+                          )}
+                          {inactiveEmps.map(renderEmp)}
+                        </>
+                      );
+                    })()}
                   </CollapsibleContent>
                 </Collapsible>
               );
