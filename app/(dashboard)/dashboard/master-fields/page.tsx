@@ -26,6 +26,7 @@ export default function JobFieldsPage() {
   const [typeFilter, setTypeFilter] = useState<string>("all")
   const [requiredFilter, setRequiredFilter] = useState<string>("all")
   const [categoryFilter, setCategoryFilter] = useState<string>("all")
+  const [scopeFilter, setScopeFilter] = useState<string>("all")
   const [categories, setCategories] = useState<string[]>([])
 
   const [selectedField, setSelectedField] = useState<JobField | null>(null)
@@ -50,7 +51,7 @@ export default function JobFieldsPage() {
   // 2. Filter Trigger
   useEffect(() => {
     filterFields()
-  }, [fields, searchTerm, typeFilter, requiredFilter, categoryFilter])
+  }, [fields, searchTerm, typeFilter, requiredFilter, categoryFilter, scopeFilter])
 
   const fetchFields = async () => {
     try {
@@ -107,6 +108,11 @@ export default function JobFieldsPage() {
     // Category Filter (Logic Fixed)
     if (categoryFilter !== "all") {
       filtered = filtered.filter((field) => field.category === categoryFilter)
+    }
+
+    // Scope Filter
+    if (scopeFilter !== "all") {
+      filtered = filtered.filter((field) => (field.field_scope || "general") === scopeFilter)
     }
 
     setFilteredFields(filtered)
@@ -273,6 +279,17 @@ export default function JobFieldsPage() {
                     <SelectItem value="optional">Optional</SelectItem>
                   </SelectContent>
                 </Select>
+
+                <Select value={scopeFilter} onValueChange={setScopeFilter}>
+                  <SelectTrigger className="w-full sm:w-[160px] bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700 focus:ring-blue-500">
+                    <SelectValue placeholder="Filter by scope" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Scopes</SelectItem>
+                    <SelectItem value="general">General</SelectItem>
+                    <SelectItem value="immigration">Immigration</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </CardHeader>
@@ -311,6 +328,12 @@ export default function JobFieldsPage() {
                       onClick={() => requestSort('is_required')}
                     >
                       Required{getSortIndicator('is_required')}
+                    </TableHead>
+                    <TableHead
+                      className="py-4 px-6 text-white border-r cursor-pointer hover:bg-blue-600 transition-colors"
+                      onClick={() => requestSort('field_scope')}
+                    >
+                      Scope{getSortIndicator('field_scope')}
                     </TableHead>
                     <TableHead className="py-4 px-6 text-white border-r">
                       Sources
@@ -365,6 +388,18 @@ export default function JobFieldsPage() {
                             {field.is_required ? "Required" : "Optional"}
                           </Badge>
                         </TableCell>
+                        <TableCell className="p-6 border-r">
+                          <Badge
+                            variant={field.field_scope === 'immigration' ? "default" : "outline"}
+                            className={
+                              field.field_scope === 'immigration'
+                                ? "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border-amber-200"
+                                : "text-slate-500"
+                            }
+                          >
+                            {field.field_scope === 'immigration' ? "Immigration" : "General"}
+                          </Badge>
+                        </TableCell>
 
                         <TableCell className="p-6 border-r">
                           {field.is_computed ? (
@@ -411,7 +446,7 @@ export default function JobFieldsPage() {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={9} className="h-24 text-center text-slate-500 dark:text-slate-400">
+                      <TableCell colSpan={10} className="h-24 text-center text-slate-500 dark:text-slate-400">
                         No fields found. Try adjusting your search or filters.
                       </TableCell>
                     </TableRow>

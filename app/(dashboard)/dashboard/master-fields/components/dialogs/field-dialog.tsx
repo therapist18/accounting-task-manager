@@ -78,12 +78,13 @@ export type SourceCardState = {
     loadingFields?: boolean
 }
 
-const DEFAULT_CARD_DATA = (name = "", category = "General") => ({
+const DEFAULT_CARD_DATA = (name = "", category = "General", fieldScope = "general") => ({
     field_key: name.toLowerCase().replace(/[^a-z0-9]/g, '_'),
     label: name,
     type: 'text',
     is_required: false,
     category: category,
+    field_scope: fieldScope,
     is_computed: false,
     computed_function: "",
     computed_config: {
@@ -270,6 +271,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
         date_config: { useCurrentDate: true, format: 'YYYY-MM-DD' },
         documentTypes: [],
         category: "General",
+        field_scope: "general",
         dependencyConfig: { mode: 'db_filter', valueKey: "name", labelKey: "name", parentOptionKey: "parent_id" },
         manualMapping: {}
     })
@@ -303,7 +305,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
         const fieldNames = input.split(/[\n,]+/).map(name => name.trim()).filter(Boolean);
         const newCards = fieldNames.map((name, index) => ({
             id: `field-${Date.now()}-${index}`,
-            data: DEFAULT_CARD_DATA(name, formData.category)
+            data: DEFAULT_CARD_DATA(name, formData.category, formData.field_scope)
         }));
         setFieldCards(prev => [...prev, ...newCards]);
         setBulkInput("");
@@ -312,7 +314,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
     const addSingleFieldCard = () => {
         setFieldCards(prev => [...prev, {
             id: `field-${Date.now()}`,
-            data: DEFAULT_CARD_DATA("", formData.category)
+            data: DEFAULT_CARD_DATA("", formData.category, formData.field_scope)
         }]);
     };
 
@@ -447,6 +449,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                     manualMapping: currentManualMapping,
                     date_config: field.date_config || { useCurrentDate: true, format: 'YYYY-MM-DD' },
                     category: field.category || "General",
+                    field_scope: field.field_scope || "general",
                     documentTypes: formData.documentTypes
                 })
 
@@ -500,6 +503,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                     date_config: { useCurrentDate: true, format: 'YYYY-MM-DD' },
                     documentTypes: formData.documentTypes,
                     category: "General",
+                    field_scope: "general",
                     dependencyConfig: { mode: 'db_filter', valueKey: "name", labelKey: "name", parentOptionKey: "parent_id" },
                     manualMapping: {}
                 })
@@ -619,6 +623,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                         type: card.data.type === 'dropdown' ? 'select' : card.data.type,
                         is_required: card.data.is_required,
                         category: card.data.category,
+                        field_scope: card.data.field_scope || 'general',
                         options: [],
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString(),
@@ -745,6 +750,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                 is_required: formData.is_required ?? (isEditMode ? field?.is_required : false),
                 options,
                 category: formData.category,
+                field_scope: formData.field_scope || 'general',
                 updated_at: new Date().toISOString()
             }
 
@@ -914,6 +920,19 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                                     </Command>
                                                 </PopoverContent>
                                             </Popover>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-xs font-bold uppercase text-slate-500">Field Scope</Label>
+                                            <Select
+                                                value={card.data.field_scope || 'general'}
+                                                onValueChange={(value) => updateFieldCard(card.id, { field_scope: value })}
+                                            >
+                                                <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="general">General</SelectItem>
+                                                    <SelectItem value="immigration">Immigration</SelectItem>
+                                                </SelectContent>
+                                            </Select>
                                         </div>
                                     </div>
 
@@ -1170,6 +1189,20 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                             </Command>
                                         </PopoverContent>
                                     </Popover>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-xs font-bold uppercase text-slate-500">Field Scope</Label>
+                                    <Select
+                                        value={formData.field_scope || 'general'}
+                                        onValueChange={(value) => setFormData({ ...formData, field_scope: value })}
+                                    >
+                                        <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="general">General</SelectItem>
+                                            <SelectItem value="immigration">Immigration</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-[11px] text-slate-400">Immigration fields are reserved for the immigration workflow and shouldn't be reused for other documents.</p>
                                 </div>
                             </div>
                         </Card>

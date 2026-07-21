@@ -55,9 +55,9 @@ type ThemeCssArgs = { primaryColor: string; accentColor: string; fontFamily: str
 const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
   corporate: ({ primaryColor, accentColor, fontFamily, fontScale }) => `
     font-family: ${fontFamily};
-    color: #334155;
+    color: #1e293b;
     line-height: 1.65;
-    font-size: ${10.5 * fontScale}pt;
+    font-size: ${11.5 * fontScale}pt;
     h1 { color: ${primaryColor}; font-weight: 800; font-size: ${18 * fontScale}pt; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 32px; position: relative; }
     h1::after { content: ''; position: absolute; left: 0; bottom: -2px; width: 80px; height: 2px; background-color: ${accentColor}; }
     h2 { color: ${primaryColor}; font-weight: 700; font-size: ${12.5 * fontScale}pt; margin-top: 32px; margin-bottom: 12px; }

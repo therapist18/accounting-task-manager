@@ -11,6 +11,7 @@ export interface Database {
             sources: JobFieldSource[]
             options: any
             category?: string | null
+            field_scope: "general" | "immigration"
             created_at: string
             updated_at: string
           }
@@ -23,6 +24,7 @@ export interface Database {
             sources?: JobFieldSource[]
             options?: any
             category?: string | null
+            field_scope?: "general" | "immigration"
             created_at?: string
             updated_at?: string
           }
@@ -35,6 +37,7 @@ export interface Database {
             sources?: JobFieldSource[]
             options?: any
             category?: string | null
+            field_scope?: "general" | "immigration"
             updated_at?: string
           }
         }
