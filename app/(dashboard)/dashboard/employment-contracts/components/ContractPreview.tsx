@@ -55,6 +55,13 @@ export function ContractPreview({ contractData, setContractData, selectedTemplat
     ? replacePlaceholders(applyThemeToHtml(selectedTemplate.content, themeSettings), contractData.placeholderValues || {})
     : '';
 
+  // Separate, Word-safe rendering of the same content (flattened CSS + table-based
+  // signature layout) used only when building the .doc download - see themeEngine's
+  // applyThemeToHtml for why the browser-rendered version above can't be reused for Word.
+  const wordSafeMergedHtml = isHtmlTemplate && selectedTemplate?.content
+    ? replacePlaceholders(applyThemeToHtml(selectedTemplate.content, themeSettings, { wordSafe: true }), contractData.placeholderValues || {})
+    : '';
+
   const updateThemeSettings = (settings: ContractThemeSettings) => {
     setContractData?.((prev: any) => ({ ...prev, themeSettings: settings }));
   };
@@ -137,10 +144,10 @@ export function ContractPreview({ contractData, setContractData, selectedTemplat
       return { blob: mergedDocxBlob, fileName: `${baseName}_Employment_Contract.docx` };
     }
     if (isHtmlTemplate && mergedHtml) {
-      // Word-openable HTML document (not true OOXML) - but it embeds the full theme <style>
-      // block, so unlike a from-scratch docx generator it actually preserves the selected
-      // layout/colors/fonts when opened in Word, instead of silently dropping most of them.
-      const htmlDoc = `<!doctype html><html><head><meta charset="utf-8"><title>${baseName} Employment Contract</title></head><body>${themedMergedHtml}</body></html>`;
+      // Word-openable HTML document (not true OOXML) - uses the Word-safe variant (flat
+      // CSS, table-based signature layout) so the theme actually survives Word's import
+      // instead of being silently dropped, see themeEngine.applyThemeToHtml.
+      const htmlDoc = `<!doctype html><html><head><meta charset="utf-8"><title>${baseName} Employment Contract</title></head><body>${wordSafeMergedHtml}</body></html>`;
       return { blob: new Blob([htmlDoc], { type: 'application/msword' }), fileName: `${baseName}_Employment_Contract.doc` };
     }
     return null;
@@ -157,6 +164,20 @@ export function ContractPreview({ contractData, setContractData, selectedTemplat
 
     setIsGeneratingPdf(true);
     try {
+      if (typeof document !== 'undefined' && (document as any).fonts?.ready) {
+        try { await (document as any).fonts.ready; } catch { /* ignore */ }
+      }
+      await Promise.all(
+        Array.from(element.querySelectorAll('img')).map((img) =>
+          (img as HTMLImageElement).complete
+            ? Promise.resolve()
+            : new Promise<void>((resolve) => {
+                (img as HTMLImageElement).addEventListener('load', () => resolve(), { once: true });
+                (img as HTMLImageElement).addEventListener('error', () => resolve(), { once: true });
+              })
+        )
+      );
+
       const canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,

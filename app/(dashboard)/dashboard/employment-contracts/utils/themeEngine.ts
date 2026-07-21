@@ -266,9 +266,61 @@ const THEME_HEADERS: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
 };
 
 /**
- * Applies the selected theme, color/font overrides, and branding strategy to merged HTML.
+ * THEME_STYLES entries are written as SCSS-style nested CSS (a top-level property list
+ * followed by `selector { ... }` blocks meant to apply *inside* the theme's root class).
+ * Modern browsers understand native CSS nesting, which is why the live preview and the
+ * html2canvas-captured PDF both render correctly - but Word's HTML importer only
+ * understands flat CSS 2.1-era rules. Given a block with nested rules, Word's parser
+ * discards the entire `<style>` block rather than just the part it can't read, so every
+ * themed heading/table/signature style silently disappears from the exported .doc file.
+ * This flattens `.root { color: red; h1 { color: blue; } }` into
+ * `.root { color: red; } .root h1 { color: blue; }` so the same styling survives in Word.
  */
-export function applyThemeToHtml(content: string, settings: ContractThemeSettings): string {
+function flattenNestedCss(rootSelector: string, css: string): string {
+  const blockPattern = /([^{}]+)\{([^{}]*)\}/g;
+  const rules: string[] = [];
+  let baseDecls = '';
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = blockPattern.exec(css)) !== null) {
+    baseDecls += css.slice(lastIndex, match.index);
+    lastIndex = blockPattern.lastIndex;
+
+    const nestedSelector = match[1].trim();
+    const body = match[2].trim();
+    if (!nestedSelector || !body) continue;
+
+    // Nested selector may itself be comma-separated (e.g. "th, td")
+    const fullSelector = nestedSelector
+      .split(',')
+      .map((s) => `${rootSelector} ${s.trim()}`)
+      .join(', ');
+    rules.push(`${fullSelector} { ${body} }`);
+  }
+  baseDecls += css.slice(lastIndex);
+
+  return [`${rootSelector} { ${baseDecls.trim()} }`, ...rules].join('\n');
+}
+
+/**
+ * Word's HTML importer doesn't support flexbox - `display: flex` signature columns
+ * collapse to stacked blocks instead of sitting side by side. Swap them for the
+ * table-cell layout Word's legacy renderer has always understood.
+ */
+function makeWordSafe(css: string): string {
+  return css
+    .replace(/(\.signature-block\s*\{[^}]*?)display:\s*flex;?/g, '$1display: table; width: 100%;')
+    .replace(/(\.signature-column\s*\{[^}]*?)flex:\s*1;?/g, '$1display: table-cell; width: 50%; vertical-align: top;');
+}
+
+/**
+ * Applies the selected theme, color/font overrides, and branding strategy to merged HTML.
+ * Pass `wordSafe: true` when the result will be saved as a .doc file for Microsoft Word
+ * rather than rendered in a browser (live preview / PDF capture) - see flattenNestedCss
+ * and makeWordSafe above for why the two paths need different CSS.
+ */
+export function applyThemeToHtml(content: string, settings: ContractThemeSettings, options?: { wordSafe?: boolean }): string {
   const theme = settings.theme || 'corporate';
   const args: ThemeCssArgs = {
     primaryColor: settings.primaryColor || THEME_DEFAULTS[theme].primaryColor,
@@ -292,15 +344,16 @@ export function applyThemeToHtml(content: string, settings: ContractThemeSetting
     finalContent = `${companyHeader}\n<div class="document-body">${finalContent}</div>`;
   }
 
-  // 2. Apply theme styling - inject a scoped <style> block around the content
-  const css = THEME_STYLES[theme]?.(args) || THEME_STYLES.corporate(args);
+  // 2. Apply theme styling - inject a flat (Word-parseable), scoped <style> block
+  const rawCss = THEME_STYLES[theme]?.(args) || THEME_STYLES.corporate(args);
+  const rootSelector = `.contract-theme-${theme}`;
+  let flatCss = flattenNestedCss(rootSelector, rawCss);
+  if (options?.wordSafe) flatCss = makeWordSafe(flatCss);
 
   return `
     <div class="contract-theme-${theme}" style="padding: 40px; max-width: 850px; margin: 0 auto; background: white; box-sizing: border-box;">
       <style>
-        .contract-theme-${theme} {
-          ${css}
-        }
+        ${flatCss}
       </style>
       ${finalContent}
     </div>

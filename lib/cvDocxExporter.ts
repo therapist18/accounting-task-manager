@@ -3,6 +3,7 @@ import {
   Packer,
   Paragraph,
   TextRun,
+  ImageRun,
   HeadingLevel,
   Table,
   TableRow,
@@ -13,7 +14,50 @@ import {
 } from "docx";
 import { saveAs } from "file-saver";
 
-export async function exportToDocx(cvData: any, cvSettings?: { primaryColor?: string; accentColor?: string }) {
+// Fetches the profile photo and decodes its natural dimensions so the embedded
+// image keeps its aspect ratio instead of being squashed into a fixed box.
+async function loadPhotoImageRun(url?: string, targetWidth = 110): Promise<ImageRun | null> {
+  if (!url) return null;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+
+    let type: "jpg" | "png" | "gif" | "bmp" = "png";
+    const contentType = blob.type || "";
+    if (contentType.includes("jpeg") || contentType.includes("jpg") || /\.jpe?g(\?|$)/i.test(url)) type = "jpg";
+    else if (contentType.includes("gif") || /\.gif(\?|$)/i.test(url)) type = "gif";
+    else if (contentType.includes("bmp") || /\.bmp(\?|$)/i.test(url)) type = "bmp";
+
+    const dims = await new Promise<{ w: number; h: number }>((resolve) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(blob);
+      img.onload = () => {
+        resolve({ w: img.naturalWidth || 1, h: img.naturalHeight || 1 });
+        URL.revokeObjectURL(objectUrl);
+      };
+      img.onerror = () => {
+        resolve({ w: 1, h: 1 });
+        URL.revokeObjectURL(objectUrl);
+      };
+      img.src = objectUrl;
+    });
+
+    const targetHeight = Math.round((dims.h / dims.w) * targetWidth) || targetWidth;
+    const data = await blob.arrayBuffer();
+
+    return new ImageRun({
+      data,
+      type,
+      transformation: { width: targetWidth, height: targetHeight },
+    });
+  } catch (e) {
+    console.warn("CV DOCX export: failed to embed profile photo", e);
+    return null;
+  }
+}
+
+export async function exportToDocx(cvData: any, cvSettings?: { primaryColor?: string; accentColor?: string; showPhoto?: boolean }) {
   const {
     personalInfo = {},
     personalDetails = {},
@@ -24,6 +68,10 @@ export async function exportToDocx(cvData: any, cvSettings?: { primaryColor?: st
     projects = [],
     education = [],
     references = [],
+    languages = [],
+    certifications = [],
+    achievements = [],
+    additionalInfo = [],
     declaration = "",
     includeDeclaration = true,
     verifiedBadge = false,
@@ -38,11 +86,25 @@ export async function exportToDocx(cvData: any, cvSettings?: { primaryColor?: st
   const primaryColor = toDocxColor(cvSettings?.primaryColor);
   const accentColor = toDocxColor(cvSettings?.accentColor);
 
+  const showPhoto = cvSettings?.showPhoto !== false;
+  const photoImageRun = showPhoto ? await loadPhotoImageRun(personalInfo.photoUrl) : null;
+
   const doc = new Document({
     sections: [
       {
         properties: {},
         children: [
+          // PROFILE PHOTO
+          ...(photoImageRun
+            ? [
+                new Paragraph({
+                  alignment: AlignmentType.CENTER,
+                  spacing: { after: 150 },
+                  children: [photoImageRun],
+                }),
+              ]
+            : []),
+
           // HEADER - Name & Title
           new Paragraph({
             alignment: AlignmentType.CENTER,
@@ -405,6 +467,109 @@ export async function exportToDocx(cvData: any, cvSettings?: { primaryColor?: st
             });
           }),
 
+          // CERTIFICATIONS
+          certifications.length > 0
+            ? new Paragraph({
+                heading: HeadingLevel.HEADING_2,
+                spacing: { before: 300, after: 150 },
+                children: [
+                  new TextRun({
+                    text: "CERTIFICATIONS",
+                    bold: true,
+                    size: 24,
+                    color: primaryColor,
+                  }),
+                ],
+              })
+            : new Paragraph({ text: "" }),
+
+          ...certifications.map((cert: any) => {
+            return new Paragraph({
+              spacing: { after: 80 },
+              children: [
+                new TextRun({
+                  text: cert.name || "Certification",
+                  bold: true,
+                  size: 20,
+                  color: accentColor,
+                }),
+                cert.issuer ? new TextRun({ text: ` - ${cert.issuer}`, size: 20 }) : new TextRun({ text: "" }),
+                cert.date ? new TextRun({ text: ` (${cert.date})`, italics: true, size: 20, color: "555555" }) : new TextRun({ text: "" }),
+                cert.url ? new TextRun({ text: `\n${cert.url}`, size: 18, color: "777777" }) : new TextRun({ text: "" }),
+              ],
+            });
+          }),
+
+          // LANGUAGES
+          languages.length > 0
+            ? new Paragraph({
+                heading: HeadingLevel.HEADING_2,
+                spacing: { before: 300, after: 150 },
+                children: [
+                  new TextRun({
+                    text: "LANGUAGES",
+                    bold: true,
+                    size: 24,
+                    color: primaryColor,
+                  }),
+                ],
+              })
+            : new Paragraph({ text: "" }),
+
+          languages.length > 0
+            ? new Paragraph({
+                spacing: { after: 100 },
+                children: languages.flatMap((lang: any, idx: number) => [
+                  new TextRun({
+                    text: `${lang.language || ""}`,
+                    bold: true,
+                    size: 20,
+                  }),
+                  new TextRun({
+                    text: lang.proficiency ? ` (${lang.proficiency})` : "",
+                    size: 20,
+                    color: "555555",
+                  }),
+                  new TextRun({
+                    text: idx < languages.length - 1 ? "   |   " : "",
+                    size: 20,
+                  }),
+                ]),
+              })
+            : new Paragraph({ text: "" }),
+
+          // ACHIEVEMENTS
+          achievements.length > 0
+            ? new Paragraph({
+                heading: HeadingLevel.HEADING_2,
+                spacing: { before: 300, after: 150 },
+                children: [
+                  new TextRun({
+                    text: "ACHIEVEMENTS",
+                    bold: true,
+                    size: 24,
+                    color: primaryColor,
+                  }),
+                ],
+              })
+            : new Paragraph({ text: "" }),
+
+          ...achievements.map((ach: any) => {
+            return new Paragraph({
+              spacing: { after: 80 },
+              children: [
+                new TextRun({
+                  text: ach.title || "Achievement",
+                  bold: true,
+                  size: 20,
+                  color: accentColor,
+                }),
+                ach.date ? new TextRun({ text: ` (${ach.date})`, italics: true, size: 20, color: "555555" }) : new TextRun({ text: "" }),
+                ach.description ? new TextRun({ text: `\n${ach.description}`, size: 20 }) : new TextRun({ text: "" }),
+              ],
+            });
+          }),
+
           // PERSONAL DETAILS (if relevant)
           Object.keys(personalDetails).length > 0
             ? new Paragraph({
@@ -479,6 +644,42 @@ export async function exportToDocx(cvData: any, cvSettings?: { primaryColor?: st
               ],
             });
           }),
+
+          // ADDITIONAL INFORMATION
+          additionalInfo.length > 0
+            ? new Paragraph({
+                heading: HeadingLevel.HEADING_2,
+                spacing: { before: 300, after: 150 },
+                children: [
+                  new TextRun({
+                    text: "ADDITIONAL INFORMATION",
+                    bold: true,
+                    size: 24,
+                    color: primaryColor,
+                  }),
+                ],
+              })
+            : new Paragraph({ text: "" }),
+
+          ...additionalInfo
+            .filter((info: any) => info.label || info.value)
+            .map((info: any) => {
+              return new Paragraph({
+                spacing: { after: 60 },
+                children: [
+                  new TextRun({
+                    text: `${info.label || ""}: `,
+                    bold: true,
+                    size: 20,
+                    color: accentColor,
+                  }),
+                  new TextRun({
+                    text: info.value || "",
+                    size: 20,
+                  }),
+                ],
+              });
+            }),
 
           // DECLARATION
           includeDeclaration && declaration

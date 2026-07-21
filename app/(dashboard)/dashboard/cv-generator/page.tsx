@@ -2299,10 +2299,27 @@ export default function CVGeneratorPage() {
       
       // Add pdf-mode class to hide UI elements
       document.body.classList.add("pdf-mode");
-      
+
+      // Wait for the chosen theme font (and any images already in the DOM) to finish
+      // loading - otherwise html2canvas can paint with the fallback font, producing a
+      // PDF that visibly doesn't match the on-screen preview.
+      if (typeof document !== "undefined" && (document as any).fonts?.ready) {
+        try { await (document as any).fonts.ready; } catch { /* ignore */ }
+      }
+      await Promise.all(
+        Array.from(element.querySelectorAll("img")).map((img) =>
+          (img as HTMLImageElement).complete
+            ? Promise.resolve()
+            : new Promise<void>((resolve) => {
+                (img as HTMLImageElement).addEventListener("load", () => resolve(), { once: true });
+                (img as HTMLImageElement).addEventListener("error", () => resolve(), { once: true });
+              })
+        )
+      );
+
       // Wait for layout to settle
       await new Promise(resolve => setTimeout(resolve, 200));
-      
+
       // Get actual content dimensions
       const contentWidth = element.scrollWidth;
       const contentHeight = element.scrollHeight;
@@ -2406,9 +2423,14 @@ export default function CVGeneratorPage() {
     }
   };
 
-  const handleDownloadDocx = () => {
+  const handleDownloadDocx = async () => {
     try {
-      exportToDocx(cvData, { primaryColor: cvSettings.primaryColor, accentColor: cvSettings.accentColor });
+      toast.info("Generating Word document...");
+      await exportToDocx(cvData, {
+        primaryColor: cvSettings.primaryColor,
+        accentColor: cvSettings.accentColor,
+        showPhoto: cvSettings.showPhoto,
+      });
       toast.success("Word document (.docx) generated successfully!");
     } catch (e: any) {
       console.error(e);

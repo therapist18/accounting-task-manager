@@ -81,7 +81,23 @@ export default function AdvancedExport({ cvData, previewRef, onClose }: Advanced
     element.style.transform = "none";
     element.style.overflow = "visible";
     element.style.width = "210mm";
-    
+
+    // Wait for the theme font and any images to finish loading so the capture matches
+    // what's on screen instead of falling back to a default font/broken image.
+    if (typeof document !== "undefined" && (document as any).fonts?.ready) {
+      try { await (document as any).fonts.ready; } catch { /* ignore */ }
+    }
+    await Promise.all(
+      Array.from(element.querySelectorAll("img")).map((img) =>
+        (img as HTMLImageElement).complete
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => {
+              (img as HTMLImageElement).addEventListener("load", () => resolve(), { once: true });
+              (img as HTMLImageElement).addEventListener("error", () => resolve(), { once: true });
+            })
+      )
+    );
+
     // Wait for layout
     await new Promise(resolve => setTimeout(resolve, 100));
     
