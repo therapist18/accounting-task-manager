@@ -52,6 +52,20 @@ export const FONT_OPTIONS = [
 
 type ThemeCssArgs = { primaryColor: string; accentColor: string; fontFamily: string; fontScale: number };
 
+// Structural rules keyed off the real section semantics the clause engine now
+// emits (<section data-section="..."> - see utils/clauseEngine.ts /
+// utils/contractStructure.ts) rather than guessing from heading level. Shared
+// across all themes since section spacing/pagination is layout, not brand
+// styling - each theme still fully controls typography/color/table/signature
+// treatment above via THEME_STYLES.
+const BASE_SECTION_STYLES = `
+  .cs-section { margin-bottom: 28px; }
+  .cs-section:last-child { margin-bottom: 0; }
+  .cs-missing-clause { color: #b91c1c; font-style: italic; border: 1px dashed #b91c1c; padding: 10px 14px; border-radius: 4px; }
+  [data-section="appendix_job_description"] { page-break-before: always; }
+  [data-section="signatures"] { page-break-inside: avoid; }
+`;
+
 const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
   corporate: ({ primaryColor, accentColor, fontFamily, fontScale }) => `
     font-family: ${fontFamily};
@@ -350,7 +364,7 @@ export function applyThemeToHtml(content: string, settings: ContractThemeSetting
   }
 
   // 2. Apply theme styling - inject a flat (Word-parseable), scoped <style> block
-  const rawCss = THEME_STYLES[theme]?.(args) || THEME_STYLES.corporate(args);
+  const rawCss = (THEME_STYLES[theme]?.(args) || THEME_STYLES.corporate(args)) + BASE_SECTION_STYLES;
   const rootSelector = `.contract-theme-${theme}`;
   let flatCss = flattenNestedCss(rootSelector, rawCss);
   if (options?.wordSafe) flatCss = makeWordSafe(flatCss);

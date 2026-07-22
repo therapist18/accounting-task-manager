@@ -1,22 +1,21 @@
 import { useEffect, useState } from 'react';
-import supabase from '@/lib/supabase/client';
 import { fetchCompanyEmployees, ContractEmployeeInfo } from '../utils/data';
-import { buildPlaceholderContext, resolveContractPlaceholders } from '../utils/placeholderContext';
+import { EcJobProfile, fetchJobProfiles, matchJobProfile } from '../utils/jobProfileData';
+import { EmploymentOffer, fetchLatestOffer } from '../utils/employmentOfferData';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, RefreshCw, Settings2, UserRound, FileText } from 'lucide-react';
-import { EMPLOYMENT_CONTRACT_DOCUMENT_ID } from '../utils/constants';
-import { ContractPlaceholderList } from './ContractPlaceholderList';
+import { Loader2, RefreshCw, Settings2, UserRound, Briefcase, Plus, Trash2 } from 'lucide-react';
 
 interface ContractEditorProps {
   companyId: string | null;
   employeeId: string | null;
   contractData: any;
   setContractData: (data: any) => void;
-  selectedTemplate: any;
-  setSelectedTemplate: (template: any) => void;
+  selectedJobProfile: EcJobProfile | null;
+  setSelectedJobProfile: (profile: EcJobProfile | null) => void;
   onRefreshPreview: () => void;
 }
 
@@ -25,15 +24,19 @@ export function ContractEditor({
   employeeId,
   contractData,
   setContractData,
-  selectedTemplate,
-  setSelectedTemplate,
+  selectedJobProfile,
+  setSelectedJobProfile,
   onRefreshPreview
 }: ContractEditorProps) {
   const [employee, setEmployee] = useState<ContractEmployeeInfo | null>(null);
-  const [templates, setTemplates] = useState<any[]>([]);
+  const [profiles, setProfiles] = useState<EcJobProfile[]>([]);
   const [loading, setLoading] = useState(false);
-  const [loadingPlaceholders, setLoadingPlaceholders] = useState(false);
-  const [resolvedNames, setResolvedNames] = useState<Set<string>>(new Set());
+  const [settingsRows, setSettingsRows] = useState<{ key: string; value: string }[]>([]);
+
+  const offer: Partial<EmploymentOffer> = contractData.offer || {};
+  const updateOffer = (patch: Partial<EmploymentOffer>) => {
+    setContractData((prev: any) => ({ ...prev, offer: { ...(prev.offer || {}), ...patch } }));
+  };
 
   useEffect(() => {
     async function loadData() {
@@ -43,113 +46,54 @@ export function ContractEditor({
       }
       setLoading(true);
 
-      // Fetch employee data
-      const emps = await fetchCompanyEmployees(companyId);
+      const [emps, jobProfiles] = await Promise.all([
+        fetchCompanyEmployees(companyId),
+        fetchJobProfiles(companyId),
+      ]);
       const target = emps.find(e => String(e.individualId) === employeeId) || null;
       setEmployee(target);
+      setProfiles(jobProfiles);
 
-      if (target) {
-        // Initialize contract fields
-        setContractData((prev: any) => ({
-          ...prev,
-          employee: target,
-          startDate: target.startDate || new Date().toISOString().split('T')[0],
-          endDate: '',
-          placeholderValues: {},
-        }));
-      }
+      const matched = target ? matchJobProfile(jobProfiles, target) : null;
+      setSelectedJobProfile(matched);
 
-      // Fetch templates configured for Employment Contracts (see Manage Templates settings)
-      const { data: tpls } = await supabase
-        .from('acc_portal_templates')
-        .select('*')
-        .eq('document_id', EMPLOYMENT_CONTRACT_DOCUMENT_ID)
-        .order('file_name');
+      const individualId = target ? target.individualId : Number(employeeId);
+      const existingOffer = target ? await fetchLatestOffer(companyId, individualId) : null;
 
-      if (tpls && tpls.length > 0) {
-        setTemplates(tpls);
+      const nextOffer: Partial<EmploymentOffer> = existingOffer || {
+        job_profile_id: matched?.id,
+        company_id: String(companyId),
+        individual_id: individualId,
+        basic_salary: target?.basicSalary || null,
+        currency: 'KES',
+        allowances: [],
+        start_date: target?.startDate || new Date().toISOString().split('T')[0],
+        end_date: null,
+        settings_overrides: {},
+        section_clauses_overrides: {},
+        status: 'draft',
+      };
 
-        if (target) {
-          // Auto-select template based on fallback priority
-          let bestTemplate = null;
-          let bestScore = -1;
-
-          for (const t of tpls) {
-            let score = 0;
-            let disqualified = false;
-
-            const checkMatch = (templateVal: string | null | undefined, empVal: string | null | undefined, weight: number) => {
-              if (templateVal) {
-                if (!empVal || templateVal.toLowerCase() !== empVal.toLowerCase()) {
-                  disqualified = true;
-                } else {
-                  score += weight;
-                }
-              }
-            };
-
-            const c = t.classification || {};
-            checkMatch(c.company_id, String(companyId), 1000);
-            checkMatch(c.department_id, target.department, 100);
-            checkMatch(c.position_id, target.jobTitle, 10);
-            checkMatch(c.contract_duration, target.employmentType, 1);
-
-            if (c.is_general) {
-              score += 0.5; // fallback
-            } else if (!c.company_id && !c.department_id && !c.position_id && !c.contract_duration) {
-              // Not general but no specific conditions? Treat as low priority fallback
-              score += 0.1;
-            }
-
-            if (!disqualified && score > bestScore) {
-              bestScore = score;
-              bestTemplate = t;
-            }
-          }
-
-          if (bestTemplate) {
-            setSelectedTemplate(bestTemplate);
-          } else {
-            // Default to first if none matched (should rarely happen if there's a general template)
-            setSelectedTemplate(tpls[0]);
-          }
-        }
-      } else {
-        setTemplates([]);
-        setSelectedTemplate(null);
-      }
+      setSettingsRows(Object.entries(nextOffer.settings_overrides || {}).map(([key, value]) => ({ key, value: String(value) })));
+      setContractData((prev: any) => ({ ...prev, employee: target, offer: nextOffer }));
 
       setLoading(false);
     }
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, employeeId]);
 
-  // When a template is picked, resolve its placeholders from company/employee data using the
-  // same master-field resolution engine as the tasks-requirements template generator, so this
-  // module doesn't re-implement that lookup logic.
-  useEffect(() => {
-    async function resolvePlaceholders() {
-      if (!selectedTemplate?.placeholders?.length || !employee || !companyId) {
-        setResolvedNames(new Set());
-        return;
-      }
+  // Keep the offer's job_profile_id in sync when the profile is switched manually.
+  const handleProfileChange = (profileId: string) => {
+    const profile = profiles.find(p => p.id === profileId) || null;
+    setSelectedJobProfile(profile);
+    updateOffer({ job_profile_id: profile?.id });
+  };
 
-      setLoadingPlaceholders(true);
-      try {
-        const { ctx } = await buildPlaceholderContext(companyId, employee.individualId);
-        const { values, resolvedNames: resolved } = resolveContractPlaceholders(selectedTemplate, ctx);
-        setContractData((prev: any) => ({
-          ...prev,
-          placeholderValues: values,
-        }));
-        setResolvedNames(resolved);
-      } finally {
-        setLoadingPlaceholders(false);
-      }
-    }
-    resolvePlaceholders();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTemplate?.id, employee?.individualId, companyId]);
+  const commitSettingsRows = (rows: { key: string; value: string }[]) => {
+    setSettingsRows(rows);
+    updateOffer({ settings_overrides: Object.fromEntries(rows.filter(r => r.key.trim()).map(r => [r.key.trim(), r.value])) });
+  };
 
   if (!companyId || !employeeId) {
     return (
@@ -169,6 +113,8 @@ export function ContractEditor({
       </div>
     );
   }
+
+  const positionProfiles = profiles.filter(p => p.scope === 'position');
 
   return (
     <div className="flex flex-col h-full bg-slate-50/50 dark:bg-slate-950 relative overflow-hidden">
@@ -204,74 +150,115 @@ export function ContractEditor({
                 <p className="font-medium text-slate-800 dark:text-slate-200">{employee?.employeeNumber || 'N/A'}</p>
               </div>
               <div className="space-y-1">
-                <span className="text-xs text-slate-500 font-medium">Basic Salary</span>
+                <span className="text-xs text-slate-500 font-medium">Registry Salary</span>
                 <p className="font-medium text-slate-800 dark:text-slate-200">KES {employee?.basicSalary?.toLocaleString() || 0}</p>
               </div>
             </div>
           </div>
 
-          {/* Template & Dates Card */}
+          {/* Job Profile Card */}
           <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm">
             <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
-              <FileText className="w-4 h-4 text-custom-blue" /> Document Settings
+              <Briefcase className="w-4 h-4 text-custom-blue" /> Job Profile
             </h3>
-            
+            <div className="space-y-2">
+              <Label className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                {positionProfiles.length === 0 ? 'No profiles configured for this company yet' : 'Reusable job package this hire draws from'}
+              </Label>
+              <Select value={selectedJobProfile?.id || ''} onValueChange={handleProfileChange}>
+                <SelectTrigger className="bg-slate-50 dark:bg-slate-950/50 h-9 border-slate-200 dark:border-slate-800">
+                  <SelectValue placeholder="Select a job profile..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {positionProfiles.map(p => (
+                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!selectedJobProfile && positionProfiles.length > 0 && (
+                <p className="text-xs text-amber-600">No profile auto-matched this employee's department/job title/employment type - pick one manually.</p>
+              )}
+            </div>
+          </div>
+
+          {/* Offer Card */}
+          <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm">
+            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <Settings2 className="w-4 h-4 text-custom-blue" /> Employment Offer
+            </h3>
+
             <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
-              <div className="space-y-2 md:col-span-6">
-                <Label className="text-xs font-medium text-slate-600 dark:text-slate-400">Template</Label>
-                <Select
-                  value={selectedTemplate?.id || ''}
-                  onValueChange={(val) => {
-                    const t = templates.find(x => x.id === val);
-                    setSelectedTemplate(t);
-                  }}
-                >
-                  <SelectTrigger className="bg-slate-50 dark:bg-slate-950/50 h-9 border-slate-200 dark:border-slate-800 transition-colors hover:bg-slate-100 dark:hover:bg-slate-900">
-                    <SelectValue placeholder="Choose a contract template..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {templates.map(t => (
-                      <SelectItem key={t.id} value={t.id}>{t.file_name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="space-y-2 md:col-span-4">
+                <Label className="text-xs font-medium text-slate-600 dark:text-slate-400">Basic Salary</Label>
+                <Input
+                  type="number"
+                  className="h-9 bg-slate-50 dark:bg-slate-950/50 border-slate-200 dark:border-slate-800"
+                  value={offer.basic_salary ?? ''}
+                  onChange={(e) => updateOffer({ basic_salary: e.target.value === '' ? null : Number(e.target.value) })}
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label className="text-xs font-medium text-slate-600 dark:text-slate-400">Currency</Label>
+                <Input
+                  className="h-9 bg-slate-50 dark:bg-slate-950/50 border-slate-200 dark:border-slate-800"
+                  value={offer.currency ?? 'KES'}
+                  onChange={(e) => updateOffer({ currency: e.target.value })}
+                />
               </div>
               <div className="space-y-2 md:col-span-3">
                 <Label className="text-xs font-medium text-slate-600 dark:text-slate-400">Start Date</Label>
                 <Input
                   type="date"
-                  className="h-9 bg-slate-50 dark:bg-slate-950/50 border-slate-200 dark:border-slate-800 transition-colors hover:bg-slate-100 dark:hover:bg-slate-900"
-                  value={contractData.startDate || ''}
-                  onChange={(e) => setContractData({ ...contractData, startDate: e.target.value })}
+                  className="h-9 bg-slate-50 dark:bg-slate-950/50 border-slate-200 dark:border-slate-800"
+                  value={offer.start_date || ''}
+                  onChange={(e) => updateOffer({ start_date: e.target.value })}
                 />
               </div>
               <div className="space-y-2 md:col-span-3">
                 <Label className="text-xs font-medium text-slate-600 dark:text-slate-400">End Date</Label>
                 <Input
                   type="date"
-                  className="h-9 bg-slate-50 dark:bg-slate-950/50 border-slate-200 dark:border-slate-800 transition-colors hover:bg-slate-100 dark:hover:bg-slate-900"
-                  value={contractData.endDate || ''}
-                  onChange={(e) => setContractData({ ...contractData, endDate: e.target.value })}
+                  className="h-9 bg-slate-50 dark:bg-slate-950/50 border-slate-200 dark:border-slate-800"
+                  value={offer.end_date || ''}
+                  onChange={(e) => updateOffer({ end_date: e.target.value })}
                 />
               </div>
             </div>
-          </div>
 
-          {/* Placeholders Card */}
-          <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm">
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
-              <Settings2 className="w-4 h-4 text-custom-blue" /> Variables & Fields
-            </h3>
-            <ContractPlaceholderList
-              placeholders={selectedTemplate?.placeholders || []}
-              values={contractData.placeholderValues || {}}
-              resolvedNames={resolvedNames}
-              loading={loadingPlaceholders}
-              onChange={(name, value) => setContractData({
-                ...contractData,
-                placeholderValues: { ...(contractData.placeholderValues || {}), [name]: value },
-              })}
-            />
+            <div className="mt-5 space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                  Negotiated overrides <span className="text-slate-400 font-normal">(only what differs from the Job Profile - e.g. a better medical cover)</span>
+                </Label>
+                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => commitSettingsRows([...settingsRows, { key: '', value: '' }])}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Add
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {settingsRows.map((row, i) => (
+                  <div key={i} className="flex gap-2">
+                    <Input
+                      className="h-8 text-xs flex-1"
+                      placeholder="key (e.g. medical_cover)"
+                      value={row.key}
+                      onChange={(e) => commitSettingsRows(settingsRows.map((r, ri) => ri === i ? { ...r, key: e.target.value } : r))}
+                    />
+                    <Input
+                      className="h-8 text-xs flex-[2]"
+                      placeholder="value (e.g. Medical Cover B)"
+                      value={row.value}
+                      onChange={(e) => commitSettingsRows(settingsRows.map((r, ri) => ri === i ? { ...r, value: e.target.value } : r))}
+                    />
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-600 shrink-0" onClick={() => commitSettingsRows(settingsRows.filter((_, ri) => ri !== i))}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+                {settingsRows.length === 0 && (
+                  <p className="text-xs text-slate-400 italic">No overrides - this hire inherits everything from the Job Profile as-is.</p>
+                )}
+              </div>
+            </div>
           </div>
 
         </div>
@@ -281,7 +268,7 @@ export function ContractEditor({
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 flex justify-end">
         <button
           onClick={onRefreshPreview}
-          disabled={!selectedTemplate}
+          disabled={!selectedJobProfile}
           className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
         >
           <RefreshCw className="w-4 h-4" />

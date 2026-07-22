@@ -1,0 +1,145 @@
+import { replacePlaceholders } from '../../tasks-requirements/utils/templateFormatters';
+import { CONTRACT_SECTIONS, type ContractSectionDef, type ContractSectionKey } from './contractStructure';
+
+// Mirrors ec_job_profiles (at any of its 3 scopes - company/department/position)
+// and ec_employment_offers row shapes (see
+// supabase/migrations/20260722000000_employment_contract_engine.sql) - only
+// the fields the engine actually reads. The caller assembles the layer array
+// in cascade order (company-scope row, department-scope row, position-scope
+// row, then the employment offer); this module doesn't care which table or
+// scope a layer came from, just the order it's passed in.
+export interface SettingsLayer {
+  settings?: Record<string, any> | null;
+}
+
+export interface ClauseLayer {
+  section_clauses?: Record<string, string> | null; // section_key -> clause_id
+}
+
+export interface EcClauseRow {
+  id: string;
+  section_key: string;
+  content: string;
+  is_default: boolean;
+}
+
+export interface ClauseSuggestionCondition {
+  employment_type?: string;
+  job_level?: string;
+  work_arrangement?: string;
+  department?: string;
+}
+
+// suggest_conditions/suggest_priority live directly on ec_clauses (no
+// separate rules table) and are only consulted when authoring a Job
+// Profile, to pre-fill a suggested clause per section - never re-evaluated
+// at contract-generation time. A clause matches if ANY of its condition-sets
+// is satisfied (each condition-set's fields are AND-ed); among matching
+// clauses for a section, highest suggest_priority wins.
+export function suggestClauseForSection(
+  clauses: EcClauseRow[],
+  sectionKey: string,
+  facts: ClauseSuggestionCondition
+): EcClauseRow | undefined {
+  const candidates = (clauses as Array<EcClauseRow & { suggest_conditions?: ClauseSuggestionCondition[]; suggest_priority?: number }>)
+    .filter((c) => c.section_key === sectionKey)
+    .filter((c) =>
+      (c.suggest_conditions || []).some((cond) =>
+        Object.entries(cond).every(([key, value]) => !value || facts[key as keyof ClauseSuggestionCondition] === value)
+      )
+    );
+  candidates.sort((a, b) => (b.suggest_priority || 0) - (a.suggest_priority || 0));
+  return candidates[0];
+}
+
+/**
+ * Cascade merge for settings values (working hours, notice period, benefits, ...).
+ * Layers are applied in the order given - later layers win on key conflicts,
+ * matching the Company Defaults -> Department Defaults -> Job Profile ->
+ * Employment Offer inheritance order. Null/undefined layers are skipped.
+ */
+export function resolveEffectiveSettings(layers: Array<SettingsLayer | null | undefined>): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const layer of layers) {
+    if (!layer?.settings) continue;
+    Object.assign(result, layer.settings);
+  }
+  return result;
+}
+
+/**
+ * Builds a section_key -> clause_id lookup of each section's is_default clause,
+ * used as the final fallback when no layer in the cascade specifies a clause
+ * for that section.
+ */
+export function buildDefaultClauseMap(clauses: EcClauseRow[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const clause of clauses) {
+    if (clause.is_default && !map[clause.section_key]) {
+      map[clause.section_key] = clause.id;
+    }
+  }
+  return map;
+}
+
+/**
+ * Cascade merge for section -> clause selection, same precedence as
+ * resolveEffectiveSettings, falling back to each section's default clause
+ * when nothing in the cascade picked one.
+ */
+export function resolveEffectiveClauses(
+  layers: Array<ClauseLayer | null | undefined>,
+  defaultClauseBySection: Record<string, string>
+): Record<string, string> {
+  const result: Record<string, string> = { ...defaultClauseBySection };
+  for (const layer of layers) {
+    if (!layer?.section_clauses) continue;
+    Object.assign(result, layer.section_clauses);
+  }
+  return result;
+}
+
+export interface AssembleContractHtmlParams {
+  sectionKeys: ContractSectionKey[] | string[]; // ordered, from ec_contract_templates.section_keys
+  clausesById: Record<string, EcClauseRow>;
+  effectiveClauses: Record<string, string>; // section_key -> clause_id
+  effectiveSettings: Record<string, any>;
+  employeePlaceholderValues: Record<string, string>; // from utils/placeholderContext.ts, unchanged
+}
+
+/**
+ * Assembles the full contract body from resolved clauses + placeholder values.
+ * Employee/company identity values win over settings on key collisions (e.g.
+ * a badly-named settings key should never shadow {{employee_name}}).
+ * Returns plain section-wrapped HTML - theme is applied separately by the
+ * caller via applyThemeToHtml (utils/themeEngine.ts), keeping content and
+ * presentation resolution as two distinct steps.
+ */
+export function assembleContractHtml({
+  sectionKeys,
+  clausesById,
+  effectiveClauses,
+  effectiveSettings,
+  employeePlaceholderValues,
+}: AssembleContractHtmlParams): string {
+  const mergedValues = { ...effectiveSettings, ...employeePlaceholderValues };
+
+  const orderedSections = sectionKeys
+    .map((key) => CONTRACT_SECTIONS.find((s) => s.key === key))
+    .filter((s): s is ContractSectionDef => !!s)
+    .sort((a, b) => a.order - b.order);
+
+  const html = orderedSections.map((section) => {
+    const clauseId = effectiveClauses[section.key];
+    const clause = clauseId ? clausesById[clauseId] : undefined;
+    if (!clause) {
+      // No clause resolved for this section (missing default) - surface it
+      // visibly in the preview rather than silently dropping the section.
+      return `<section class="cs-section cs-${section.key}" data-section="${section.key}"><p class="cs-missing-clause">[No clause configured for "${section.title}"]</p></section>`;
+    }
+    const renderedContent = replacePlaceholders(clause.content, mergedValues);
+    return `<section class="cs-section cs-${section.key}" data-section="${section.key}">${renderedContent}</section>`;
+  });
+
+  return html.join('\n');
+}

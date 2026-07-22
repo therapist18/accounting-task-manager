@@ -8,12 +8,13 @@ import { cn } from '@/lib/utils';
 import { ContractsSidebar } from './components/ContractsSidebar';
 import { ContractEditor } from './components/ContractEditor';
 import { ContractPreview } from './components/ContractPreview';
+import { EcJobProfile } from './utils/jobProfileData';
 
 export default function EmploymentContractsPage() {
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [contractData, setContractData] = useState<any>({});
-  const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
+  const [selectedJobProfile, setSelectedJobProfile] = useState<EcJobProfile | null>(null);
   const [previewKey, setPreviewKey] = useState(0);
 
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
@@ -32,7 +33,7 @@ export default function EmploymentContractsPage() {
     setSelectedCompanyId(companyId);
     setSelectedEmployeeId(employeeId);
     setContractData({});
-    setSelectedTemplate(null);
+    setSelectedJobProfile(null);
   };
 
   return (
@@ -120,8 +121,8 @@ export default function EmploymentContractsPage() {
             employeeId={selectedEmployeeId}
             contractData={contractData}
             setContractData={setContractData}
-            selectedTemplate={selectedTemplate}
-            setSelectedTemplate={setSelectedTemplate}
+            selectedJobProfile={selectedJobProfile}
+            setSelectedJobProfile={setSelectedJobProfile}
             onRefreshPreview={() => setPreviewKey(prev => prev + 1)}
           />
         </Panel>
@@ -143,7 +144,7 @@ export default function EmploymentContractsPage() {
             key={previewKey}
             contractData={contractData}
             setContractData={setContractData}
-            selectedTemplate={selectedTemplate}
+            selectedJobProfile={selectedJobProfile}
           />
         </Panel>
       </PanelGroup>
