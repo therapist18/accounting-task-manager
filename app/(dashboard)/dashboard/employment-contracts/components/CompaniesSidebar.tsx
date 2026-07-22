@@ -1,0 +1,146 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Search, Building2, Filter } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Company } from '../../companies/database';
+import ClientCategoryFilter from '@/app/generic-components/ClientCategoryFilter';
+import {
+  companyMatchesCategoryFilters,
+  DEFAULT_CATEGORY_FILTERS,
+  type FilterState,
+} from '@/app/generic-components/companyCategoryFilters';
+
+export interface SidebarItem {
+  id: string;
+  label: string;
+  count: number;
+}
+
+interface CompaniesSidebarProps {
+  companies: Company[];
+  selectedCompanyId: string | null;
+  onSelectCompany: (id: string | null) => void;
+  /** Extra items shown above the company list, e.g. "Platform Defaults" */
+  topItems?: SidebarItem[];
+  /** Items to render per company */
+  companyCounts?: Record<string, number>;
+  /** Label shown under heading */
+  subtitle?: string;
+  /** Placeholder for search input */
+  searchPlaceholder?: string;
+}
+
+export function CompaniesSidebar({
+  companies,
+  selectedCompanyId,
+  onSelectCompany,
+  topItems = [],
+  companyCounts = {},
+  subtitle = 'Select company',
+  searchPlaceholder = 'Search company...',
+}: CompaniesSidebarProps) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilters, setCategoryFilters] = useState<FilterState | null>(DEFAULT_CATEGORY_FILTERS);
+  const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
+
+  const filteredCompanies = useMemo(() =>
+    companies
+      .filter(c => c.company_name?.toLowerCase().includes(searchQuery.toLowerCase()))
+      .filter(c => companyMatchesCategoryFilters(c, categoryFilters)),
+    [companies, searchQuery, categoryFilters]
+  );
+
+  return (
+    <div className="flex flex-col h-full border-r border-slate-200 dark:border-slate-800">
+      <div className="p-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-custom-blue" />
+            Entities
+          </h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-slate-400 hover:text-slate-700"
+            onClick={() => setCategoryFilterOpen(true)}
+            title="Filter by client category"
+          >
+            <Filter className="h-3.5 w-3.5" />
+          </Button>
+          <ClientCategoryFilter
+            open={categoryFilterOpen}
+            onOpenChange={setCategoryFilterOpen}
+            onFilterChange={setCategoryFilters}
+            initialFilters={categoryFilters}
+            showSectionStatus={false}
+            showOperationalStatus={true}
+            hideCategoryFilterButton
+          />
+        </div>
+        <p className="text-xs text-slate-500 mb-3">{subtitle}</p>
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+          <Input
+            placeholder={searchPlaceholder}
+            className="pl-9 h-8 text-xs bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+      </div>
+      <ScrollArea className="flex-1">
+        <div className="p-2 space-y-0.5">
+          {topItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => onSelectCompany(item.id)}
+              className={cn(
+                "flex items-center w-full p-2 text-xs rounded-md transition-colors",
+                selectedCompanyId === item.id
+                  ? "bg-custom-blue text-white font-medium shadow-sm"
+                  : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              )}
+            >
+              <Building2 className="w-3.5 h-3.5 mr-2 shrink-0" />
+              <span className="truncate flex-1 text-left">{item.label}</span>
+              <Badge variant="outline" className="text-[9px] font-semibold rounded-full px-1.5 py-0 ml-1 tabular-nums">
+                {item.count}
+              </Badge>
+            </button>
+          ))}
+          {topItems.length > 0 && filteredCompanies.length > 0 && (
+            <div className="h-px bg-slate-100 dark:bg-slate-800 my-1" />
+          )}
+          {filteredCompanies.map((company) => {
+            const compId = String(company.id);
+            const count = companyCounts[compId] ?? 0;
+            const isSelected = selectedCompanyId === compId;
+            return (
+              <button
+                key={compId}
+                onClick={() => onSelectCompany(compId)}
+                className={cn(
+                  "flex items-center w-full p-2 text-xs rounded-md transition-colors",
+                  isSelected
+                    ? "bg-custom-blue text-white font-medium shadow-sm"
+                    : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                )}
+              >
+                <Building2 className="w-3.5 h-3.5 mr-2 shrink-0" />
+                <span className="truncate flex-1 text-left">{company.company_name}</span>
+                <Badge variant="outline" className="text-[9px] font-semibold rounded-full px-1.5 py-0 ml-1 tabular-nums">
+                  {count}
+                </Badge>
+              </button>
+            );
+          })}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}

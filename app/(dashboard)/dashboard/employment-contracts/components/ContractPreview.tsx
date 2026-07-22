@@ -17,7 +17,7 @@ import {
 } from '../utils/clauseEngine';
 import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
 import { EcJobProfile, fetchJobProfiles, findCompanyDefaults, findDepartmentDefaults } from '../utils/jobProfileData';
-import { EcContractTemplate, fetchEffectiveContractTemplate } from '../utils/contractTemplateData';
+import { EcContractTemplate, fetchEffectiveContractTemplate, fetchContractTemplateById } from '../utils/contractTemplateData';
 import { EmploymentOffer, createEmploymentOffer, updateEmploymentOffer } from '../utils/employmentOfferData';
 import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
 import { fetchCompanies, Company } from '../../companies/database';
@@ -32,6 +32,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const employee = contractData?.employee;
   const offer: Partial<EmploymentOffer> | undefined = contractData?.offer;
   const companyId = employee?.companyId;
+  const selectedTemplateId = contractData?.selectedTemplateId;
 
   const [clauses, setClauses] = useState<EcClause[]>([]);
   const [orgProfiles, setOrgProfiles] = useState<EcJobProfile[]>([]);
@@ -47,25 +48,40 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
 
   const htmlCaptureRef = useRef<HTMLDivElement>(null);
 
+  // Load base context (clauses, profiles, company) when company changes.
   useEffect(() => {
     async function loadContext() {
       if (!companyId) return;
       setLoadingContext(true);
-      const [allClauses, profiles, companies, template] = await Promise.all([
+      const [allClauses, profiles, companies] = await Promise.all([
         fetchClauses(),
         fetchJobProfiles(companyId),
         fetchCompanies(),
-        fetchEffectiveContractTemplate(companyId),
       ]);
       setClauses(allClauses);
       setOrgProfiles(profiles);
       setCompany(companies.find((c) => String(c.id) === String(companyId)) || null);
-      setContractTemplate(template);
-      setThemeOverride(null);
       setLoadingContext(false);
     }
     loadContext();
   }, [companyId]);
+
+  // Resolve the template: use the override from the editor if present,
+  // otherwise fall back to the effective (auto-selected) template.
+  useEffect(() => {
+    async function resolveTemplate() {
+      if (!companyId) return;
+      if (selectedTemplateId) {
+        const t = await fetchContractTemplateById(selectedTemplateId);
+        setContractTemplate(t);
+      } else {
+        const t = await fetchEffectiveContractTemplate(companyId);
+        setContractTemplate(t);
+      }
+      setThemeOverride(null);
+    }
+    resolveTemplate();
+  }, [companyId, selectedTemplateId]);
 
   const clausesById = useMemo(() => Object.fromEntries(clauses.map((c) => [c.id, c])), [clauses]);
   const defaultClauseMap = useMemo(() => buildDefaultClauseMap(clauses), [clauses]);
@@ -81,8 +97,8 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   ], defaultClauseMap), [companyDefaults, departmentDefaults, selectedJobProfile, offer, defaultClauseMap]);
 
   const employeeValues = useMemo(
-    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer) : {}),
-    [employee, company, offer]
+    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings) : {}),
+    [employee, company, offer, effectiveSettings]
   );
 
   const bodyHtml = useMemo(() => {

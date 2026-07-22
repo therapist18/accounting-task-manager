@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { fetchCompanyEmployees, ContractEmployeeInfo } from '../utils/data';
 import { EcJobProfile, fetchJobProfiles, matchJobProfile } from '../utils/jobProfileData';
+import { EcContractTemplate, fetchContractTemplates } from '../utils/contractTemplateData';
 import { EmploymentOffer, fetchLatestOffer } from '../utils/employmentOfferData';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, RefreshCw, Settings2, UserRound, Briefcase, Plus, Trash2 } from 'lucide-react';
+import { Loader2, RefreshCw, Settings2, UserRound, Briefcase, Plus, Trash2, LayoutTemplate } from 'lucide-react';
 
 interface ContractEditorProps {
   companyId: string | null;
@@ -30,6 +31,7 @@ export function ContractEditor({
 }: ContractEditorProps) {
   const [employee, setEmployee] = useState<ContractEmployeeInfo | null>(null);
   const [profiles, setProfiles] = useState<EcJobProfile[]>([]);
+  const [templates, setTemplates] = useState<EcContractTemplate[]>([]);
   const [loading, setLoading] = useState(false);
   const [settingsRows, setSettingsRows] = useState<{ key: string; value: string }[]>([]);
 
@@ -37,6 +39,8 @@ export function ContractEditor({
   const updateOffer = (patch: Partial<EmploymentOffer>) => {
     setContractData((prev: any) => ({ ...prev, offer: { ...(prev.offer || {}), ...patch } }));
   };
+
+  const [allowanceRows, setAllowanceRows] = useState<{ label: string; amount: string }[]>([]);
 
   useEffect(() => {
     async function loadData() {
@@ -46,16 +50,24 @@ export function ContractEditor({
       }
       setLoading(true);
 
-      const [emps, jobProfiles] = await Promise.all([
+      const [emps, jobProfiles, companyTemplates] = await Promise.all([
         fetchCompanyEmployees(companyId),
         fetchJobProfiles(companyId),
+        fetchContractTemplates(companyId),
       ]);
       const target = emps.find(e => String(e.individualId) === employeeId) || null;
       setEmployee(target);
       setProfiles(jobProfiles);
+      setTemplates(companyTemplates);
 
       const matched = target ? matchJobProfile(jobProfiles, target) : null;
       setSelectedJobProfile(matched);
+
+      // Pick the effective template: company is_default → any company → platform is_default → any platform
+      const companyDefault = companyTemplates.find(t => t.company_id === String(companyId) && t.is_default);
+      const companyAny = companyTemplates.find(t => t.company_id === String(companyId));
+      const platformDefault = companyTemplates.find(t => !t.company_id && t.is_default);
+      const effectiveTemplate = companyDefault || companyAny || platformDefault || companyTemplates[0] || null;
 
       const individualId = target ? target.individualId : Number(employeeId);
       const existingOffer = target ? await fetchLatestOffer(companyId, individualId) : null;
@@ -75,7 +87,17 @@ export function ContractEditor({
       };
 
       setSettingsRows(Object.entries(nextOffer.settings_overrides || {}).map(([key, value]) => ({ key, value: String(value) })));
-      setContractData((prev: any) => ({ ...prev, employee: target, offer: nextOffer }));
+      setAllowanceRows(
+        Array.isArray(nextOffer.allowances)
+          ? nextOffer.allowances.map((a: any) => ({ label: a.label || '', amount: a.amount != null ? String(a.amount) : '' }))
+          : []
+      );
+      setContractData((prev: any) => ({
+        ...prev,
+        employee: target,
+        offer: nextOffer,
+        selectedTemplateId: prev.selectedTemplateId || effectiveTemplate?.id || null,
+      }));
 
       setLoading(false);
     }
@@ -90,9 +112,22 @@ export function ContractEditor({
     updateOffer({ job_profile_id: profile?.id });
   };
 
+  const handleTemplateChange = (templateId: string) => {
+    setContractData((prev: any) => ({ ...prev, selectedTemplateId: templateId || null }));
+  };
+
   const commitSettingsRows = (rows: { key: string; value: string }[]) => {
     setSettingsRows(rows);
     updateOffer({ settings_overrides: Object.fromEntries(rows.filter(r => r.key.trim()).map(r => [r.key.trim(), r.value])) });
+  };
+
+  const commitAllowanceRows = (rows: { label: string; amount: string }[]) => {
+    setAllowanceRows(rows);
+    updateOffer({
+      allowances: rows
+        .filter(r => r.label.trim())
+        .map(r => ({ label: r.label.trim(), amount: r.amount ? Number(r.amount) : undefined })),
+    });
   };
 
   if (!companyId || !employeeId) {
@@ -153,6 +188,44 @@ export function ContractEditor({
                 <span className="text-xs text-slate-500 font-medium">Registry Salary</span>
                 <p className="font-medium text-slate-800 dark:text-slate-200">KES {employee?.basicSalary?.toLocaleString() || 0}</p>
               </div>
+            </div>
+          </div>
+
+          {/* Contract Template Card */}
+          <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm">
+            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <LayoutTemplate className="w-4 h-4 text-custom-blue" /> Contract Template
+            </h3>
+            <div className="space-y-2">
+              <Label className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                {templates.length === 0 ? 'No templates configured for this company yet' : 'Controls which sections appear and the visual theme'}
+              </Label>
+              <Select
+                value={contractData.selectedTemplateId || ''}
+                onValueChange={handleTemplateChange}
+                disabled={templates.length === 0}
+              >
+                <SelectTrigger className="bg-slate-50 dark:bg-slate-950/50 h-9 border-slate-200 dark:border-slate-800">
+                  <SelectValue placeholder={templates.length === 0 ? 'No templates available' : 'Select a template...'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {templates.map(t => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}{t.is_default ? ' (default)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!contractData.selectedTemplateId && templates.length > 0 && (
+                <p className="text-xs text-amber-600">No template selected - the system will auto-pick the default for this company.</p>
+              )}
+              {templates.length === 0 && (
+                <p className="text-xs text-slate-400">
+                  Create a template under{' '}
+                  <a href="/dashboard/employment-contracts/templates" className="text-custom-blue hover:underline">Manage Templates</a>
+                  {' '}to control section layout and theme.
+                </p>
+              )}
             </div>
           </div>
 
@@ -228,7 +301,43 @@ export function ContractEditor({
             <div className="mt-5 space-y-2">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-medium text-slate-600 dark:text-slate-400">
-                  Negotiated overrides <span className="text-slate-400 font-normal">(only what differs from the Job Profile - e.g. a better medical cover)</span>
+                  Allowances <span className="text-slate-400 font-normal">(housing, transport, telephone, meal, etc.)</span>
+                </Label>
+                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => commitAllowanceRows([...allowanceRows, { label: '', amount: '' }])}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Add
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {allowanceRows.map((row, i) => (
+                  <div key={i} className="flex gap-2">
+                    <Input
+                      className="h-8 text-xs flex-[2]"
+                      placeholder="Allowance name (e.g. Housing Allowance)"
+                      value={row.label}
+                      onChange={(e) => commitAllowanceRows(allowanceRows.map((r, ri) => ri === i ? { ...r, label: e.target.value } : r))}
+                    />
+                    <Input
+                      type="number"
+                      className="h-8 text-xs flex-1"
+                      placeholder="Amount"
+                      value={row.amount}
+                      onChange={(e) => commitAllowanceRows(allowanceRows.map((r, ri) => ri === i ? { ...r, amount: e.target.value } : r))}
+                    />
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-600 shrink-0" onClick={() => commitAllowanceRows(allowanceRows.filter((_, ri) => ri !== i))}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+                {allowanceRows.length === 0 && (
+                  <p className="text-xs text-slate-400 italic">No allowances configured.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                  Settings overrides <span className="text-slate-400 font-normal">(only what differs from the Job Profile — e.g. notice_period, medical_cover, working_days)</span>
                 </Label>
                 <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => commitSettingsRows([...settingsRows, { key: '', value: '' }])}>
                   <Plus className="h-3.5 w-3.5 mr-1" /> Add

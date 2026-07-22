@@ -16,6 +16,10 @@ export type ContractEmployeeInfo = {
   department: string;
   jobTitle: string;
   employmentType: string;
+  employmentStatus: string;
+  jobLevel: string;
+  reportsTo: string;
+  workLocation: string;
   workArrangement: string;
   status: string;
   basicSalary: number;
@@ -88,6 +92,10 @@ function mapEmployeeRow(
     department: emp.department || '',
     jobTitle: emp.job_title || '',
     employmentType: emp.employment_type || '',
+    employmentStatus: emp.employment_lifecycle?.status || 'Active',
+    jobLevel: emp.job_level || '',
+    reportsTo: emp.reports_to || '',
+    workLocation: emp.work_location || '',
     workArrangement: emp.work_arrangement || '',
     status: emp.employment_lifecycle?.status || 'Active',
     basicSalary: basic,

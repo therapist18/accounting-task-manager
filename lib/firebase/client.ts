@@ -1,7 +1,7 @@
 // Firebase Client for Task Manager
 // Using same Firebase project as registry
 
-import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
+import { getApp, getApps, initializeApp, type FirebaseApp } from "@firebase/app";
 import { getAuth, type Auth, signInWithCustomToken } from "firebase/auth";
 
 type FirebaseClientConfig = {

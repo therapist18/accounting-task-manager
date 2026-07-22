@@ -26,8 +26,13 @@ interface JobProfileEditorProps {
 }
 
 const COMMON_SETTINGS_HINTS = [
-  'working_days', 'working_hours', 'notice_period', 'probation_period',
-  'leave_days', 'benefits', 'reports_to', 'salary_structure',
+  'notice_period', 'probation_period', 'probation_notice',
+  'working_days', 'working_hours', 'start_time', 'end_time', 'break_duration', 'rest_days', 'work_mode',
+  'reports_to', 'work_location', 'job_level',
+  'medical_cover', 'housing_allowance', 'transport_allowance', 'telephone_allowance', 'meal_allowance', 'pension_scheme',
+  'annual_leave_days', 'sick_leave_days', 'maternity_leave_days', 'paternity_leave_days',
+  'payment_frequency', 'payment_day',
+  'salary_structure',
 ];
 
 export function JobProfileEditor({ open, onClose, companyId, clauses, profile, defaultScope, onSaved }: JobProfileEditorProps) {
@@ -136,14 +141,14 @@ export function JobProfileEditor({ open, onClose, companyId, clauses, profile, d
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col rounded-2xl">
-        <DialogHeader>
+      <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col rounded-2xl p-0">
+        <DialogHeader className="sticky top-0 z-10 bg-white dark:bg-slate-900 px-6 pt-6 pb-4 border-b border-slate-200 dark:border-slate-800 rounded-t-2xl">
           <DialogTitle className="text-base font-bold">
             {profile ? 'Edit Profile' : 'New Profile'}
           </DialogTitle>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 -mx-6 px-6">
+        <ScrollArea className="flex-1 overflow-auto px-6 py-4">
           <div className="space-y-5 py-2">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
@@ -273,13 +278,15 @@ export function JobProfileEditor({ open, onClose, companyId, clauses, profile, d
           </div>
         </ScrollArea>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-            {profile ? 'Save changes' : 'Create profile'}
-          </Button>
-        </DialogFooter>
+        <div className="px-6 pb-6 pt-2 border-t border-slate-200 dark:border-slate-800">
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              {profile ? 'Save changes' : 'Create profile'}
+            </Button>
+          </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

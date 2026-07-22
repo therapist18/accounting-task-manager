@@ -63,6 +63,10 @@ const BASE_SECTION_STYLES = `
   .cs-section:last-child { margin-bottom: 0; }
   .cs-missing-clause { color: #b91c1c; font-style: italic; border: 1px dashed #b91c1c; padding: 10px 14px; border-radius: 4px; }
   [data-section="appendix_job_description"] { page-break-before: always; }
+  [data-section="appendix_salary_breakdown"] { page-break-before: always; }
+  [data-section="appendix_benefits_schedule"] { page-break-before: always; }
+  [data-section="appendix_company_policies"] { page-break-before: always; }
+  [data-section="appendix_equipment_issued"] { page-break-before: always; }
   [data-section="signatures"] { page-break-inside: avoid; }
 `;
 

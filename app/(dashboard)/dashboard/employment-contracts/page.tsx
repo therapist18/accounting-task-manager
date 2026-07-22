@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
-import { Settings, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2 } from 'lucide-react';
+import { Settings, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2, BookText, Briefcase } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ContractsSidebar } from './components/ContractsSidebar';
 import { ContractEditor } from './components/ContractEditor';
@@ -74,13 +74,29 @@ export default function EmploymentContractsPage() {
             </button>
           </div>
         </div>
-        <Link
-          href="/dashboard/employment-contracts/templates"
-          className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-        >
-          <Settings className="w-3.5 h-3.5" />
-          Manage Templates
-        </Link>
+        <div className="flex items-center gap-1">
+          <Link
+            href="/dashboard/employment-contracts/clause-library"
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+          >
+            <BookText className="w-3.5 h-3.5" />
+            Clauses
+          </Link>
+          <Link
+            href="/dashboard/employment-contracts/job-profiles"
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+          >
+            <Briefcase className="w-3.5 h-3.5" />
+            Job Profiles
+          </Link>
+          <Link
+            href="/dashboard/employment-contracts/templates"
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+          >
+            <Settings className="w-3.5 h-3.5" />
+            Templates
+          </Link>
+        </div>
       </div>
       <PanelGroup direction="horizontal" className="h-full w-full">
         {/* LEFT PANEL: Hierarchy (Companies -> Employees) */}

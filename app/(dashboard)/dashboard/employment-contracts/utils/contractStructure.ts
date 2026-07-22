@@ -1,4 +1,4 @@
-// The standard employment contract structure - these 17 sections always exist,
+// The standard employment contract structure - these 21 sections always exist,
 // in this order, regardless of employment type, industry, or company. Only the
 // clause selected within each section changes (see clauseEngine.ts). Fixed as
 // a code constant rather than DB-editable, since the structure itself doesn't
@@ -20,7 +20,11 @@ export type ContractSectionKey =
   | 'general_provisions'
   | 'acceptance'
   | 'signatures'
-  | 'appendix_job_description';
+  | 'appendix_job_description'
+  | 'appendix_salary_breakdown'
+  | 'appendix_benefits_schedule'
+  | 'appendix_company_policies'
+  | 'appendix_equipment_issued';
 
 export interface ContractSectionDef {
   key: ContractSectionKey;
@@ -46,6 +50,10 @@ export const CONTRACT_SECTIONS: ContractSectionDef[] = [
   { key: 'acceptance', title: 'Acceptance', order: 15 },
   { key: 'signatures', title: 'Signatures', order: 16 },
   { key: 'appendix_job_description', title: 'Appendix A – Detailed Job Description', order: 17 },
+  { key: 'appendix_salary_breakdown', title: 'Appendix B – Salary Breakdown', order: 18 },
+  { key: 'appendix_benefits_schedule', title: 'Appendix C – Benefits Schedule', order: 19 },
+  { key: 'appendix_company_policies', title: 'Appendix D – Company Policies', order: 20 },
+  { key: 'appendix_equipment_issued', title: 'Appendix E – Equipment Issued', order: 21 },
 ];
 
 export const CONTRACT_SECTION_KEYS: ContractSectionKey[] = CONTRACT_SECTIONS.map((s) => s.key);

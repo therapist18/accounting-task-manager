@@ -27,6 +27,16 @@ export async function fetchContractTemplates(companyId?: string | number): Promi
   return (data || []) as EcContractTemplate[];
 }
 
+export async function fetchContractTemplateById(id: string): Promise<EcContractTemplate | null> {
+  const { data, error } = await supabase
+    .from('ec_contract_templates')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data as EcContractTemplate;
+}
+
 /** The template a company should generate with: its own is_default row, else the platform default. */
 export async function fetchEffectiveContractTemplate(companyId: string | number): Promise<EcContractTemplate | null> {
   const templates = await fetchContractTemplates(companyId);
