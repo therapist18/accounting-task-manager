@@ -14,8 +14,6 @@ export default function EmploymentContractsPage() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [contractData, setContractData] = useState<any>({});
   const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
-
-  // We keep track of preview trigger to refresh the docx
   const [previewKey, setPreviewKey] = useState(0);
 
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
@@ -33,7 +31,6 @@ export default function EmploymentContractsPage() {
   const handleEmployeeSelect = (companyId: string, employeeId: string) => {
     setSelectedCompanyId(companyId);
     setSelectedEmployeeId(employeeId);
-    // Reset contract data when new employee is selected
     setContractData({});
     setSelectedTemplate(null);
   };

@@ -39,6 +39,7 @@ export function ContractPreview({ contractData, setContractData, selectedTemplat
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mergeWarning, setMergeWarning] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
@@ -74,6 +75,7 @@ export function ContractPreview({ contractData, setContractData, selectedTemplat
       setMergedHtml('');
       setOriginalHtml('');
       setError(null);
+      setMergeWarning(null);
 
       if (!selectedTemplate || !contractData.employee) return;
 
@@ -95,9 +97,21 @@ export function ContractPreview({ contractData, setContractData, selectedTemplat
           const arrayBuffer = await fileData.arrayBuffer();
           setOriginalDocxBuffer(arrayBuffer);
 
-          const merged = await generateWordDocument(arrayBuffer, values);
-          setMergedDocxBlob(merged);
-          setMergedDocxBuffer(await merged.arrayBuffer());
+          // Merging can fail on templates whose placeholder tags got split across
+          // separate Word XML runs (e.g. by autocorrect) - docxtemplater then reports
+          // "duplicate open/close tag". That's a template authoring issue, not something
+          // the user can fix from this screen, so we fall back to just showing the
+          // original document instead of blocking the whole preview with an error.
+          try {
+            const merged = await generateWordDocument(arrayBuffer, values);
+            setMergedDocxBlob(merged);
+            setMergedDocxBuffer(await merged.arrayBuffer());
+          } catch (mergeErr: any) {
+            console.error('Error merging DOCX template, falling back to original document:', mergeErr);
+            setMergedDocxBlob(null);
+            setMergedDocxBuffer(arrayBuffer);
+            setMergeWarning('This template could not be auto-filled (its placeholder tags are malformed), so the original document is shown instead. Downloads and saving are disabled until the template is fixed.');
+          }
         } else if (isHtmlTemplate) {
           const content = selectedTemplate.content || '';
           setOriginalHtml(content);
@@ -320,6 +334,12 @@ export function ContractPreview({ contractData, setContractData, selectedTemplat
                 <TabsTrigger value="original" className="text-xs">Original Template</TabsTrigger>
               </TabsList>
             </div>
+            {mergeWarning && (
+              <div className="flex items-start gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-300 text-xs shrink-0">
+                <FileWarning className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <p>{mergeWarning}</p>
+              </div>
+            )}
 
             <TabsContent value="preview" className="flex-1 m-0 overflow-auto min-h-0 h-full">
               <PreviewPanel

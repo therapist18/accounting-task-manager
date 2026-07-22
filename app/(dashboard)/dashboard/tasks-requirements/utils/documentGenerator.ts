@@ -88,6 +88,12 @@ export const generateWordDocument = async (
       }
       return null;
     },
+    getSize: (img: any, tagValue: any, tagName: string) => {
+      const style = renderData[`${tagName}_style`] || {};
+      const width = style.imageWidth ? parseInt(style.imageWidth) : 300;
+      const height = style.imageHeight ? parseInt(style.imageHeight) : 150;
+      return [width, height];
+    },
   });
 
   const doc = new Docxtemplater(zip, {
