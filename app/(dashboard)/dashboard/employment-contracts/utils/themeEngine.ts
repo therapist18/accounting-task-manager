@@ -27,7 +27,10 @@ export const DEFAULT_CONTRACT_THEME: ContractThemeSettings = {
   accentColor: THEME_DEFAULTS.corporate.accentColor,
   fontFamily: THEME_DEFAULTS.corporate.fontFamily,
   fontScale: 1,
-  brandingStrategy: 'none',
+  // Was 'none': the styled masthead banner (see THEME_HEADERS) never appeared unless
+  // someone opened Theme > Header and switched it manually, so every contract looked
+  // like plain numbered text by default even with a theme selected.
+  brandingStrategy: 'theme_header',
 };
 
 export const COLOR_PRESETS = [
@@ -280,25 +283,28 @@ function flattenNestedCss(rootSelector: string, css: string): string {
   const blockPattern = /([^{}]+)\{([^{}]*)\}/g;
   const rules: string[] = [];
   let baseDecls = '';
-  let lastIndex = 0;
   let match: RegExpExecArray | null;
 
   while ((match = blockPattern.exec(css)) !== null) {
-    baseDecls += css.slice(lastIndex, match.index);
-    lastIndex = blockPattern.lastIndex;
-
-    const nestedSelector = match[1].trim();
+    const preText = match[1];
     const body = match[2].trim();
-    if (!nestedSelector || !body) continue;
+
+    // preText is everything since the previous '}' (or string start): base-level
+    // declarations (each ending in ';') immediately followed by the nested selector
+    // itself, which never contains ';'. Split on the last ';' to recover both.
+    const lastSemi = preText.lastIndexOf(';');
+    const selectorPart = (lastSemi === -1 ? preText : preText.slice(lastSemi + 1)).trim();
+    baseDecls += lastSemi === -1 ? '' : preText.slice(0, lastSemi + 1);
+
+    if (!selectorPart || !body) continue;
 
     // Nested selector may itself be comma-separated (e.g. "th, td")
-    const fullSelector = nestedSelector
+    const fullSelector = selectorPart
       .split(',')
       .map((s) => `${rootSelector} ${s.trim()}`)
       .join(', ');
     rules.push(`${fullSelector} { ${body} }`);
   }
-  baseDecls += css.slice(lastIndex);
 
   return [`${rootSelector} { ${baseDecls.trim()} }`, ...rules].join('\n');
 }

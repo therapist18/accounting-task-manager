@@ -4,15 +4,20 @@ import {
   Paragraph,
   TextRun,
   ImageRun,
-  HeadingLevel,
   Table,
   TableRow,
   TableCell,
   WidthType,
   BorderStyle,
   AlignmentType,
+  ShadingType,
+  VerticalAlign,
 } from "docx";
 import { saveAs } from "file-saver";
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
 
 // Fetches the profile photo and decodes its natural dimensions so the embedded
 // image keeps its aspect ratio instead of being squashed into a fixed box.
@@ -57,674 +62,535 @@ async function loadPhotoImageRun(url?: string, targetWidth = 110): Promise<Image
   }
 }
 
-export async function exportToDocx(cvData: any, cvSettings?: { primaryColor?: string; accentColor?: string; showPhoto?: boolean }) {
+const toDocxColor = (hex?: string, fallback = "2c3e50"): string => (hex ? hex.replace("#", "") : fallback);
+
+// Blends a hex color toward white - used to approximate the CSS `${accent}18`
+// (~9% opacity) tinted section-header backgrounds used across the CV themes,
+// since docx cell/paragraph shading doesn't support alpha.
+function lightenHex(hex: string, factor: number): string {
+  const clean = hex.replace("#", "").padEnd(6, "0").slice(0, 6);
+  const r = parseInt(clean.slice(0, 2), 16) || 0;
+  const g = parseInt(clean.slice(2, 4), 16) || 0;
+  const b = parseInt(clean.slice(4, 6), 16) || 0;
+  const blend = (c: number) => Math.round(c + (255 - c) * factor).toString(16).padStart(2, "0");
+  return `${blend(r)}${blend(g)}${blend(b)}`;
+}
+
+// A colored-left-border, tinted-background section header - the Word equivalent
+// of the `.border-l-[5px] { background: accent+opacity }` boxes used across the
+// CV preview themes (see cv-designs.tsx), instead of a plain heading style.
+function sectionHeaderBox(text: string, primaryColor: string, accentColor: string): Paragraph {
+  return new Paragraph({
+    spacing: { before: 260, after: 140 },
+    shading: { type: ShadingType.CLEAR, color: "auto", fill: lightenHex(accentColor, 0.88) },
+    border: { left: { style: BorderStyle.SINGLE, size: 24, color: accentColor, space: 6 } },
+    indent: { left: 120 },
+    children: [new TextRun({ text: text.toUpperCase(), bold: true, size: 21, color: primaryColor })],
+  });
+}
+
+// Dark-sidebar section heading: uppercase accent-colored text with a thin
+// bottom rule, matching the sidebar `border-b` headings in theme1/theme5.
+function sidebarHeading(text: string, accentColor: string): Paragraph {
+  return new Paragraph({
+    spacing: { before: 220, after: 100 },
+    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: accentColor, space: 4 } },
+    children: [new TextRun({ text: text.toUpperCase(), bold: true, size: 18, color: accentColor })],
+  });
+}
+
+function sidebarLine(value: string, opts?: { label?: string; accentColor?: string; muted?: boolean }): Paragraph {
+  const children: TextRun[] = [];
+  if (opts?.label) children.push(new TextRun({ text: `${opts.label}: `, bold: true, size: 17, color: opts.accentColor || "FFFFFF" }));
+  children.push(new TextRun({ text: value || "—", size: 17, color: opts?.muted ? "C7CCD1" : "FFFFFF" }));
+  return new Paragraph({ spacing: { after: 70 }, children });
+}
+
+type CvBlocks = ReturnType<typeof buildContentBlocks>;
+
+// Builds the theme-agnostic content (experience, education, etc.) as Paragraph
+// arrays so both the sidebar and banner layouts can share the exact same data
+// mapping and only differ in header chrome/column structure.
+function buildContentBlocks(cvData: any, primaryColor: string, accentColor: string) {
   const {
-    personalInfo = {},
-    personalDetails = {},
     summary = "",
-    skills = [],
     experience = [],
     internships = [],
     projects = [],
     education = [],
     references = [],
-    languages = [],
     certifications = [],
     achievements = [],
-    additionalInfo = [],
     declaration = "",
     includeDeclaration = true,
     verifiedBadge = false,
   } = cvData;
 
-  // Convert hex color to docx format (remove # prefix)
-  const toDocxColor = (hex?: string): string => {
-    if (!hex) return "2c3e50";
-    return hex.replace("#", "");
-  };
+  const header = (text: string) => sectionHeaderBox(text, primaryColor, accentColor);
 
+  const summaryBlock: Paragraph[] = summary
+    ? [header("Professional Profile"), new Paragraph({ spacing: { after: 160 }, alignment: AlignmentType.BOTH, children: [new TextRun({ text: summary, size: 21 })] })]
+    : [];
+
+  const experienceBlock: Paragraph[] = experience.length
+    ? [
+        header("Professional Experience"),
+        ...experience.flatMap((exp: any) => [
+          new Paragraph({
+            spacing: { before: 100, after: 30 },
+            children: [
+              new TextRun({ text: exp.company || "Company", bold: true, size: 21, color: "1a1a1a" }),
+              new TextRun({ text: exp.location ? ` (${exp.location})` : "", italics: true, size: 19, color: "555555" }),
+              new TextRun({ text: `\t\t\t${exp.startDate || ""} – ${exp.endDate || ""}`, bold: true, size: 19 }),
+            ],
+          }),
+          new Paragraph({ spacing: { after: 50 }, children: [new TextRun({ text: exp.role || "Role", bold: true, italics: true, size: 19, color: accentColor })] }),
+          ...(exp.companyDesc ? [new Paragraph({ spacing: { after: 70 }, children: [new TextRun({ text: exp.companyDesc, italics: true, size: 18, color: "777777" })] })] : []),
+          ...(exp.responsibilities || []).map(
+            (resp: string) => new Paragraph({ bullet: { level: 0 }, spacing: { after: 40 }, children: [new TextRun({ text: resp, size: 19 })] })
+          ),
+        ]),
+      ]
+    : [];
+
+  const internshipsBlock: Paragraph[] = internships.length
+    ? [
+        header("Internships"),
+        ...internships.flatMap((intern: any) => [
+          new Paragraph({
+            spacing: { before: 100, after: 30 },
+            children: [
+              new TextRun({ text: intern.company || "Company", bold: true, size: 21 }),
+              new TextRun({ text: intern.location ? ` (${intern.location})` : "", italics: true, size: 19, color: "555555" }),
+              new TextRun({ text: `\t\t\t${intern.startDate || ""} – ${intern.endDate || ""}`, bold: true, size: 19 }),
+            ],
+          }),
+          new Paragraph({ spacing: { after: 50 }, children: [new TextRun({ text: intern.role || "Role", bold: true, italics: true, size: 19, color: accentColor })] }),
+          ...(intern.companyDesc ? [new Paragraph({ spacing: { after: 70 }, children: [new TextRun({ text: intern.companyDesc, italics: true, size: 18, color: "777777" })] })] : []),
+          ...(intern.responsibilities || []).map(
+            (resp: string) => new Paragraph({ bullet: { level: 0 }, spacing: { after: 40 }, children: [new TextRun({ text: resp, size: 19 })] })
+          ),
+        ]),
+      ]
+    : [];
+
+  const projectsBlock: Paragraph[] = projects.length
+    ? [
+        header("Key Projects"),
+        ...projects.map(
+          (proj: any) =>
+            new Paragraph({
+              spacing: { after: 80 },
+              children: [
+                new TextRun({ text: proj.title || "Project Title", bold: true, size: 20, color: primaryColor }),
+                new TextRun({ text: proj.year ? ` (${proj.year}): ` : ": ", bold: true, size: 20 }),
+                new TextRun({ text: proj.description || "", size: 20 }),
+              ],
+            })
+        ),
+      ]
+    : [];
+
+  const educationBlock: Paragraph[] = education.length
+    ? [
+        header("Education"),
+        ...education.map(
+          (edu: any) =>
+            new Paragraph({
+              spacing: { after: 80 },
+              children: [
+                new TextRun({ text: edu.degree || "Degree", bold: true, size: 20, color: accentColor }),
+                new TextRun({ text: " - ", size: 20 }),
+                new TextRun({ text: edu.institution || "Institution", size: 20 }),
+                new TextRun({ text: ` (${edu.year || ""})`, italics: true, size: 20, color: "555555" }),
+                ...(edu.details ? [new TextRun({ text: `\n${edu.details}`, size: 18, color: "777777" })] : []),
+              ],
+            })
+        ),
+      ]
+    : [];
+
+  const certificationsBlock: Paragraph[] = certifications.length
+    ? [
+        header("Certifications"),
+        ...certifications.map(
+          (cert: any) =>
+            new Paragraph({
+              spacing: { after: 80 },
+              children: [
+                new TextRun({ text: cert.name || "Certification", bold: true, size: 20, color: accentColor }),
+                ...(cert.issuer ? [new TextRun({ text: ` - ${cert.issuer}`, size: 20 })] : []),
+                ...(cert.date ? [new TextRun({ text: ` (${cert.date})`, italics: true, size: 20, color: "555555" })] : []),
+                ...(cert.url ? [new TextRun({ text: `\n${cert.url}`, size: 18, color: "777777" })] : []),
+              ],
+            })
+        ),
+      ]
+    : [];
+
+  const achievementsBlock: Paragraph[] = achievements.length
+    ? [
+        header("Achievements"),
+        ...achievements.map(
+          (ach: any) =>
+            new Paragraph({
+              spacing: { after: 80 },
+              children: [
+                new TextRun({ text: ach.title || "Achievement", bold: true, size: 20, color: accentColor }),
+                ...(ach.date ? [new TextRun({ text: ` (${ach.date})`, italics: true, size: 20, color: "555555" })] : []),
+                ...(ach.description ? [new TextRun({ text: `\n${ach.description}`, size: 20 })] : []),
+              ],
+            })
+        ),
+      ]
+    : [];
+
+  const referencesBlock: Paragraph[] = references.length
+    ? [
+        header("References"),
+        ...references.map(
+          (ref: any) =>
+            new Paragraph({
+              spacing: { after: 100 },
+              children: [
+                new TextRun({ text: ref.name || "Reference Name", bold: true, size: 20 }),
+                new TextRun({ text: `\n${ref.title || ""} | ${ref.company || ""}`, italics: true, size: 19 }),
+                ...(ref.address ? [new TextRun({ text: `\nAddress: ${ref.address}`, size: 18 })] : []),
+                new TextRun({ text: `\nContact: ${ref.contact || ""}`, size: 18, color: accentColor }),
+              ],
+            })
+        ),
+      ]
+    : [];
+
+  const declarationBlock: Paragraph[] = includeDeclaration && declaration
+    ? [
+        new Paragraph({
+          spacing: { before: 400, after: 100 },
+          border: { top: { color: "e0e0e0", space: 10, style: BorderStyle.SINGLE, size: 6 } },
+          children: [
+            new TextRun({ text: "DECLARATION\n", bold: true, size: 20, color: "777777" }),
+            new TextRun({ text: declaration, italics: true, size: 18, color: "777777" }),
+            ...(verifiedBadge
+              ? [
+                  new TextRun({
+                    text: `\nCV Verified & Up-to-date ${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}`,
+                    bold: true,
+                    size: 18,
+                    color: accentColor,
+                  }),
+                ]
+              : []),
+          ],
+        }),
+      ]
+    : [];
+
+  return {
+    summaryBlock,
+    experienceBlock,
+    internshipsBlock,
+    projectsBlock,
+    educationBlock,
+    certificationsBlock,
+    achievementsBlock,
+    referencesBlock,
+    declarationBlock,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Layout 1: dark colored sidebar + white main column (theme1 / theme5 / default)
+// ---------------------------------------------------------------------------
+
+function buildSidebarLayout(cvData: any, primaryColor: string, accentColor: string, photoImageRun: ImageRun | null): (Paragraph | Table)[] {
+  const { personalInfo = {}, personalDetails = {}, skills = [], languages = [], additionalInfo = [] } = cvData;
+  const blocks = buildContentBlocks(cvData, primaryColor, accentColor);
+
+  const sidebarChildren: Paragraph[] = [
+    ...(photoImageRun ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: [photoImageRun] })] : []),
+
+    sidebarHeading("Contact Information", accentColor),
+    sidebarLine(personalInfo.location || "Location", { muted: !personalInfo.location }),
+    sidebarLine(personalInfo.phone || "Phone", { muted: !personalInfo.phone }),
+    sidebarLine(personalInfo.email || "Email", { muted: !personalInfo.email }),
+    ...(personalInfo.github ? [sidebarLine(personalInfo.github)] : []),
+    ...(personalInfo.linkedin ? [sidebarLine(personalInfo.linkedin)] : []),
+
+    sidebarHeading("Personal Details", accentColor),
+    ...(personalDetails.dateOfBirth ? [sidebarLine(personalDetails.dateOfBirth, { label: "Date of Birth", accentColor: "FFFFFF" })] : []),
+    ...(personalDetails.nationality ? [sidebarLine(personalDetails.nationality, { label: "Nationality", accentColor: "FFFFFF" })] : []),
+    ...(personalDetails.maritalStatus ? [sidebarLine(personalDetails.maritalStatus, { label: "Marital Status", accentColor: "FFFFFF" })] : []),
+    ...(personalDetails.residence ? [sidebarLine(personalDetails.residence, { label: "Residence", accentColor: "FFFFFF" })] : []),
+    ...(personalDetails.kenyaStatus ? [sidebarLine(personalDetails.kenyaStatus, { label: "Kenya Status", accentColor: "FFFFFF" })] : []),
+    ...(personalDetails.nairobiRes ? [sidebarLine(personalDetails.nairobiRes, { label: "Nairobi Res", accentColor: "FFFFFF" })] : []),
+    ...(personalDetails.drivingExperience ? [sidebarLine(personalDetails.drivingExperience, { label: "Driving", accentColor: "FFFFFF" })] : []),
+
+    sidebarHeading("Core Competencies", accentColor),
+    ...(skills.length
+      ? skills.flatMap((grp: any) => [
+          new Paragraph({ spacing: { after: 30 }, children: [new TextRun({ text: grp.category || "", bold: true, size: 17, color: "FFFFFF" })] }),
+          new Paragraph({
+            spacing: { after: 90 },
+            children: [new TextRun({ text: Array.isArray(grp.items) ? grp.items.join(", ") : grp.items || "", size: 16, color: "E5E7EB" })],
+          }),
+        ])
+      : [new Paragraph({ children: [new TextRun({ text: "No skills added yet.", italics: true, size: 16, color: "C7CCD1" })] })]),
+
+    sidebarHeading("Languages", accentColor),
+    ...(languages.length
+      ? languages.map(
+          (l: any) => new Paragraph({ spacing: { after: 50 }, children: [new TextRun({ text: `${l.language || ""}${l.proficiency ? ` (${l.proficiency})` : ""}`, size: 17, color: "FFFFFF" })] })
+        )
+      : [new Paragraph({ children: [new TextRun({ text: "No languages added yet.", italics: true, size: 16, color: "C7CCD1" })] })]),
+
+    ...(additionalInfo.length
+      ? [
+          sidebarHeading("Additional Info", accentColor),
+          ...additionalInfo
+            .filter((i: any) => i.label || i.value)
+            .map((i: any) => sidebarLine(i.value || "", { label: i.label, accentColor: "FFFFFF" })),
+        ]
+      : []),
+  ];
+
+  const mainChildren: Paragraph[] = [
+    new Paragraph({
+      border: { bottom: { style: BorderStyle.SINGLE, size: 32, color: primaryColor, space: 8 } },
+      spacing: { after: 240 },
+      children: [new TextRun({ text: personalInfo.fullName || "Your Name", bold: true, size: 40, color: primaryColor })],
+    }),
+    new Paragraph({
+      spacing: { after: 40 },
+      border: { bottom: { style: BorderStyle.SINGLE, size: 32, color: primaryColor, space: 0 } },
+      children: [new TextRun({ text: (personalInfo.title || "Professional Title").toUpperCase(), bold: true, size: 24, color: accentColor })],
+    }),
+    ...blocks.summaryBlock,
+    ...blocks.experienceBlock,
+    ...blocks.internshipsBlock,
+    ...blocks.projectsBlock,
+    ...blocks.educationBlock,
+    ...blocks.certificationsBlock,
+    ...blocks.achievementsBlock,
+    ...blocks.referencesBlock,
+    ...blocks.declarationBlock,
+  ];
+
+  const table = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+    },
+    rows: [
+      new TableRow({
+        children: [
+          new TableCell({
+            width: { size: 30, type: WidthType.PERCENTAGE },
+            shading: { type: ShadingType.CLEAR, color: "auto", fill: primaryColor },
+            margins: { top: 200, bottom: 200, left: 160, right: 160 },
+            verticalAlign: VerticalAlign.TOP,
+            children: sidebarChildren,
+          }),
+          new TableCell({
+            width: { size: 70, type: WidthType.PERCENTAGE },
+            margins: { top: 200, bottom: 200, left: 260, right: 200 },
+            verticalAlign: VerticalAlign.TOP,
+            children: mainChildren,
+          }),
+        ],
+      }),
+    ],
+  });
+
+  return [table];
+}
+
+// ---------------------------------------------------------------------------
+// Layout 2: colored full-width header band + single column (theme2 / theme3 /
+// theme6 / any other/unrecognized theme) - a lighter-weight fallback that still
+// carries the chosen colors and photo instead of a flat, unbranded document.
+// ---------------------------------------------------------------------------
+
+function buildBannerLayout(cvData: any, primaryColor: string, accentColor: string, photoImageRun: ImageRun | null): (Paragraph | Table)[] {
+  const { personalInfo = {}, personalDetails = {}, skills = [], languages = [], additionalInfo = [] } = cvData;
+  const blocks = buildContentBlocks(cvData, primaryColor, accentColor);
+
+  const contactLine = [personalInfo.location, personalInfo.phone, personalInfo.email].filter(Boolean).join("   |   ");
+
+  const bannerTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+    },
+    rows: [
+      new TableRow({
+        children: [
+          ...(photoImageRun
+            ? [
+                new TableCell({
+                  width: { size: 18, type: WidthType.PERCENTAGE },
+                  shading: { type: ShadingType.CLEAR, color: "auto", fill: primaryColor },
+                  verticalAlign: VerticalAlign.CENTER,
+                  margins: { top: 160, bottom: 160, left: 160, right: 100 },
+                  children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [photoImageRun] })],
+                }),
+              ]
+            : []),
+          new TableCell({
+            width: { size: photoImageRun ? 82 : 100, type: WidthType.PERCENTAGE },
+            shading: { type: ShadingType.CLEAR, color: "auto", fill: primaryColor },
+            verticalAlign: VerticalAlign.CENTER,
+            margins: { top: 220, bottom: 220, left: 260, right: 260 },
+            children: [
+              new Paragraph({ spacing: { after: 60 }, children: [new TextRun({ text: personalInfo.fullName || "Your Name", bold: true, size: 40, color: "FFFFFF" })] }),
+              new Paragraph({
+                spacing: { after: contactLine ? 140 : 0 },
+                children: [new TextRun({ text: (personalInfo.title || "Professional Title").toUpperCase(), bold: true, size: 22, color: accentColor })],
+              }),
+              ...(contactLine ? [new Paragraph({ children: [new TextRun({ text: contactLine, size: 17, color: "E5E7EB" })] })] : []),
+              ...(personalInfo.linkedin || personalInfo.github
+                ? [
+                    new Paragraph({
+                      spacing: { before: 40 },
+                      children: [
+                        new TextRun({ text: [personalInfo.linkedin, personalInfo.github].filter(Boolean).join("   |   "), size: 16, color: "E5E7EB" }),
+                      ],
+                    }),
+                  ]
+                : []),
+            ],
+          }),
+        ],
+      }),
+    ],
+  });
+
+  const detailEntries = [
+    ["Date of Birth", personalDetails.dateOfBirth],
+    ["Nationality", personalDetails.nationality],
+    ["Marital Status", personalDetails.maritalStatus],
+    ["Residence", personalDetails.residence],
+    ["Kenya Status", personalDetails.kenyaStatus],
+    ["Nairobi Res", personalDetails.nairobiRes],
+    ["Driving", personalDetails.drivingExperience],
+  ].filter(([, val]) => !!val) as [string, string][];
+
+  const body: Paragraph[] = [
+    new Paragraph({ spacing: { before: 260 }, children: [] }),
+    ...blocks.summaryBlock,
+
+    sectionHeaderBox("Core Competencies", primaryColor, accentColor),
+    ...(skills.length
+      ? skills.flatMap((grp: any) => [
+          new Paragraph({ spacing: { after: 20 }, children: [new TextRun({ text: grp.category || "", bold: true, size: 19, color: accentColor })] }),
+          new Paragraph({ spacing: { after: 90 }, children: [new TextRun({ text: Array.isArray(grp.items) ? grp.items.join(", ") : grp.items || "", size: 19 })] }),
+        ])
+      : [new Paragraph({ children: [new TextRun({ text: "No skills added yet.", italics: true, size: 19, color: "999999" })] })]),
+
+    ...blocks.experienceBlock,
+    ...blocks.internshipsBlock,
+    ...blocks.projectsBlock,
+    ...blocks.educationBlock,
+    ...blocks.certificationsBlock,
+    ...blocks.achievementsBlock,
+
+    ...(languages.length
+      ? [
+          sectionHeaderBox("Languages", primaryColor, accentColor),
+          new Paragraph({
+            spacing: { after: 100 },
+            children: languages.flatMap((l: any, idx: number) => [
+              new TextRun({ text: l.language || "", bold: true, size: 20 }),
+              new TextRun({ text: l.proficiency ? ` (${l.proficiency})` : "", size: 20, color: "555555" }),
+              new TextRun({ text: idx < languages.length - 1 ? "   |   " : "", size: 20 }),
+            ]),
+          }),
+        ]
+      : []),
+
+    ...(detailEntries.length
+      ? [
+          sectionHeaderBox("Personal Details", primaryColor, accentColor),
+          ...detailEntries.map(
+            ([label, val]) =>
+              new Paragraph({
+                spacing: { after: 60 },
+                children: [new TextRun({ text: `${label}: `, bold: true, size: 20, color: accentColor }), new TextRun({ text: val, size: 20 })],
+              })
+          ),
+        ]
+      : []),
+
+    ...blocks.referencesBlock,
+
+    ...(additionalInfo.filter((i: any) => i.label || i.value).length
+      ? [
+          sectionHeaderBox("Additional Information", primaryColor, accentColor),
+          ...additionalInfo
+            .filter((i: any) => i.label || i.value)
+            .map(
+              (i: any) =>
+                new Paragraph({
+                  spacing: { after: 60 },
+                  children: [new TextRun({ text: `${i.label || ""}: `, bold: true, size: 20, color: accentColor }), new TextRun({ text: i.value || "", size: 20 })],
+                })
+            ),
+        ]
+      : []),
+
+    ...blocks.declarationBlock,
+  ];
+
+  return [bannerTable, ...body];
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+// CV themes fall into two structural families in the preview (see cv-designs.tsx):
+// a dark colored sidebar (theme1, theme5) or a single flowing column (theme2,
+// theme3, theme6, and any future/unrecognized theme). We replicate whichever
+// family the user actually has selected instead of always falling back to a
+// generic, unbranded layout.
+const SIDEBAR_THEMES = new Set(["theme1", "theme5"]);
+
+export async function exportToDocx(
+  cvData: any,
+  cvSettings?: { primaryColor?: string; accentColor?: string; showPhoto?: boolean },
+  selectedLayout?: string
+) {
   const primaryColor = toDocxColor(cvSettings?.primaryColor);
-  const accentColor = toDocxColor(cvSettings?.accentColor);
+  const accentColor = toDocxColor(cvSettings?.accentColor, "3498db");
 
   const showPhoto = cvSettings?.showPhoto !== false;
-  const photoImageRun = showPhoto ? await loadPhotoImageRun(personalInfo.photoUrl) : null;
+  const photoImageRun = showPhoto ? await loadPhotoImageRun(cvData?.personalInfo?.photoUrl) : null;
+
+  const isSidebar = SIDEBAR_THEMES.has(selectedLayout || "theme1");
+  const children = isSidebar
+    ? buildSidebarLayout(cvData, primaryColor, accentColor, photoImageRun)
+    : buildBannerLayout(cvData, primaryColor, accentColor, photoImageRun);
 
   const doc = new Document({
     sections: [
       {
-        properties: {},
-        children: [
-          // PROFILE PHOTO
-          ...(photoImageRun
-            ? [
-                new Paragraph({
-                  alignment: AlignmentType.CENTER,
-                  spacing: { after: 150 },
-                  children: [photoImageRun],
-                }),
-              ]
-            : []),
-
-          // HEADER - Name & Title
-          new Paragraph({
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 100 },
-            children: [
-              new TextRun({
-                text: personalInfo.fullName || "Your Name",
-                bold: true,
-                size: 36, // 18pt
-                color: primaryColor,
-              }),
-            ],
-          }),
-          new Paragraph({
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 200 },
-            children: [
-              new TextRun({
-                text: (personalInfo.title || "Professional Title").toUpperCase(),
-                bold: true,
-                size: 24, // 12pt
-                color: accentColor,
-              }),
-            ],
-          }),
-
-          // CONTACT INFO LINE
-          new Paragraph({
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 300 },
-            border: {
-              bottom: {
-                color: primaryColor,
-                space: 10,
-                style: BorderStyle.SINGLE,
-                size: 12,
-              },
-            },
-            children: [
-              new TextRun({
-                text: `${personalInfo.location || ""} | ${personalInfo.phone || ""} | ${personalInfo.email || ""}`,
-                size: 19, // 9.5pt
-                color: "555555",
-              }),
-              personalInfo.linkedin
-                ? new TextRun({
-                    text: `\nLinkedIn: ${personalInfo.linkedin}`,
-                    size: 18,
-                    color: accentColor,
-                  })
-                : new TextRun({ text: "" }),
-              personalInfo.github
-                ? new TextRun({
-                    text: ` | GitHub: ${personalInfo.github}`,
-                    size: 18,
-                    color: accentColor,
-                  })
-                : new TextRun({ text: "" }),
-            ],
-          }),
-
-          // PROFESSIONAL SUMMARY
-          new Paragraph({
-            heading: HeadingLevel.HEADING_2,
-            spacing: { before: 200, after: 100 },
-            children: [
-              new TextRun({
-                text: "PROFESSIONAL PROFILE",
-                bold: true,
-                size: 24,
-                color: primaryColor,
-              }),
-            ],
-          }),
-          new Paragraph({
-            spacing: { after: 200 },
-            alignment: AlignmentType.BOTH,
-            children: [
-              new TextRun({
-                text: summary || "Enter professional summary...",
-                size: 22, // 11pt
-              }),
-            ],
-          }),
-
-          // CORE COMPETENCIES / SKILLS
-          new Paragraph({
-            heading: HeadingLevel.HEADING_2,
-            spacing: { before: 200, after: 100 },
-            children: [
-              new TextRun({
-                text: "CORE COMPETENCIES",
-                bold: true,
-                size: 24,
-                color: primaryColor,
-              }),
-            ],
-          }),
-          ...skills.map((skillGroup: any) => {
-            return new Paragraph({
-              spacing: { after: 80 },
-              children: [
-                new TextRun({
-                  text: `${skillGroup.category}: `,
-                  bold: true,
-                  size: 20,
-                  color: accentColor,
-                }),
-                new TextRun({
-                  text: Array.isArray(skillGroup.items)
-                    ? skillGroup.items.join(", ")
-                    : skillGroup.items || "",
-                  size: 20,
-                }),
-              ],
-            });
-          }),
-
-          // WORK EXPERIENCE
-          experience.length > 0
-            ? new Paragraph({
-                heading: HeadingLevel.HEADING_2,
-                spacing: { before: 300, after: 150 },
-                children: [
-                  new TextRun({
-                    text: "PROFESSIONAL EXPERIENCE",
-                    bold: true,
-                    size: 24,
-                    color: primaryColor,
-                  }),
-                ],
-              })
-            : new Paragraph({ text: "" }),
-
-          ...experience.flatMap((exp: any) => {
-            const paragraphs = [
-              new Paragraph({
-                spacing: { before: 100, after: 40 },
-                children: [
-                  new TextRun({
-                    text: exp.company || "Company",
-                    bold: true,
-                    size: 22,
-                    color: "000000",
-                  }),
-                  new TextRun({
-                    text: ` (${exp.location || ""})`,
-                    italics: true,
-                    size: 20,
-                    color: "555555",
-                  }),
-                  new TextRun({
-                    text: `\t\t\t\t${exp.startDate || ""} – ${exp.endDate || ""}`,
-                    bold: true,
-                    size: 20,
-                  }),
-                ],
-              }),
-              new Paragraph({
-                spacing: { after: 60 },
-                children: [
-                  new TextRun({
-                    text: exp.role || "Role",
-                    bold: true,
-                    italics: true,
-                    size: 20,
-                    color: accentColor,
-                  }),
-                ],
-              }),
-            ];
-
-            if (exp.companyDesc) {
-              paragraphs.push(
-                new Paragraph({
-                  spacing: { after: 80 },
-                  children: [
-                    new TextRun({
-                      text: exp.companyDesc,
-                      italics: true,
-                      size: 19,
-                      color: "777777",
-                    }),
-                  ],
-                })
-              );
-            }
-
-            const bullets = (exp.responsibilities || []).map((resp: string) => {
-              return new Paragraph({
-                bullet: {
-                  level: 0,
-                },
-                spacing: { after: 40 },
-                children: [
-                  new TextRun({
-                    text: resp,
-                    size: 20,
-                  }),
-                ],
-              });
-            });
-
-            return [...paragraphs, ...bullets];
-          }),
-
-          // INTERNSHIPS
-          internships.length > 0
-            ? new Paragraph({
-                heading: HeadingLevel.HEADING_2,
-                spacing: { before: 300, after: 150 },
-                children: [
-                  new TextRun({
-                    text: "INTERNSHIPS",
-                    bold: true,
-                    size: 24,
-                    color: primaryColor,
-                  }),
-                ],
-              })
-            : new Paragraph({ text: "" }),
-
-          ...internships.flatMap((intern: any) => {
-            const paragraphs = [
-              new Paragraph({
-                spacing: { before: 100, after: 40 },
-                children: [
-                  new TextRun({
-                    text: intern.company || "Company",
-                    bold: true,
-                    size: 22,
-                  }),
-                  new TextRun({
-                    text: ` (${intern.location || ""})`,
-                    italics: true,
-                    size: 20,
-                    color: "555555",
-                  }),
-                  new TextRun({
-                    text: `\t\t\t\t${intern.startDate || ""} – ${intern.endDate || ""}`,
-                    bold: true,
-                    size: 20,
-                  }),
-                ],
-              }),
-              new Paragraph({
-                spacing: { after: 60 },
-                children: [
-                  new TextRun({
-                    text: intern.role || "Role",
-                    bold: true,
-                    italics: true,
-                    size: 20,
-                    color: accentColor,
-                  }),
-                ],
-              }),
-            ];
-
-            if (intern.companyDesc) {
-              paragraphs.push(
-                new Paragraph({
-                  spacing: { after: 80 },
-                  children: [
-                    new TextRun({
-                      text: intern.companyDesc,
-                      italics: true,
-                      size: 19,
-                      color: "777777",
-                    }),
-                  ],
-                })
-              );
-            }
-
-            const bullets = (intern.responsibilities || []).map((resp: string) => {
-              return new Paragraph({
-                bullet: {
-                  level: 0,
-                },
-                spacing: { after: 40 },
-                children: [
-                  new TextRun({
-                    text: resp,
-                    size: 20,
-                  }),
-                ],
-              });
-            });
-
-            return [...paragraphs, ...bullets];
-          }),
-
-          // PROJECTS
-          projects.length > 0
-            ? new Paragraph({
-                heading: HeadingLevel.HEADING_2,
-                spacing: { before: 300, after: 150 },
-                children: [
-                  new TextRun({
-                    text: "KEY PROJECTS",
-                    bold: true,
-                    size: 24,
-                    color: primaryColor,
-                  }),
-                ],
-              })
-            : new Paragraph({ text: "" }),
-
-          ...projects.map((proj: any) => {
-            return new Paragraph({
-              spacing: { after: 80 },
-              children: [
-                new TextRun({
-                  text: proj.title || "Project Title",
-                  bold: true,
-                  size: 20,
-                  color: primaryColor,
-                }),
-                proj.year ? new TextRun({ text: ` (${proj.year}): `, bold: true, size: 20 }) : new TextRun({ text: ": ", size: 20 }),
-                new TextRun({
-                  text: proj.description || "",
-                  size: 20,
-                }),
-              ],
-            });
-          }),
-
-          // EDUCATION
-          education.length > 0
-            ? new Paragraph({
-                heading: HeadingLevel.HEADING_2,
-                spacing: { before: 300, after: 150 },
-                children: [
-                  new TextRun({
-                    text: "EDUCATION & CERTIFICATIONS",
-                    bold: true,
-                    size: 24,
-                    color: primaryColor,
-                  }),
-                ],
-              })
-            : new Paragraph({ text: "" }),
-
-          ...education.map((edu: any) => {
-            return new Paragraph({
-              spacing: { after: 80 },
-              children: [
-                new TextRun({
-                  text: edu.degree || "Degree",
-                  bold: true,
-                  size: 20,
-                  color: accentColor,
-                }),
-                new TextRun({ text: " - ", size: 20 }),
-                new TextRun({ text: edu.institution || "Institution", size: 20 }),
-                new TextRun({ text: ` (${edu.year || ""})`, italics: true, size: 20, color: "555555" }),
-                edu.details ? new TextRun({ text: `\n${edu.details}`, size: 18, color: "777777" }) : new TextRun({ text: "" }),
-              ],
-            });
-          }),
-
-          // CERTIFICATIONS
-          certifications.length > 0
-            ? new Paragraph({
-                heading: HeadingLevel.HEADING_2,
-                spacing: { before: 300, after: 150 },
-                children: [
-                  new TextRun({
-                    text: "CERTIFICATIONS",
-                    bold: true,
-                    size: 24,
-                    color: primaryColor,
-                  }),
-                ],
-              })
-            : new Paragraph({ text: "" }),
-
-          ...certifications.map((cert: any) => {
-            return new Paragraph({
-              spacing: { after: 80 },
-              children: [
-                new TextRun({
-                  text: cert.name || "Certification",
-                  bold: true,
-                  size: 20,
-                  color: accentColor,
-                }),
-                cert.issuer ? new TextRun({ text: ` - ${cert.issuer}`, size: 20 }) : new TextRun({ text: "" }),
-                cert.date ? new TextRun({ text: ` (${cert.date})`, italics: true, size: 20, color: "555555" }) : new TextRun({ text: "" }),
-                cert.url ? new TextRun({ text: `\n${cert.url}`, size: 18, color: "777777" }) : new TextRun({ text: "" }),
-              ],
-            });
-          }),
-
-          // LANGUAGES
-          languages.length > 0
-            ? new Paragraph({
-                heading: HeadingLevel.HEADING_2,
-                spacing: { before: 300, after: 150 },
-                children: [
-                  new TextRun({
-                    text: "LANGUAGES",
-                    bold: true,
-                    size: 24,
-                    color: primaryColor,
-                  }),
-                ],
-              })
-            : new Paragraph({ text: "" }),
-
-          languages.length > 0
-            ? new Paragraph({
-                spacing: { after: 100 },
-                children: languages.flatMap((lang: any, idx: number) => [
-                  new TextRun({
-                    text: `${lang.language || ""}`,
-                    bold: true,
-                    size: 20,
-                  }),
-                  new TextRun({
-                    text: lang.proficiency ? ` (${lang.proficiency})` : "",
-                    size: 20,
-                    color: "555555",
-                  }),
-                  new TextRun({
-                    text: idx < languages.length - 1 ? "   |   " : "",
-                    size: 20,
-                  }),
-                ]),
-              })
-            : new Paragraph({ text: "" }),
-
-          // ACHIEVEMENTS
-          achievements.length > 0
-            ? new Paragraph({
-                heading: HeadingLevel.HEADING_2,
-                spacing: { before: 300, after: 150 },
-                children: [
-                  new TextRun({
-                    text: "ACHIEVEMENTS",
-                    bold: true,
-                    size: 24,
-                    color: primaryColor,
-                  }),
-                ],
-              })
-            : new Paragraph({ text: "" }),
-
-          ...achievements.map((ach: any) => {
-            return new Paragraph({
-              spacing: { after: 80 },
-              children: [
-                new TextRun({
-                  text: ach.title || "Achievement",
-                  bold: true,
-                  size: 20,
-                  color: accentColor,
-                }),
-                ach.date ? new TextRun({ text: ` (${ach.date})`, italics: true, size: 20, color: "555555" }) : new TextRun({ text: "" }),
-                ach.description ? new TextRun({ text: `\n${ach.description}`, size: 20 }) : new TextRun({ text: "" }),
-              ],
-            });
-          }),
-
-          // PERSONAL DETAILS (if relevant)
-          Object.keys(personalDetails).length > 0
-            ? new Paragraph({
-                heading: HeadingLevel.HEADING_2,
-                spacing: { before: 300, after: 150 },
-                children: [
-                  new TextRun({
-                    text: "PERSONAL DETAILS",
-                    bold: true,
-                    size: 24,
-                    color: primaryColor,
-                  }),
-                ],
-              })
-            : new Paragraph({ text: "" }),
-
-          ...Object.entries(personalDetails)
-            .filter(([_, val]) => !!val)
-            .map(([key, val]) => {
-              const label = key
-                .replace(/([A-Z])/g, " $1")
-                .replace(/^./, (str) => str.toUpperCase());
-              return new Paragraph({
-                spacing: { after: 60 },
-                children: [
-                  new TextRun({
-                    text: `${label}: `,
-                    bold: true,
-                    size: 20,
-                    color: accentColor,
-                  }),
-                  new TextRun({
-                    text: String(val),
-                    size: 20,
-                  }),
-                ],
-              });
-            }),
-
-          // REFERENCES
-          references.length > 0
-            ? new Paragraph({
-                heading: HeadingLevel.HEADING_2,
-                spacing: { before: 300, after: 150 },
-                children: [
-                  new TextRun({
-                    text: "REFERENCES",
-                    bold: true,
-                    size: 24,
-                    color: primaryColor,
-                  }),
-                ],
-              })
-            : new Paragraph({ text: "" }),
-
-          ...references.map((ref: any) => {
-            return new Paragraph({
-              spacing: { after: 100 },
-              children: [
-                new TextRun({
-                  text: ref.name || "Reference Name",
-                  bold: true,
-                  size: 20,
-                }),
-                new TextRun({
-                  text: `\n${ref.title || ""} | ${ref.company || ""}`,
-                  italics: true,
-                  size: 19,
-                }),
-                ref.address ? new TextRun({ text: `\nAddress: ${ref.address}`, size: 18 }) : new TextRun({ text: "" }),
-                new TextRun({ text: `\nContact: ${ref.contact || ""}`, size: 18, color: accentColor }),
-              ],
-            });
-          }),
-
-          // ADDITIONAL INFORMATION
-          additionalInfo.length > 0
-            ? new Paragraph({
-                heading: HeadingLevel.HEADING_2,
-                spacing: { before: 300, after: 150 },
-                children: [
-                  new TextRun({
-                    text: "ADDITIONAL INFORMATION",
-                    bold: true,
-                    size: 24,
-                    color: primaryColor,
-                  }),
-                ],
-              })
-            : new Paragraph({ text: "" }),
-
-          ...additionalInfo
-            .filter((info: any) => info.label || info.value)
-            .map((info: any) => {
-              return new Paragraph({
-                spacing: { after: 60 },
-                children: [
-                  new TextRun({
-                    text: `${info.label || ""}: `,
-                    bold: true,
-                    size: 20,
-                    color: accentColor,
-                  }),
-                  new TextRun({
-                    text: info.value || "",
-                    size: 20,
-                  }),
-                ],
-              });
-            }),
-
-          // DECLARATION
-          includeDeclaration && declaration
-            ? new Paragraph({
-                spacing: { before: 400, after: 100 },
-                border: {
-                  top: {
-                    color: "e0e0e0",
-                    space: 10,
-                    style: BorderStyle.SINGLE,
-                    size: 6,
-                  },
-                },
-                children: [
-                  new TextRun({
-                    text: "DECLARATION\n",
-                    bold: true,
-                    size: 20,
-                    color: "777777",
-                  }),
-                  new TextRun({
-                    text: declaration,
-                    italics: true,
-                    size: 18,
-                    color: "777777",
-                  }),
-                  ...(verifiedBadge
-                    ? [
-                        new TextRun({
-                          text: `\nCV Verified & Up-to-date ${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}`,
-                          bold: true,
-                          size: 18,
-                          color: accentColor,
-                        }),
-                      ]
-                    : []),
-                ],
-              })
-            : new Paragraph({ text: "" }),
-        ],
+        properties: { page: { margin: { top: 500, bottom: 500, left: 500, right: 500 } } },
+        children,
       },
     ],
   });
 
   const blob = await Packer.toBlob(doc);
-  const fileName = `${(personalInfo.fullName || "CV").replace(/\s+/g, "_")}_CV.docx`;
+  const fileName = `${(cvData?.personalInfo?.fullName || "CV").replace(/\s+/g, "_")}_CV.docx`;
   saveAs(blob, fileName);
 }

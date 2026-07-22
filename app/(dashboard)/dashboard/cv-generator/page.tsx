@@ -2426,11 +2426,15 @@ export default function CVGeneratorPage() {
   const handleDownloadDocx = async () => {
     try {
       toast.info("Generating Word document...");
-      await exportToDocx(cvData, {
-        primaryColor: cvSettings.primaryColor,
-        accentColor: cvSettings.accentColor,
-        showPhoto: cvSettings.showPhoto,
-      });
+      await exportToDocx(
+        cvData,
+        {
+          primaryColor: cvSettings.primaryColor,
+          accentColor: cvSettings.accentColor,
+          showPhoto: cvSettings.showPhoto,
+        },
+        selectedLayout
+      );
       toast.success("Word document (.docx) generated successfully!");
     } catch (e: any) {
       console.error(e);
