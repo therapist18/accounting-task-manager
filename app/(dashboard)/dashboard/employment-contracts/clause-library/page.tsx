@@ -21,7 +21,7 @@ import {
 import {
   Loader2, PlusCircle, Settings, Trash2, BookText, Star, Briefcase,
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
-  Columns2, FileText, Search, List,
+  Columns2, FileText, Search, List, Layers,
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
@@ -36,9 +36,66 @@ const EMPTY_DRAFT: Partial<EcClause> = {
   content: '',
   is_default: false,
   company_id: null,
+  variant_group: null,
   suggest_conditions: [],
   suggest_priority: 0,
 };
+
+function ClauseCard({
+  clause, companies, selected, onSelect, onEdit, onDelete, compact,
+}: {
+  clause: EcClause;
+  companies: Company[];
+  selected: boolean;
+  onSelect: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  compact?: boolean;
+}) {
+  return (
+    <div
+      onClick={onSelect}
+      className={cn(
+        "cursor-pointer border rounded-xl transition-all duration-200",
+        compact ? "p-3.5" : "p-5",
+        selected
+          ? "border-custom-blue bg-blue-50 dark:bg-blue-900/20 shadow-md ring-1 ring-custom-blue/20"
+          : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:shadow-md"
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className={cn("font-semibold text-slate-800 dark:text-slate-100 truncate flex items-center gap-1.5", compact ? "text-sm" : "text-base")}>
+            {clause.is_default && <Star className="h-4 w-4 text-amber-500 shrink-0" fill="currentColor" />}
+            {clause.label}
+          </p>
+          <p className="text-sm text-slate-400 truncate">{clause.clause_key}</p>
+        </div>
+        <div className="flex gap-1 shrink-0">
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-700" onClick={(e) => { e.stopPropagation(); onEdit(); }}>
+            <Settings className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-600" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1.5 mt-3">
+        {clause.is_default && (
+          <Badge className="text-xs font-semibold bg-amber-50 text-amber-700 border-amber-200 rounded-full px-2 py-0.5" variant="outline">Default</Badge>
+        )}
+        <Badge className="text-xs font-semibold bg-slate-50 text-slate-600 border-slate-200 rounded-full px-2 py-0.5" variant="outline">
+          {clause.company_id ? (companies.find((c) => String(c.id) === clause.company_id)?.company_name || 'Company') : 'Global'}
+        </Badge>
+        {clause.suggest_conditions?.length > 0 && (
+          <Badge className="text-xs font-semibold bg-purple-50 text-purple-700 border-purple-200 rounded-full px-2 py-0.5" variant="outline">
+            Rule-suggested
+          </Badge>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function ClauseLibraryPage() {
   const [clauses, setClauses] = useState<EcClause[]>([]);
@@ -87,6 +144,36 @@ export default function ClauseLibraryPage() {
   const sectionClauses = useMemo(() => {
     return grouped.find(g => g.section.key === selectedSectionKey)?.items || [];
   }, [grouped, selectedSectionKey]);
+
+  // Clusters sectionClauses into standalone cards vs. variant groups (clauses
+  // sharing a variant_group are alternatives of one component, e.g. "Office
+  // Hours" vs "Shift Hours" under Working Hours) - display only, doesn't
+  // affect which clause a section actually resolves to.
+  type ClauseEntry = { kind: 'single'; clause: EcClause } | { kind: 'group'; key: string; clauses: EcClause[] };
+  const sectionEntries = useMemo<ClauseEntry[]>(() => {
+    const seenGroups = new Set<string>();
+    const entries: ClauseEntry[] = [];
+    for (const c of sectionClauses) {
+      if (c.variant_group) {
+        if (seenGroups.has(c.variant_group)) continue;
+        seenGroups.add(c.variant_group);
+        entries.push({ kind: 'group', key: c.variant_group, clauses: sectionClauses.filter((x) => x.variant_group === c.variant_group) });
+      } else {
+        entries.push({ kind: 'single', clause: c });
+      }
+    }
+    return entries;
+  }, [sectionClauses]);
+
+  // Existing group names in the currently-edited section, offered as a
+  // datalist so authors reuse a group instead of typo-ing new ones.
+  const groupNamesForSection = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of clauses) {
+      if (c.section_key === draft.section_key && c.variant_group) set.add(c.variant_group);
+    }
+    return Array.from(set).sort();
+  }, [clauses, draft.section_key]);
 
   const openNew = (sectionKey?: string) => {
     setEditingId(null);
@@ -276,49 +363,43 @@ export default function ClauseLibraryPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                  {sectionClauses.map((clause) => (
-                    <div
-                      key={clause.id}
-                      onClick={() => setSelectedClause(clause)}
-                      className={cn(
-                        "cursor-pointer border rounded-xl p-5 transition-all duration-200",
-                        selectedClause?.id === clause.id
-                          ? "border-custom-blue bg-blue-50 dark:bg-blue-900/20 shadow-md ring-1 ring-custom-blue/20"
-                          : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:shadow-md"
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="text-base font-semibold text-slate-800 dark:text-slate-100 truncate flex items-center gap-1.5">
-                            {clause.is_default && <Star className="h-4 w-4 text-amber-500 shrink-0" fill="currentColor" />}
-                            {clause.label}
-                          </p>
-                          <p className="text-sm text-slate-400 truncate">{clause.clause_key}</p>
-                        </div>
-                        <div className="flex gap-1 shrink-0">
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-700" onClick={(e) => { e.stopPropagation(); openEdit(clause); setSelectedClause(clause); }}>
-                            <Settings className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-600" onClick={(e) => { e.stopPropagation(); setDeletingId(clause.id); }}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 mt-3">
-                        {clause.is_default && (
-                          <Badge className="text-xs font-semibold bg-amber-50 text-amber-700 border-amber-200 rounded-full px-2 py-0.5" variant="outline">Default</Badge>
-                        )}
-                        <Badge className="text-xs font-semibold bg-slate-50 text-slate-600 border-slate-200 rounded-full px-2 py-0.5" variant="outline">
-                          {clause.company_id ? (companies.find((c) => String(c.id) === clause.company_id)?.company_name || 'Company') : 'Global'}
-                        </Badge>
-                        {clause.suggest_conditions?.length > 0 && (
-                          <Badge className="text-xs font-semibold bg-purple-50 text-purple-700 border-purple-200 rounded-full px-2 py-0.5" variant="outline">
-                            Rule-suggested
+                  {sectionEntries.map((entry) =>
+                    entry.kind === 'single' ? (
+                      <ClauseCard
+                        key={entry.clause.id}
+                        clause={entry.clause}
+                        companies={companies}
+                        selected={selectedClause?.id === entry.clause.id}
+                        onSelect={() => setSelectedClause(entry.clause)}
+                        onEdit={() => { openEdit(entry.clause); setSelectedClause(entry.clause); }}
+                        onDelete={() => setDeletingId(entry.clause.id)}
+                      />
+                    ) : (
+                      <div key={entry.key} className="xl:col-span-2 border border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-slate-100/60 dark:bg-slate-900/40">
+                        <div className="flex items-center gap-2 px-1.5 pb-2">
+                          <Layers className="h-4 w-4 text-custom-blue" />
+                          <p className="text-sm font-bold text-slate-700 dark:text-slate-200">{entry.key}</p>
+                          <Badge variant="outline" className="text-xs font-semibold rounded-full px-2 py-0 tabular-nums">
+                            {entry.clauses.length} variant{entry.clauses.length !== 1 ? 's' : ''}
                           </Badge>
-                        )}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {entry.clauses.map((clause) => (
+                            <ClauseCard
+                              key={clause.id}
+                              clause={clause}
+                              companies={companies}
+                              selected={selectedClause?.id === clause.id}
+                              onSelect={() => setSelectedClause(clause)}
+                              onEdit={() => { openEdit(clause); setSelectedClause(clause); }}
+                              onDelete={() => setDeletingId(clause.id)}
+                              compact
+                            />
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  )}
                 </div>
               )}
             </ScrollArea>
@@ -357,6 +438,9 @@ export default function ClauseLibraryPage() {
                     <div className="grid grid-cols-2 gap-2 text-sm">
                       <div><span className="text-slate-500">Key:</span> <span className="font-mono text-slate-700 dark:text-slate-200">{selectedClause.clause_key}</span></div>
                       <div><span className="text-slate-500">Scope:</span> <span className="font-medium text-slate-700 dark:text-slate-200">{selectedClause.company_id ? 'Company' : 'Global'}</span></div>
+                      {selectedClause.variant_group && (
+                        <div className="col-span-2"><span className="text-slate-500">Group:</span> <span className="font-medium text-slate-700 dark:text-slate-200">{selectedClause.variant_group}</span></div>
+                      )}
                       {selectedClause.suggest_conditions?.length > 0 && (
                         <div className="col-span-2">
                           <span className="text-slate-500">Suggest when:</span>{' '}
@@ -367,6 +451,32 @@ export default function ClauseLibraryPage() {
                       )}
                     </div>
                   </div>
+
+                  {selectedClause.variant_group && (
+                    <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-4">
+                      <p className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-2 flex items-center gap-1.5">
+                        <Layers className="h-3.5 w-3.5 text-custom-blue" /> Other variants in &ldquo;{selectedClause.variant_group}&rdquo;
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {clauses
+                          .filter((c) => c.section_key === selectedClause.section_key && c.variant_group === selectedClause.variant_group)
+                          .map((c) => (
+                            <button
+                              key={c.id}
+                              onClick={() => setSelectedClause(c)}
+                              className={cn(
+                                "text-sm rounded-full px-3 py-1 border transition-colors",
+                                c.id === selectedClause.id
+                                  ? "bg-custom-blue text-white border-custom-blue font-medium"
+                                  : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                              )}
+                            >
+                              {c.label}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-4">
                     <p className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-2">Content</p>
@@ -435,6 +545,21 @@ export default function ClauseLibraryPage() {
             <div className="space-y-1.5">
               <Label className="text-sm">Label</Label>
               <Input className="h-10" placeholder="e.g. Standard Office Hours" value={draft.label || ''} onChange={(e) => setDraft({ ...draft, label: e.target.value })} />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-sm">Variant group (optional)</Label>
+              <Input
+                className="h-10"
+                list="variant-group-options"
+                placeholder="e.g. Working Hours — leave blank if this clause stands alone"
+                value={draft.variant_group || ''}
+                onChange={(e) => setDraft({ ...draft, variant_group: e.target.value || null })}
+              />
+              <datalist id="variant-group-options">
+                {groupNamesForSection.map((g) => <option key={g} value={g} />)}
+              </datalist>
+              <p className="text-xs text-slate-400">Clauses sharing a group name show up together as alternatives of one component (e.g. Office Hours vs Shift Hours).</p>
             </div>
 
             <div className="space-y-1.5">
