@@ -143,11 +143,11 @@ export default function ClauseLibraryPage() {
   };
 
   return (
-    <div className="max-h-[calc(100vh-1rem)] w-full overflow-hidden bg-slate-50 dark:bg-slate-950 flex flex-col rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+    <div className="h-[calc(100vh-1rem)] w-full overflow-hidden bg-slate-50 dark:bg-slate-950 flex flex-col rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
       {/* HEADER */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-sm font-bold text-slate-800 dark:text-slate-100">Clause Library</h1>
+          <h1 className="text-base font-bold text-slate-800 dark:text-slate-100">Clause Library</h1>
           <div className="flex items-center gap-1 border-l border-slate-200 dark:border-slate-800 pl-3">
             <button
               onClick={() => togglePanel('sidebar')}
@@ -182,13 +182,13 @@ export default function ClauseLibraryPage() {
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <Link href="/dashboard/employment-contracts" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">Contracts</Link>
-          <Link href="/dashboard/employment-contracts/job-profiles" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"><Briefcase className="w-3.5 h-3.5" /> Job Profiles</Link>
-          <Link href="/dashboard/employment-contracts/templates" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"><Settings className="w-3.5 h-3.5" /> Templates</Link>
+          <Link href="/dashboard/employment-contracts" className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">Contracts</Link>
+          <Link href="/dashboard/employment-contracts/job-profiles" className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"><Briefcase className="w-4 h-4" /> Job Profiles</Link>
+          <Link href="/dashboard/employment-contracts/templates" className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"><Settings className="w-4 h-4" /> Templates</Link>
         </div>
       </div>
 
-      <PanelGroup direction="horizontal" className="h-full w-full">
+      <PanelGroup direction="horizontal" className="flex-1 min-h-0 w-full">
         {/* LEFT PANEL: Sections list */}
         <Panel
           ref={sidebarPanelRef}
@@ -203,28 +203,28 @@ export default function ClauseLibraryPage() {
         >
           <div className="flex flex-col h-full border-r border-slate-200 dark:border-slate-800">
             <div className="p-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
-              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+              <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                 <List className="w-4 h-4 text-custom-blue" />
                 Sections
               </h2>
-              <p className="text-[11px] text-slate-500 mt-0.5">21 standard contract sections</p>
+              <p className="text-xs text-slate-500 mt-0.5">21 standard contract sections</p>
             </div>
             <ScrollArea className="flex-1">
-              <div className="p-2 space-y-0.5">
+              <div className="p-2 space-y-1">
                 {grouped.map(({ section, items }) => (
                   <button
                     key={section.key}
                     onClick={() => { setSelectedSectionKey(section.key); setSelectedClause(null); }}
                     className={cn(
-                      "flex items-center w-full p-2 text-xs rounded-md transition-colors",
+                      "flex items-center w-full p-2.5 text-sm rounded-md transition-colors",
                       selectedSectionKey === section.key
                         ? "bg-custom-blue text-white font-medium shadow-sm"
                         : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                     )}
                   >
-                    <BookText className="w-3.5 h-3.5 mr-2 shrink-0" />
+                    <BookText className="w-4 h-4 mr-2 shrink-0" />
                     <span className="truncate flex-1 text-left">{section.title}</span>
-                    <Badge variant="outline" className="text-[9px] font-semibold rounded-full px-1.5 py-0 ml-1 tabular-nums">
+                    <Badge variant="outline" className="text-[10px] font-semibold rounded-full px-1.5 py-0 ml-1 tabular-nums">
                       {items.length}
                     </Badge>
                   </button>
@@ -239,8 +239,8 @@ export default function ClauseLibraryPage() {
         {/* CENTER PANEL: Clause cards for selected section */}
         <Panel
           ref={editorPanelRef}
-          defaultSize={50}
-          minSize={30}
+          defaultSize={38}
+          minSize={28}
           collapsible
           collapsedSize={0}
           onCollapse={() => setCollapsed(prev => ({ ...prev, editor: true }))}
@@ -251,37 +251,37 @@ export default function ClauseLibraryPage() {
             <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                    <BookText className="w-4 h-4 text-custom-blue" />
+                  <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                    <BookText className="w-5 h-5 text-custom-blue" />
                     {CONTRACT_SECTIONS.find(s => s.key === selectedSectionKey)?.title || 'Select a section'}
                   </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Reusable wording — authored once, reused by every Job Profile</p>
+                  <p className="text-sm text-slate-500 mt-0.5">Reusable wording — authored once, reused by every Job Profile</p>
                 </div>
-                <Button size="sm" className="h-8 text-xs" onClick={() => openNew()}>
-                  <PlusCircle className="h-3.5 w-3.5 mr-1.5" /> New Clause
+                <Button size="sm" className="h-9 text-sm" onClick={() => openNew()}>
+                  <PlusCircle className="h-4 w-4 mr-1.5" /> New Clause
                 </Button>
               </div>
             </div>
 
-            <ScrollArea className="flex-1 p-4">
+            <ScrollArea className="flex-1 p-5">
               {isLoading ? (
                 <div className="flex justify-center items-center h-64">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
               ) : sectionClauses.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-40 text-center border-2 border-dashed rounded-2xl border-slate-200 dark:border-slate-800">
-                  <BookText className="h-10 w-10 text-slate-300 mb-3" />
-                  <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">No clauses for this section</h3>
-                  <p className="text-xs text-slate-500 mt-1">Add a clause to get started.</p>
+                <div className="flex flex-col items-center justify-center h-64 text-center border-2 border-dashed rounded-2xl border-slate-200 dark:border-slate-800">
+                  <BookText className="h-12 w-12 text-slate-300 mb-3" />
+                  <h3 className="text-base font-semibold text-slate-700 dark:text-slate-200">No clauses for this section</h3>
+                  <p className="text-sm text-slate-500 mt-1">Add a clause to get started.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   {sectionClauses.map((clause) => (
                     <div
                       key={clause.id}
-                      onClick={() => { openEdit(clause); setSelectedClause(clause); }}
+                      onClick={() => setSelectedClause(clause)}
                       className={cn(
-                        "cursor-pointer border rounded-xl p-4 transition-all duration-200",
+                        "cursor-pointer border rounded-xl p-5 transition-all duration-200",
                         selectedClause?.id === clause.id
                           ? "border-custom-blue bg-blue-50 dark:bg-blue-900/20 shadow-md ring-1 ring-custom-blue/20"
                           : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:shadow-md"
@@ -289,30 +289,30 @@ export default function ClauseLibraryPage() {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate flex items-center gap-1.5">
-                            {clause.is_default && <Star className="h-3.5 w-3.5 text-amber-500 shrink-0" fill="currentColor" />}
+                          <p className="text-base font-semibold text-slate-800 dark:text-slate-100 truncate flex items-center gap-1.5">
+                            {clause.is_default && <Star className="h-4 w-4 text-amber-500 shrink-0" fill="currentColor" />}
                             {clause.label}
                           </p>
-                          <p className="text-xs text-slate-400 truncate">{clause.clause_key}</p>
+                          <p className="text-sm text-slate-400 truncate">{clause.clause_key}</p>
                         </div>
                         <div className="flex gap-1 shrink-0">
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-slate-700" onClick={(e) => { e.stopPropagation(); openEdit(clause); setSelectedClause(clause); }}>
-                            <Settings className="h-3.5 w-3.5" />
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-700" onClick={(e) => { e.stopPropagation(); openEdit(clause); setSelectedClause(clause); }}>
+                            <Settings className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-600" onClick={(e) => { e.stopPropagation(); setDeletingId(clause.id); }}>
-                            <Trash2 className="h-3.5 w-3.5" />
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-600" onClick={(e) => { e.stopPropagation(); setDeletingId(clause.id); }}>
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-1 mt-3">
+                      <div className="flex flex-wrap gap-1.5 mt-3">
                         {clause.is_default && (
-                          <Badge className="text-[10px] font-semibold bg-amber-50 text-amber-700 border-amber-200 rounded-full px-2 py-0.5" variant="outline">Default</Badge>
+                          <Badge className="text-xs font-semibold bg-amber-50 text-amber-700 border-amber-200 rounded-full px-2 py-0.5" variant="outline">Default</Badge>
                         )}
-                        <Badge className="text-[10px] font-semibold bg-slate-50 text-slate-600 border-slate-200 rounded-full px-2 py-0.5" variant="outline">
+                        <Badge className="text-xs font-semibold bg-slate-50 text-slate-600 border-slate-200 rounded-full px-2 py-0.5" variant="outline">
                           {clause.company_id ? (companies.find((c) => String(c.id) === clause.company_id)?.company_name || 'Company') : 'Global'}
                         </Badge>
                         {clause.suggest_conditions?.length > 0 && (
-                          <Badge className="text-[10px] font-semibold bg-purple-50 text-purple-700 border-purple-200 rounded-full px-2 py-0.5" variant="outline">
+                          <Badge className="text-xs font-semibold bg-purple-50 text-purple-700 border-purple-200 rounded-full px-2 py-0.5" variant="outline">
                             Rule-suggested
                           </Badge>
                         )}
@@ -330,8 +330,8 @@ export default function ClauseLibraryPage() {
         {/* RIGHT PANEL: Clause content preview */}
         <Panel
           ref={previewPanelRef}
-          defaultSize={32}
-          minSize={22}
+          defaultSize={44}
+          minSize={30}
           collapsible
           collapsedSize={0}
           onCollapse={() => setCollapsed(prev => ({ ...prev, preview: true }))}
@@ -339,22 +339,22 @@ export default function ClauseLibraryPage() {
           className="bg-slate-100 dark:bg-slate-900 flex flex-col z-10 border-l border-slate-200 dark:border-slate-800 !overflow-auto"
         >
           <div className="flex flex-col h-full">
-            <div className="p-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
-              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
+              <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-custom-blue" />
                 Clause Preview
               </h2>
-              <p className="text-[11px] text-slate-500 mt-0.5">Select a clause to preview its content</p>
+              <p className="text-xs text-slate-500 mt-0.5">Select a clause to preview its content</p>
             </div>
-            <div className="flex-1 overflow-auto p-3">
+            <div className="flex-1 overflow-auto p-4">
               {selectedClause ? (
                 <div className="space-y-4">
-                  <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-3 space-y-2">
+                  <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-4 space-y-2">
                     <div className="flex items-center gap-2">
-                      {selectedClause.is_default && <Star className="h-3.5 w-3.5 text-amber-500 shrink-0" fill="currentColor" />}
-                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{selectedClause.label}</p>
+                      {selectedClause.is_default && <Star className="h-4 w-4 text-amber-500 shrink-0" fill="currentColor" />}
+                      <p className="text-base font-bold text-slate-800 dark:text-slate-100">{selectedClause.label}</p>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2 text-sm">
                       <div><span className="text-slate-500">Key:</span> <span className="font-mono text-slate-700 dark:text-slate-200">{selectedClause.clause_key}</span></div>
                       <div><span className="text-slate-500">Scope:</span> <span className="font-medium text-slate-700 dark:text-slate-200">{selectedClause.company_id ? 'Company' : 'Global'}</span></div>
                       {selectedClause.suggest_conditions?.length > 0 && (
@@ -368,20 +368,20 @@ export default function ClauseLibraryPage() {
                     </div>
                   </div>
 
-                  <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-3">
-                    <p className="text-xs font-bold text-slate-600 dark:text-slate-300 mb-2">Content</p>
+                  <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-4">
+                    <p className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-2">Content</p>
                     <div
-                      className="prose prose-xs max-w-none text-slate-700 dark:text-slate-200 [&_strong]:text-slate-800 [&_strong]:dark:text-slate-100"
+                      className="prose prose-sm max-w-none text-slate-700 dark:text-slate-200 [&_strong]:text-slate-800 [&_strong]:dark:text-slate-100"
                       dangerouslySetInnerHTML={{ __html: selectedClause.content }}
                     />
                   </div>
 
                   {selectedClause.content?.includes('{{') && (
-                    <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-3">
-                      <p className="text-xs font-bold text-slate-600 dark:text-slate-300 mb-2">Placeholders Used</p>
+                    <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-4">
+                      <p className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-2">Placeholders Used</p>
                       <div className="flex flex-wrap gap-1.5">
                         {Array.from(selectedClause.content.matchAll(/\{\{(\w+)\}\}/g)).map((m, i) => (
-                          <Badge key={i} variant="outline" className="text-[10px] font-mono bg-slate-50 text-slate-600 border-slate-200 rounded-full px-2 py-0.5">
+                          <Badge key={i} variant="outline" className="text-xs font-mono bg-slate-50 text-slate-600 border-slate-200 rounded-full px-2 py-0.5">
                             {'{{' + m[1] + '}}'}
                           </Badge>
                         ))}
@@ -391,8 +391,8 @@ export default function ClauseLibraryPage() {
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center">
-                  <FileText className="w-10 h-10 text-slate-300 mb-3" />
-                  <p className="text-xs text-slate-500">Select a clause to preview its rendered content</p>
+                  <FileText className="w-12 h-12 text-slate-300 mb-3" />
+                  <p className="text-sm text-slate-500">Select a clause to preview its rendered content</p>
                 </div>
               )}
             </div>
@@ -404,15 +404,16 @@ export default function ClauseLibraryPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col rounded-2xl p-0">
           <DialogHeader className="sticky top-0 z-10 bg-white dark:bg-slate-900 px-6 pt-6 pb-4 border-b border-slate-200 dark:border-slate-800 rounded-t-2xl">
-            <DialogTitle className="text-base font-bold">{editingId ? 'Edit Clause' : 'New Clause'}</DialogTitle>
+            <DialogTitle className="text-lg font-bold">{editingId ? 'Edit Clause' : 'New Clause'}</DialogTitle>
           </DialogHeader>
 
           <ScrollArea className="flex-1 overflow-auto px-6 py-4">
+            <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label className="text-xs">Section</Label>
+                <Label className="text-sm">Section</Label>
                 <Select value={draft.section_key} onValueChange={(v) => setDraft({ ...draft, section_key: v })}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {CONTRACT_SECTIONS.map((s) => (
                       <SelectItem key={s.key} value={s.key}>{s.title}</SelectItem>
@@ -421,9 +422,9 @@ export default function ClauseLibraryPage() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Clause key</Label>
+                <Label className="text-sm">Clause key</Label>
                 <Input
-                  className="h-9"
+                  className="h-10"
                   placeholder="e.g. standard_office"
                   value={draft.clause_key || ''}
                   onChange={(e) => setDraft({ ...draft, clause_key: e.target.value.trim().toLowerCase().replace(/\s+/g, '_') })}
@@ -432,26 +433,26 @@ export default function ClauseLibraryPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs">Label</Label>
-              <Input className="h-9" placeholder="e.g. Standard Office Hours" value={draft.label || ''} onChange={(e) => setDraft({ ...draft, label: e.target.value })} />
+              <Label className="text-sm">Label</Label>
+              <Input className="h-10" placeholder="e.g. Standard Office Hours" value={draft.label || ''} onChange={(e) => setDraft({ ...draft, label: e.target.value })} />
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs">Content</Label>
+              <Label className="text-sm">Content</Label>
               <Textarea
-                className="min-h-[160px] font-mono text-xs"
+                className="min-h-[160px] font-mono text-sm"
                 placeholder="<p>The Employee shall work {{working_days}}, {{working_hours}}.</p>"
                 value={draft.content || ''}
                 onChange={(e) => setDraft({ ...draft, content: e.target.value })}
               />
-              <p className="text-[11px] text-slate-400">HTML with {'{{tokens}}'} - employee/company fields (employee_name, kra_pin, ...) and settings keys (working_hours, notice_period, benefits, ...) both resolve here.</p>
+              <p className="text-xs text-slate-400">HTML with {'{{tokens}}'} - employee/company fields (employee_name, kra_pin, ...) and settings keys (working_hours, notice_period, benefits, ...) both resolve here.</p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label className="text-xs">Scope</Label>
+                <Label className="text-sm">Scope</Label>
                 <Select value={draft.company_id || '__global__'} onValueChange={(v) => setDraft({ ...draft, company_id: v === '__global__' ? null : v })}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__global__">Global (any company)</SelectItem>
                     {companies.map((c) => (
@@ -460,29 +461,30 @@ export default function ClauseLibraryPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex items-center justify-between border border-slate-200 dark:border-slate-800 rounded-lg px-3 h-9 mt-[22px]">
-                <Label className="text-xs">Default for section</Label>
+              <div className="flex items-center justify-between border border-slate-200 dark:border-slate-800 rounded-lg px-3 h-10 mt-[22px]">
+                <Label className="text-sm">Default for section</Label>
                 <Switch checked={!!draft.is_default} onCheckedChange={(v) => setDraft({ ...draft, is_default: v })} />
               </div>
             </div>
 
-            <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-3">
-              <Label className="text-xs font-semibold text-slate-600">Suggest this clause when... (optional)</Label>
+            <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-4 space-y-3">
+              <Label className="text-sm font-semibold text-slate-600">Suggest this clause when... (optional)</Label>
               <div className="grid grid-cols-2 gap-3">
-                <Input className="h-8 text-xs" placeholder="Employment type" value={condition.employment_type || ''} onChange={(e) => setCondition({ ...condition, employment_type: e.target.value || undefined })} />
-                <Input className="h-8 text-xs" placeholder="Job level" value={condition.job_level || ''} onChange={(e) => setCondition({ ...condition, job_level: e.target.value || undefined })} />
-                <Input className="h-8 text-xs" placeholder="Work arrangement" value={condition.work_arrangement || ''} onChange={(e) => setCondition({ ...condition, work_arrangement: e.target.value || undefined })} />
-                <Input className="h-8 text-xs" placeholder="Department" value={condition.department || ''} onChange={(e) => setCondition({ ...condition, department: e.target.value || undefined })} />
+                <Input className="h-9 text-sm" placeholder="Employment type" value={condition.employment_type || ''} onChange={(e) => setCondition({ ...condition, employment_type: e.target.value || undefined })} />
+                <Input className="h-9 text-sm" placeholder="Job level" value={condition.job_level || ''} onChange={(e) => setCondition({ ...condition, job_level: e.target.value || undefined })} />
+                <Input className="h-9 text-sm" placeholder="Work arrangement" value={condition.work_arrangement || ''} onChange={(e) => setCondition({ ...condition, work_arrangement: e.target.value || undefined })} />
+                <Input className="h-9 text-sm" placeholder="Department" value={condition.department || ''} onChange={(e) => setCondition({ ...condition, department: e.target.value || undefined })} />
               </div>
               <div className="flex items-center gap-2">
-                <Label className="text-xs text-slate-500 shrink-0">Priority (ties broken by highest)</Label>
+                <Label className="text-sm text-slate-500 shrink-0">Priority (ties broken by highest)</Label>
                 <Input
                   type="number"
-                  className="h-8 text-xs w-20"
+                  className="h-9 text-sm w-20"
                   value={draft.suggest_priority ?? 0}
                   onChange={(e) => setDraft({ ...draft, suggest_priority: Number(e.target.value) || 0 })}
                 />
               </div>
+            </div>
             </div>
           </ScrollArea>
 
@@ -501,16 +503,16 @@ export default function ClauseLibraryPage() {
       <AlertDialog open={!!deletingId} onOpenChange={(open) => !open && setDeletingId(null)}>
         <AlertDialogContent className="rounded-2xl max-w-sm">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-base font-bold text-slate-800">Delete this clause?</AlertDialogTitle>
-            <AlertDialogDescription className="text-xs text-slate-500">
+            <AlertDialogTitle className="text-lg font-bold text-slate-800">Delete this clause?</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm text-slate-500">
               Job Profiles referencing this clause will fall back to the section's default clause. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2 mt-4">
-            <AlertDialogCancel className="h-9 px-4 rounded-full text-xs font-semibold">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="h-9 px-4 rounded-full text-sm font-semibold">Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => { if (deletingId) handleDelete(deletingId); setDeletingId(null); }}
-              className="h-9 px-4 rounded-full bg-red-600 hover:bg-red-700 text-white text-xs font-semibold shadow-md shadow-red-500/10 border-0"
+              className="h-9 px-4 rounded-full bg-red-600 hover:bg-red-700 text-white text-sm font-semibold shadow-md shadow-red-500/10 border-0"
             >
               Delete
             </AlertDialogAction>

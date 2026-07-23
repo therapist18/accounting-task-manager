@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import supabase from '@/lib/supabase/client';
-import { PreviewPanel } from '../../tasks-requirements/components/PreviewPanel';
 import { replacePlaceholders } from '../../tasks-requirements/utils/templateFormatters';
-import { EDITOR_PREVIEW_STYLES } from '../../tasks-requirements/utils/templateUtils';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Download, Loader2, Save, FileText, FileWarning, Palette, FileDown, SlidersHorizontal } from 'lucide-react';
+import {
+  Download, Loader2, Save, FileText, FileWarning, Palette, FileDown,
+  ZoomIn, ZoomOut, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+} from 'lucide-react';
 import { saveAs } from 'file-saver';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -48,8 +48,19 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
   const htmlCaptureRef = useRef<HTMLDivElement>(null);
+  const contentMeasureRef = useRef<HTMLDivElement>(null);
 
-  // Load base context (clauses, profiles, company) when company changes.
+  // Pagination Configuration
+  const PAGE_WIDTH_PX = 794; // Standard A4 width at 96dpi
+  const PAGE_HEIGHT_PX = 1123; // Standard A4 height at 96dpi
+  const [zoomPct, setZoomPct] = useState(80);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [contentHeightPx, setContentHeightPx] = useState(0);
+  
+  // Calculate total pages safely based on real measured height
+  const totalPages = Math.max(1, Math.ceil(contentHeightPx / PAGE_HEIGHT_PX));
+
+  // Load base context
   useEffect(() => {
     async function loadContext() {
       if (!companyId) return;
@@ -67,8 +78,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     loadContext();
   }, [companyId]);
 
-  // Resolve the template: use the override from the editor if present,
-  // otherwise fall back to the effective (auto-selected) template.
+  // Resolve template
   useEffect(() => {
     async function resolveTemplate() {
       if (!companyId) return;
@@ -83,6 +93,38 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     }
     resolveTemplate();
   }, [companyId, selectedTemplateId]);
+
+  // Reset to page 1 on document switch
+  useEffect(() => { setPageIndex(0); }, [employee?.individualId, contractTemplate?.id]);
+
+  // Track natural unscaled height for pagination math
+  useEffect(() => {
+    const el = contentMeasureRef.current;
+    if (!el) return;
+    
+    const measure = () => {
+      // Short delay allows any injected web fonts/theme images to settle before measuring
+      setTimeout(() => setContentHeightPx(el.scrollHeight), 50);
+    };
+    
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    
+    // Also bind to image loads if the theme contains logos
+    const images = el.querySelectorAll('img');
+    images.forEach(img => img.addEventListener('load', measure));
+    
+    return () => {
+      observer.disconnect();
+      images.forEach(img => img.removeEventListener('load', measure));
+    };
+  }, [contractTemplate, themeOverride]);
+
+  // Clamp page index if content shrinks (e.g. changing theme)
+  useEffect(() => {
+    setPageIndex((p) => Math.min(p, totalPages - 1 >= 0 ? totalPages - 1 : 0));
+  }, [totalPages]);
 
   const clausesById = useMemo(() => Object.fromEntries(clauses.map((c) => [c.id, c])), [clauses]);
   const defaultClauseMap = useMemo(() => buildDefaultClauseMap(clauses), [clauses]);
@@ -116,9 +158,6 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const themeSettings: ContractThemeSettings = themeOverride || contractTemplate?.theme_settings || DEFAULT_CONTRACT_THEME;
   const mergedValues = { ...effectiveSettings, ...employeeValues };
 
-  // Theme first (its header/letterhead may inject its own {{company_name}} etc. tokens),
-  // then substitute over the whole themed result - same ordering the old flow used, see
-  // themeEngine.applyThemeToHtml.
   const themedHtml = bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings), mergedValues) : '';
   const wordSafeHtml = bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings, { wordSafe: true }), mergedValues) : '';
 
@@ -156,22 +195,16 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
         )
       );
 
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-      });
-
+      const canvas = await html2canvas(element, { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' });
       const imgData = canvas.toDataURL('image/jpeg', 0.95);
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
       const imgWidth = pageWidth;
       const imgHeight = (canvas.height * pageWidth) / canvas.width;
-      const totalPages = Math.ceil(imgHeight / pageHeight);
+      const totalPdfPages = Math.ceil(imgHeight / pageHeight);
 
-      for (let i = 0; i < totalPages; i++) {
+      for (let i = 0; i < totalPdfPages; i++) {
         if (i > 0) pdf.addPage();
         pdf.addImage(imgData, 'JPEG', 0, -(i * pageHeight), imgWidth, imgHeight);
       }
@@ -191,7 +224,6 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     if (!output || !employee || !offer || !contractTemplate || !selectedJobProfile) return;
     setIsSaving(true);
     try {
-      // 1. Persist the Employment Offer itself (may still be an unsaved draft).
       const offerPayload = { ...offer, job_profile_id: selectedJobProfile.id, status: 'active' as const };
       const persistedOffer = offer.id
         ? await updateEmploymentOffer(offer.id, offerPayload)
@@ -199,17 +231,11 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
       if (!persistedOffer) throw new Error('Failed to save the employment offer');
       setContractData?.((prev: any) => ({ ...prev, offer: persistedOffer }));
 
-      // 2. Upload the generated document to storage
       const fileName = `generated/${employee.companyId}/${employee.individualId}/${Date.now()}_contract.doc`;
-      const { error: uploadError } = await supabase.storage
-        .from("kyc-templates") // Can use a separate bucket like "contracts" in real deployment
-        .upload(fileName, output.blob, { contentType: output.blob.type });
-
+      const { error: uploadError } = await supabase.storage.from("kyc-templates").upload(fileName, output.blob, { contentType: output.blob.type });
       if (uploadError) throw new Error('Failed to upload generated document to storage');
 
-      // 3. Save record to acc_employment_contracts
       const { data: { session } } = await supabase.auth.getSession();
-
       const { data: insertData, error: insertError } = await supabase
         .from('acc_employment_contracts')
         .insert([{
@@ -219,13 +245,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
           template_id: contractTemplate.id,
           status: 'generated',
           docx_path: fileName,
-          metadata: {
-            jobProfileId: selectedJobProfile.id,
-            employmentOfferId: persistedOffer.id,
-            contractTemplateId: contractTemplate.id,
-            effectiveSettings,
-            themeSettings,
-          },
+          metadata: { jobProfileId: selectedJobProfile.id, employmentOfferId: persistedOffer.id, contractTemplateId: contractTemplate.id, effectiveSettings, themeSettings },
           generated_by: session?.user?.id || null
         }])
         .select()
@@ -233,124 +253,185 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
 
       if (insertError) throw new Error('Failed to save contract record');
 
-      // 4. Save audit trail
       if (insertData) {
         await supabase.from('acc_employment_contracts_audit').insert([{
-          contract_id: insertData.id,
-          action: 'generated',
-          user_id: session?.user?.id || null,
-          details: `Contract generated for ${employee.fullName}`
+          contract_id: insertData.id, action: 'generated', user_id: session?.user?.id || null, details: `Contract generated for ${employee.fullName}`
         }]);
       }
 
       toast.success('Contract generated and saved successfully!');
     } catch (err: any) {
-      console.error(err);
       toast.error(err.message || 'Error saving contract');
     } finally {
       setIsSaving(false);
     }
   };
 
-  if (!employee) {
+  if (!employee || !selectedJobProfile) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-500 p-8 text-center bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800">
-        <FileText className="w-16 h-16 mb-4 text-slate-200 dark:text-slate-700" />
-        <h3 className="text-lg font-medium text-slate-700 dark:text-slate-300">Live Document Preview</h3>
-        <p className="text-sm">Select an employee and a job profile to view the generated document.</p>
-      </div>
-    );
-  }
-
-  if (!selectedJobProfile) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-500 p-8 text-center bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800">
-        <FileWarning className="w-16 h-16 mb-4 text-amber-300" />
-        <h3 className="text-lg font-medium text-slate-700 dark:text-slate-300">No Job Profile Selected</h3>
-        <p className="text-sm">Pick a Job Profile in the configuration panel to generate this contract.</p>
+      <div className="flex flex-col items-center justify-center h-full text-slate-500 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm mx-5 mb-5 lg:ml-0 lg:flex-1 lg:min-w-[600px]">
+        <FileWarning className="w-12 h-12 mb-4 text-slate-300 dark:text-slate-700" />
+        <h3 className="text-[15px] font-medium text-slate-700 dark:text-slate-300">
+          {!employee ? 'No Employee Selected' : 'No Job Profile Selected'}
+        </h3>
+        <p className="text-[13px] mt-1 text-slate-500">Configure the basic terms to preview the document.</p>
       </div>
     );
   }
 
   const hasOutput = !!bodyHtml;
 
-  // Active Configurations strip - a quick-glance recap of the resolved
-  // settings actually feeding this contract, pulled from the same
-  // effectiveSettings/mergedValues already computed above for rendering.
-  const configChips: { label: string; value: string }[] = [
-    { label: 'Employment Type', value: mergedValues.employment_type },
-    { label: 'Job Level', value: mergedValues.job_level },
-    { label: 'Working Schedule', value: [mergedValues.working_days, mergedValues.working_hours].filter(Boolean).join(' • ') },
-    { label: 'Notice Period', value: mergedValues.notice_period },
-    { label: 'Probation', value: mergedValues.probation_period },
-    { label: 'Benefits', value: mergedValues.medical_cover },
-  ].filter((c) => !!c.value);
+  // Variables for explicit scale footprint to fix inner bounding box issues
+  const zoomRatio = zoomPct / 100;
+  const scaledWidth = PAGE_WIDTH_PX * zoomRatio;
+  const scaledHeight = PAGE_HEIGHT_PX * zoomRatio;
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 border-l border-slate-200 dark:border-slate-800 relative overflow-hidden">
-      <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between shrink-0">
+    <div className="flex flex-col h-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden flex-1 lg:min-w-[600px] relative">
+      
+      {/* Header & Toolbar */}
+      <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-white dark:bg-slate-900 z-10 gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-            Document Preview
+          <h2 className="text-[15px] font-semibold text-slate-900 dark:text-slate-100 mb-0.5">
+            Contract Preview
           </h2>
-          <p className="text-xs text-slate-500">Live preview of the generated contract</p>
+          <div className="text-[12px] text-slate-500">
+            <span>Theme: {themeSettings.name || 'Custom'}</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Zoom Controls */}
+          <div className="flex items-center border border-slate-200 dark:border-slate-700 rounded-md bg-slate-50 dark:bg-slate-900/50 h-8 mr-1">
+            <button onClick={() => setZoomPct((z) => Math.max(40, z - 10))} disabled={zoomPct <= 40} className="px-2 h-full text-slate-500 hover:text-slate-800 disabled:opacity-50 transition-colors">
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            <span className="text-[12px] font-medium text-slate-700 dark:text-slate-300 w-10 text-center tabular-nums border-x border-slate-200 dark:border-slate-700 h-full flex items-center justify-center bg-white dark:bg-slate-900">
+              {zoomPct}%
+            </span>
+            <button onClick={() => setZoomPct((z) => Math.min(150, z + 10))} disabled={zoomPct >= 150} className="px-2 h-full text-slate-500 hover:text-slate-800 disabled:opacity-50 transition-colors">
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="h-5 w-px bg-slate-200 dark:bg-slate-700 mx-1 hidden sm:block"></div>
+
+          {/* Action Buttons */}
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-8 text-[13px] bg-white dark:bg-slate-900 shadow-sm"
             onClick={() => setThemePanelOpen(true)}
-            disabled={!contractTemplate}
-            className={cn(themePanelOpen && "border-custom-blue text-custom-blue")}
           >
-            <Palette className="w-4 h-4 mr-2" /> Theme
+            <Palette className="w-3.5 h-3.5 mr-2 text-blue-600" /> Theme
           </Button>
-          <Button variant="outline" size="sm" onClick={handleDownloadPdf} disabled={!hasOutput || loadingContext || isGeneratingPdf}>
-            {isGeneratingPdf ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileDown className="w-4 h-4 mr-2" />} PDF
+
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-8 text-[13px] bg-white dark:bg-slate-900 shadow-sm"
+            onClick={handleDownloadPdf} 
+            disabled={!hasOutput || loadingContext || isGeneratingPdf}
+          >
+            {isGeneratingPdf ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin text-slate-500" /> : <FileDown className="w-3.5 h-3.5 mr-2 text-slate-500" />} PDF
           </Button>
-          <Button variant="outline" size="sm" onClick={handleDownloadWord} disabled={!hasOutput || loadingContext}>
-            <Download className="w-4 h-4 mr-2" /> Word
+          
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-8 text-[13px] bg-white dark:bg-slate-900 shadow-sm"
+            onClick={handleDownloadWord} 
+            disabled={!hasOutput || loadingContext}
+          >
+            <FileText className="w-3.5 h-3.5 mr-2 text-slate-500" /> Word
           </Button>
-          <Button size="sm" className="bg-custom-blue hover:bg-custom-blue/90 text-white" onClick={handleSaveToDb} disabled={!hasOutput || loadingContext || isSaving}>
-            {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+          
+          <Button 
+            size="sm" 
+            className="h-8 text-[13px] bg-blue-600 hover:bg-blue-700 text-white shadow-sm ml-1"
+            onClick={handleSaveToDb} 
+            disabled={!hasOutput || loadingContext || isSaving}
+          >
+            {isSaving ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-2" />} 
             Generate & Save
           </Button>
         </div>
       </div>
 
-      {configChips.length > 0 && (
-        <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/50 flex items-center gap-2 flex-wrap shrink-0">
-          <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-          {configChips.map((chip) => (
-            <Badge
-              key={chip.label}
-              variant="outline"
-              className="text-[10px] font-medium bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 rounded-full px-2 py-0.5"
-            >
-              <span className="text-slate-400 mr-1">{chip.label}:</span>{chip.value}
-            </Badge>
-          ))}
-        </div>
-      )}
-
-      <div className="flex-1 overflow-hidden relative flex flex-col min-h-0">
+      {/* Main Preview Area (Removed custom-scrollbar to restore clean OS scrollbars) */}
+      <div className="flex-1 overflow-auto bg-[#F8F9FB] dark:bg-slate-950/50 flex flex-col items-center">
         {!contractTemplate && !loadingContext ? (
-          <div className="flex flex-col items-center justify-center h-full text-red-500 p-8 text-center bg-red-50/50 dark:bg-red-950/50">
-            <FileWarning className="w-12 h-12 mb-4 text-red-400" />
-            <p className="text-sm font-medium">No Contract Template configured for this company yet. Set one up under "Manage Templates".</p>
+          <div className="flex flex-col items-center justify-center h-full text-slate-400">
+            <FileWarning className="w-10 h-10 mb-3" />
+            <p className="text-[13px]">No Contract Template configured.</p>
+          </div>
+        ) : loadingContext ? (
+          <div className="flex items-center justify-center h-full min-h-[300px]">
+            <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
           </div>
         ) : (
-          <PreviewPanel
-            previewContent={themedHtml}
-            isPreviewLoading={loadingContext}
-            panelClasses="h-full"
-            EDITOR_PREVIEW_STYLES={EDITOR_PREVIEW_STYLES}
-            templateName={contractTemplate?.name || 'Employment Contract'}
-            isWordTemplate={false}
-            docxBuffer={undefined}
-          />
+          <div className="py-8 px-4 flex flex-col items-center min-h-full">
+            
+            {/* 
+              THE FIX: This wrapper claims the precise scaled dimensions.
+              This guarantees the container doesn't generate false internal scrollbars.
+            */}
+            <div 
+              className="relative shrink-0 transition-all duration-200 ease-out"
+              style={{ width: scaledWidth, height: scaledHeight }}
+            >
+              {/* The A4 Canvas Document */}
+              <div 
+                className="absolute top-0 left-0 bg-white shadow-md border border-slate-200/80 overflow-hidden"
+                style={{
+                  width: PAGE_WIDTH_PX,
+                  height: PAGE_HEIGHT_PX,
+                  transform: `scale(${zoomRatio})`,
+                  transformOrigin: 'top left',
+                  color: 'black' // Force standard paper text coloring
+                }}
+              >
+                {/* Sliding Window for Pagination */}
+                <div 
+                  className="w-full transition-transform duration-300 ease-in-out"
+                  style={{ transform: `translateY(-${pageIndex * PAGE_HEIGHT_PX}px)` }}
+                >
+                  {/* Added p-12 (48px) padding here so text doesn't scrape the physical edges */}
+                  <div className="p-12 text-[14.5px] leading-relaxed">
+                    <div dangerouslySetInnerHTML={{ __html: themedHtml }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
         )}
       </div>
+
+      {/* Sticky Pagination Controls - Fixed to the bottom */}
+      {contractTemplate && !loadingContext && (
+        <div className="shrink-0 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-2.5 flex items-center justify-center gap-6 text-[13px] text-slate-600 dark:text-slate-300 font-medium z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+          <div className="flex items-center gap-1">
+            <button onClick={() => setPageIndex(0)} disabled={pageIndex === 0} className="p-1.5 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+              <ChevronsLeft className="w-4 h-4" />
+            </button>
+            <button onClick={() => setPageIndex(p => p - 1)} disabled={pageIndex === 0} className="p-1.5 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+          </div>
+          
+          <span className="tabular-nums min-w-[100px] text-center">Page {pageIndex + 1} of {totalPages}</span>
+          
+          <div className="flex items-center gap-1">
+            <button onClick={() => setPageIndex(p => p + 1)} disabled={pageIndex >= totalPages - 1} className="p-1.5 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <button onClick={() => setPageIndex(totalPages - 1)} disabled={pageIndex >= totalPages - 1} className="p-1.5 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+              <ChevronsRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       <ContractThemePanel
         open={themePanelOpen}
@@ -359,10 +440,29 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
         onChange={updateThemeSettings}
       />
 
-      {/* Hidden, unscaled capture target for PDF export - kept out of view but laid out
-          at natural size so html2canvas doesn't have to fight any zoom/scale transform. */}
-      <div className="fixed left-[-99999px] top-0 pointer-events-none" aria-hidden="true">
-        <div ref={htmlCaptureRef} className="bg-white w-[800px] p-10" dangerouslySetInnerHTML={{ __html: themedHtml }} />
+      {/* 
+        HIDDEN RENDER TARGETS
+        1. measure-target: Accurately sizes the pure DOM unscaled for pagination math.
+        Must strictly match the visual container (p-12) to keep math accurate.
+      */}
+      <div 
+        className="absolute top-0 left-0 pointer-events-none z-[-1] opacity-0" 
+        aria-hidden="true"
+      >
+        <div 
+          ref={contentMeasureRef} 
+          className="bg-white" 
+          style={{ width: PAGE_WIDTH_PX }} 
+        >
+          <div className="p-12 text-[14.5px] leading-relaxed">
+            <div dangerouslySetInnerHTML={{ __html: themedHtml }} />
+          </div>
+        </div>
+        
+        {/* capture-target: Pure DOM with safety padding for PDF extraction. */}
+        <div ref={htmlCaptureRef} className="bg-white text-black p-12 text-[14.5px] leading-relaxed" style={{ width: PAGE_WIDTH_PX }}>
+          <div dangerouslySetInnerHTML={{ __html: themedHtml }} />
+        </div>
       </div>
     </div>
   );

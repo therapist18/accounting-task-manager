@@ -93,6 +93,7 @@ export default function EmploymentContractTemplatesPage() {
   const [draft, setDraft] = useState<Draft>(emptyDraft(null));
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState<EcContractTemplate | null>(null);
 
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
   const editorPanelRef = useRef<ImperativePanelHandle>(null);
@@ -146,6 +147,7 @@ export default function EmploymentContractTemplatesPage() {
   };
 
   const openEdit = (template: EcContractTemplate) => {
+    setSelectedTemplate(template);
     setDraft({
       id: template.id,
       name: template.name,
@@ -211,10 +213,10 @@ export default function EmploymentContractTemplatesPage() {
   };
 
   const previewHtml = useMemo(() => {
-    if (!draft.id && !dialogOpen) return '';
-    const themed = applyThemeToHtml(PREVIEW_SAMPLE_HTML, draft.themeSettings);
-    return themed;
-  }, [draft.themeSettings, dialogOpen]);
+    const themeSettings = dialogOpen ? draft.themeSettings : selectedTemplate?.theme_settings;
+    if (!themeSettings) return '';
+    return applyThemeToHtml(PREVIEW_SAMPLE_HTML, themeSettings);
+  }, [draft.themeSettings, dialogOpen, selectedTemplate]);
 
   const selectedCompany = useMemo(() =>
     companies.find(c => String(c.id) === selectedCompanyId) || null,
@@ -224,8 +226,13 @@ export default function EmploymentContractTemplatesPage() {
   const renderCard = (template: EcContractTemplate) => (
     <Card
       key={template.id}
-      onClick={() => openEdit(template)}
-      className="cursor-pointer border border-slate-100 dark:border-slate-800 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden"
+      onClick={() => setSelectedTemplate(template)}
+      className={cn(
+        "cursor-pointer border rounded-xl shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden",
+        selectedTemplate?.id === template.id
+          ? "border-custom-blue ring-1 ring-custom-blue/20"
+          : "border-slate-100 dark:border-slate-800"
+      )}
     >
       <CardHeader className="p-4">
         <CardTitle className="flex justify-between items-start gap-2 text-sm font-bold text-slate-800 dark:text-slate-100">
@@ -437,7 +444,7 @@ export default function EmploymentContractTemplatesPage() {
               <p className="text-[11px] text-slate-500 mt-0.5">Preview of the selected template's theme</p>
             </div>
             <div className="flex-1 overflow-auto p-3">
-              {dialogOpen && previewHtml ? (
+              {previewHtml ? (
                 <div
                   className="bg-white rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden"
                   dangerouslySetInnerHTML={{ __html: previewHtml }}
@@ -445,7 +452,7 @@ export default function EmploymentContractTemplatesPage() {
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center">
                   <FileText className="w-10 h-10 text-slate-300 mb-3" />
-                  <p className="text-xs text-slate-500">Open a template editor to preview its theme</p>
+                  <p className="text-xs text-slate-500">Select a template to preview its theme</p>
                 </div>
               )}
             </div>

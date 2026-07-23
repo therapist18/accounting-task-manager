@@ -27,7 +27,12 @@ export const DEFAULT_CONTRACT_THEME: ContractThemeSettings = {
   accentColor: THEME_DEFAULTS.corporate.accentColor,
   fontFamily: THEME_DEFAULTS.corporate.fontFamily,
   fontScale: 1,
-  brandingStrategy: 'theme_header',
+  // 'theme_header' renders a large decorative banner with hardcoded generic
+  // text (not the real company) - fine as an optional style choice, but a
+  // poor default since it duplicates the document's own "heading" clause
+  // and isn't tied to real data. 'company_letterhead' is compact and uses
+  // real {{company_name}}/{{company_address}}/{{company_email}} tokens.
+  brandingStrategy: 'company_letterhead',
 };
 
 export const COLOR_PRESETS = [
@@ -338,10 +343,14 @@ export function applyThemeToHtml(content: string, settings: ContractThemeSetting
     const header = THEME_HEADERS[theme]?.(args) || '';
     finalContent = `${header}\n<div class="document-body">${finalContent}</div>`;
   } else if (settings.brandingStrategy === 'company_letterhead') {
-    const companyHeader = `<div style="text-align: center; margin-bottom: 48px; font-family: sans-serif;">
-        <h1 style="margin: 0; font-size: 28px; font-weight: 800; color: ${args.primaryColor}; text-transform: uppercase; letter-spacing: 0.05em;">{{company_name}}</h1>
-        <p style="margin: 12px 0; font-size: 13px; color: #64748b; letter-spacing: 0.02em;">{{company_address}} | {{company_email}}</p>
-        <hr style="border: 0; border-top: 2px solid ${args.accentColor}; margin-top: 24px; width: 100px; margin-left: auto; margin-right: auto;" />
+    // Compact two-column letterhead (name/tagline left, address block right,
+    // thin accent rule beneath) - deliberately small, since the document's
+    // own "heading"/"parties" clauses already carry the actual contract
+    // title/preamble further down. This block is letterhead branding only,
+    // not a second title page.
+    const companyHeader = `<div style="font-family: sans-serif; padding-bottom: 12px; margin-bottom: 20px; border-bottom: 2px solid ${args.accentColor}; display: flex; justify-content: space-between; align-items: flex-end; gap: 16px;">
+        <div style="font-size: 17px; font-weight: 800; color: ${args.primaryColor}; letter-spacing: 0.01em;">{{company_name}}</div>
+        <div style="text-align: right; font-size: 10px; color: #64748b; line-height: 1.5;">{{company_address}}<br/>{{company_email}}</div>
     </div>`;
     finalContent = `${companyHeader}\n<div class="document-body">${finalContent}</div>`;
   }

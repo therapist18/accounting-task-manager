@@ -19,12 +19,17 @@ export interface EcJobProfile {
   updated_at: string;
 }
 
-export async function fetchJobProfiles(companyId: string | number): Promise<EcJobProfile[]> {
-  const { data, error } = await supabase
+export async function fetchJobProfiles(companyId?: string | number): Promise<EcJobProfile[]> {
+  let query = supabase
     .from('ec_job_profiles')
     .select('*')
-    .eq('company_id', String(companyId))
     .order('name', { ascending: true });
+
+  if (companyId) {
+    query = query.eq('company_id', String(companyId));
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('Error fetching job profiles:', error);
