@@ -64,10 +64,10 @@ export function buildStandardPlaceholderValues(
     department: employee.department,
     job_title: employee.jobTitle,
     employment_type: employee.employmentType,
-    employment_status: employee.employmentStatus || employee.status || 'Active',
-    job_level: employee.jobLevel || String(s.job_level || ''),
-    reports_to: employee.reportsTo || String(s.reports_to || ''),
-    work_location: employee.workLocation || String(s.work_location || ''),
+    employment_status: employee.status || 'Active',
+    job_level: String(s.job_level || ''),
+    reports_to: String(s.reports_to || ''),
+    work_location: String(s.work_location || ''),
     work_arrangement: employee.workArrangement,
 
     // ── Salary / compensation ──────────────────────────────────────────

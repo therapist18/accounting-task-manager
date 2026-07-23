@@ -8,6 +8,15 @@
 
 -- Helper: resolve a clause ID by clause_key (global, is_default = true)
 -- Used inline below so section_clauses always point to real clause rows.
+--
+-- NOTE: section_clauses is built with jsonb_build_object(...), not a
+-- '{...}'::jsonb string literal - a jsonb literal is static JSON text, and
+-- JSON has no syntax for "the result of this subquery" as a value. Every
+-- (SELECT ...) here has to be a real SQL expression passed as a function
+-- argument so Postgres evaluates it, not text sitting inside a quoted
+-- string (which is what caused the "syntax error at or near ..." - the
+-- nested single-quotes around each clause_key were closing the outer
+-- string literal early).
 
 -- ─── 1. COMPANY DEFAULTS ──────────────────────────────────────────────────────
 INSERT INTO ec_job_profiles (
@@ -34,29 +43,29 @@ INSERT INTO ec_job_profiles (
     "reports_to": "As assigned by management",
     "work_location": "Company headquarters, Nairobi"
   }'::jsonb,
-  '{
-    "heading":            (SELECT id FROM ec_clauses WHERE clause_key = 'standard_heading'            AND company_id IS NULL AND is_default = true LIMIT 1),
-    "parties":            (SELECT id FROM ec_clauses WHERE clause_key = 'standard_parties'            AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appointment":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_appointment'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "place_of_work":      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_place_of_work'      AND company_id IS NULL AND is_default = true LIMIT 1),
-    "duties":             (SELECT id FROM ec_clauses WHERE clause_key = 'standard_duties'             AND company_id IS NULL AND is_default = true LIMIT 1),
-    "working_hours":      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_office_hours'       AND company_id IS NULL AND is_default = true LIMIT 1),
-    "remuneration":       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_remuneration'       AND company_id IS NULL AND is_default = true LIMIT 1),
-    "benefits":           (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits'           AND company_id IS NULL AND is_default = true LIMIT 1),
-    "statutory_deductions": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_statutory_deductions' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "leave":              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_leave'              AND company_id IS NULL AND is_default = true LIMIT 1),
-    "employee_obligations": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_employee_obligations' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "performance":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_performance'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "termination":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_termination'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "general_provisions": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_general_provisions' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "acceptance":         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_acceptance'         AND company_id IS NULL AND is_default = true LIMIT 1),
-    "signatures":         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_signatures'         AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_job_description":     (SELECT id FROM ec_clauses WHERE clause_key = 'standard_job_description'     AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_salary_breakdown":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_salary_breakdown'    AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_benefits_schedule":   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits_schedule'   AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_company_policies":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_company_policies'    AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_equipment_issued":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_equipment_issued'    AND company_id IS NULL AND is_default = true LIMIT 1)
-  }'::jsonb,
+  jsonb_build_object(
+    'heading',                    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_heading'                AND company_id IS NULL AND is_default = true LIMIT 1),
+    'parties',                    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_parties'                AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appointment',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_appointment'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'place_of_work',              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_place_of_work'          AND company_id IS NULL AND is_default = true LIMIT 1),
+    'duties',                     (SELECT id FROM ec_clauses WHERE clause_key = 'standard_duties'                 AND company_id IS NULL AND is_default = true LIMIT 1),
+    'working_hours',              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_office_hours'           AND company_id IS NULL AND is_default = true LIMIT 1),
+    'remuneration',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_remuneration'           AND company_id IS NULL AND is_default = true LIMIT 1),
+    'benefits',                   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits'               AND company_id IS NULL AND is_default = true LIMIT 1),
+    'statutory_deductions',       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_statutory_deductions'   AND company_id IS NULL AND is_default = true LIMIT 1),
+    'leave',                      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_leave'                  AND company_id IS NULL AND is_default = true LIMIT 1),
+    'employee_obligations',       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_employee_obligations'   AND company_id IS NULL AND is_default = true LIMIT 1),
+    'performance',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_performance'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'termination',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_termination'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'general_provisions',         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_general_provisions'     AND company_id IS NULL AND is_default = true LIMIT 1),
+    'acceptance',                 (SELECT id FROM ec_clauses WHERE clause_key = 'standard_acceptance'             AND company_id IS NULL AND is_default = true LIMIT 1),
+    'signatures',                 (SELECT id FROM ec_clauses WHERE clause_key = 'standard_signatures'             AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_job_description',   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_job_description'        AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_salary_breakdown',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_salary_breakdown'       AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_benefits_schedule', (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits_schedule'      AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_company_policies',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_company_policies'       AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_equipment_issued',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_equipment_issued'       AND company_id IS NULL AND is_default = true LIMIT 1)
+  ),
   true
 );
 
@@ -124,29 +133,29 @@ INSERT INTO ec_job_profiles (
     "reports_to": "Finance Manager",
     "work_location": "Finance Department, 3rd Floor, Company HQ"
   }'::jsonb,
-  '{
-    "heading":            (SELECT id FROM ec_clauses WHERE clause_key = 'standard_heading'            AND company_id IS NULL AND is_default = true LIMIT 1),
-    "parties":            (SELECT id FROM ec_clauses WHERE clause_key = 'standard_parties'            AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appointment":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_appointment'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "place_of_work":      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_place_of_work'      AND company_id IS NULL AND is_default = true LIMIT 1),
-    "duties":             (SELECT id FROM ec_clauses WHERE clause_key = 'standard_duties'             AND company_id IS NULL AND is_default = true LIMIT 1),
-    "working_hours":      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_office_hours'       AND company_id IS NULL AND is_default = true LIMIT 1),
-    "remuneration":       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_remuneration'       AND company_id IS NULL AND is_default = true LIMIT 1),
-    "benefits":           (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits'           AND company_id IS NULL AND is_default = true LIMIT 1),
-    "statutory_deductions": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_statutory_deductions' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "leave":              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_leave'              AND company_id IS NULL AND is_default = true LIMIT 1),
-    "employee_obligations": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_employee_obligations' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "performance":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_performance'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "termination":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_termination'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "general_provisions": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_general_provisions' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "acceptance":         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_acceptance'         AND company_id IS NULL AND is_default = true LIMIT 1),
-    "signatures":         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_signatures'         AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_job_description":     (SELECT id FROM ec_clauses WHERE clause_key = 'standard_job_description'     AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_salary_breakdown":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_salary_breakdown'    AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_benefits_schedule":   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits_schedule'   AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_company_policies":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_company_policies'    AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_equipment_issued":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_equipment_issued'    AND company_id IS NULL AND is_default = true LIMIT 1)
-  }'::jsonb,
+  jsonb_build_object(
+    'heading',                    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_heading'                AND company_id IS NULL AND is_default = true LIMIT 1),
+    'parties',                    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_parties'                AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appointment',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_appointment'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'place_of_work',              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_place_of_work'          AND company_id IS NULL AND is_default = true LIMIT 1),
+    'duties',                     (SELECT id FROM ec_clauses WHERE clause_key = 'standard_duties'                 AND company_id IS NULL AND is_default = true LIMIT 1),
+    'working_hours',              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_office_hours'           AND company_id IS NULL AND is_default = true LIMIT 1),
+    'remuneration',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_remuneration'           AND company_id IS NULL AND is_default = true LIMIT 1),
+    'benefits',                   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits'               AND company_id IS NULL AND is_default = true LIMIT 1),
+    'statutory_deductions',       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_statutory_deductions'   AND company_id IS NULL AND is_default = true LIMIT 1),
+    'leave',                      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_leave'                  AND company_id IS NULL AND is_default = true LIMIT 1),
+    'employee_obligations',       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_employee_obligations'   AND company_id IS NULL AND is_default = true LIMIT 1),
+    'performance',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_performance'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'termination',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_termination'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'general_provisions',         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_general_provisions'     AND company_id IS NULL AND is_default = true LIMIT 1),
+    'acceptance',                 (SELECT id FROM ec_clauses WHERE clause_key = 'standard_acceptance'             AND company_id IS NULL AND is_default = true LIMIT 1),
+    'signatures',                 (SELECT id FROM ec_clauses WHERE clause_key = 'standard_signatures'             AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_job_description',   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_job_description'        AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_salary_breakdown',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_salary_breakdown'       AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_benefits_schedule', (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits_schedule'      AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_company_policies',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_company_policies'       AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_equipment_issued',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_equipment_issued'       AND company_id IS NULL AND is_default = true LIMIT 1)
+  ),
   true
 );
 
@@ -178,29 +187,29 @@ INSERT INTO ec_job_profiles (
     "reports_to": "Head of IT / CTO",
     "work_location": "Hybrid — 3 days office, 2 days remote"
   }'::jsonb,
-  '{
-    "heading":            (SELECT id FROM ec_clauses WHERE clause_key = 'standard_heading'            AND company_id IS NULL AND is_default = true LIMIT 1),
-    "parties":            (SELECT id FROM ec_clauses WHERE clause_key = 'standard_parties'            AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appointment":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_appointment'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "place_of_work":      (SELECT id FROM ec_clauses WHERE clause_key = 'remote_place_of_work'       AND company_id IS NULL AND is_default = true LIMIT 1),
-    "duties":             (SELECT id FROM ec_clauses WHERE clause_key = 'standard_duties'             AND company_id IS NULL AND is_default = true LIMIT 1),
-    "working_hours":      (SELECT id FROM ec_clauses WHERE clause_key = 'flexible_hours'             AND company_id IS NULL AND is_default = true LIMIT 1),
-    "remuneration":       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_remuneration'       AND company_id IS NULL AND is_default = true LIMIT 1),
-    "benefits":           (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits'           AND company_id IS NULL AND is_default = true LIMIT 1),
-    "statutory_deductions": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_statutory_deductions' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "leave":              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_leave'              AND company_id IS NULL AND is_default = true LIMIT 1),
-    "employee_obligations": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_employee_obligations' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "performance":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_performance'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "termination":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_termination'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "general_provisions": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_general_provisions' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "acceptance":         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_acceptance'         AND company_id IS NULL AND is_default = true LIMIT 1),
-    "signatures":         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_signatures'         AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_job_description":     (SELECT id FROM ec_clauses WHERE clause_key = 'standard_job_description'     AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_salary_breakdown":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_salary_breakdown'    AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_benefits_schedule":   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits_schedule'   AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_company_policies":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_company_policies'    AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_equipment_issued":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_equipment_issued'    AND company_id IS NULL AND is_default = true LIMIT 1)
-  }'::jsonb,
+  jsonb_build_object(
+    'heading',                    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_heading'                AND company_id IS NULL AND is_default = true LIMIT 1),
+    'parties',                    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_parties'                AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appointment',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_appointment'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'place_of_work',              (SELECT id FROM ec_clauses WHERE clause_key = 'remote_place_of_work'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'duties',                     (SELECT id FROM ec_clauses WHERE clause_key = 'standard_duties'                 AND company_id IS NULL AND is_default = true LIMIT 1),
+    'working_hours',              (SELECT id FROM ec_clauses WHERE clause_key = 'flexible_hours'                  AND company_id IS NULL AND is_default = true LIMIT 1),
+    'remuneration',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_remuneration'           AND company_id IS NULL AND is_default = true LIMIT 1),
+    'benefits',                   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits'               AND company_id IS NULL AND is_default = true LIMIT 1),
+    'statutory_deductions',       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_statutory_deductions'   AND company_id IS NULL AND is_default = true LIMIT 1),
+    'leave',                      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_leave'                  AND company_id IS NULL AND is_default = true LIMIT 1),
+    'employee_obligations',       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_employee_obligations'   AND company_id IS NULL AND is_default = true LIMIT 1),
+    'performance',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_performance'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'termination',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_termination'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'general_provisions',         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_general_provisions'     AND company_id IS NULL AND is_default = true LIMIT 1),
+    'acceptance',                 (SELECT id FROM ec_clauses WHERE clause_key = 'standard_acceptance'             AND company_id IS NULL AND is_default = true LIMIT 1),
+    'signatures',                 (SELECT id FROM ec_clauses WHERE clause_key = 'standard_signatures'             AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_job_description',   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_job_description'        AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_salary_breakdown',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_salary_breakdown'       AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_benefits_schedule', (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits_schedule'      AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_company_policies',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_company_policies'       AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_equipment_issued',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_equipment_issued'       AND company_id IS NULL AND is_default = true LIMIT 1)
+  ),
   true
 );
 
@@ -232,29 +241,29 @@ INSERT INTO ec_job_profiles (
     "reports_to": "HR Manager",
     "work_location": "HR Department, 2nd Floor, Company HQ"
   }'::jsonb,
-  '{
-    "heading":            (SELECT id FROM ec_clauses WHERE clause_key = 'standard_heading'            AND company_id IS NULL AND is_default = true LIMIT 1),
-    "parties":            (SELECT id FROM ec_clauses WHERE clause_key = 'standard_parties'            AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appointment":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_appointment'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "place_of_work":      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_place_of_work'      AND company_id IS NULL AND is_default = true LIMIT 1),
-    "duties":             (SELECT id FROM ec_clauses WHERE clause_key = 'standard_duties'             AND company_id IS NULL AND is_default = true LIMIT 1),
-    "working_hours":      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_office_hours'       AND company_id IS NULL AND is_default = true LIMIT 1),
-    "remuneration":       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_remuneration'       AND company_id IS NULL AND is_default = true LIMIT 1),
-    "benefits":           (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits'           AND company_id IS NULL AND is_default = true LIMIT 1),
-    "statutory_deductions": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_statutory_deductions' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "leave":              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_leave'              AND company_id IS NULL AND is_default = true LIMIT 1),
-    "employee_obligations": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_employee_obligations' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "performance":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_performance'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "termination":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_termination'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "general_provisions": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_general_provisions' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "acceptance":         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_acceptance'         AND company_id IS NULL AND is_default = true LIMIT 1),
-    "signatures":         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_signatures'         AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_job_description":     (SELECT id FROM ec_clauses WHERE clause_key = 'standard_job_description'     AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_salary_breakdown":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_salary_breakdown'    AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_benefits_schedule":   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits_schedule'   AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_company_policies":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_company_policies'    AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_equipment_issued":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_equipment_issued'    AND company_id IS NULL AND is_default = true LIMIT 1)
-  }'::jsonb,
+  jsonb_build_object(
+    'heading',                    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_heading'                AND company_id IS NULL AND is_default = true LIMIT 1),
+    'parties',                    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_parties'                AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appointment',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_appointment'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'place_of_work',              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_place_of_work'          AND company_id IS NULL AND is_default = true LIMIT 1),
+    'duties',                     (SELECT id FROM ec_clauses WHERE clause_key = 'standard_duties'                 AND company_id IS NULL AND is_default = true LIMIT 1),
+    'working_hours',              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_office_hours'           AND company_id IS NULL AND is_default = true LIMIT 1),
+    'remuneration',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_remuneration'           AND company_id IS NULL AND is_default = true LIMIT 1),
+    'benefits',                   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits'               AND company_id IS NULL AND is_default = true LIMIT 1),
+    'statutory_deductions',       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_statutory_deductions'   AND company_id IS NULL AND is_default = true LIMIT 1),
+    'leave',                      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_leave'                  AND company_id IS NULL AND is_default = true LIMIT 1),
+    'employee_obligations',       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_employee_obligations'   AND company_id IS NULL AND is_default = true LIMIT 1),
+    'performance',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_performance'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'termination',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_termination'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'general_provisions',         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_general_provisions'     AND company_id IS NULL AND is_default = true LIMIT 1),
+    'acceptance',                 (SELECT id FROM ec_clauses WHERE clause_key = 'standard_acceptance'             AND company_id IS NULL AND is_default = true LIMIT 1),
+    'signatures',                 (SELECT id FROM ec_clauses WHERE clause_key = 'standard_signatures'             AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_job_description',   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_job_description'        AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_salary_breakdown',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_salary_breakdown'       AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_benefits_schedule', (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits_schedule'      AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_company_policies',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_company_policies'       AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_equipment_issued',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_equipment_issued'       AND company_id IS NULL AND is_default = true LIMIT 1)
+  ),
   true
 );
 
@@ -285,29 +294,29 @@ INSERT INTO ec_job_profiles (
     "reports_to": "Office Manager",
     "work_location": "Reception Area, 1st Floor, Company HQ"
   }'::jsonb,
-  '{
-    "heading":            (SELECT id FROM ec_clauses WHERE clause_key = 'standard_heading'            AND company_id IS NULL AND is_default = true LIMIT 1),
-    "parties":            (SELECT id FROM ec_clauses WHERE clause_key = 'standard_parties'            AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appointment":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_appointment'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "place_of_work":      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_place_of_work'      AND company_id IS NULL AND is_default = true LIMIT 1),
-    "duties":             (SELECT id FROM ec_clauses WHERE clause_key = 'standard_duties'             AND company_id IS NULL AND is_default = true LIMIT 1),
-    "working_hours":      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_office_hours'       AND company_id IS NULL AND is_default = true LIMIT 1),
-    "remuneration":       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_remuneration'       AND company_id IS NULL AND is_default = true LIMIT 1),
-    "benefits":           (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits'           AND company_id IS NULL AND is_default = true LIMIT 1),
-    "statutory_deductions": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_statutory_deductions' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "leave":              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_leave'              AND company_id IS NULL AND is_default = true LIMIT 1),
-    "employee_obligations": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_employee_obligations' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "performance":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_performance'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "termination":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_termination'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "general_provisions": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_general_provisions' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "acceptance":         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_acceptance'         AND company_id IS NULL AND is_default = true LIMIT 1),
-    "signatures":         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_signatures'         AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_job_description":     (SELECT id FROM ec_clauses WHERE clause_key = 'standard_job_description'     AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_salary_breakdown":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_salary_breakdown'    AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_benefits_schedule":   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits_schedule'   AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_company_policies":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_company_policies'    AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_equipment_issued":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_equipment_issued'    AND company_id IS NULL AND is_default = true LIMIT 1)
-  }'::jsonb,
+  jsonb_build_object(
+    'heading',                    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_heading'                AND company_id IS NULL AND is_default = true LIMIT 1),
+    'parties',                    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_parties'                AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appointment',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_appointment'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'place_of_work',              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_place_of_work'          AND company_id IS NULL AND is_default = true LIMIT 1),
+    'duties',                     (SELECT id FROM ec_clauses WHERE clause_key = 'standard_duties'                 AND company_id IS NULL AND is_default = true LIMIT 1),
+    'working_hours',              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_office_hours'           AND company_id IS NULL AND is_default = true LIMIT 1),
+    'remuneration',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_remuneration'           AND company_id IS NULL AND is_default = true LIMIT 1),
+    'benefits',                   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits'               AND company_id IS NULL AND is_default = true LIMIT 1),
+    'statutory_deductions',       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_statutory_deductions'   AND company_id IS NULL AND is_default = true LIMIT 1),
+    'leave',                      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_leave'                  AND company_id IS NULL AND is_default = true LIMIT 1),
+    'employee_obligations',       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_employee_obligations'   AND company_id IS NULL AND is_default = true LIMIT 1),
+    'performance',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_performance'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'termination',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_termination'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'general_provisions',         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_general_provisions'     AND company_id IS NULL AND is_default = true LIMIT 1),
+    'acceptance',                 (SELECT id FROM ec_clauses WHERE clause_key = 'standard_acceptance'             AND company_id IS NULL AND is_default = true LIMIT 1),
+    'signatures',                 (SELECT id FROM ec_clauses WHERE clause_key = 'standard_signatures'             AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_job_description',   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_job_description'        AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_salary_breakdown',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_salary_breakdown'       AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_benefits_schedule', (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits_schedule'      AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_company_policies',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_company_policies'       AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_equipment_issued',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_equipment_issued'       AND company_id IS NULL AND is_default = true LIMIT 1)
+  ),
   true
 );
 
@@ -339,29 +348,29 @@ INSERT INTO ec_job_profiles (
     "reports_to": "Sales Manager",
     "work_location": "Sales Department, Ground Floor, Company HQ"
   }'::jsonb,
-  '{
-    "heading":            (SELECT id FROM ec_clauses WHERE clause_key = 'standard_heading'            AND company_id IS NULL AND is_default = true LIMIT 1),
-    "parties":            (SELECT id FROM ec_clauses WHERE clause_key = 'standard_parties'            AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appointment":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_appointment'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "place_of_work":      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_place_of_work'      AND company_id IS NULL AND is_default = true LIMIT 1),
-    "duties":             (SELECT id FROM ec_clauses WHERE clause_key = 'standard_duties'             AND company_id IS NULL AND is_default = true LIMIT 1),
-    "working_hours":      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_office_hours'       AND company_id IS NULL AND is_default = true LIMIT 1),
-    "remuneration":       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_remuneration'       AND company_id IS NULL AND is_default = true LIMIT 1),
-    "benefits":           (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits'           AND company_id IS NULL AND is_default = true LIMIT 1),
-    "statutory_deductions": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_statutory_deductions' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "leave":              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_leave'              AND company_id IS NULL AND is_default = true LIMIT 1),
-    "employee_obligations": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_employee_obligations' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "performance":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_performance'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "termination":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_termination'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "general_provisions": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_general_provisions' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "acceptance":         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_acceptance'         AND company_id IS NULL AND is_default = true LIMIT 1),
-    "signatures":         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_signatures'         AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_job_description":     (SELECT id FROM ec_clauses WHERE clause_key = 'standard_job_description'     AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_salary_breakdown":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_salary_breakdown'    AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_benefits_schedule":   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits_schedule'   AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_company_policies":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_company_policies'    AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_equipment_issued":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_equipment_issued'    AND company_id IS NULL AND is_default = true LIMIT 1)
-  }'::jsonb,
+  jsonb_build_object(
+    'heading',                    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_heading'                AND company_id IS NULL AND is_default = true LIMIT 1),
+    'parties',                    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_parties'                AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appointment',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_appointment'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'place_of_work',              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_place_of_work'          AND company_id IS NULL AND is_default = true LIMIT 1),
+    'duties',                     (SELECT id FROM ec_clauses WHERE clause_key = 'standard_duties'                 AND company_id IS NULL AND is_default = true LIMIT 1),
+    'working_hours',              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_office_hours'           AND company_id IS NULL AND is_default = true LIMIT 1),
+    'remuneration',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_remuneration'           AND company_id IS NULL AND is_default = true LIMIT 1),
+    'benefits',                   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits'               AND company_id IS NULL AND is_default = true LIMIT 1),
+    'statutory_deductions',       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_statutory_deductions'   AND company_id IS NULL AND is_default = true LIMIT 1),
+    'leave',                      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_leave'                  AND company_id IS NULL AND is_default = true LIMIT 1),
+    'employee_obligations',       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_employee_obligations'   AND company_id IS NULL AND is_default = true LIMIT 1),
+    'performance',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_performance'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'termination',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_termination'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'general_provisions',         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_general_provisions'     AND company_id IS NULL AND is_default = true LIMIT 1),
+    'acceptance',                 (SELECT id FROM ec_clauses WHERE clause_key = 'standard_acceptance'             AND company_id IS NULL AND is_default = true LIMIT 1),
+    'signatures',                 (SELECT id FROM ec_clauses WHERE clause_key = 'standard_signatures'             AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_job_description',   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_job_description'        AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_salary_breakdown',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_salary_breakdown'       AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_benefits_schedule', (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits_schedule'      AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_company_policies',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_company_policies'       AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_equipment_issued',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_equipment_issued'       AND company_id IS NULL AND is_default = true LIMIT 1)
+  ),
   true
 );
 
@@ -389,28 +398,28 @@ INSERT INTO ec_job_profiles (
     "reports_to": "Assigned Supervisor",
     "work_location": "Company HQ, Nairobi"
   }'::jsonb,
-  '{
-    "heading":            (SELECT id FROM ec_clauses WHERE clause_key = 'standard_heading'            AND company_id IS NULL AND is_default = true LIMIT 1),
-    "parties":            (SELECT id FROM ec_clauses WHERE clause_key = 'standard_parties'            AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appointment":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_appointment'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "place_of_work":      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_place_of_work'      AND company_id IS NULL AND is_default = true LIMIT 1),
-    "duties":             (SELECT id FROM ec_clauses WHERE clause_key = 'standard_duties'             AND company_id IS NULL AND is_default = true LIMIT 1),
-    "working_hours":      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_office_hours'       AND company_id IS NULL AND is_default = true LIMIT 1),
-    "remuneration":       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_remuneration'       AND company_id IS NULL AND is_default = true LIMIT 1),
-    "benefits":           (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits'           AND company_id IS NULL AND is_default = true LIMIT 1),
-    "statutory_deductions": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_statutory_deductions' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "leave":              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_leave'              AND company_id IS NULL AND is_default = true LIMIT 1),
-    "employee_obligations": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_employee_obligations' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "performance":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_performance'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "termination":        (SELECT id FROM ec_clauses WHERE clause_key = 'standard_termination'        AND company_id IS NULL AND is_default = true LIMIT 1),
-    "general_provisions": (SELECT id FROM ec_clauses WHERE clause_key = 'standard_general_provisions' AND company_id IS NULL AND is_default = true LIMIT 1),
-    "acceptance":         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_acceptance'         AND company_id IS NULL AND is_default = true LIMIT 1),
-    "signatures":         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_signatures'         AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_job_description":     (SELECT id FROM ec_clauses WHERE clause_key = 'standard_job_description'     AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_salary_breakdown":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_salary_breakdown'    AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_benefits_schedule":   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits_schedule'   AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_company_policies":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_company_policies'    AND company_id IS NULL AND is_default = true LIMIT 1),
-    "appendix_equipment_issued":    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_equipment_issued'    AND company_id IS NULL AND is_default = true LIMIT 1)
-  }'::jsonb,
+  jsonb_build_object(
+    'heading',                    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_heading'                AND company_id IS NULL AND is_default = true LIMIT 1),
+    'parties',                    (SELECT id FROM ec_clauses WHERE clause_key = 'standard_parties'                AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appointment',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_appointment'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'place_of_work',              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_place_of_work'          AND company_id IS NULL AND is_default = true LIMIT 1),
+    'duties',                     (SELECT id FROM ec_clauses WHERE clause_key = 'standard_duties'                 AND company_id IS NULL AND is_default = true LIMIT 1),
+    'working_hours',              (SELECT id FROM ec_clauses WHERE clause_key = 'standard_office_hours'           AND company_id IS NULL AND is_default = true LIMIT 1),
+    'remuneration',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_remuneration'           AND company_id IS NULL AND is_default = true LIMIT 1),
+    'benefits',                   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits'               AND company_id IS NULL AND is_default = true LIMIT 1),
+    'statutory_deductions',       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_statutory_deductions'   AND company_id IS NULL AND is_default = true LIMIT 1),
+    'leave',                      (SELECT id FROM ec_clauses WHERE clause_key = 'standard_leave'                  AND company_id IS NULL AND is_default = true LIMIT 1),
+    'employee_obligations',       (SELECT id FROM ec_clauses WHERE clause_key = 'standard_employee_obligations'   AND company_id IS NULL AND is_default = true LIMIT 1),
+    'performance',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_performance'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'termination',                (SELECT id FROM ec_clauses WHERE clause_key = 'standard_termination'            AND company_id IS NULL AND is_default = true LIMIT 1),
+    'general_provisions',         (SELECT id FROM ec_clauses WHERE clause_key = 'standard_general_provisions'     AND company_id IS NULL AND is_default = true LIMIT 1),
+    'acceptance',                 (SELECT id FROM ec_clauses WHERE clause_key = 'standard_acceptance'             AND company_id IS NULL AND is_default = true LIMIT 1),
+    'signatures',                 (SELECT id FROM ec_clauses WHERE clause_key = 'standard_signatures'             AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_job_description',   (SELECT id FROM ec_clauses WHERE clause_key = 'standard_job_description'        AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_salary_breakdown',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_salary_breakdown'       AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_benefits_schedule', (SELECT id FROM ec_clauses WHERE clause_key = 'standard_benefits_schedule'      AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_company_policies',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_company_policies'       AND company_id IS NULL AND is_default = true LIMIT 1),
+    'appendix_equipment_issued',  (SELECT id FROM ec_clauses WHERE clause_key = 'standard_equipment_issued'       AND company_id IS NULL AND is_default = true LIMIT 1)
+  ),
   true
 );

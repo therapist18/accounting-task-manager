@@ -86,6 +86,12 @@ export function buildDefaultClauseMap(clauses: EcClauseRow[]): Record<string, st
  * Cascade merge for section -> clause selection, same precedence as
  * resolveEffectiveSettings, falling back to each section's default clause
  * when nothing in the cascade picked one.
+ *
+ * Falsy entries (e.g. '' from a "Use section default" picker - see
+ * JobProfileEditor.tsx) are skipped rather than assigned, so they behave as
+ * "no override" instead of clobbering a perfectly valid default from an
+ * earlier layer with an empty string that then fails assembleContractHtml's
+ * `clauseId ? ... : undefined` check and renders as "[No clause configured]".
  */
 export function resolveEffectiveClauses(
   layers: Array<ClauseLayer | null | undefined>,
@@ -94,7 +100,9 @@ export function resolveEffectiveClauses(
   const result: Record<string, string> = { ...defaultClauseBySection };
   for (const layer of layers) {
     if (!layer?.section_clauses) continue;
-    Object.assign(result, layer.section_clauses);
+    for (const [key, value] of Object.entries(layer.section_clauses)) {
+      if (value) result[key] = value;
+    }
   }
   return result;
 }
@@ -104,7 +112,7 @@ export interface AssembleContractHtmlParams {
   clausesById: Record<string, EcClauseRow>;
   effectiveClauses: Record<string, string>; // section_key -> clause_id
   effectiveSettings: Record<string, any>;
-  employeePlaceholderValues: Record<string, string>; // from utils/placeholderContext.ts, unchanged
+  employeePlaceholderValues: Record<string, string>; // from utils/standardPlaceholders.ts
 }
 
 /**

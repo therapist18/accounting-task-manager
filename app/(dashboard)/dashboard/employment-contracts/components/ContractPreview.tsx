@@ -4,7 +4,8 @@ import { PreviewPanel } from '../../tasks-requirements/components/PreviewPanel';
 import { replacePlaceholders } from '../../tasks-requirements/utils/templateFormatters';
 import { EDITOR_PREVIEW_STYLES } from '../../tasks-requirements/utils/templateUtils';
 import { Button } from '@/components/ui/button';
-import { Download, Loader2, Save, FileText, FileWarning, Palette, FileDown } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Download, Loader2, Save, FileText, FileWarning, Palette, FileDown, SlidersHorizontal } from 'lucide-react';
 import { saveAs } from 'file-saver';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -273,6 +274,18 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
 
   const hasOutput = !!bodyHtml;
 
+  // Active Configurations strip - a quick-glance recap of the resolved
+  // settings actually feeding this contract, pulled from the same
+  // effectiveSettings/mergedValues already computed above for rendering.
+  const configChips: { label: string; value: string }[] = [
+    { label: 'Employment Type', value: mergedValues.employment_type },
+    { label: 'Job Level', value: mergedValues.job_level },
+    { label: 'Working Schedule', value: [mergedValues.working_days, mergedValues.working_hours].filter(Boolean).join(' • ') },
+    { label: 'Notice Period', value: mergedValues.notice_period },
+    { label: 'Probation', value: mergedValues.probation_period },
+    { label: 'Benefits', value: mergedValues.medical_cover },
+  ].filter((c) => !!c.value);
+
   return (
     <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 border-l border-slate-200 dark:border-slate-800 relative overflow-hidden">
       <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between shrink-0">
@@ -304,6 +317,21 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
           </Button>
         </div>
       </div>
+
+      {configChips.length > 0 && (
+        <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/50 flex items-center gap-2 flex-wrap shrink-0">
+          <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          {configChips.map((chip) => (
+            <Badge
+              key={chip.label}
+              variant="outline"
+              className="text-[10px] font-medium bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 rounded-full px-2 py-0.5"
+            >
+              <span className="text-slate-400 mr-1">{chip.label}:</span>{chip.value}
+            </Badge>
+          ))}
+        </div>
+      )}
 
       <div className="flex-1 overflow-hidden relative flex flex-col min-h-0">
         {!contractTemplate && !loadingContext ? (

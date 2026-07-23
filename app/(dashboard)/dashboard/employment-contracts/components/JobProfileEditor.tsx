@@ -108,6 +108,10 @@ export function JobProfileEditor({ open, onClose, companyId, clauses, profile, d
 
     setSaving(true);
     const settings = Object.fromEntries(settingsRows.filter((r) => r.key.trim()).map((r) => [r.key.trim(), r.value]));
+    // Drop "Use section default" entries (stored as '' by the picker below)
+    // rather than persisting a dead key - see resolveEffectiveClauses in
+    // utils/clauseEngine.ts for why an explicit '' is dangerous to keep.
+    const cleanSectionClauses = Object.fromEntries(Object.entries(sectionClauses).filter(([, v]) => !!v));
     const payload: Partial<EcJobProfile> = {
       scope,
       company_id: companyId,
@@ -118,7 +122,7 @@ export function JobProfileEditor({ open, onClose, companyId, clauses, profile, d
       job_level: scope === 'position' ? (jobLevel.trim() || null) : null,
       work_arrangement: scope === 'position' ? (workArrangement.trim() || null) : null,
       settings,
-      section_clauses: scope === 'position' ? sectionClauses : {},
+      section_clauses: scope === 'position' ? cleanSectionClauses : {},
       is_active: isActive,
     };
 

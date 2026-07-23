@@ -52,16 +52,20 @@ export const FONT_OPTIONS = [
 
 type ThemeCssArgs = { primaryColor: string; accentColor: string; fontFamily: string; fontScale: number };
 
-// Structural rules keyed off the real section semantics the clause engine now
-// emits (<section data-section="..."> - see utils/clauseEngine.ts /
-// utils/contractStructure.ts) rather than guessing from heading level. Shared
-// across all themes since section spacing/pagination is layout, not brand
-// styling - each theme still fully controls typography/color/table/signature
-// treatment above via THEME_STYLES.
 const BASE_SECTION_STYLES = `
-  .cs-section { margin-bottom: 28px; }
+  .cs-section, .cs-section * { white-space: normal; }
+  .cs-section { margin-bottom: 16px; }
   .cs-section:last-child { margin-bottom: 0; }
   .cs-missing-clause { color: #b91c1c; font-style: italic; border: 1px dashed #b91c1c; padding: 10px 14px; border-radius: 4px; }
+  .cs-section p { margin-bottom: 8px; }
+  .cs-section ul, .cs-section ol { margin-bottom: 8px; padding-left: 20px; }
+  .cs-section li { margin-bottom: 4px; }
+  .cs-section h1 { margin-bottom: 16px; }
+  .cs-section h2 { margin-top: 4px; margin-bottom: 8px; }
+  .cs-section h3 { margin-top: 10px; margin-bottom: 6px; }
+  .cs-section table { margin: 12px 0; }
+  .cs-section th, .cs-section td { padding: 8px 12px; }
+  .cs-section .signature-block { margin-top: 28px; }
   [data-section="appendix_job_description"] { page-break-before: always; }
   [data-section="appendix_salary_breakdown"] { page-break-before: always; }
   [data-section="appendix_benefits_schedule"] { page-break-before: always; }
@@ -285,17 +289,6 @@ const THEME_HEADERS: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     </div>`,
 };
 
-/**
- * THEME_STYLES entries are written as SCSS-style nested CSS (a top-level property list
- * followed by `selector { ... }` blocks meant to apply *inside* the theme's root class).
- * Modern browsers understand native CSS nesting, which is why the live preview and the
- * html2canvas-captured PDF both render correctly - but Word's HTML importer only
- * understands flat CSS 2.1-era rules. Given a block with nested rules, Word's parser
- * discards the entire `<style>` block rather than just the part it can't read, so every
- * themed heading/table/signature style silently disappears from the exported .doc file.
- * This flattens `.root { color: red; h1 { color: blue; } }` into
- * `.root { color: red; } .root h1 { color: blue; }` so the same styling survives in Word.
- */
 function flattenNestedCss(rootSelector: string, css: string): string {
   const blockPattern = /([^{}]+)\{([^{}]*)\}/g;
   const rules: string[] = [];
@@ -306,9 +299,6 @@ function flattenNestedCss(rootSelector: string, css: string): string {
     const preText = match[1];
     const body = match[2].trim();
 
-    // preText is everything since the previous '}' (or string start): base-level
-    // declarations (each ending in ';') immediately followed by the nested selector
-    // itself, which never contains ';'. Split on the last ';' to recover both.
     const lastSemi = preText.lastIndexOf(';');
     const selectorPart = (lastSemi === -1 ? preText : preText.slice(lastSemi + 1)).trim();
     baseDecls += lastSemi === -1 ? '' : preText.slice(0, lastSemi + 1);
@@ -326,23 +316,12 @@ function flattenNestedCss(rootSelector: string, css: string): string {
   return [`${rootSelector} { ${baseDecls.trim()} }`, ...rules].join('\n');
 }
 
-/**
- * Word's HTML importer doesn't support flexbox - `display: flex` signature columns
- * collapse to stacked blocks instead of sitting side by side. Swap them for the
- * table-cell layout Word's legacy renderer has always understood.
- */
 function makeWordSafe(css: string): string {
   return css
     .replace(/(\.signature-block\s*\{[^}]*?)display:\s*flex;?/g, '$1display: table; width: 100%;')
     .replace(/(\.signature-column\s*\{[^}]*?)flex:\s*1;?/g, '$1display: table-cell; width: 50%; vertical-align: top;');
 }
 
-/**
- * Applies the selected theme, color/font overrides, and branding strategy to merged HTML.
- * Pass `wordSafe: true` when the result will be saved as a .doc file for Microsoft Word
- * rather than rendered in a browser (live preview / PDF capture) - see flattenNestedCss
- * and makeWordSafe above for why the two paths need different CSS.
- */
 export function applyThemeToHtml(content: string, settings: ContractThemeSettings, options?: { wordSafe?: boolean }): string {
   const theme = settings.theme || 'corporate';
   const args: ThemeCssArgs = {
