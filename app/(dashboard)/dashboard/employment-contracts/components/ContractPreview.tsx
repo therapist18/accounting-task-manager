@@ -1,11 +1,10 @@
-// @ts-nocheck
 import { useEffect, useMemo, useRef, useState } from 'react';
 import supabase from '@/lib/supabase/client';
 import { replacePlaceholders } from '../../tasks-requirements/utils/templateFormatters';
 import { Button } from '@/components/ui/button';
 import {
   Download, Loader2, Save, FileText, FileWarning, Palette, FileDown,
-  ZoomIn, ZoomOut, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, CheckCircle
+  ZoomIn, ZoomOut, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from 'lucide-react';
 import { saveAs } from 'file-saver';
 import { toast } from 'sonner';
@@ -141,7 +140,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   ], defaultClauseMap), [companyDefaults, departmentDefaults, selectedJobProfile, offer, defaultClauseMap]);
 
   const employeeValues = useMemo(
-    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings) : {}),
+    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer?.placeholder_overrides) : {}),
     [employee, company, offer, effectiveSettings]
   );
 
@@ -161,23 +160,6 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
 
   const themedHtml = bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings), mergedValues) : '';
   const wordSafeHtml = bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings, { wordSafe: true }), mergedValues) : '';
-
-  // --- FLAW FIX: Regex Cleanup of Document Template ---
-  // Ensure exposed handlebars code and missing variables are handled properly before rendering to screen
-  const cleanedThemedHtml = useMemo(() => {
-    if (!themedHtml) return '';
-    let html = themedHtml;
-    // 1. Remove dangling conditional blocks completely (prevents `{{#if end_date}}` showing on UI)
-    html = html.replace(/\{\{#if\s+[^}]+\}\}/g, '');
-    html = html.replace(/\{\{\/if\}\}/g, '');
-    html = html.replace(/\{\{\^if\s+[^}]+\}\}/g, '');
-    
-    // 2. Wrap unresolved single tags with a visually distinct span instead of leaving raw brackets 
-    // that break grammar. (e.g. 'entered into on [Missing Date] between')
-    html = html.replace(/\{\{([^}]+)\}\}/g, '<span style="display:inline-block; font-size:0.85em; padding:0 4px; border-radius:3px; background-color:#fee2e2; color:#ef4444; border:1px solid #fca5a5; white-space:nowrap;">[$1 missing]</span>');
-    
-    return html;
-  }, [themedHtml]);
 
   const updateThemeSettings = (settings: ContractThemeSettings) => setThemeOverride(settings);
 
@@ -297,7 +279,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     );
   }
 
-  const hasOutput = !!cleanedThemedHtml;
+  const hasOutput = !!bodyHtml;
 
   // Variables for explicit scale footprint to fix inner bounding box issues
   const zoomRatio = zoomPct / 100;
@@ -321,13 +303,13 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
         <div className="flex items-center gap-2 flex-wrap">
           {/* Zoom Controls */}
           <div className="flex items-center border border-slate-200 dark:border-slate-700 rounded-md bg-slate-50 dark:bg-slate-900/50 h-8 mr-1">
-            <button title="Zoom Out" aria-label="Zoom Out" onClick={() => setZoomPct((z) => Math.max(40, z - 10))} disabled={zoomPct <= 40} className="px-2 h-full text-slate-500 hover:text-slate-800 disabled:opacity-50 transition-colors">
+            <button onClick={() => setZoomPct((z) => Math.max(40, z - 10))} disabled={zoomPct <= 40} className="px-2 h-full text-slate-500 hover:text-slate-800 disabled:opacity-50 transition-colors">
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
             <span className="text-[12px] font-medium text-slate-700 dark:text-slate-300 w-10 text-center tabular-nums border-x border-slate-200 dark:border-slate-700 h-full flex items-center justify-center bg-white dark:bg-slate-900">
               {zoomPct}%
             </span>
-            <button title="Zoom In" aria-label="Zoom In" onClick={() => setZoomPct((z) => Math.min(150, z + 10))} disabled={zoomPct >= 150} className="px-2 h-full text-slate-500 hover:text-slate-800 disabled:opacity-50 transition-colors">
+            <button onClick={() => setZoomPct((z) => Math.min(150, z + 10))} disabled={zoomPct >= 150} className="px-2 h-full text-slate-500 hover:text-slate-800 disabled:opacity-50 transition-colors">
               <ZoomIn className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -364,20 +346,19 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
             <FileText className="w-3.5 h-3.5 mr-2 text-slate-500" /> Word
           </Button>
           
-          {/* FLAW FIX: Updated Button Copy to reflect actual action */}
           <Button 
             size="sm" 
             className="h-8 text-[13px] bg-blue-600 hover:bg-blue-700 text-white shadow-sm ml-1"
             onClick={handleSaveToDb} 
             disabled={!hasOutput || loadingContext || isSaving}
           >
-            {isSaving ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5 mr-2" />} 
-            Finalize & Save
+            {isSaving ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-2" />} 
+            Generate & Save
           </Button>
         </div>
       </div>
 
-      {/* Main Preview Area */}
+      {/* Main Preview Area (Removed custom-scrollbar to restore clean OS scrollbars) */}
       <div className="flex-1 overflow-auto bg-[#F8F9FB] dark:bg-slate-950/50 flex flex-col items-center">
         {!contractTemplate && !loadingContext ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-400">
@@ -392,23 +373,9 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
           <div className="py-8 px-4 flex flex-col items-center min-h-full">
             
             {/* 
-              FLAW FIX: Included explicit local styles for HTML tables to prevent 
-              cramped layouts if the theme HTML is lacking proper CSS attributes. 
+              THE FIX: This wrapper claims the precise scaled dimensions.
+              This guarantees the container doesn't generate false internal scrollbars.
             */}
-            <style dangerouslySetInnerHTML={{__html: `
-              .contract-preview-content table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 1rem;
-                margin-bottom: 1rem;
-              }
-              .contract-preview-content th, .contract-preview-content td {
-                border: 1px solid #cbd5e1;
-                padding: 10px 14px;
-                text-align: left;
-              }
-            `}} />
-
             <div 
               className="relative shrink-0 transition-all duration-200 ease-out"
               style={{ width: scaledWidth, height: scaledHeight }}
@@ -429,8 +396,9 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
                   className="w-full transition-transform duration-300 ease-in-out"
                   style={{ transform: `translateY(-${pageIndex * PAGE_HEIGHT_PX}px)` }}
                 >
-                  <div className="p-12 text-[14.5px] leading-relaxed contract-preview-content">
-                    <div dangerouslySetInnerHTML={{ __html: cleanedThemedHtml }} />
+                  {/* Added p-12 (48px) padding here so text doesn't scrape the physical edges */}
+                  <div className="p-12 text-[14.5px] leading-relaxed">
+                    <div dangerouslySetInnerHTML={{ __html: themedHtml }} />
                   </div>
                 </div>
               </div>
@@ -486,14 +454,14 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
           className="bg-white" 
           style={{ width: PAGE_WIDTH_PX }} 
         >
-          <div className="p-12 text-[14.5px] leading-relaxed contract-preview-content">
-            <div dangerouslySetInnerHTML={{ __html: cleanedThemedHtml }} />
+          <div className="p-12 text-[14.5px] leading-relaxed">
+            <div dangerouslySetInnerHTML={{ __html: themedHtml }} />
           </div>
         </div>
         
         {/* capture-target: Pure DOM with safety padding for PDF extraction. */}
-        <div ref={htmlCaptureRef} className="bg-white text-black p-12 text-[14.5px] leading-relaxed contract-preview-content" style={{ width: PAGE_WIDTH_PX }}>
-          <div dangerouslySetInnerHTML={{ __html: cleanedThemedHtml }} />
+        <div ref={htmlCaptureRef} className="bg-white text-black p-12 text-[14.5px] leading-relaxed" style={{ width: PAGE_WIDTH_PX }}>
+          <div dangerouslySetInnerHTML={{ __html: themedHtml }} />
         </div>
       </div>
     </div>

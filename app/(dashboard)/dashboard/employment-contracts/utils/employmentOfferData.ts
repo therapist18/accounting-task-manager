@@ -12,6 +12,11 @@ export interface EmploymentOffer {
   end_date: string | null;
   settings_overrides: Record<string, any>;
   section_clauses_overrides: Record<string, string>;
+  // Per-contract {{token}} value overrides (identity, working hours,
+  // benefits, leave, ...) - see standardPlaceholders.ts. Distinct from
+  // settings_overrides, which only feeds the settings cascade and can be
+  // shadowed by computed identity fields; this always wins.
+  placeholder_overrides: Record<string, string>;
   status: 'draft' | 'active' | 'superseded';
   created_at: string;
   updated_at: string;

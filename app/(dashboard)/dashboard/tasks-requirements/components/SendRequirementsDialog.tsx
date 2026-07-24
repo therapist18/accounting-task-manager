@@ -649,25 +649,40 @@ export function SendRequirementsDialog({
       </div>
     `
 
+    // Deliberately left unstyled (no position/opacity/z-index) and never
+    // appended to the DOM ourselves. html2pdf's own toContainer() step
+    // deep-clones this node and re-parents the clone inside ITS OWN container
+    // div (position:absolute; height:auto), which it then wraps in an
+    // opacity:0 overlay and appends/removes from document.body itself. If our
+    // source carries its own position:absolute/fixed, the clone inherits that
+    // and is pulled out of normal flow *inside html2pdf's container too* - the
+    // container's height:auto then has no in-flow content to size against and
+    // collapses to ~0 (confirmed: canvas came back 1362 x 0 for 2006px-tall
+    // content). Leaving this plain lets html2pdf's own hide/cleanup work as
+    // designed.
     const element = document.createElement('div')
     element.innerHTML = htmlContent
     element.style.width = '800px'
-    element.style.position = 'absolute'
-    element.style.left = '-9999px' // Hide off-screen to avoid layout shifts for the user
-    element.style.top = '0'
-    document.body.appendChild(element)
 
     try {
       const html2pdf = (await import('html2pdf.js')).default
       await html2pdf()
         .set({
-          margin: 15, // Using html2pdf margins is much safer than manual CSS padding for page breaks
-          pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+          margin: 15,
+          // 'avoid-all' is html2pdf's JS-based page-break heuristic, layered on
+          // top of the CSS one - with this many small page-break-inside:avoid
+          // elements (every table row, every field card) it's prone to
+          // miscalculating and inserting a large blank gap before the first
+          // avoided block. 'css' alone still honors our own page-break-inside/
+          // page-break-after rules, just without that heuristic pass.
+          pagebreak: { mode: ['css'] },
           html2canvas: {
             scale: 2,
             useCORS: true,
             logging: false,
             letterRendering: true,
+            allowTaint: true,
+            backgroundColor: '#ffffff',
           },
           jsPDF: {
             unit: 'mm',
@@ -684,7 +699,6 @@ export function SendRequirementsDialog({
       toast.error('Failed to export PDF. Please try again.', { id: toastId })
     } finally {
       setIsExporting(false)
-      document.body.removeChild(element)
     }
   }
 

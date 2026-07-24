@@ -3,7 +3,7 @@ import type { Company } from '../../companies/database';
 import type { EmploymentOffer } from './employmentOfferData';
 
 // Builds the full set of well-known placeholder tokens that clause content
-// may reference as {{token_name}}. Values come from three sources, merged
+// may reference as {{token_name}}. Values come from four sources, merged
 // in precedence order (later wins on key collisions):
 //
 //   1. Employee identity fields (name, ID, bank, etc.)
@@ -12,6 +12,11 @@ import type { EmploymentOffer } from './employmentOfferData';
 //   4. Effective settings from the cascade (working hours, notice period,
 //      benefits, leave, probation, etc.) — passed through so clause content
 //      can reference {{notice_period}}, {{medical_cover}}, etc. directly.
+//   5. placeholderOverrides - explicit per-contract overrides from
+//      offer.placeholder_overrides (see ContractEditor.tsx's Placeholders &
+//      Values tab). Always wins, even over identity fields - this is the
+//      one place a user can deliberately diverge a single contract from the
+//      Employee/Company record without editing that record.
 //
 // This replaces the old tasks-requirements master-field engine for the
 // Employment Contracts module. The caller in ContractPreview.tsx passes
@@ -20,7 +25,8 @@ export function buildStandardPlaceholderValues(
   employee: ContractEmployeeInfo,
   company: Company | null | undefined,
   offer: EmploymentOffer | null | undefined,
-  effectiveSettings?: Record<string, any>
+  effectiveSettings?: Record<string, any>,
+  placeholderOverrides?: Record<string, string>
 ): Record<string, string> {
   const contactEmail = company?.contact_details?.email || '';
 
@@ -35,7 +41,7 @@ export function buildStandardPlaceholderValues(
   // can reference them with or without explicit settings being configured.
   const s = effectiveSettings || {};
 
-  return {
+  const defaults: Record<string, string> = {
     // ── Employee identity ──────────────────────────────────────────────
     employee_name: employee.fullName,
     employee_first_name: employee.firstName,
@@ -112,4 +118,6 @@ export function buildStandardPlaceholderValues(
     paternity_leave_days: String(s.paternity_leave_days || ''),
     compassionate_leave_days: String(s.compassionate_leave_days || ''),
   };
+
+  return { ...defaults, ...placeholderOverrides };
 }
