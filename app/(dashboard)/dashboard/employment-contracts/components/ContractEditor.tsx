@@ -7,6 +7,7 @@ import { EmploymentOffer, fetchLatestOffer } from '../utils/employmentOfferData'
 import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
 import { resolveEffectiveClauses, resolveEffectiveSettings, buildDefaultClauseMap } from '../utils/clauseEngine';
 import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
+import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
 import { CONTRACT_SECTIONS, type ContractSectionKey } from '../utils/contractStructure';
 import { fetchCompanies, Company } from '../../companies/database';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -341,12 +342,14 @@ export function ContractEditor({
     companyDefaults, departmentDefaults, selectedJobProfile, offer.section_clauses_overrides ? { section_clauses: offer.section_clauses_overrides } : null,
   ], defaultClauseMap), [companyDefaults, departmentDefaults, selectedJobProfile, offer, defaultClauseMap]);
 
+  const { ecPlaceholders, masterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
+
   // Full resolved {{token}} -> value map for the Placeholders & Values tab -
   // same computation ContractPreview.tsx uses to render the document, so
   // what's shown here always matches what will actually be generated.
   const placeholderValues = useMemo(
-    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer.placeholder_overrides) : {}),
-    [employee, company, offer, effectiveSettings]
+    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer.placeholder_overrides, ecPlaceholders, masterFieldValues) : {}),
+    [employee, company, offer, effectiveSettings, ecPlaceholders, masterFieldValues]
   );
 
   const sectionRows = useMemo(() => {

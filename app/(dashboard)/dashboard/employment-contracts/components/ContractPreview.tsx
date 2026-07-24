@@ -21,6 +21,7 @@ import { EcJobProfile, fetchJobProfiles, findCompanyDefaults, findDepartmentDefa
 import { EcContractTemplate, fetchEffectiveContractTemplate, fetchContractTemplateById } from '../utils/contractTemplateData';
 import { EmploymentOffer, createEmploymentOffer, updateEmploymentOffer } from '../utils/employmentOfferData';
 import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
+import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
 import { fetchCompanies, Company } from '../../companies/database';
 
 interface ContractPreviewProps {
@@ -139,9 +140,11 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     companyDefaults, departmentDefaults, selectedJobProfile, offer ? { section_clauses: offer.section_clauses_overrides } : null,
   ], defaultClauseMap), [companyDefaults, departmentDefaults, selectedJobProfile, offer, defaultClauseMap]);
 
+  const { ecPlaceholders, masterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
+
   const employeeValues = useMemo(
-    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer?.placeholder_overrides) : {}),
-    [employee, company, offer, effectiveSettings]
+    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer?.placeholder_overrides, ecPlaceholders, masterFieldValues) : {}),
+    [employee, company, offer, effectiveSettings, ecPlaceholders, masterFieldValues]
   );
 
   const bodyHtml = useMemo(() => {

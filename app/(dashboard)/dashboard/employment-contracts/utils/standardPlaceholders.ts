@@ -1,9 +1,10 @@
 import type { ContractEmployeeInfo } from './data';
 import type { Company } from '../../companies/database';
 import type { EmploymentOffer } from './employmentOfferData';
+import type { EcPlaceholder } from './ecPlaceholders';
 
 // Builds the full set of well-known placeholder tokens that clause content
-// may reference as {{token_name}}. Values come from four sources, merged
+// may reference as {{token_name}}. Values come from five sources, merged
 // in precedence order (later wins on key collisions):
 //
 //   1. Employee identity fields (name, ID, bank, etc.)
@@ -12,11 +13,19 @@ import type { EmploymentOffer } from './employmentOfferData';
 //   4. Effective settings from the cascade (working hours, notice period,
 //      benefits, leave, probation, etc.) — passed through so clause content
 //      can reference {{notice_period}}, {{medical_cover}}, etc. directly.
-//   5. placeholderOverrides - explicit per-contract overrides from
+//   5. Linked master-field values - for each ec_placeholders row with
+//      source_kind='master_field' and a master_field_id set, the value
+//      resolved from tm_job_fields (see masterFieldResolver.ts) replaces the
+//      1-4 default for that key. This is the "single source of truth" path:
+//      once a placeholder is linked, its data comes from the same master
+//      field Document Template Manager and every other consumer would use,
+//      not a value hardcoded in this function. Unlinked placeholders simply
+//      keep their 1-4 default - nothing breaks while linking is in progress.
+//   6. placeholderOverrides - explicit per-contract overrides from
 //      offer.placeholder_overrides (see ContractEditor.tsx's Placeholders &
-//      Values tab). Always wins, even over identity fields - this is the
-//      one place a user can deliberately diverge a single contract from the
-//      Employee/Company record without editing that record.
+//      Values tab). Always wins, even over a linked master field - this is
+//      the one place a user can deliberately diverge a single contract from
+//      the Employee/Company record without editing that record.
 //
 // This replaces the old tasks-requirements master-field engine for the
 // Employment Contracts module. The caller in ContractPreview.tsx passes
@@ -26,7 +35,9 @@ export function buildStandardPlaceholderValues(
   company: Company | null | undefined,
   offer: EmploymentOffer | null | undefined,
   effectiveSettings?: Record<string, any>,
-  placeholderOverrides?: Record<string, string>
+  placeholderOverrides?: Record<string, string>,
+  ecPlaceholders?: EcPlaceholder[],
+  masterFieldValues?: Record<string, string>
 ): Record<string, string> {
   const contactEmail = company?.contact_details?.email || '';
 
@@ -119,5 +130,14 @@ export function buildStandardPlaceholderValues(
     compassionate_leave_days: String(s.compassionate_leave_days || ''),
   };
 
-  return { ...defaults, ...placeholderOverrides };
+  const masterFieldOverlay: Record<string, string> = {};
+  if (ecPlaceholders && masterFieldValues) {
+    for (const p of ecPlaceholders) {
+      if (p.source_kind !== 'master_field' || !p.master_field_id) continue;
+      const resolved = masterFieldValues[p.master_field_id];
+      if (resolved !== undefined) masterFieldOverlay[p.key] = resolved;
+    }
+  }
+
+  return { ...defaults, ...masterFieldOverlay, ...placeholderOverrides };
 }
