@@ -25,13 +25,22 @@ export async function resolveMasterFieldValues(
   const result: Record<string, string> = {};
 
   await Promise.all(fields.map(async (field) => {
+    // JobFieldSource['linking_variable'] is typed as 'id' | 'director_id' |
+    // null in master-fields/components/types/database.ts, but the Master
+    // Fields admin UI (link-sources-dialog.tsx) actually also writes
+    // 'individual_id' / 'company_id' - that type is stale, not this code, so
+    // read it as a plain string here rather than fight the narrower type.
     const sources = (field.sources || [])
       .filter((s) => s.source_type === 'individual' || s.source_type === 'company')
-      .filter((s) => s.linking_variable === 'individual_id' || s.linking_variable === 'company_id' || !s.linking_variable)
+      .filter((s) => {
+        const lv = s.linking_variable as string | null | undefined;
+        return lv === 'individual_id' || lv === 'company_id' || !lv;
+      })
       .sort((a, b) => a.priority - b.priority);
 
     for (const source of sources) {
-      const usesCompanyId = source.linking_variable === 'company_id' || (source.source_type === 'company' && !source.linking_variable);
+      const linkingVariable = source.linking_variable as string | null | undefined;
+      const usesCompanyId = linkingVariable === 'company_id' || (source.source_type === 'company' && !linkingVariable);
       const idColumn = usesCompanyId ? 'company_id' : 'individual_id';
       const idValue = usesCompanyId ? companyId : individualId;
       if (idValue === null || idValue === undefined) continue;
