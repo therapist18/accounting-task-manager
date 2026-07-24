@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Progress } from "@/components/ui/progress"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandGroup, CommandItem, CommandList } from "@/components/ui/command"
+import { Switch } from "@/components/ui/switch"
 import { toast } from "sonner"
 import {
   CheckCircle2, AlertCircle, Copy, Check, ExternalLink,
@@ -132,7 +133,10 @@ function getAppliesToNames(item: any, task: any): string[] {
   return Array.from(new Set(getApplicableEntitiesForRequirement(item, task).map(e => e.name).filter(Boolean)))
 }
 
-function AppliesToCell({ item, task }: { item: any, task: any }) {
+function AppliesToCell({ item, task, blank }: { item: any, task: any, blank?: boolean }) {
+  if (blank) {
+    return <span className="text-xs text-slate-400 italic">&mdash;</span>
+  }
   const names = getAppliesToNames(item, task)
   if (names.length === 0) {
     return <span className="text-xs text-slate-400 italic">Everyone</span>
@@ -180,6 +184,12 @@ export function SendRequirementsDialog({
   const [copied, setCopied] = useState(false)
   const [activeTab, setActiveTab] = useState("checklist")
   const [isExporting, setIsExporting] = useState(false)
+  // When on, the Action Checklist and PDF export show a blanked-out version of
+  // this same requirement list (no statuses/dates/values) so it can be handed to
+  // a third party without exposing the applicant's already-collected data. The
+  // Share Access tab is intentionally unaffected - that link always ties back to
+  // the applicant's own task record regardless of this toggle.
+  const [blankMode, setBlankMode] = useState(false)
   const router = useRouter()
 
   const clientRequirements = useMemo(() => {
@@ -397,6 +407,38 @@ export function SendRequirementsDialog({
     return { total, completed, percent: total > 0 ? Math.round((completed / total) * 100) : 0 };
   }, [clientRequirements, docsWithStatus, questionsWithValues, fieldsWithValues]);
 
+  // Blanked equivalents of the above, used by the Action Checklist tab and PDF
+  // export when blankMode is on. Structural info (names, entity types, accepted
+  // document types) is kept - only actual statuses/dates/values are cleared.
+  const displayDocsWithStatus = useMemo(() => {
+    if (!blankMode) return docsWithStatus
+    return docsWithStatus.map(({ doc, status, docTypeNames, acceptedTypesLabel }) => ({
+      doc,
+      docTypeNames,
+      acceptedTypesLabel,
+      status: status.status === 'unconfigured' ? status : {
+        label: 'Action Required', color: 'text-red-600', bgColor: 'bg-red-50',
+        status: 'missing', icon: AlertCircle, date: '-', satisfiedCount: 0,
+        requiredCount: doc.requiredDocumentCount || 1
+      }
+    }))
+  }, [docsWithStatus, blankMode])
+
+  const displayQuestionsWithValues = useMemo(() => {
+    if (!blankMode) return questionsWithValues
+    return questionsWithValues.map(({ question }) => ({ question, value: null, isMissing: true }))
+  }, [questionsWithValues, blankMode])
+
+  const displayFieldsWithValues = useMemo(() => {
+    if (!blankMode) return fieldsWithValues
+    return fieldsWithValues.map(({ field, isArray }) => ({ field, isArray, arrayRows: [] as any[], value: null, isMissing: true }))
+  }, [fieldsWithValues, blankMode])
+
+  const displayStats = useMemo(() => {
+    if (!blankMode) return stats
+    return { total: stats.total, completed: 0, percent: 0 }
+  }, [stats, blankMode])
+
   const clientUrl = useMemo(() => {
     if (typeof window === "undefined" || !tasks?.[0]?.id) return ""
     return `${window.location.origin}/client/fill-requirements?taskId=${tasks[0].id}`
@@ -435,7 +477,7 @@ export function SendRequirementsDialog({
       return `<strong style="color:#1e293b;">${label}</strong><br/><span style="color:#94a3b8; font-size:9px;">${preview}</span>`
     }
 
-    const docRows = docsWithStatus.map(({ doc, status, docTypeNames }, idx) => {
+    const docRows = displayDocsWithStatus.map(({ doc, status, docTypeNames }, idx) => {
       const requiredCount = doc.requiredDocumentCount || 1
       const automationTag = doc.web_automation?.automationId
         ? ' <span style="display:inline-block; font-size:8px; font-weight:700; color:#7c3aed; background:#f5f3ff; border:1px solid #ddd6fe; border-radius:9999px; padding:1px 6px; vertical-align:middle;">&#9889; Automated</span>'
@@ -452,7 +494,7 @@ export function SendRequirementsDialog({
     }).join('')
 
     const fieldCards = [
-      ...questionsWithValues.map(({ question: q, value: val, isMissing }, idx) => {
+      ...displayQuestionsWithValues.map(({ question: q, value: val, isMissing }, idx) => {
         return `<div class="field-card ${isMissing ? 'field-missing' : 'field-ok'}">
           <div class="field-card-top">
             <span class="field-num">${String(idx + 1).padStart(2, '0')}</span>
@@ -462,7 +504,7 @@ export function SendRequirementsDialog({
           <div class="field-value">${val || '<span style="color:#cbd5e1;font-style:italic;">Pending Input</span>'}</div>
         </div>`
       }),
-      ...fieldsWithValues.map(({ field: f, isArray, arrayRows, value: val, isMissing }, idx) => {
+      ...displayFieldsWithValues.map(({ field: f, isArray, arrayRows, value: val, isMissing }, idx) => {
         let displayVal: string
         if (isArray) {
           displayVal = isMissing
@@ -477,7 +519,7 @@ export function SendRequirementsDialog({
         }
         return `<div class="field-card ${isMissing ? 'field-missing' : 'field-ok'} ${isArray ? 'field-wide' : ''}">
           <div class="field-card-top">
-            <span class="field-num">${String(questionsWithValues.length + idx + 1).padStart(2, '0')}</span>
+            <span class="field-num">${String(displayQuestionsWithValues.length + idx + 1).padStart(2, '0')}</span>
             <span class="field-name">${getFieldLabel(f)}</span>
             <span class="status-dot ${isMissing ? 'dot-missing' : 'dot-valid'}"></span>
           </div>
@@ -493,7 +535,7 @@ export function SendRequirementsDialog({
         
         .pdf-wrapper { background: #ffffff; padding: 0; position: relative; z-index: 1; }
         
-        .watermark { position: fixed; top: 40%; left: 50%; transform: translate(-50%, -50%) rotate(-35deg); font-size: 80px; font-weight: 900; color: rgba(37, 99, 235, 0.03); letter-spacing: 0.1em; text-transform: uppercase; pointer-events: none; white-space: nowrap; z-index: -1; }
+        .watermark { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%) rotate(-35deg); font-size: 80px; font-weight: 900; color: rgba(37, 99, 235, 0.03); letter-spacing: 0.1em; text-transform: uppercase; pointer-events: none; white-space: nowrap; z-index: -1; }
 
         .header { border-bottom: 3px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px; }
         .header-top { display: flex; justify-content: space-between; align-items: flex-start; }
@@ -567,9 +609,9 @@ export function SendRequirementsDialog({
             </div>
           </div>
           <div class="progress-row">
-            <div class="progress-bar-bg"><div class="progress-bar-fill" style="width: ${stats.percent}%"></div></div>
-            <span class="progress-summary">${stats.completed} of ${stats.total} items addressed</span>
-            <span class="progress-percent">${stats.percent}%</span>
+            <div class="progress-bar-bg"><div class="progress-bar-fill" style="width: ${displayStats.percent}%"></div></div>
+            <span class="progress-summary">${displayStats.completed} of ${displayStats.total} items addressed</span>
+            <span class="progress-percent">${displayStats.percent}%</span>
           </div>
         </div>
 
@@ -671,15 +713,24 @@ export function SendRequirementsDialog({
               </div>
             </div>
 
+            {/* Blank Copy Toggle - affects Action Checklist + PDF export only */}
+            <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-2.5 shadow-sm shrink-0">
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-slate-700">Blank Copy</span>
+                <span className="text-[10px] text-slate-400 leading-tight">For third-party recipients &middot; Checklist &amp; PDF only</span>
+              </div>
+              <Switch checked={blankMode} onCheckedChange={setBlankMode} />
+            </div>
+
             {/* Progress Card */}
             <div className="bg-slate-900 text-white rounded-xl p-4 min-w-[260px] shadow-lg flex flex-col justify-center border border-slate-800 shrink-0">
               <div className="flex justify-between items-end mb-2.5 px-1">
                 <span className="text-[10px] uppercase tracking-widest font-semibold text-slate-400">Total Completion</span>
-                <span className="text-lg font-bold leading-none">{stats.percent}%</span>
+                <span className="text-lg font-bold leading-none">{displayStats.percent}%</span>
               </div>
-              <Progress value={stats.percent} className="h-2 bg-slate-700" indicatorClassName="bg-blue-400" />
+              <Progress value={displayStats.percent} className="h-2 bg-slate-700" indicatorClassName="bg-blue-400" />
               <p className="text-[11px] mt-2.5 px-1 text-slate-300 font-medium">
-                <strong className="text-white">{stats.completed}</strong> of <strong className="text-white">{stats.total}</strong> requirements satisfied
+                <strong className="text-white">{displayStats.completed}</strong> of <strong className="text-white">{displayStats.total}</strong> requirements satisfied
               </p>
             </div>
           </div>
@@ -743,7 +794,7 @@ export function SendRequirementsDialog({
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {docsWithStatus.map(({ doc, status, docTypeNames, acceptedTypesLabel }, idx) => {
+                              {displayDocsWithStatus.map(({ doc, status, docTypeNames, acceptedTypesLabel }, idx) => {
                                 const StatusIcon = status.icon
 
                                 return (
@@ -771,7 +822,7 @@ export function SendRequirementsDialog({
                                       <EntityTypeBadges types={getEntityTypes(doc)} />
                                     </TableCell>
                                     <TableCell className="py-4 pr-4">
-                                      <AppliesToCell item={doc} task={doc.task} />
+                                      <AppliesToCell item={doc} task={doc.task} blank={blankMode} />
                                     </TableCell>
                                     <TableCell className="py-4 pr-4">
                                       <span className="inline-block text-xs font-medium text-slate-600 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-md">
@@ -822,7 +873,7 @@ export function SendRequirementsDialog({
                             </TableHeader>
                             <TableBody>
                               {/* Questions */}
-                              {questionsWithValues.map(({ question: q, value: val, isMissing }, idx) => {
+                              {displayQuestionsWithValues.map(({ question: q, value: val, isMissing }, idx) => {
                                 return (
                                   <TableRow key={`q-${idx}`} className="group hover:bg-slate-50/60 border-slate-100 transition-colors">
                                     <TableCell className="text-center font-mono text-xs text-slate-400 font-medium align-top pt-5">{idx + 1}</TableCell>
@@ -838,7 +889,7 @@ export function SendRequirementsDialog({
                                       <EntityTypeBadges types={getEntityTypes(q)} />
                                     </TableCell>
                                     <TableCell className="py-4 pr-4 align-top">
-                                      <AppliesToCell item={q} task={q.task} />
+                                      <AppliesToCell item={q} task={q.task} blank={blankMode} />
                                     </TableCell>
                                     <TableCell className="py-4 pr-4 align-top">
                                       {isMissing ? (
@@ -863,11 +914,11 @@ export function SendRequirementsDialog({
                               })}
 
                               {/* Fields */}
-                              {fieldsWithValues.map(({ field: f, isArray, arrayRows, value: val, isMissing }, idx) => {
+                              {displayFieldsWithValues.map(({ field: f, isArray, arrayRows, value: val, isMissing }, idx) => {
                                 return (
                                   <TableRow key={`f-${idx}`} className="group hover:bg-slate-50/60 border-slate-100 transition-colors">
                                     <TableCell className="text-center font-mono text-xs text-slate-400 font-medium align-top pt-5">
-                                      {questionsWithValues.length + idx + 1}
+                                      {displayQuestionsWithValues.length + idx + 1}
                                     </TableCell>
                                     <TableCell className="py-4 pr-4 align-top">
                                       <div className="flex flex-col gap-1">
@@ -883,7 +934,7 @@ export function SendRequirementsDialog({
                                       <EntityTypeBadges types={getEntityTypes(f)} />
                                     </TableCell>
                                     <TableCell className="py-4 pr-4 align-top">
-                                      <AppliesToCell item={f} task={f.task} />
+                                      <AppliesToCell item={f} task={f.task} blank={blankMode} />
                                     </TableCell>
                                     <TableCell className="py-4 pr-4 align-top">
                                       {isArray ? (
