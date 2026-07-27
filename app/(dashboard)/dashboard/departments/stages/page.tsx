@@ -98,6 +98,7 @@ export default function Stages() {
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map())
   const [kycDocumentsLoading, setKycDocumentsLoading] = useState(false)
   const [columnVisibility, setColumnVisibility] = useState({ index: true, entity: true, stageName: true, duration: true, followUp: true, status: true, controls: true })
+  const [isRecalculatingExpectedTimes, setIsRecalculatingExpectedTimes] = useState(false)
   const [entityVisibility, setEntityVisibility] = useState<Record<string, boolean>>({})
   const [userData, setUserData] = useState<{
     officers: DisplayUser[];
@@ -1878,6 +1879,37 @@ export default function Stages() {
     }
   }
 
+  // Reconciles every leaf entity's stored total for the active department in one go —
+  // also doubles as the backfill for job levels that existed before this feature shipped
+  // (nothing else populates expected_total_time_minutes for those).
+  const handleRecalculateExpectedTimes = async () => {
+    const currentDept = getCurrentDepartment()
+    if (!currentDept) return
+    setIsRecalculatingExpectedTimes(true)
+    try {
+      const leafCount = buildLeafEntitiesRaw(currentDept.subdepartments || []).length
+      await recalcExpectedTimeTotals({
+        departmentId: currentDept.id,
+        stages: currentDept.stages,
+        subdepartments: currentDept.subdepartments || [],
+        scope: { type: "department" },
+      })
+      toast({
+        title: "Success",
+        description: `Recalculated Overall Expected Time for ${leafCount} job level${leafCount === 1 ? "" : "s"}.`,
+      })
+    } catch (err) {
+      console.error("Error recalculating expected times:", err)
+      toast({
+        title: "Error",
+        description: "Failed to recalculate expected times. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsRecalculatingExpectedTimes(false)
+    }
+  }
+
   // Effect to fetch all KYC documents
   useEffect(() => {
     const fetchAllKycDocuments = async () => {
@@ -3266,20 +3298,13 @@ export default function Stages() {
               )}
               {/* Applicable/Display Headers Row */}
               <TableRow>
-                <TableHead className="sticky left-0 bg-blue-700 border-r-2 border-blue-500 font-bold w-16 z-40 text-center text-white" rowSpan={2} colSpan={2}></TableHead>
+                <TableHead className="sticky left-0 bg-blue-700 border-r-2 border-blue-500 font-bold w-16 z-40 text-center text-white" rowSpan={2} colSpan={3}></TableHead>
               </TableRow>
               {columnVisibility.controls && (
                 <TableRow className="border-b-0">
                   {columnVisibility.stageName && (
                     <TableHead
-                      className={cn(
-                        "sticky bg-slate-500 border-r-2 border-slate-300 z-20",
-                        columnVisibility.index && columnVisibility.entity
-                          ? "left-80"
-                          : columnVisibility.index || columnVisibility.entity
-                            ? "left-64"
-                            : "left-0",
-                      )}
+                      className={cn("sticky bg-slate-500 border-r-2 border-slate-300 z-20", stageNameLeftClass)}
                     ></TableHead>
                   )}
                   {currentDept.stages.map((stage, index) => (
@@ -3334,16 +3359,19 @@ export default function Stages() {
                         </div>
                       </TableCell>
                     )}
+                    <TableCell className={cn("sticky bg-slate-100 border-r-2 border-slate-300 text-center text-sm font-semibold text-slate-700 z-10", expectedTimeLeftClass)}>
+                      {hasClasses
+                        ? "-"
+                        : minutesToTimeString(
+                          currentDept.stages.reduce(
+                            (sum, stage) => (resolveStageApplicable(subdept.stages, stage.id) ? sum + (stage.estimated_time || 0) : sum),
+                            0,
+                          ),
+                        )}
+                    </TableCell>
                     {columnVisibility.stageName && (
                       <TableCell
-                        className={cn(
-                          "sticky bg-slate-100 border-r-2 border-slate-300 text-center text-sm z-10",
-                          columnVisibility.index && columnVisibility.entity
-                            ? "left-80"
-                            : columnVisibility.index || columnVisibility.entity
-                              ? "left-64"
-                              : "left-0",
-                        )}
+                        className={cn("sticky bg-slate-100 border-r-2 border-slate-300 text-center text-sm z-10", stageNameLeftClass)}
                       ></TableCell>
                     )}
                     {currentDept.stages.map((stage, stageIndex) => {
@@ -3466,16 +3494,19 @@ export default function Stages() {
                             </div>
                           </TableCell>
                         )}
+                        <TableCell className={cn("sticky bg-gray-50 border-r-2 border-gray-200 text-center text-sm font-semibold text-slate-700 z-10", expectedTimeLeftClass)}>
+                          {hasSubClasses
+                            ? "-"
+                            : minutesToTimeString(
+                              currentDept.stages.reduce(
+                                (sum, stage) => (resolveStageApplicable(cls.stages, stage.id) ? sum + (stage.estimated_time || 0) : sum),
+                                0,
+                              ),
+                            )}
+                        </TableCell>
                         {columnVisibility.stageName && (
                           <TableCell
-                            className={cn(
-                              "sticky bg-gray-50 border-r-2 border-gray-200 text-center text-sm z-10",
-                              columnVisibility.index && columnVisibility.entity
-                                ? "left-80"
-                                : columnVisibility.index || columnVisibility.entity
-                                  ? "left-64"
-                                  : "left-0",
-                            )}
+                            className={cn("sticky bg-gray-50 border-r-2 border-gray-200 text-center text-sm z-10", stageNameLeftClass)}
                           ></TableCell>
                         )}
                         {currentDept.stages.map((stage, stageIndex) => {
@@ -3572,16 +3603,17 @@ export default function Stages() {
                                 </div>
                               </TableCell>
                             )}
+                            <TableCell className={cn("sticky bg-white border-r-2 border-gray-200 text-center text-sm font-semibold text-slate-700 z-10", expectedTimeLeftClass)}>
+                              {minutesToTimeString(
+                                currentDept.stages.reduce(
+                                  (sum, stage) => (resolveStageApplicable(subCls.stages, stage.id) ? sum + (stage.estimated_time || 0) : sum),
+                                  0,
+                                ),
+                              )}
+                            </TableCell>
                             {columnVisibility.stageName && (
                               <TableCell
-                                className={cn(
-                                  "sticky bg-white border-r-2 border-gray-200 text-center text-sm z-10",
-                                  columnVisibility.index && columnVisibility.entity
-                                    ? "left-80"
-                                    : columnVisibility.index || columnVisibility.entity
-                                      ? "left-64"
-                                      : "left-0",
-                                )}
+                                className={cn("sticky bg-white border-r-2 border-gray-200 text-center text-sm z-10", stageNameLeftClass)}
                               ></TableCell>
                             )}
                             {currentDept.stages.map((stage, stageIndex) => {
@@ -3791,6 +3823,18 @@ export default function Stages() {
             >
               <FileSpreadsheet className="mr-2 h-4 w-4" />
               Export to Excel
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRecalculateExpectedTimes}
+              disabled={!currentDept || isRecalculatingExpectedTimes}
+              className="flex items-center gap-2 bg-transparent"
+              title="Recompute and persist Overall Expected Time for every job level in this department"
+            >
+              <Clock className={cn("mr-2 h-4 w-4", isRecalculatingExpectedTimes && "animate-spin")} />
+              {isRecalculatingExpectedTimes ? "Recalculating..." : "Recalculate Expected Times"}
             </Button>
 
             <AddStageDialog

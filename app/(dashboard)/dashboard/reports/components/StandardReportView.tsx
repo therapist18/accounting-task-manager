@@ -214,7 +214,7 @@ export function StandardReportView({
                                 </span>
                               </TooltipTrigger>
                               <TooltipContent side="bottom" className="bg-slate-900 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[9999] max-w-[260px] break-words">
-                                {col.label}
+                                {col.description || col.label}
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>

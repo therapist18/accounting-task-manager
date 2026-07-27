@@ -175,6 +175,7 @@ export default function ReportsPage() {
   const [activePerspective, setActivePerspective] = useState<'overview' | 'officers' | 'managers' | 'clients' | 'companies'>('overview');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [reportDocDefaults, setReportDocDefaults] = useState<any[]>([]);
+  const [expectedTimeByJobLevel, setExpectedTimeByJobLevel] = useState<Map<string, number>>(new Map());
   const [allIndividualDocuments, setAllIndividualDocuments] = useState<Record<number, any[]>>({});
   const [allCompanyDocuments, setAllCompanyDocuments] = useState<Record<number, any[]>>({});
   const [previewDocument, setPreviewDocument] = useState<any>(null);
@@ -346,10 +347,10 @@ export default function ReportsPage() {
     setAvailableTaskManagers(unifiedManagers.filter(m => allowedIds.has(m.id)));
   }, [activeDeptId, activeSubDeptIds, unifiedManagers, activeSubDepartments]);
 
-  // Fetch report_doc_defaults for current job level
+  // Fetch report_doc_defaults + expected_total_time_minutes for current job level
   useEffect(() => {
     const fetchReportDocDefaults = async () => {
-      if (!activeDeptId) { setReportDocDefaults([]); return; }
+      if (!activeDeptId) { setReportDocDefaults([]); setExpectedTimeByJobLevel(new Map()); return; }
       try {
         // Get unique job levels from tasks in this department
         const deptTasks = tasks.filter(t => String(t.department_id) === String(activeDeptId));
@@ -385,16 +386,20 @@ export default function ReportsPage() {
           });
         }
 
-        // Fetch report_doc_defaults for all matching job levels
+        // Fetch report_doc_defaults + expected_total_time_minutes for all matching job levels
         const allDefaults: any[] = [];
-        for (const [_, jobLevel] of jobLevels) {
+        const newExpectedTimeMap = new Map<string, number>();
+        for (const [key, jobLevel] of jobLevels) {
           const { data, error } = await supabase
             .from('tm_class_requirements')
-            .select('report_doc_defaults')
+            .select('report_doc_defaults, expected_total_time_minutes')
             .eq('job_level', JSON.stringify(jobLevel))
             .maybeSingle();
           if (!error && data?.report_doc_defaults) {
             allDefaults.push(...data.report_doc_defaults);
+          }
+          if (!error && typeof data?.expected_total_time_minutes === 'number') {
+            newExpectedTimeMap.set(key, data.expected_total_time_minutes);
           }
         }
 
@@ -407,9 +412,11 @@ export default function ReportsPage() {
         ).sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
 
         setReportDocDefaults(uniqueDefaults);
+        setExpectedTimeByJobLevel(newExpectedTimeMap);
       } catch (err) {
         console.error('Error fetching report doc defaults:', err);
         setReportDocDefaults([]);
+        setExpectedTimeByJobLevel(new Map());
       }
     };
     fetchReportDocDefaults();
@@ -733,8 +740,20 @@ export default function ReportsPage() {
     });
 
     if (stageInfoCols.length > 0) {
-      cols.push({ id: '__expected_total_time__', label: 'Expected Time', type: 'total_time_expected', relatedCols: stageInfoCols });
-      cols.push({ id: '__actual_total_time__', label: 'Actual Time Taken', type: 'total_time_actual', relatedCols: stageInfoCols });
+      cols.push({
+        id: '__expected_total_time__',
+        label: 'Expected Time',
+        type: 'total_time_expected',
+        relatedCols: stageInfoCols,
+        description: 'How long this job level is expected to take in total, based on the estimated time set for each applicable stage in Departments → Stages. Updates automatically whenever those settings change.',
+      });
+      cols.push({
+        id: '__actual_total_time__',
+        label: 'Actual Time Taken',
+        type: 'total_time_actual',
+        relatedCols: stageInfoCols,
+        description: 'How long this task has actually been running: from its first stage (e.g. Enquiry) up to today. Keeps counting up while the task is still in progress.',
+      });
     }
 
     cols.push(...stageInfoCols);
@@ -912,6 +931,22 @@ export default function ReportsPage() {
     }
 
     if (col.type === 'total_time_expected') {
+      // Prefer the canonical total stored by the Stages module (sum of every stage
+      // applicable to this job level, not just the ones this particular report happens to
+      // include) — fall back to the on-the-fly sum only if that job level hasn't been
+      // recomputed there yet.
+      const jl = task.job_level || {};
+      const jobLevelKey = JSON.stringify({
+        department_id: Number(jl.department_id || activeDeptId),
+        subdepartment_id: jl.subdepartment_id || null,
+        class_id: jl.class_id || null,
+        subclass_id: jl.subclass_id || null
+      });
+      const storedMinutes = expectedTimeByJobLevel.get(jobLevelKey);
+      if (typeof storedMinutes === 'number') {
+        return storedMinutes > 0 ? formatEstimatedMins(storedMinutes) : 'N/A';
+      }
+
       let totalMinutes = 0;
       (col.relatedCols || []).forEach((c: any) => {
         const stage = stages.find(s => s.id === c.stageId);
@@ -921,19 +956,26 @@ export default function ReportsPage() {
     }
 
     if (col.type === 'total_time_actual') {
-      const dates: Date[] = [];
-      (col.relatedCols || []).filter((c: any) => c.hasDate).forEach((c: any) => {
-        const stage = stages.find(s => s.id === c.stageId);
-        if (!stage || !checkStageApplicableForTask(stage, task)) return;
-        const info = computeStageDateInfo(task, stage, c);
-        if (info.isSkipped || !info.effectiveDateValue) return;
-        const d = parseDateSafe(formatDate(info.effectiveDateValue, false));
-        if (d) dates.push(d);
-      });
-      if (dates.length === 0) return 'N/A';
-      const earliest = new Date(Math.min(...dates.map(d => d.getTime())));
-      const latest = new Date(Math.max(...dates.map(d => d.getTime())));
-      const diffDays = differenceInDays(latest, earliest);
+      // Elapsed time since the task's first applicable stage (e.g. Enquiry) up to today —
+      // not "earliest dated stage to latest dated stage", since a task still in progress
+      // has no finish date yet and freezing at whatever stage last happened to get dated
+      // understates how long it's actually been running. Uses the full department stage
+      // list (not just col.relatedCols, which is scoped to stages this report happens to
+      // include) so the true first stage is found regardless of report configuration.
+      const applicableStagesSorted = [...stages]
+        .filter((s: any) => checkStageApplicableForTask(s, task))
+        .sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
+      const firstStage = applicableStagesSorted[0];
+      if (!firstStage) return 'N/A';
+
+      const firstStageCol = (col.relatedCols || []).find((c: any) => c.stageId === firstStage.id) || { stageId: firstStage.id, hasDate: true, fields: [] };
+      const info = computeStageDateInfo(task, firstStage, firstStageCol);
+      if (info.isSkipped || !info.effectiveDateValue) return 'N/A';
+
+      const startDate = parseDateSafe(formatDate(info.effectiveDateValue, false));
+      if (!startDate) return 'N/A';
+
+      const diffDays = differenceInDays(new Date(), startDate);
       return `${diffDays}d`;
     }
 
@@ -1029,7 +1071,7 @@ export default function ReportsPage() {
     return <span className="text-sm text-gray-400">—</span>;
   }, [
     stages, departments, kycDocuments, companies, enhancedTasksData, taskDependants,
-    showTime, activeDeptId, unifiedOfficers, allDocuments,
+    showTime, activeDeptId, unifiedOfficers, allDocuments, expectedTimeByJobLevel,
     allIndividualDocuments, allCompanyDocuments, computeStageDateInfo // Ensure these were added to dependencies!
   ]);
 
