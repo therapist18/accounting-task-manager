@@ -110,11 +110,17 @@ export function StandardReportView({
   const interleavedColumns = useMemo(() => {
     if (!showDelta) return filteredColumns;
     const result: any[] = [];
+    const priorStageCols: any[] = [];
     filteredColumns.forEach((col: any, i: number) => {
       result.push(col);
+      if (col.type === 'stage_info') priorStageCols.push(col);
       const next = filteredColumns[i + 1];
       if (col.type === 'stage_info' && next?.type === 'stage_info') {
-        result.push({ id: `__delta__${i}`, isDelta: true, prevCol: col, nextCol: next, label: 'Δ', width: 62 });
+        // priorStageCols (this stage and everything before it) lets the delta cell reach
+        // back past a pending/skipped predecessor to the nearest stage that actually has
+        // a date, instead of just giving up with "—" whenever the immediate neighbour
+        // hasn't happened yet.
+        result.push({ id: `__delta__${i}`, isDelta: true, prevCol: col, nextCol: next, priorCols: [...priorStageCols], label: 'Δ', width: 62 });
       }
     });
     return result;
@@ -343,9 +349,23 @@ export function StandardReportView({
                     {interleavedColumns.map((col: any) => {
                       // ── Delta column ──
                       if (col.isDelta) {
-                        const prevDate = parseDateSafeReport(getStageDisplayDateStr(task, col.prevCol));
                         const nextDate = parseDateSafeReport(getStageDisplayDateStr(task, col.nextCol));
+                        // Only bother finding a start point once the "arrival" stage has actually
+                        // happened. If the immediate predecessor is still pending/skipped (no date
+                        // of its own yet), reach back through earlier stages to the nearest one that
+                        // does have a date, rather than showing "—" just because one stage in the
+                        // middle hasn't been dated — that would silently hide a real, known gap.
+                        let prevDate: Date | null = null;
+                        let bridgedFromCol: any = col.prevCol;
+                        if (nextDate) {
+                          for (let i = (col.priorCols?.length || 0) - 1; i >= 0; i--) {
+                            const candidate = col.priorCols[i];
+                            const d = parseDateSafeReport(getStageDisplayDateStr(task, candidate));
+                            if (d) { prevDate = d; bridgedFromCol = candidate; break; }
+                          }
+                        }
                         const diff = prevDate && nextDate ? differenceInDays(nextDate, prevDate) : null;
+                        const bridged = diff !== null && bridgedFromCol?.id !== col.prevCol?.id;
                         return (
                           <TableCell
                             key={col.id}
@@ -361,13 +381,16 @@ export function StandardReportView({
                                   <TooltipTrigger asChild>
                                     <span className={cn(
                                       "text-sm font-bold tabular-nums cursor-default",
+                                      bridged ? "italic underline decoration-dotted" : "",
                                       diff < 0 ? "text-red-600" : diff > 30 ? "text-rose-500" : diff > 14 ? "text-amber-500" : "text-slate-500"
                                     )}>
                                       {diff >= 0 ? `+${diff}d` : `${diff}d`}
                                     </span>
                                   </TooltipTrigger>
                                   <TooltipContent side="top" className="bg-slate-900 text-white text-xs rounded-lg px-2 py-1.5 z-[9999]">
-                                    {diff} day{Math.abs(diff) !== 1 ? "s" : ""} between stages
+                                    {bridged
+                                      ? `${diff} day${Math.abs(diff) !== 1 ? "s" : ""} since ${bridgedFromCol?.label} — ${col.prevCol?.label} has no date yet`
+                                      : `${diff} day${Math.abs(diff) !== 1 ? "s" : ""} between stages`}
                                   </TooltipContent>
                                 </Tooltip>
                               </TooltipProvider>

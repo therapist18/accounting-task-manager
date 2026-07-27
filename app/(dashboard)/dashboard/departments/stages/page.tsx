@@ -1100,6 +1100,17 @@ export default function Stages() {
 
       if (error) throw error
 
+      // updateData only ever carries `classes` and/or `stages` — spread it over the
+      // original subdept so recalcExpectedTimeTotals sees the freshly-updated allocation
+      // arrays without waiting on the (async, same-tick-stale) setDepartments below.
+      const originalSubdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
+      recalcExpectedTimeTotals({
+        departmentId: currentDept.id,
+        stages: currentDept.stages,
+        subdepartments: originalSubdept ? [{ ...originalSubdept, ...updateData }] : [],
+        scope: { type: "subdepartment", subdeptId },
+      })
+
       // Update local state
       setDepartments((prevDepartments) =>
         prevDepartments.map((dept) => {
@@ -1502,6 +1513,12 @@ export default function Stages() {
       setDepartments(
         departments.map((dept) => (dept.id === currentDept.id ? { ...dept, stages: updatedStages } : dept)),
       )
+      recalcExpectedTimeTotals({
+        departmentId: currentDept.id,
+        stages: updatedStages,
+        subdepartments: currentDept.subdepartments || [],
+        scope: { type: "department" },
+      })
 
       setIsDialogOpen(false)
 
@@ -1583,6 +1600,12 @@ export default function Stages() {
       if (error) throw error
 
       setDepartments((prev) => prev.map((dept) => (dept.id === activeTab ? { ...dept, stages: updatedStages } : dept)))
+      recalcExpectedTimeTotals({
+        departmentId: activeTab,
+        stages: updatedStages,
+        subdepartments: currentDept.subdepartments || [],
+        scope: { type: "department" },
+      })
 
       toast({
         title: "Success",
@@ -1719,6 +1742,12 @@ export default function Stages() {
       if (error) throw error
 
       setDepartments((prev) => prev.map((dept) => (dept.id === activeTab ? { ...dept, stages: updatedStages } : dept)))
+      recalcExpectedTimeTotals({
+        departmentId: activeTab,
+        stages: updatedStages,
+        subdepartments: currentDept.subdepartments || [],
+        scope: { type: "department" },
+      })
 
       toast({
         title: "Success",
@@ -1731,6 +1760,121 @@ export default function Stages() {
         description: "Failed to delete stage. Please try again.",
         variant: "destructive",
       })
+    }
+  }
+
+  // Raw (unfiltered) leaf-entity walk for the "Overall Expected Time" total — deliberately
+  // NOT the same as getLeafEntities/getStageAllocation, which route through
+  // getProcessedSubdepartments and apply UI-only filters (showDefaultDisplayOnly,
+  // entityVisibility). The persisted total must reflect every job level regardless of what
+  // happens to be visible in the current viewer's session.
+  const buildLeafEntitiesRaw = (subdepartments: any[]): Array<{
+    type: "subdepartment" | "class" | "subclass"
+    subdeptId: number
+    classId: number | null
+    subclassId: number | null
+    ownStages: any[]
+  }> => {
+    const leaves: Array<{ type: "subdepartment" | "class" | "subclass"; subdeptId: number; classId: number | null; subclassId: number | null; ownStages: any[] }> = []
+    ;(subdepartments || []).forEach((subdept) => {
+      const classes = subdept.classes || []
+      if (classes.length === 0) {
+        leaves.push({ type: "subdepartment", subdeptId: subdept.id, classId: null, subclassId: null, ownStages: subdept.stages || [] })
+        return
+      }
+      classes.forEach((cls: any) => {
+        const subClasses = cls.subClasses || []
+        if (subClasses.length === 0) {
+          leaves.push({ type: "class", subdeptId: subdept.id, classId: cls.id, subclassId: null, ownStages: cls.stages || [] })
+          return
+        }
+        subClasses.forEach((subCls: any) => {
+          leaves.push({ type: "subclass", subdeptId: subdept.id, classId: cls.id, subclassId: subCls.id, ownStages: subCls.stages || [] })
+        })
+      })
+    })
+    return leaves
+  }
+
+  const resolveStageApplicable = (entityStages: any[] | undefined, stageId: string): boolean => {
+    return entityStages?.find((s: any) => s.stage_id === stageId)?.applicable ?? true
+  }
+
+  // Shared calc+persist for the "Overall Expected Time" total. Always call with the
+  // handler's own freshly-built LOCAL data (never currentDept/getCurrentDepartment()),
+  // since React state hasn't committed yet in the same tick as the mutation that triggered
+  // this. This is a derived/cache write — it must never fail or block the caller's own
+  // success path, hence the outer try/catch that only logs.
+  const recalcExpectedTimeTotals = async ({
+    departmentId,
+    stages,
+    subdepartments,
+    scope,
+  }: {
+    departmentId: string | number
+    stages: Stage[]
+    subdepartments: any[]
+    scope: { type: "subdepartment"; subdeptId: number } | { type: "department" }
+  }): Promise<void> => {
+    try {
+      const allLeaves = buildLeafEntitiesRaw(subdepartments)
+      const leaves = scope.type === "subdepartment" ? allLeaves.filter((l) => l.subdeptId === scope.subdeptId) : allLeaves
+      if (leaves.length === 0) return
+
+      const leavesWithTotals = leaves.map((leaf) => {
+        const totalMinutes = stages.reduce((sum, stage) => {
+          return resolveStageApplicable(leaf.ownStages, stage.id) ? sum + (stage.estimated_time || 0) : sum
+        }, 0)
+        const jobLevel = {
+          department_id: Number(departmentId),
+          subdepartment_id: Number(leaf.subdeptId),
+          class_id: leaf.classId != null ? Number(leaf.classId) : null,
+          subclass_id: leaf.subclassId != null ? Number(leaf.subclassId) : null,
+          level: leaf.type === "subdepartment" ? 2 : leaf.type === "class" ? 3 : 4,
+        }
+        return { totalMinutes, jobLevel }
+      })
+
+      let existingQuery = supabase
+        .from("tm_class_requirements")
+        .select("id, job_level")
+        .eq("job_level->>department_id", String(departmentId))
+      if (scope.type === "subdepartment") {
+        existingQuery = existingQuery.eq("job_level->>subdepartment_id", String(scope.subdeptId))
+      }
+      const { data: existingRows, error: fetchError } = await existingQuery
+      if (fetchError) throw fetchError
+
+      const keyPart = (v: any) => (v === null || v === undefined ? "null" : String(v))
+      const findExisting = (jobLevel: any) =>
+        (existingRows || []).find((row: any) => {
+          const jl = row.job_level || {}
+          return (
+            keyPart(jl.subdepartment_id) === keyPart(jobLevel.subdepartment_id) &&
+            keyPart(jl.class_id) === keyPart(jobLevel.class_id) &&
+            keyPart(jl.subclass_id) === keyPart(jobLevel.subclass_id)
+          )
+        })
+
+      await Promise.all(
+        leavesWithTotals.map(async ({ totalMinutes, jobLevel }) => {
+          const existing = findExisting(jobLevel)
+          if (existing) {
+            const { error } = await supabase
+              .from("tm_class_requirements")
+              .update({ expected_total_time_minutes: totalMinutes, updated_at: new Date().toISOString() })
+              .eq("id", existing.id)
+            if (error) throw error
+          } else {
+            const { error } = await supabase
+              .from("tm_class_requirements")
+              .insert({ job_level: jobLevel, expected_total_time_minutes: totalMinutes, created_at: new Date().toISOString() })
+            if (error) throw error
+          }
+        }),
+      )
+    } catch (err) {
+      console.error("Error recalculating expected time totals:", err)
     }
   }
 
@@ -2795,6 +2939,19 @@ export default function Stages() {
           },
         ]
 
+    // The "Overall Expected Time" column sits between Entity and Stage Name, so every
+    // sticky-left offset that used to start at Stage Name shifts right by its width (w-32).
+    const expectedTimeLeftClass = columnVisibility.index && columnVisibility.entity
+      ? "left-80"
+      : columnVisibility.index || columnVisibility.entity
+        ? "left-64"
+        : "left-0"
+    const stageNameLeftClass = columnVisibility.index && columnVisibility.entity
+      ? "left-[28rem]"
+      : columnVisibility.index || columnVisibility.entity
+        ? "left-96"
+        : "left-32"
+
     return (
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
         <div className="relative overflow-auto max-h-[calc(100vh-300px)]">
@@ -2825,16 +2982,15 @@ export default function Stages() {
                     </div>
                   </TableHead>
                 )}
+                <TableHead
+                  className={cn("sticky bg-blue-700 border-r-2 border-blue-500 font-bold w-32 z-40 text-white text-center", expectedTimeLeftClass)}
+                  rowSpan={headerRowCount}
+                >
+                  Overall Expected Time
+                </TableHead>
                 {columnVisibility.stageName && (
                   <TableHead
-                    className={cn(
-                      "sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white",
-                      columnVisibility.index && columnVisibility.entity
-                        ? "left-80"
-                        : columnVisibility.index || columnVisibility.entity
-                          ? "left-64"
-                          : "left-0",
-                    )}
+                    className={cn("sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white", stageNameLeftClass)}
                   >
                     Stage Name
                   </TableHead>
@@ -3020,14 +3176,7 @@ export default function Stages() {
                 <TableRow className="border-b-0">
                   {columnVisibility.stageName && (
                     <TableHead
-                      className={cn(
-                        "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
-                        columnVisibility.index && columnVisibility.entity
-                          ? "left-80"
-                          : columnVisibility.index || columnVisibility.entity
-                            ? "left-64"
-                            : "left-0",
-                      )}
+                      className={cn("sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white", stageNameLeftClass)}
                     >
                       Duration
                     </TableHead>
@@ -3049,14 +3198,7 @@ export default function Stages() {
                 <TableRow className="border-b-0">
                   {columnVisibility.stageName && (
                     <TableHead
-                      className={cn(
-                        "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
-                        columnVisibility.index && columnVisibility.entity
-                          ? "left-80"
-                          : columnVisibility.index || columnVisibility.entity
-                            ? "left-64"
-                            : "left-0",
-                      )}
+                      className={cn("sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white", stageNameLeftClass)}
                     >
                       Follow Up
                     </TableHead>
@@ -3082,10 +3224,7 @@ export default function Stages() {
               {/* Automation Row in Standard View */}
               <TableRow className="border-b-0">
                 {columnVisibility.stageName && (
-                  <TableHead className={cn(
-                    "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
-                    columnVisibility.index && columnVisibility.entity ? "left-80" : "left-64"
-                  )}>
+                  <TableHead className={cn("sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white", stageNameLeftClass)}>
                     Automation
                   </TableHead>
                 )}
@@ -3110,14 +3249,7 @@ export default function Stages() {
                 <TableRow className="border-b-0">
                   {columnVisibility.stageName && (
                     <TableHead
-                      className={cn(
-                        "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
-                        columnVisibility.index && columnVisibility.entity
-                          ? "left-80"
-                          : columnVisibility.index || columnVisibility.entity
-                            ? "left-64"
-                            : "left-0",
-                      )}
+                      className={cn("sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white", stageNameLeftClass)}
                     >
                       Status
                     </TableHead>

@@ -41,9 +41,6 @@ const PP_ENDORSEMENT_STAGE_ID = 'caefd742-5de5-4341-a3bb-81d7b9dd2b73';
 
 const parseDateSafe = (s: string | null | undefined): Date | null => {
   if (!s || typeof s !== 'string') return null;
-  // Match dd/mm/yyyy with an optional trailing " HH:mm" — captured explicitly so a time
-  // suffix can never bleed into the year (e.g. "19/11/2025 16:12" used to reconstruct as
-  // "2025 16:12-11-19", which JS's lenient Date parser silently mis-parsed to Jan 2025).
   const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
   if (m) {
     const [, dd, mm, yyyy, hh, min] = m;
@@ -580,119 +577,35 @@ export default function ReportsPage() {
     return true;
   }, [activeDeptId, activeSubDeptIds, activeClassId, departments]);
 
-  const getSortableValue = useCallback((task: any, col: any) => {
-    if (!col) return '';
-    if (col.type === 'task') return getRawCellValue(departments, task, col.field, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper);
-    if (col.type === 'stage_info' && col.hasDate) return task.stages?.[col.stageId]?.date ? parseDateSafe(task.stages[col.stageId].date)?.getTime() || 0 : 0;
-    return '';
-  }, [departments, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper]);
-
-  const handleSort = (columnId: string) => {
-    setSortConfig(cur => cur?.key === columnId ? { key: columnId, direction: cur.direction === 'asc' ? 'desc' : 'asc' } : { key: columnId, direction: 'asc' });
-  };
-
-  const columns = useMemo(() => {
-    if (!activeReport || !stages.length) return [];
-    const getLabel = (id: any) => ENHANCED_TABLE_HEADERS_IMMIGRATION.find(h => h.id === id)?.label || String(id || '').replace(/_/g, ' ').toUpperCase();
-    const cols: any[] = [];
-    const fieldsToDisplay = activeReport.sessionIncludedFields?.length > 0 ? activeReport.sessionIncludedFields : activeReport.configuration?.taskFields?.map((f: any) => f.id) || [];
-    fieldsToDisplay.forEach((fieldId: string) => { if (fieldId) cols.push({ id: `task_${fieldId}`, label: getLabel(fieldId), type: 'task', field: fieldId }); });
-
-    if (showDocRequirementsColumns) {
-      const referenceRequirements = new Map<string, any>();
-      tasks.forEach(task => task.requirements?.forEach((req: any) => req.category === 'reference' && referenceRequirements.set(`req_${req.id || req.name}`, req)));
-      referenceRequirements.forEach((req, reqId) => cols.push({ id: reqId, label: req.name || 'Reference Requirement', type: 'reference_requirement', requirementId: req.id, requirementName: req.name }));
-    }
-
-    const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
-    const sortedStages = stages.filter(s => activeStageIds.includes(s.id) && isStageApplicableToCurrentFilter(s.id)).sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-
-    const stageInfoCols: any[] = [];
-    sortedStages.forEach((stage) => {
-      const config = activeReport.configuration.stages[stage.id];
-      const requiresUpload = !!(stage.documents && stage.documents.length > 0);
-
-      const hasDate = !!config.isStageDateSelected;
-      const hasOfficer = stage.follow_up?.toLowerCase() === 'officer';
-      const allFields: { kycId: string; fieldId: string; fieldName: string; isImmigrationDate: boolean }[] = [];
-
-      if (config.documents && Object.keys(config.documents).length > 0) {
-        Object.entries(config.documents).forEach(([kycId, docConfig]) => {
-          const kycDoc = kycDocuments.get(kycId);
-          if (!kycDoc) return;
-          (docConfig as any).fields?.forEach((field: any) => {
-            const fieldInfo = kycDoc.fields?.find((f: any) => f.id === field.id);
-            if (!fieldInfo) return;
-            allFields.push({ kycId, fieldId: field.id, fieldName: fieldInfo.fieldName || field.id, isImmigrationDate: !!fieldInfo.isImmigrationDate });
-          });
-        });
-      }
-
-      // Push ONE unified column if any of the elements are requested,
-      // or if the stage requires document upload (always show pending/upload state)
-      if (hasDate || hasOfficer || allFields.length > 0 || requiresUpload) {
-        stageInfoCols.push({
-          id: `stage_${stage.id}_info`,
-          label: stage.name,
-          type: 'stage_info',
-          stageId: stage.id,
-          stageName: stage.name,
-          hasDate,
-          hasOfficer,
-          requiresUpload,
-          fields: allFields,
-        });
-      }
-    });
-
-    // Aggregate columns placed just before the first stage column: expected total
-    // processing time (sum of each included stage's estimated_time) and the actual
-    // total time taken (earliest-to-latest span across those stages' resolved dates).
-    if (stageInfoCols.length > 0) {
-      cols.push({ id: '__expected_total_time__', label: 'Expected Time', type: 'total_time_expected', relatedCols: stageInfoCols });
-      cols.push({ id: '__actual_total_time__', label: 'Actual Time Taken', type: 'total_time_actual', relatedCols: stageInfoCols });
-    }
-
-    cols.push(...stageInfoCols);
-
-    // Add Report Doc columns
-    if (reportDocDefaults && reportDocDefaults.length > 0) {
-      reportDocDefaults.forEach(doc => {
-        cols.push({ id: `report-doc-${doc.documentId || doc.id}`, type: 'report_doc', reportDoc: doc, label: doc.documentName });
-      });
-    }
-
-    return cols;
-  }, [activeReport, stages, isStageApplicableToCurrentFilter, expandedStageColumns, showDocRequirementsColumns, tasks, reportDocDefaults]);
-
-  useEffect(() => {
-    if (columns.length > 0) setVisibleColumnIds(prev => Array.from(new Set([...prev, ...columns.map(c => c.id)])));
-  }, [columns]);
-
-  const filteredColumns = useMemo(() => columns.filter(c => visibleColumnIds.includes(c.id)), [columns, visibleColumnIds]);
-
   // Resolves the same "effective" date a stage_info cell displays on screen (document
   // extraction date, completedAt fallback, or manual stage date via calculateStageDate),
-  // plus overdue status. Shared by the stage_info cell renderer and the aggregate
-  // "Expected Time" / "Actual Time Taken" columns so both use one source of truth.
+  // plus overdue status. Must NOT be gated on whether the report has "Docs" fields
+  // configured for the stage — otherwise calculateStageDate never sees a linkedDocument
+  // and falls back to stageData.date verbatim, which is sometimes garbage (e.g. literally
+  // "completed", written by a bug elsewhere in stage submission). Shared by the cell
+  // renderer, the sort comparator, the export, and the total-time columns.
   const computeStageDateInfo = useCallback((task: any, stage: any, col: any) => {
     const stageData = task.stages?.[col.stageId];
     const isSkipped = stageData?.status === 'skipped';
     const isCompleted = stageData?.status === 'completed' || stageData?.documentsUploaded === true;
 
     let docsForStage: any[] = [];
-    if (col.fields && col.fields.length > 0) {
-      const sourceDocRef = task.source_document_id?.[col.stageId];
-      if (sourceDocRef) {
-        const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
-        docsForStage = docIds.map((d: any) => {
-          const docId = typeof d === 'string' ? d : d?.id;
-          return allDocuments.find((ad: any) => ad.id?.toString() === docId?.toString());
-        }).filter(Boolean);
-      }
-      if (docsForStage.length === 0 && stageData?.documents) {
-        docsForStage = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
-      }
+    const sourceDocRef = task.source_document_id?.[col.stageId];
+    if (sourceDocRef) {
+      const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
+      docsForStage = docIds.map((d: any) => {
+        const docId = typeof d === 'string' ? d : d?.id;
+        return allDocuments.find((ad: any) => ad.id?.toString() === docId?.toString());
+      }).filter(Boolean);
+    }
+    if (docsForStage.length === 0 && stageData?.documents) {
+      // stageData.documents holds lightweight link stubs ({id, name, status, ...}), not the
+      // full document row, so resolve each stub's id against allDocuments to get the record
+      // that actually carries extracted_details (falling back to the stub if not found).
+      const stubs = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
+      docsForStage = stubs
+        .map((stub: any) => allDocuments.find((ad: any) => ad.id?.toString() === stub?.id?.toString()) || stub)
+        .filter(Boolean);
     }
 
     const linkedDocument = docsForStage.length > 0 ? docsForStage[0] : null;
@@ -748,11 +661,104 @@ export default function ReportsPage() {
     return { stageData, isSkipped, isCompleted, isPending, docsForStage, linkedDocument, documentFields, dateValue, immigrationDateValue, effectiveDateValue, isOverdue };
   }, [stages, allDocuments, kycDocuments]);
 
+  const getSortableValue = useCallback((task: any, col: any) => {
+    if (!col) return '';
+    if (col.type === 'task') return getRawCellValue(departments, task, col.field, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper);
+    if (col.type === 'stage_info' && col.hasDate) {
+      // Sort by the same resolved date the cell displays, not the raw stageData.date —
+      // that field is sometimes bogus (e.g. literally "completed"), which used to sort
+      // those rows as if their date were epoch 0 instead of their real, later date.
+      const stage = stages.find(s => s.id === col.stageId);
+      if (!stage) return 0;
+      const { dateValue } = computeStageDateInfo(task, stage, col);
+      return dateValue ? (parseDateSafe(dateValue)?.getTime() || 0) : 0;
+    }
+    return '';
+  }, [departments, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, stages, computeStageDateInfo]);
+
+  const handleSort = (columnId: string) => {
+    setSortConfig(cur => cur?.key === columnId ? { key: columnId, direction: cur.direction === 'asc' ? 'desc' : 'asc' } : { key: columnId, direction: 'asc' });
+  };
+
+  const columns = useMemo(() => {
+    if (!activeReport || !stages.length) return [];
+    const getLabel = (id: any) => ENHANCED_TABLE_HEADERS_IMMIGRATION.find(h => h.id === id)?.label || String(id || '').replace(/_/g, ' ').toUpperCase();
+    const cols: any[] = [];
+    const fieldsToDisplay = activeReport.sessionIncludedFields?.length > 0 ? activeReport.sessionIncludedFields : activeReport.configuration?.taskFields?.map((f: any) => f.id) || [];
+    fieldsToDisplay.forEach((fieldId: string) => { if (fieldId) cols.push({ id: `task_${fieldId}`, label: getLabel(fieldId), type: 'task', field: fieldId }); });
+
+    if (showDocRequirementsColumns) {
+      const referenceRequirements = new Map<string, any>();
+      tasks.forEach(task => task.requirements?.forEach((req: any) => req.category === 'reference' && referenceRequirements.set(`req_${req.id || req.name}`, req)));
+      referenceRequirements.forEach((req, reqId) => cols.push({ id: reqId, label: req.name || 'Reference Requirement', type: 'reference_requirement', requirementId: req.id, requirementName: req.name }));
+    }
+
+    const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
+    const sortedStages = stages.filter(s => activeStageIds.includes(s.id) && isStageApplicableToCurrentFilter(s.id)).sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+
+    const stageInfoCols: any[] = [];
+    sortedStages.forEach((stage) => {
+      const config = activeReport.configuration.stages[stage.id];
+      const requiresUpload = !!(stage.documents && stage.documents.length > 0);
+
+      const hasDate = !!config.isStageDateSelected;
+      const hasOfficer = stage.follow_up?.toLowerCase() === 'officer';
+      const allFields: { kycId: string; fieldId: string; fieldName: string; isImmigrationDate: boolean }[] = [];
+
+      if (config.documents && Object.keys(config.documents).length > 0) {
+        Object.entries(config.documents).forEach(([kycId, docConfig]) => {
+          const kycDoc = kycDocuments.get(kycId);
+          if (!kycDoc) return;
+          (docConfig as any).fields?.forEach((field: any) => {
+            const fieldInfo = kycDoc.fields?.find((f: any) => f.id === field.id);
+            if (!fieldInfo) return;
+            allFields.push({ kycId, fieldId: field.id, fieldName: fieldInfo.fieldName || field.id, isImmigrationDate: !!fieldInfo.isImmigrationDate });
+          });
+        });
+      }
+
+      if (hasDate || hasOfficer || allFields.length > 0 || requiresUpload) {
+        stageInfoCols.push({
+          id: `stage_${stage.id}_info`,
+          label: stage.name,
+          type: 'stage_info',
+          stageId: stage.id,
+          stageName: stage.name,
+          hasDate,
+          hasOfficer,
+          requiresUpload,
+          fields: allFields,
+        });
+      }
+    });
+
+    if (stageInfoCols.length > 0) {
+      cols.push({ id: '__expected_total_time__', label: 'Expected Time', type: 'total_time_expected', relatedCols: stageInfoCols });
+      cols.push({ id: '__actual_total_time__', label: 'Actual Time Taken', type: 'total_time_actual', relatedCols: stageInfoCols });
+    }
+
+    cols.push(...stageInfoCols);
+
+    // Add Report Doc columns
+    if (reportDocDefaults && reportDocDefaults.length > 0) {
+      reportDocDefaults.forEach(doc => {
+        cols.push({ id: `report-doc-${doc.documentId || doc.id}`, type: 'report_doc', reportDoc: doc, label: doc.documentName });
+      });
+    }
+
+    return cols;
+  }, [activeReport, stages, isStageApplicableToCurrentFilter, expandedStageColumns, showDocRequirementsColumns, tasks, reportDocDefaults]);
+
+  useEffect(() => {
+    if (columns.length > 0) setVisibleColumnIds(prev => Array.from(new Set([...prev, ...columns.map(c => c.id)])));
+  }, [columns]);
+
+  const filteredColumns = useMemo(() => columns.filter(c => visibleColumnIds.includes(c.id)), [columns, visibleColumnIds]);
+
   const renderCellValue = useCallback((task: any, col: any) => {
     if (col.type === 'task') {
       const val = getRawCellValue(departments, task, col.field, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper);
 
-      // Exact Immigration Tracker Missing check & UI
       const isEmpty = !val || val === 'N/A' || val === '—' || val === 'null';
       if (isEmpty) {
         return (
@@ -777,7 +783,6 @@ export default function ReportsPage() {
       const stage = stages.find(s => s.id === col.stageId);
       if (!stage) return <span className="text-sm text-slate-400">—</span>;
 
-      // Check overarching applicability
       if (!checkStageApplicableForTask(stage, task)) {
         return {
           isCombinedStageDetails: true,
@@ -789,14 +794,11 @@ export default function ReportsPage() {
       let docNode: React.ReactNode = null;
       let docIsPending = false;
 
-      // --- 1 & 2. Stage Data, Doc Resolution & Date Raw Props (shared with total-time columns) ---
       const {
         stageData, isSkipped, isCompleted, isPending, docsForStage,
         dateValue, immigrationDateValue, isOverdue,
       } = computeStageDateInfo(task, stage, col);
 
-      // Ensure stageDateRawProps is universally generated so that StandardReportView
-      // can deploy the "Pending Link" or "Add Date" logic correctly.
       const stageDateRawProps = {
         dateValue,
         isCompleted,
@@ -1069,14 +1071,22 @@ export default function ReportsPage() {
 
   const getExportCellValue = useCallback((task: any, col: any, exportOpts: { showTime?: boolean } = {}): string => {
     if (col.type === 'export_delta') {
-      const prevVal = renderCellValue(task, col.prevCol);
-      const nextVal = renderCellValue(task, col.nextCol);
-      const prevDateValue = prevVal?.isCombinedStageDetails ? (prevVal.stageDateRawProps?.dateValue || prevVal.docDateValue) : null;
-      const nextDateValue = nextVal?.isCombinedStageDetails ? (nextVal.stageDateRawProps?.dateValue || nextVal.docDateValue) : null;
-      if (!prevDateValue || !nextDateValue) return '';
-      const prevDate = parseDateSafe(formatDate(prevDateValue, false));
-      const nextDate = parseDateSafe(formatDate(nextDateValue, false));
-      if (!prevDate || !nextDate) return '';
+      const getResolvedDate = (c: any): Date | null => {
+        const val = renderCellValue(task, c);
+        const dateValue = val?.isCombinedStageDetails ? (val.stageDateRawProps?.dateValue || val.docDateValue) : null;
+        return dateValue ? parseDateSafe(formatDate(dateValue, false)) : null;
+      };
+      const nextDate = getResolvedDate(col.nextCol);
+      if (!nextDate) return '';
+      // Mirror the on-screen Δ: only look for a start point once the arrival stage has
+      // actually happened, reaching back past any pending/skipped predecessor to the
+      // nearest stage that does have a date instead of dropping the gap entirely.
+      let prevDate: Date | null = null;
+      for (let i = (col.priorCols?.length || 0) - 1; i >= 0; i--) {
+        const d = getResolvedDate(col.priorCols[i]);
+        if (d) { prevDate = d; break; }
+      }
+      if (!prevDate) return '';
       const diff = differenceInDays(nextDate, prevDate);
       return diff >= 0 ? `+${diff}d` : `${diff}d`;
     }
@@ -1096,27 +1106,10 @@ export default function ReportsPage() {
       const stageData = task.stages?.[col.stageId];
       const parts: string[] = [];
 
-      // Resolve docs for calculateStageDate
-      let docsForStage: any[] = [];
-      if (col.fields && col.fields.length > 0) {
-        const sourceDocRef = task.source_document_id?.[col.stageId];
-        if (sourceDocRef) {
-          const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
-          docsForStage = docIds.map(d => {
-            const docId = typeof d === 'string' ? d : d?.id;
-            return allDocuments.find((ad: any) => ad.id?.toString() === docId?.toString());
-          }).filter(Boolean);
-        }
-        if (docsForStage.length === 0 && stageData?.documents) {
-          docsForStage = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
-        }
-      }
-      const linkedDocument = docsForStage.length > 0 ? docsForStage[0] : null;
-      const documentFields = linkedDocument?.document_type_id ? (kycDocuments.get(linkedDocument.document_type_id)?.fields || []) : [];
+      const { docsForStage, dateValue } = computeStageDateInfo(task, stage, col);
 
       if (col.hasDate) {
-        const dateVal = calculateStageDate(stage, stageData, linkedDocument, documentFields, null, false);
-        parts.push(`Date: ${dateVal ? formatDate(dateVal, !!exportOpts.showTime) : 'Pending'}`);
+        parts.push(`Date: ${dateValue ? formatDate(dateValue, !!exportOpts.showTime) : 'Pending'}`);
       }
 
       if (col.fields && col.fields.length > 0) {
@@ -1237,7 +1230,7 @@ export default function ReportsPage() {
   }, [
     departments, stages, enhancedTasksData, companies, getStaffName,
     getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper,
-    unifiedOfficers, allDocuments, kycDocuments, renderCellValue,
+    unifiedOfficers, allDocuments, kycDocuments, renderCellValue, computeStageDateInfo,
     allIndividualDocuments, allCompanyDocuments // Ensure these were added to dependencies!
   ]);
 
@@ -1309,14 +1302,19 @@ export default function ReportsPage() {
     }
 
     const exportCols = includeDelta
-      ? filteredColumns.reduce((acc: any[], col: any, i: number) => {
-          acc.push(col);
-          const next = filteredColumns[i + 1];
-          if (col.type === 'stage_info' && next?.type === 'stage_info') {
-            acc.push({ id: `__export_delta__${i}`, type: 'export_delta', label: 'Δ', prevCol: col, nextCol: next });
-          }
+      ? (() => {
+          const acc: any[] = [];
+          const priorStageCols: any[] = [];
+          filteredColumns.forEach((col: any, i: number) => {
+            acc.push(col);
+            if (col.type === 'stage_info') priorStageCols.push(col);
+            const next = filteredColumns[i + 1];
+            if (col.type === 'stage_info' && next?.type === 'stage_info') {
+              acc.push({ id: `__export_delta__${i}`, type: 'export_delta', label: 'Δ', prevCol: col, nextCol: next, priorCols: [...priorStageCols] });
+            }
+          });
           return acc;
-        }, [])
+        })()
       : filteredColumns;
     const exportCellOpts = { showTime: includeTime };
     const numDataCols = exportCols.length + 1;
@@ -1502,13 +1500,33 @@ export default function ReportsPage() {
       paintPageHeader(1);
       let startY = 26;
 
-      // Wide landscape: fit ~18 columns per chunk
-      const CHUNK = 18;
+      // Wide landscape: fit ~12 columns per chunk. Kept lower than before so each column
+      // gets enough room that wrapped (not truncated) text stays readable rather than
+      // ballooning row height across dozens of near-empty slivers.
+      const CHUNK = 12;
       const colChunks: any[][] = [];
       for (let i = 0; i < pdfCols.length; i += CHUNK) {
         colChunks.push(pdfCols.slice(i, i + CHUNK));
       }
       if (colChunks.length === 0) colChunks.push([]);
+
+      // Columns don't all need the same width: a Δ cell is 2-4 chars, a combined stage
+      // cell ("Date: ... | Docs: ... | Officers: ...") can run long, and name/company task
+      // columns are usually the longest. Give each a relative weight and split whatever
+      // page width remains (after the fixed index column) proportionally.
+      const INDEX_COL_PDF_WIDTH = 7;
+      const getPdfColWeight = (col: any): number => {
+        if (!col) return 1;
+        if (col.type === 'export_delta') return 0.55;
+        if (col.type === 'total_time_expected' || col.type === 'total_time_actual') return 0.85;
+        if (col.type === 'stage_info') return 1.7;
+        if (col.type === 'report_doc' || col.type === 'reference_requirement') return 1;
+        if (col.type === 'task') {
+          const id = `${col.field || ''} ${col.label || ''}`.toLowerCase();
+          return /name|company|address|remarks|comment/.test(id) ? 1.6 : 1;
+        }
+        return 1;
+      };
 
       // ── Per-group rendering ────────────────────────────────────────────────────
       for (const group of groups) {
@@ -1561,6 +1579,14 @@ export default function ReportsPage() {
             })
           ]);
 
+          const availableWidth = (pageW - 16) - INDEX_COL_PDF_WIDTH;
+          const weights = chunk.map(getPdfColWeight);
+          const totalWeight = weights.reduce((a, b) => a + b, 0) || 1;
+          const columnStyles: Record<number, any> = { 0: { halign: 'center', cellWidth: INDEX_COL_PDF_WIDTH } };
+          chunk.forEach((_col: any, idx: number) => {
+            columnStyles[idx + 1] = { cellWidth: Math.max(10, (availableWidth * weights[idx]) / totalWeight) };
+          });
+
           autoTable(doc, {
             startY,
             head: [headers],
@@ -1568,7 +1594,7 @@ export default function ReportsPage() {
             styles: {
               fontSize: 6.5,
               cellPadding: { top: 1.5, right: 2, bottom: 1.5, left: 2 },
-              overflow: 'ellipsize',
+              overflow: 'linebreak',
               lineColor: GREY_LIGHT,
               lineWidth: 0.15,
               valign: 'middle',
@@ -1585,7 +1611,7 @@ export default function ReportsPage() {
               lineColor: [241, 245, 249],
             },
             alternateRowStyles: { fillColor: ROW_ALT },
-            columnStyles: { 0: { halign: 'center', cellWidth: 7 } },
+            columnStyles,
             margin: { left: 8, right: 8, top: 26, bottom: 12 },
             didParseCell: (data: any) => {
               if (data.section === 'head') {
