@@ -27,6 +27,7 @@ import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
 import { EcClause, fetchClauses, createClause, updateClause, deleteClause } from '../utils/clauseLibraryData';
+import { syncPlaceholdersFromContent } from '../utils/placeholderDetection';
 import { fetchCompanies, Company } from '../../companies/database';
 
 const EMPTY_DRAFT: Partial<EcClause> = {
@@ -211,6 +212,18 @@ export default function ClauseLibraryPage() {
       }
       setDialogOpen(false);
       await load();
+
+      // Auto-detect any {{tokens}} this clause introduced and register them
+      // as unlinked (fuzzy-auto-matched where possible) Data Sources entries
+      // - same "detect on save" flow as Document Template Manager's
+      // extractPlaceholders, so a new token never silently goes unlinkable.
+      const newTokens = await syncPlaceholdersFromContent([payload.content || '']);
+      if (newTokens.length > 0) {
+        toast({
+          title: `${newTokens.length} new placeholder${newTokens.length !== 1 ? 's' : ''} detected`,
+          description: `${newTokens.map((k) => `{{${k}}}`).join(', ')} - link a data source on the Data Sources page.`,
+        });
+      }
     } catch (err: any) {
       toast({ title: 'Error', description: err.message || 'Failed to save clause', variant: 'destructive' });
     } finally {

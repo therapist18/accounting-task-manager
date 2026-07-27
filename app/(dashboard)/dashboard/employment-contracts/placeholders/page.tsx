@@ -2,35 +2,30 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import supabase from '@/lib/supabase/client';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, Database, Briefcase, BookText, Settings, Sliders, FileStack } from 'lucide-react';
+import { Loader2, Database, Briefcase, BookText, Settings, Sliders, FileStack, RefreshCw } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
-import { cn } from '@/lib/utils';
 import { EcPlaceholder, fetchPlaceholders, linkPlaceholderMasterField } from '../utils/ecPlaceholders';
-
-interface MasterFieldOption {
-  id: string;
-  label: string;
-  field_key: string;
-  category: string | null;
-}
+import { MasterFieldOption, fetchMasterFieldOptions, syncPlaceholdersFromContent } from '../utils/placeholderDetection';
+import { fetchClauses } from '../utils/clauseLibraryData';
+import { MasterFieldPicker } from '../components/MasterFieldPicker';
 
 export default function PlaceholderDataSourcesPage() {
   const [placeholders, setPlaceholders] = useState<EcPlaceholder[]>([]);
   const [masterFields, setMasterFields] = useState<MasterFieldOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [linkingId, setLinkingId] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const load = async () => {
     setIsLoading(true);
-    const [{ data: fields }, ecPlaceholders] = await Promise.all([
-      supabase.from('tm_job_fields').select('id, label, field_key, category').order('label'),
+    const [fields, ecPlaceholders] = await Promise.all([
+      fetchMasterFieldOptions(),
       fetchPlaceholders(),
     ]);
-    setMasterFields((fields || []) as MasterFieldOption[]);
+    setMasterFields(fields);
     setPlaceholders(ecPlaceholders);
     setIsLoading(false);
   };
@@ -46,18 +41,41 @@ export default function PlaceholderDataSourcesPage() {
     return Array.from(map.entries());
   }, [placeholders]);
 
-  const handleLink = async (placeholder: EcPlaceholder, masterFieldId: string) => {
+  const handleLink = async (placeholder: EcPlaceholder, field: MasterFieldOption | null) => {
     setLinkingId(placeholder.id);
     try {
-      const updated = await linkPlaceholderMasterField(placeholder.id, masterFieldId === '__none__' ? null : masterFieldId);
+      const updated = await linkPlaceholderMasterField(placeholder.id, field?.id ?? null);
       if (updated) {
         setPlaceholders((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-        toast({ title: masterFieldId === '__none__' ? 'Unlinked' : 'Linked to master field' });
+        toast({ title: field ? `Linked to ${field.label}` : 'Unlinked' });
       }
     } catch (err: any) {
       toast({ title: 'Error', description: err.message || 'Failed to update link', variant: 'destructive' });
     } finally {
       setLinkingId(null);
+    }
+  };
+
+  // Scans every clause's content for {{tokens}} not yet registered here -
+  // the same "detect, then let the user assign a master field" flow as
+  // Document Template Manager's Re-scan, just sourced from the whole Clause
+  // Library instead of one uploaded document. New tokens land unlinked (or
+  // fuzzy-auto-matched) under the "Custom" group, ready to link below.
+  const handleSync = async () => {
+    setIsSyncing(true);
+    try {
+      const clauses = await fetchClauses();
+      const added = await syncPlaceholdersFromContent(clauses.map((c) => c.content));
+      if (added.length > 0) {
+        toast({ title: `Found ${added.length} new placeholder${added.length !== 1 ? 's' : ''}`, description: added.map((k) => `{{${k}}}`).join(', ') });
+        await load();
+      } else {
+        toast({ title: 'Up to date', description: 'No new placeholders found in the Clause Library.' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Failed to sync placeholders', variant: 'destructive' });
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -78,6 +96,10 @@ export default function PlaceholderDataSourcesPage() {
               {linkedCount}/{masterFieldTotal} linked
             </Badge>
           )}
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={handleSync} disabled={isSyncing}>
+            {isSyncing ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+            Sync from Clause Library
+          </Button>
         </div>
         <div className="flex items-center gap-1">
           <Link href="/dashboard/employment-contracts" className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">Contracts</Link>
@@ -91,7 +113,8 @@ export default function PlaceholderDataSourcesPage() {
         <p className="text-sm text-slate-500">
           Every <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-1 rounded">{'{{token}}'}</span> a contract clause can use, and where its value comes from.
           Identity fields (Employee / Company) link to a <span className="font-medium text-slate-700 dark:text-slate-300">Master Field</span> - the same registry Document Template Manager uses -
-          so the data source is defined once and shared everywhere. Working hours, benefits, leave and salary fields are resolved by the Job Profile / Offer cascade instead and aren't linkable here.
+          so the data source is defined once and shared everywhere. New tokens typed into a clause are picked up automatically when the clause is saved, or via <span className="font-medium text-slate-700 dark:text-slate-300">Sync from Clause Library</span> above.
+          Working hours, benefits, leave and salary fields are resolved by the Job Profile / Offer cascade instead and aren't linkable here.
         </p>
       </div>
 
@@ -119,23 +142,12 @@ export default function PlaceholderDataSourcesPage() {
                         {p.source_kind === 'master_field' ? (
                           <>
                             {linkingId === p.id && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 shrink-0" />}
-                            <Select
-                              value={p.master_field_id || '__none__'}
-                              onValueChange={(v) => handleLink(p, v)}
+                            <MasterFieldPicker
+                              masterFields={masterFields}
+                              selectedFieldId={p.master_field_id}
+                              onSelect={(field) => handleLink(p, field)}
                               disabled={linkingId === p.id}
-                            >
-                              <SelectTrigger className={cn("h-8 text-xs w-72", !p.master_field_id && "border-amber-300 dark:border-amber-700")}>
-                                <SelectValue placeholder="Not linked - using legacy default" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__none__">Not linked (falls back to legacy default)</SelectItem>
-                                {masterFields.map((f) => (
-                                  <SelectItem key={f.id} value={f.id}>
-                                    {f.label} <span className="text-slate-400 font-mono text-[10px]">({f.field_key})</span>
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            />
                           </>
                         ) : p.source_kind === 'settings_cascade' ? (
                           <Badge variant="outline" className="text-xs font-medium bg-blue-50 text-blue-700 border-blue-200 rounded-full px-2.5 py-0.5 gap-1.5 shrink-0">

@@ -9,8 +9,59 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2 } from "lucide-react";
 import { ReportColumnVisibilityDialog } from "./ReportColumnVisibilityDialog";
+
+// Asks the user which optional columns/formatting to bake into the exported
+// file — the on-screen Δ/Time toggles only affect the live table, so export
+// needs its own explicit opt-in rather than silently mirroring screen state.
+function ExportOptionsDialog({ pending, onClose, onConfirm }: any) {
+  const [includeDelta, setIncludeDelta] = useState(false);
+  const [includeTime, setIncludeTime] = useState(false);
+
+  React.useEffect(() => {
+    if (pending) { setIncludeDelta(false); setIncludeTime(false); }
+  }, [pending]);
+
+  return (
+    <Dialog open={!!pending} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-md rounded-2xl">
+        <DialogHeader>
+          <DialogTitle className="text-lg font-black text-slate-900">Export Options</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors">
+            <Checkbox checked={includeDelta} onCheckedChange={(v: boolean) => setIncludeDelta(!!v)} />
+            <div className="flex flex-col">
+              <span className="text-sm font-bold text-slate-800">Show Δ (time between stages)</span>
+              <span className="text-xs text-slate-500">Adds a day-difference column between each pair of stage columns</span>
+            </div>
+          </label>
+          <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors">
+            <Checkbox checked={includeTime} onCheckedChange={(v: boolean) => setIncludeTime(!!v)} />
+            <div className="flex flex-col">
+              <span className="text-sm font-bold text-slate-800">Show Time</span>
+              <span className="text-xs text-slate-500">Includes the time-of-day alongside exported dates</span>
+            </div>
+          </label>
+        </div>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" size="sm" className="rounded-lg" onClick={onClose}>Cancel</Button>
+          <Button
+            size="sm"
+            className="rounded-lg text-white"
+            style={{ backgroundColor: '#376bae' }}
+            onClick={() => onConfirm({ includeDelta, includeTime })}
+          >
+            Export {pending?.exportFormat?.toUpperCase()}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 interface ReportsSidebarProps {
   departments: any[];
@@ -198,6 +249,8 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
 
 export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setView, handleSendReport, activeDepartment, activeSubDepartments, activeSubDeptIds, allTasksCount, wipTasksCount, writeUpCompletedCount, columns, visibleColumnIds, setVisibleColumnIds, showTime, setShowTime, showDelta, setShowDelta, showOfficers, setShowOfficers, showNARows, setShowNARows }: any) {
 
+  const [pendingExport, setPendingExport] = useState<{ reportType: 'officer' | 'manager'; exportFormat: 'excel' | 'pdf' } | null>(null);
+
   const selectedSubDeptText = React.useMemo(() => {
     if (activeSubDeptIds.length === 0) return "All Sub-units";
     const names = activeSubDeptIds.map(id => activeSubDepartments.find((s: any) => s.id.toString() === id)?.name).filter(Boolean);
@@ -329,16 +382,16 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
               <div className="px-3 py-2">
                 <p className="text-sm font-black text-slate-400 uppercase tracking-widest">Officer Delivery</p>
                 <div className="flex gap-2 mt-2">
-                  <Button variant="outline" size="sm" className="flex-1 text-sm h-8 rounded-lg" onClick={() => handleSendReport('officer', 'excel')}>Excel</Button>
-                  <Button variant="outline" size="sm" className="flex-1 text-sm h-8 rounded-lg" onClick={() => handleSendReport('officer', 'pdf')}>PDF</Button>
+                  <Button variant="outline" size="sm" className="flex-1 text-sm h-8 rounded-lg" onClick={() => setPendingExport({ reportType: 'officer', exportFormat: 'excel' })}>Excel</Button>
+                  <Button variant="outline" size="sm" className="flex-1 text-sm h-8 rounded-lg" onClick={() => setPendingExport({ reportType: 'officer', exportFormat: 'pdf' })}>PDF</Button>
                 </div>
               </div>
               <DropdownMenuSeparator />
               <div className="px-3 py-2">
                 <p className="text-sm font-black text-slate-400 uppercase tracking-widest">Manager Delivery</p>
                 <div className="flex gap-2 mt-2">
-                  <Button variant="outline" size="sm" className="flex-1 text-sm h-8 rounded-lg border-violet-200 hover:bg-violet-50 text-violet-700" onClick={() => handleSendReport('manager', 'excel')}>Excel</Button>
-                  <Button variant="outline" size="sm" className="flex-1 text-sm h-8 rounded-lg border-violet-200 hover:bg-violet-50 text-violet-700" onClick={() => handleSendReport('manager', 'pdf')}>PDF</Button>
+                  <Button variant="outline" size="sm" className="flex-1 text-sm h-8 rounded-lg border-violet-200 hover:bg-violet-50 text-violet-700" onClick={() => setPendingExport({ reportType: 'manager', exportFormat: 'excel' })}>Excel</Button>
+                  <Button variant="outline" size="sm" className="flex-1 text-sm h-8 rounded-lg border-violet-200 hover:bg-violet-50 text-violet-700" onClick={() => setPendingExport({ reportType: 'manager', exportFormat: 'pdf' })}>PDF</Button>
                 </div>
               </div>
             </DropdownMenuContent>
@@ -347,6 +400,15 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
           <Button variant="outline" className="h-10 px-5 rounded-full border-emerald-600 text-sm font-bold text-emerald-700 bg-emerald-50/30 hover:bg-emerald-50">
             <Download className="h-4 w-4 mr-2" /> Bulk Export
           </Button>
+
+          <ExportOptionsDialog
+            pending={pendingExport}
+            onClose={() => setPendingExport(null)}
+            onConfirm={(opts: { includeDelta: boolean; includeTime: boolean }) => {
+              if (pendingExport) handleSendReport(pendingExport.reportType, pendingExport.exportFormat, opts);
+              setPendingExport(null);
+            }}
+          />
         </div>
       </div>
     </div>

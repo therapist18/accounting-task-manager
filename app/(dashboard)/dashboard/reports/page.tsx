@@ -11,7 +11,7 @@ import { Loader2, LayoutGrid, Plus, Minus, Briefcase, FileDown, ChevronDown, Fil
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { format, parse, isValid } from "date-fns";
+import { format, parse, isValid, differenceInDays } from "date-fns";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/lib/hooks/use-toast";
 import { supabase } from "@/lib/supabase/client";
@@ -29,6 +29,7 @@ import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
 import { MobileReportView } from "./components/MobileReportView";
 import { ReportsSidebar, ReportsHeader, PersonFilterStrip, StatusFilterBar } from "./components/ReportsHeader";
+import { formatEstimatedMins } from "./components/reportCellRenderers";
 
 const SPECIAL_STAGE_IDS = [
   '072b9710-45df-4a05-ba65-01b4ef29d61d',
@@ -39,10 +40,14 @@ const WRITE_UP_STAGE_ID = '072b9710-45df-4a05-ba65-01b4ef29d61d';
 const PP_ENDORSEMENT_STAGE_ID = 'caefd742-5de5-4341-a3bb-81d7b9dd2b73';
 
 const parseDateSafe = (s: string | null | undefined): Date | null => {
-  if (!s) return null;
-  if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) {
-    const [dd, mm, yyyy] = s.split("/");
-    const d = new Date(`${yyyy}-${mm}-${dd}`);
+  if (!s || typeof s !== 'string') return null;
+  // Match dd/mm/yyyy with an optional trailing " HH:mm" — captured explicitly so a time
+  // suffix can never bleed into the year (e.g. "19/11/2025 16:12" used to reconstruct as
+  // "2025 16:12-11-19", which JS's lenient Date parser silently mis-parsed to Jan 2025).
+  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+  if (m) {
+    const [, dd, mm, yyyy, hh, min] = m;
+    const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd), hh ? Number(hh) : 0, min ? Number(min) : 0);
     return isValid(d) ? d : null;
   }
   try {
@@ -261,8 +266,9 @@ export default function ReportsPage() {
   }, []);
 
   const refreshData = useCallback(async (silent = false) => {
-    if (!activeReport) return;
+    if (!activeReport) return false;
     if (!silent) setLoading(true);
+    let success = true;
     try {
       const [depts, comps, docs, kycFields] = await Promise.all([
         fetchDepartments(),
@@ -300,13 +306,26 @@ export default function ReportsPage() {
         else if (depts.length > 0) setActiveDeptId(depts[0].id.toString());
       }
     } catch (error) {
+      success = false;
       toast({ title: "Error", description: "Failed to load report data.", variant: "destructive" });
     } finally {
       if (!silent) setLoading(false);
     }
+    return success;
   }, [activeReport, activeDeptId]);
 
   useEffect(() => { refreshData(); }, [activeReport]);
+
+  // Manual "Refresh" button: keeps the current table on screen (silent = true skips the
+  // full-page loading overlay) while showing its own spinner, then confirms with a toast
+  // so the user knows the refresh actually happened.
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+  const handleManualRefresh = useCallback(async () => {
+    setIsManualRefreshing(true);
+    const success = await refreshData(true);
+    if (success) toast({ title: "Refreshed", description: "Report data has been updated." });
+    setIsManualRefreshing(false);
+  }, [refreshData]);
 
   const activeDepartment = useMemo(() => departments.find(d => d.id.toString() === activeDeptId), [departments, activeDeptId]);
   const activeSubDepartments = useMemo(() => activeDepartment?.tm_subdepartments || [], [activeDepartment]);
@@ -588,6 +607,7 @@ export default function ReportsPage() {
     const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
     const sortedStages = stages.filter(s => activeStageIds.includes(s.id) && isStageApplicableToCurrentFilter(s.id)).sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
 
+    const stageInfoCols: any[] = [];
     sortedStages.forEach((stage) => {
       const config = activeReport.configuration.stages[stage.id];
       const requiresUpload = !!(stage.documents && stage.documents.length > 0);
@@ -611,7 +631,7 @@ export default function ReportsPage() {
       // Push ONE unified column if any of the elements are requested,
       // or if the stage requires document upload (always show pending/upload state)
       if (hasDate || hasOfficer || allFields.length > 0 || requiresUpload) {
-        cols.push({
+        stageInfoCols.push({
           id: `stage_${stage.id}_info`,
           label: stage.name,
           type: 'stage_info',
@@ -624,6 +644,16 @@ export default function ReportsPage() {
         });
       }
     });
+
+    // Aggregate columns placed just before the first stage column: expected total
+    // processing time (sum of each included stage's estimated_time) and the actual
+    // total time taken (earliest-to-latest span across those stages' resolved dates).
+    if (stageInfoCols.length > 0) {
+      cols.push({ id: '__expected_total_time__', label: 'Expected Time', type: 'total_time_expected', relatedCols: stageInfoCols });
+      cols.push({ id: '__actual_total_time__', label: 'Actual Time Taken', type: 'total_time_actual', relatedCols: stageInfoCols });
+    }
+
+    cols.push(...stageInfoCols);
 
     // Add Report Doc columns
     if (reportDocDefaults && reportDocDefaults.length > 0) {
@@ -640,6 +670,83 @@ export default function ReportsPage() {
   }, [columns]);
 
   const filteredColumns = useMemo(() => columns.filter(c => visibleColumnIds.includes(c.id)), [columns, visibleColumnIds]);
+
+  // Resolves the same "effective" date a stage_info cell displays on screen (document
+  // extraction date, completedAt fallback, or manual stage date via calculateStageDate),
+  // plus overdue status. Shared by the stage_info cell renderer and the aggregate
+  // "Expected Time" / "Actual Time Taken" columns so both use one source of truth.
+  const computeStageDateInfo = useCallback((task: any, stage: any, col: any) => {
+    const stageData = task.stages?.[col.stageId];
+    const isSkipped = stageData?.status === 'skipped';
+    const isCompleted = stageData?.status === 'completed' || stageData?.documentsUploaded === true;
+
+    let docsForStage: any[] = [];
+    if (col.fields && col.fields.length > 0) {
+      const sourceDocRef = task.source_document_id?.[col.stageId];
+      if (sourceDocRef) {
+        const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
+        docsForStage = docIds.map((d: any) => {
+          const docId = typeof d === 'string' ? d : d?.id;
+          return allDocuments.find((ad: any) => ad.id?.toString() === docId?.toString());
+        }).filter(Boolean);
+      }
+      if (docsForStage.length === 0 && stageData?.documents) {
+        docsForStage = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
+      }
+    }
+
+    const linkedDocument = docsForStage.length > 0 ? docsForStage[0] : null;
+    const documentFields = linkedDocument?.document_type_id ? (kycDocuments.get(linkedDocument.document_type_id)?.fields || []) : [];
+
+    const dateValue = !isSkipped ? calculateStageDate(stage, stageData, linkedDocument, documentFields, null, false) : null;
+
+    const immigrationDateField = col.fields?.find((f: any) => f.isImmigrationDate);
+    let immigrationDateValue: string | null = null;
+    if (immigrationDateField && docsForStage.length > 0) {
+      for (const doc of docsForStage) {
+        const val = doc.extracted_details?.[immigrationDateField.fieldName] ||
+          doc.edited_details?.[immigrationDateField.fieldName] ||
+          doc.extracted_data?.[immigrationDateField.fieldName];
+        if (val && typeof val === 'string' && val.trim()) {
+          immigrationDateValue = val.trim();
+          break;
+        }
+      }
+    }
+
+    const effectiveDateValue = dateValue || immigrationDateValue;
+
+    let isOverdue = false;
+    if (effectiveDateValue && stage.estimated_time) {
+      const sortedStagesList = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+      const currentStageIndex = sortedStagesList.findIndex(s => s.id === stage.id);
+
+      let prevStage = currentStageIndex > 0 ? sortedStagesList[currentStageIndex - 1] : null;
+      let prevDateStr = null;
+
+      while (prevStage) {
+        prevDateStr = task.stages?.[prevStage.id]?.date || task.stages?.[prevStage.id]?.completedAt || task.stages?.[prevStage.id]?.date_completed;
+        if (prevDateStr) break;
+        const prevIndex = sortedStagesList.findIndex(s => s.id === prevStage.id);
+        if (prevIndex <= 0) break;
+        prevStage = sortedStagesList[prevIndex - 1];
+      }
+
+      const startStr = prevDateStr || task.date_initiated || task.created_at;
+      const start = parseDateSafe(startStr);
+      const end = parseDateSafe(effectiveDateValue);
+
+      if (start && end) {
+        const durationMs = end.getTime() - start.getTime();
+        const durationMinutes = Math.floor(durationMs / (1000 * 60));
+        isOverdue = durationMinutes > stage.estimated_time;
+      }
+    }
+
+    const isPending = !isCompleted && !isSkipped;
+
+    return { stageData, isSkipped, isCompleted, isPending, docsForStage, linkedDocument, documentFields, dateValue, immigrationDateValue, effectiveDateValue, isOverdue };
+  }, [stages, allDocuments, kycDocuments]);
 
   const renderCellValue = useCallback((task: any, col: any) => {
     if (col.type === 'task') {
@@ -682,80 +789,11 @@ export default function ReportsPage() {
       let docNode: React.ReactNode = null;
       let docIsPending = false;
 
-      // --- 1. Stage Data & Doc Resolution (before dateValue so we can use calculateStageDate) ---
-      const stageData = task.stages?.[col.stageId];
-      const isSkipped = stageData?.status === 'skipped';
-      const isCompleted = stageData?.status === 'completed' || stageData?.documentsUploaded === true;
-
-      // Resolve docs early so we can pass them to calculateStageDate
-      let docsForStage: any[] = [];
-      if (col.fields && col.fields.length > 0) {
-        const sourceDocRef = task.source_document_id?.[col.stageId];
-        if (sourceDocRef) {
-          const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
-          docsForStage = docIds.map(d => {
-            const docId = typeof d === 'string' ? d : d?.id;
-            return allDocuments.find((ad: any) => ad.id?.toString() === docId?.toString());
-          }).filter(Boolean);
-        }
-        if (docsForStage.length === 0 && stageData?.documents) {
-          docsForStage = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
-        }
-      }
-
-      const linkedDocument = docsForStage.length > 0 ? docsForStage[0] : null;
-      const documentFields = linkedDocument?.document_type_id ? (kycDocuments.get(linkedDocument.document_type_id)?.fields || []) : [];
-
-      // --- 2. Date Raw Props (using calculateStageDate for isImmigrationDate support) ---
-      const dateValue = !isSkipped ? calculateStageDate(stage, stageData, linkedDocument, documentFields, null, false) : null;
-      let isOverdue = false;
-
-      // Extract isImmigrationDate field value directly from docs for LATE badge
-      const immigrationDateField = col.fields?.find((f: any) => f.isImmigrationDate);
-      let immigrationDateValue: string | null = null;
-      if (immigrationDateField && docsForStage.length > 0) {
-        for (const doc of docsForStage) {
-          const val = doc.extracted_details?.[immigrationDateField.fieldName] ||
-            doc.edited_details?.[immigrationDateField.fieldName] ||
-            doc.extracted_data?.[immigrationDateField.fieldName];
-          if (val && typeof val === 'string' && val.trim()) {
-            immigrationDateValue = val.trim();
-            break;
-          }
-        }
-      }
-
-      // Use immigrationDateValue as fallback for dateValue when calculateStageDate returns empty
-      const effectiveDateValue = dateValue || immigrationDateValue;
-
-      // Robust LATE badge calculation mirroring Immigration Tracker / EditableStageCell
-      if (effectiveDateValue && stage.estimated_time) {
-        const sortedStagesList = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-        const currentStageIndex = sortedStagesList.findIndex(s => s.id === stage.id);
-
-        let prevStage = currentStageIndex > 0 ? sortedStagesList[currentStageIndex - 1] : null;
-        let prevDateStr = null;
-
-        while (prevStage) {
-          prevDateStr = task.stages?.[prevStage.id]?.date || task.stages?.[prevStage.id]?.completedAt || task.stages?.[prevStage.id]?.date_completed;
-          if (prevDateStr) break;
-          const prevIndex = sortedStagesList.findIndex(s => s.id === prevStage.id);
-          if (prevIndex <= 0) break;
-          prevStage = sortedStagesList[prevIndex - 1];
-        }
-
-        const startStr = prevDateStr || task.date_initiated || task.created_at;
-        const start = parseDateSafe(startStr);
-        const end = parseDateSafe(effectiveDateValue);
-
-        if (start && end) {
-          const durationMs = end.getTime() - start.getTime();
-          const durationMinutes = Math.floor(durationMs / (1000 * 60));
-          isOverdue = durationMinutes > stage.estimated_time;
-        }
-      }
-
-      const isPending = !isCompleted && !isSkipped;
+      // --- 1 & 2. Stage Data, Doc Resolution & Date Raw Props (shared with total-time columns) ---
+      const {
+        stageData, isSkipped, isCompleted, isPending, docsForStage,
+        dateValue, immigrationDateValue, isOverdue,
+      } = computeStageDateInfo(task, stage, col);
 
       // Ensure stageDateRawProps is universally generated so that StandardReportView
       // can deploy the "Pending Link" or "Add Date" logic correctly.
@@ -870,6 +908,33 @@ export default function ReportsPage() {
       const isEffectiveTo = effectiveToField ? (latestDoc.extracted_details?.[effectiveToField.fieldName] || latestDoc.edited_details?.[effectiveToField.fieldName]) : (latestDoc.extracted_details?.isEffectiveTo || latestDoc.edited_details?.isEffectiveTo);
       return <div className="text-gray-500"><span className="font-medium text-gray-700">{isEffectiveTo || '-'}</span></div>;
     }
+
+    if (col.type === 'total_time_expected') {
+      let totalMinutes = 0;
+      (col.relatedCols || []).forEach((c: any) => {
+        const stage = stages.find(s => s.id === c.stageId);
+        if (stage?.estimated_time && checkStageApplicableForTask(stage, task)) totalMinutes += stage.estimated_time;
+      });
+      return totalMinutes > 0 ? formatEstimatedMins(totalMinutes) : 'N/A';
+    }
+
+    if (col.type === 'total_time_actual') {
+      const dates: Date[] = [];
+      (col.relatedCols || []).filter((c: any) => c.hasDate).forEach((c: any) => {
+        const stage = stages.find(s => s.id === c.stageId);
+        if (!stage || !checkStageApplicableForTask(stage, task)) return;
+        const info = computeStageDateInfo(task, stage, c);
+        if (info.isSkipped || !info.effectiveDateValue) return;
+        const d = parseDateSafe(formatDate(info.effectiveDateValue, false));
+        if (d) dates.push(d);
+      });
+      if (dates.length === 0) return 'N/A';
+      const earliest = new Date(Math.min(...dates.map(d => d.getTime())));
+      const latest = new Date(Math.max(...dates.map(d => d.getTime())));
+      const diffDays = differenceInDays(latest, earliest);
+      return `${diffDays}d`;
+    }
+
    if (col.type === 'report_doc') {
       const docDef = col.reportDoc;
 
@@ -963,7 +1028,7 @@ export default function ReportsPage() {
   }, [
     stages, departments, kycDocuments, companies, enhancedTasksData, taskDependants,
     showTime, activeDeptId, unifiedOfficers, allDocuments,
-    allIndividualDocuments, allCompanyDocuments // Ensure these were added to dependencies!
+    allIndividualDocuments, allCompanyDocuments, computeStageDateInfo // Ensure these were added to dependencies!
   ]);
 
   const handleSaveStageDate = useCallback(async (taskId: string, stageId: string, date: string) => {
@@ -1002,7 +1067,23 @@ export default function ReportsPage() {
     }
   }, []);
 
-  const getExportCellValue = useCallback((task: any, col: any): string => {
+  const getExportCellValue = useCallback((task: any, col: any, exportOpts: { showTime?: boolean } = {}): string => {
+    if (col.type === 'export_delta') {
+      const prevVal = renderCellValue(task, col.prevCol);
+      const nextVal = renderCellValue(task, col.nextCol);
+      const prevDateValue = prevVal?.isCombinedStageDetails ? (prevVal.stageDateRawProps?.dateValue || prevVal.docDateValue) : null;
+      const nextDateValue = nextVal?.isCombinedStageDetails ? (nextVal.stageDateRawProps?.dateValue || nextVal.docDateValue) : null;
+      if (!prevDateValue || !nextDateValue) return '';
+      const prevDate = parseDateSafe(formatDate(prevDateValue, false));
+      const nextDate = parseDateSafe(formatDate(nextDateValue, false));
+      if (!prevDate || !nextDate) return '';
+      const diff = differenceInDays(nextDate, prevDate);
+      return diff >= 0 ? `+${diff}d` : `${diff}d`;
+    }
+    if (col.type === 'total_time_expected' || col.type === 'total_time_actual') {
+      const val = renderCellValue(task, col);
+      return typeof val === 'string' ? val : '';
+    }
     if (col.type === 'task') {
       const val = getRawCellValue(departments, task, col.field, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper);
       const isEmpty = val === null || val === undefined || val === '' || val === 'N/A' || val === '—' || val === 'null' || val === 'undefined';
@@ -1035,7 +1116,7 @@ export default function ReportsPage() {
 
       if (col.hasDate) {
         const dateVal = calculateStageDate(stage, stageData, linkedDocument, documentFields, null, false);
-        parts.push(`Date: ${dateVal ? formatDate(dateVal, false) : 'Pending'}`);
+        parts.push(`Date: ${dateVal ? formatDate(dateVal, !!exportOpts.showTime) : 'Pending'}`);
       }
 
       if (col.fields && col.fields.length > 0) {
@@ -1144,7 +1225,7 @@ export default function ReportsPage() {
                           docRecord.extracted_data?.[fieldName] ||
                           docRecord.edited_details?.[fieldName];
           if (dateVal) {
-            dateString = formatDate(dateVal, false) || String(dateVal);
+            dateString = formatDate(dateVal, !!exportOpts.showTime) || String(dateVal);
           }
         }
       }
@@ -1156,7 +1237,7 @@ export default function ReportsPage() {
   }, [
     departments, stages, enhancedTasksData, companies, getStaffName,
     getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper,
-    unifiedOfficers, allDocuments, kycDocuments,
+    unifiedOfficers, allDocuments, kycDocuments, renderCellValue,
     allIndividualDocuments, allCompanyDocuments // Ensure these were added to dependencies!
   ]);
 
@@ -1181,7 +1262,8 @@ export default function ReportsPage() {
     }));
   }, [sortedTasks, showNARows, stageOnlyColumns, stages, checkStageApplicableForTask]);
 
-  const handleSendReport = useCallback(async (reportType: 'officer' | 'manager' | 'client', exportFormat: 'excel' | 'pdf') => {
+  const handleSendReport = useCallback(async (reportType: 'officer' | 'manager' | 'client', exportFormat: 'excel' | 'pdf', exportOptions: { includeDelta?: boolean; includeTime?: boolean } = {}) => {
+    const { includeDelta = false, includeTime = false } = exportOptions;
     const deptName = activeDepartment?.name || 'All Departments';
     const subdeptLabel = activeSubDeptIds.length > 0
       ? activeSubDeptIds.map(id => activeSubDepartments.find((s: any) => s.id.toString() === id)?.name).filter(Boolean).join(', ') || 'Selected Subdepartments'
@@ -1226,7 +1308,17 @@ export default function ReportsPage() {
       return;
     }
 
-    const exportCols = filteredColumns;
+    const exportCols = includeDelta
+      ? filteredColumns.reduce((acc: any[], col: any, i: number) => {
+          acc.push(col);
+          const next = filteredColumns[i + 1];
+          if (col.type === 'stage_info' && next?.type === 'stage_info') {
+            acc.push({ id: `__export_delta__${i}`, type: 'export_delta', label: 'Δ', prevCol: col, nextCol: next });
+          }
+          return acc;
+        }, [])
+      : filteredColumns;
+    const exportCellOpts = { showTime: includeTime };
     const numDataCols = exportCols.length + 1;
     const safeDept = deptName.replace(/[^a-zA-Z0-9]/g, '_');
     const fileName = `${reportType.charAt(0).toUpperCase() + reportType.slice(1)}_Report_${safeDept}_${format(new Date(), 'yyyy-MM-dd')}`;
@@ -1289,7 +1381,7 @@ export default function ReportsPage() {
 
         // Data rows
         group.tasks.forEach((task, idx) => {
-          const dRow = ws.addRow([idx + 1, ...exportCols.map(col => getExportCellValue(task, col))]);
+          const dRow = ws.addRow([idx + 1, ...exportCols.map(col => getExportCellValue(task, col, exportCellOpts))]);
           dRow.height = 16;
           const bg = idx % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC';
           dRow.eachCell((cell, colNum) => {
@@ -1337,7 +1429,7 @@ export default function ReportsPage() {
       const pageW = doc.internal.pageSize.getWidth();
       const pageH = doc.internal.pageSize.getHeight();
 
-      const pdfCols = filteredColumns.length > 0 ? filteredColumns : [];
+      const pdfCols = exportCols.length > 0 ? exportCols : [];
 
       const hexToRgb = (hex: string): [number, number, number] => [
         parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)
@@ -1358,7 +1450,7 @@ export default function ReportsPage() {
       const GREEN_TEXT: [number, number, number] = [21, 128, 61];
 
       const pdfBucket = (type: string) => {
-        if (type === 'current_stage_age' || type === 'total_process_age') return 'duration';
+        if (type === 'current_stage_age' || type === 'total_process_age' || type === 'export_delta' || type === 'total_time_expected' || type === 'total_time_actual') return 'duration';
         if (type === 'task') return 'task';
         if (type === 'reference_requirement') return 'reference';
         return 'stage';
@@ -1464,7 +1556,7 @@ export default function ReportsPage() {
           const rows = group.tasks.map((task: any, i: number) => [
             String(i + 1),
             ...chunk.map((col: any) => {
-              const v = getExportCellValue(task, col);
+              const v = getExportCellValue(task, col, exportCellOpts);
               return v || '—';
             })
           ]);
@@ -1646,7 +1738,7 @@ export default function ReportsPage() {
           activeOfficerTab={activeOfficerTab} setActiveOfficerTab={setActiveOfficerTab} officerFilterMode={officerFilterMode} setOfficerFilterMode={setOfficerFilterMode}
           availableTaskManagers={availableTaskManagers} activeTaskManagerTab={activeTaskManagerTab} setActiveTaskManagerTab={setActiveTaskManagerTab}
           taskManagerFilterMode={taskManagerFilterMode} setTaskManagerFilterMode={setTaskManagerFilterMode}
-          searchQuery={searchQuery} setSearchQuery={setSearchQuery} refreshData={refreshData} loading={loading}
+          searchQuery={searchQuery} setSearchQuery={setSearchQuery} refreshData={handleManualRefresh} loading={isManualRefreshing}
           activeClassId={activeClassId} setActiveClassId={setActiveClassId} activeSubClassId={activeSubClassId} setActiveSubClassId={setActiveSubClassId}
           activeSubDepartments={activeSubDepartments} activeSubDeptIds={activeSubDeptIds}
         />

@@ -485,6 +485,7 @@ interface EnhancedTableProps {
   reportDocDefaults?: any[];
   allIndividualDocuments?: Record<number, any[]>;
   allCompanyDocuments?: Record<number, any[]>;
+  areTabsVisible?: boolean;
 }
 
 export const EnhancedTable: React.FC<EnhancedTableProps> = ({
@@ -516,6 +517,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   reportDocDefaults = [],
   allIndividualDocuments = {},
   allCompanyDocuments = {},
+  areTabsVisible = true,
 }) => {
   const didLogRef = useRef(false);
   const getCellContentWithCancel = useCallback((task: any, headerId: string) => {
@@ -734,7 +736,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
         )}
       </div>
 
-      <div className="bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+      <div className="bg-white overflow-auto shadow-sm border-b border-slate-200" style={{ maxHeight: `calc(100vh - ${areTabsVisible ? 260 : 145}px)` }}>
         <Table className="min-w-full border-separate border-spacing-0">
           <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
             {expandedSections.has('case_details') && visibleCaseDetailHeaders.map((header, index) => (

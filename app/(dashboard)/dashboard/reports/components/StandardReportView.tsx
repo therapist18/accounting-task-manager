@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useReactTable, getCoreRowModel, type ColumnDef, type ColumnSizingState } from "@tanstack/react-table";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Plus, Minus, ArrowUpDown, ArrowLeftRight, SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Clock, FileText } from "lucide-react";
 import { differenceInDays, isValid } from "date-fns";
 import { cn } from "@/lib/utils";
-import { formatEstimatedMins, renderReportCellContent } from "./reportCellRenderers";
+import { formatDateCell, formatEstimatedMins, renderReportCellContent } from "./reportCellRenderers";
 
 const DEFAULT_COL_WIDTH = 180;
 const INDEX_COL_WIDTH = 56;
@@ -18,11 +18,15 @@ const INDEX_COL_WIDTH = 56;
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const parseDateSafeReport = (s: string | null | undefined): Date | null => {
-  if (!s) return null;
-  if (typeof s !== 'string') return null;
-  if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) {
-    const [dd, mm, yyyy] = s.split('/');
-    const d = new Date(`${yyyy}-${mm}-${dd}`);
+  if (!s || typeof s !== 'string') return null;
+  // Match dd/mm/yyyy with an optional trailing " HH:mm" — captured explicitly so a time
+  // suffix can never bleed into the year (e.g. "19/11/2025 16:12" used to reconstruct as
+  // "2025 16:12-11-19", which JS's lenient Date parser silently mis-parsed to Jan 2025,
+  // producing wildly wrong Δ values like -316d for what should have been +4d).
+  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+  if (m) {
+    const [, dd, mm, yyyy, hh, min] = m;
+    const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd), hh ? Number(hh) : 0, min ? Number(min) : 0);
     return isValid(d) ? d : null;
   }
   try { const d = new Date(s); return isValid(d) ? d : null; } catch { return null; }
@@ -42,6 +46,19 @@ export function StandardReportView({
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
 
   const stickyColumnIds = new Set(['task_id', 'task_passport_number', 'task_applicant_name']);
+
+  // Resolve the same date value the stage cell actually renders (calculateStageDate +
+  // immigration-date fallback, via renderCellValue), then run it through the same
+  // formatter used on screen so Δ math always matches what the user sees, regardless
+  // of the raw format the underlying date happened to be stored in.
+  const getStageDisplayDateStr = (task: any, col: any): string | null => {
+    if (!col || col.type !== 'stage_info') return null;
+    const raw = renderCellValue(task, col);
+    if (!raw || typeof raw !== 'object' || !raw.isCombinedStageDetails || raw.isApplicable === false) return null;
+    const dateValue = raw.stageDateRawProps?.dateValue || raw.docDateValue || null;
+    if (!dateValue) return null;
+    return formatDateCell(dateValue, false);
+  };
 
   const columnDefs = useMemo<ColumnDef<any>[]>(() => [
     { id: '__index__', size: INDEX_COL_WIDTH, enableResizing: false },
@@ -69,7 +86,7 @@ export function StandardReportView({
     const width = getColWidth(colId);
     setColumnSizing(prev => {
       const next = { ...prev };
-      filteredColumns.forEach((c: any) => { next[c.id] = width; });
+      filteredColumns.forEach((c: any) => { next[c.id] = width; }); 
       return next;
     });
   };
@@ -113,12 +130,23 @@ export function StandardReportView({
     return first?.id || null;
   }, [interleavedColumns]);
 
+  // The two aggregate "Expected Time" / "Actual Time Taken" columns get their own
+  // accent colour so they visually pop out from the stage columns they summarize.
+  const isTotalTimeCol = (col: any) => col.type === 'total_time_expected' || col.type === 'total_time_actual';
+
   const paginatedTasks = useMemo(() => {
     const start = (currentPage - 1) * rowsPerPage;
     return allTasks.slice(start, start + rowsPerPage);
   }, [allTasks, currentPage, rowsPerPage]);
 
   const totalPages = Math.max(1, Math.ceil(allTasks.length / rowsPerPage));
+
+  // A refresh (or filter/sort change) can shrink the result set out from under
+  // whatever page the user was sitting on — snap back into range instead of
+  // rendering a blank "page 5 of 2" table.
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
 
   return (
     <div className="flex flex-col h-full antialiased pt-0 bg-white">
@@ -157,11 +185,14 @@ export function StandardReportView({
                       onClick={() => handleSort(col.id)}
                       className={cn(
                         "group relative border-r border-b border-white/30 transition-colors cursor-pointer select-none px-4 py-2",
-                        col.type === 'report_doc' ? "bg-emerald-600 hover:bg-emerald-700" : "bg-custom-blue hover:bg-slate-700",
+                        col.type === 'report_doc' ? "bg-emerald-600 hover:bg-emerald-700"
+                          : isTotalTimeCol(col) ? "bg-violet-600 hover:bg-violet-700"
+                          : "bg-custom-blue hover:bg-slate-700",
                         isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.15)]",
                         isActive && "bg-slate-700",
                         col.id === firstStageColId && "border-l-[3px] border-l-amber-400",
-                        col.id === firstReportDocColId && "border-l-[4px] border-l-emerald-400"
+                        col.id === firstReportDocColId && "border-l-[4px] border-l-emerald-400",
+                        col.id === '__expected_total_time__' && "border-l-[4px] border-l-violet-300"
                       )}
                       style={{
                         ...(isSticky ? { left: `${left}px` } : undefined),
@@ -261,10 +292,11 @@ export function StandardReportView({
                       key={col.id}
                       className={cn(
                         "border-r border-b border-slate-200 px-3 py-1 text-center",
-                        col.type === 'report_doc' ? "bg-emerald-50" : "bg-blue-50",
+                        col.type === 'report_doc' ? "bg-emerald-50" : isTotalTimeCol(col) ? "bg-violet-50" : "bg-blue-50",
                         isSticky && "sticky z-30 shadow-[2px_0_4px_rgba(0,0,0,0.02)]",
                         col.id === firstStageColId && "border-l-[3px] border-l-amber-200",
-                        col.id === firstReportDocColId && "border-l-[4px] border-l-emerald-300"
+                        col.id === firstReportDocColId && "border-l-[4px] border-l-emerald-300",
+                        col.id === '__expected_total_time__' && "border-l-[4px] border-l-violet-200"
                       )}
                       style={isSticky ? { left: `${left}px` } : undefined}
                     >
@@ -311,8 +343,8 @@ export function StandardReportView({
                     {interleavedColumns.map((col: any) => {
                       // ── Delta column ──
                       if (col.isDelta) {
-                        const prevDate = parseDateSafeReport(task.stages?.[col.prevCol?.stageId]?.date || task.stages?.[col.prevCol?.stageId]?.completedAt);
-                        const nextDate = parseDateSafeReport(task.stages?.[col.nextCol?.stageId]?.date || task.stages?.[col.nextCol?.stageId]?.completedAt);
+                        const prevDate = parseDateSafeReport(getStageDisplayDateStr(task, col.prevCol));
+                        const nextDate = parseDateSafeReport(getStageDisplayDateStr(task, col.nextCol));
                         const diff = prevDate && nextDate ? differenceInDays(nextDate, prevDate) : null;
                         return (
                           <TableCell
@@ -329,7 +361,7 @@ export function StandardReportView({
                                   <TooltipTrigger asChild>
                                     <span className={cn(
                                       "text-sm font-bold tabular-nums cursor-default",
-                                      diff > 30 ? "text-rose-500" : diff > 14 ? "text-amber-500" : "text-slate-500"
+                                      diff < 0 ? "text-red-600" : diff > 30 ? "text-rose-500" : diff > 14 ? "text-amber-500" : "text-slate-500"
                                     )}>
                                       {diff >= 0 ? `+${diff}d` : `${diff}d`}
                                     </span>
@@ -359,9 +391,12 @@ export function StandardReportView({
                             "px-3 py-1.5 border-r border-b border-slate-200 transition-colors",
                             isSticky ? "sticky z-20 shadow-[2px_0_4px_rgba(0,0,0,0.02)] bg-inherit" : "",
                             idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
-                            col.type === 'report_doc' ? "bg-emerald-50/10 group-hover:bg-emerald-50/40" : "group-hover:bg-blue-50/50",
+                            col.type === 'report_doc' ? "bg-emerald-50/10 group-hover:bg-emerald-50/40"
+                              : isTotalTimeCol(col) ? "bg-violet-50/50 group-hover:bg-violet-50/70"
+                              : "group-hover:bg-blue-50/50",
                             col.id === firstStageColId && "border-l-[3px] border-l-amber-400",
-                            col.id === firstReportDocColId && "border-l-[4px] border-l-emerald-400 bg-emerald-50/20 group-hover:bg-emerald-50/50"
+                            col.id === firstReportDocColId && "border-l-[4px] border-l-emerald-400 bg-emerald-50/20 group-hover:bg-emerald-50/50",
+                            col.id === '__expected_total_time__' && "border-l-[4px] border-l-violet-300"
                           )}
                           style={isSticky ? { left: `${left}px` } : undefined}
                         >

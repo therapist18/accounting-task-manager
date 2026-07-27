@@ -53,6 +53,7 @@ interface StandardTableProps {
   allCompanyDocuments?: Record<number, any[]>
   expandedSections?: Set<string>
   toggleSectionExpansion?: (sectionId: string) => void
+  areTabsVisible?: boolean
 }
 
 const DEFAULT_COL_WIDTH = 180;
@@ -73,6 +74,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
   allCompanyDocuments = {},
   expandedSections = new Set(['report_docs']),
   toggleSectionExpansion,
+  areTabsVisible = true,
 }) => {
   const isReportDocsExpanded = expandedSections.has('report_docs');
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
@@ -270,7 +272,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
     <div className="flex flex-col h-full antialiased bg-white border border-slate-200 shadow-sm overflow-hidden">
       <DeleteConfirmationDialog open={!!taskToDelete} onOpenChange={(open) => !open && setTaskToDelete(null)} onConfirm={handleConfirmDelete} title="Delete Task" confirmText="Delete" loading={dataLoading?.tasks || false} />
 
-      <div className="h-[calc(100vh-280px)] overflow-auto custom-scrollbar relative">
+      <div className={`h-[calc(100vh-${areTabsVisible ? 275 : 190}px)] overflow-auto custom-scrollbar relative`}>
         <Table className="border-separate border-spacing-0 min-w-max w-full">
 
           <TableHeader className="sticky top-0 z-40 bg-blue-700">

@@ -33,7 +33,7 @@ export const formatEstimatedMins = (minutes: number): string => {
   return d >= 1 ? `~${d}d` : `~${h}h`;
 };
 
-export const DataCell = ({ val, isMissing, isPrimary }: { val: React.ReactNode, isMissing: boolean, isPrimary?: boolean }) => (
+export const DataCell = ({ val, isMissing, isPrimary, isAccent }: { val: React.ReactNode, isMissing: boolean, isPrimary?: boolean, isAccent?: boolean }) => (
   <TooltipProvider delayDuration={200}>
     <Tooltip>
       <TooltipTrigger asChild>
@@ -41,9 +41,11 @@ export const DataCell = ({ val, isMissing, isPrimary }: { val: React.ReactNode, 
           "block w-full truncate text-sm cursor-default leading-snug",
           isMissing
             ? "text-slate-400 font-medium italic"
-            : isPrimary
-              ? "text-slate-900 font-semibold"
-              : "text-slate-500 font-medium"
+            : isAccent
+              ? "text-violet-700 font-bold"
+              : isPrimary
+                ? "text-slate-900 font-semibold"
+                : "text-slate-500 font-medium"
         )}>
           {val}
         </div>
@@ -393,5 +395,6 @@ export function renderReportCellContent(task: any, col: any, opts: {
   const val = safeRender(rawCellVal);
   const isMissing = React.isValidElement(val) && val.props?.className?.includes('text-rose-600');
   const isPrimary = col.field === 'applicant_name' || col.field === 'company_name';
-  return isMissing ? val : <DataCell val={val} isMissing={val === 'N/A'} isPrimary={isPrimary} />;
+  const isAccent = col.type === 'total_time_expected' || col.type === 'total_time_actual';
+  return isMissing ? val : <DataCell val={val} isMissing={val === 'N/A'} isPrimary={isPrimary} isAccent={isAccent} />;
 }

@@ -1,8 +1,8 @@
 // @ts-nocheck
 "use client";
 
-import React, { useMemo, useState } from "react";
-import Link from "next/link";
+import React, { useMemo, useState, useEffect } from "react";
+
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, SearchX } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,12 @@ export function MobileReportView({
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string | number>>(new Set());
 
   const totalPages = Math.max(1, Math.ceil(allTasks.length / rowsPerPage));
+
+  // A refresh (or filter change) can shrink the result set out from under
+  // whatever page the user was sitting on — snap back into range.
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
 
   const paginatedTasks = useMemo(() => {
     const start = (currentPage - 1) * rowsPerPage;
@@ -70,15 +76,11 @@ export function MobileReportView({
                 className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left active:bg-slate-50"
               >
                 <div className="min-w-0">
-                  <Link
-                    href={`/dashboard/tasks/${task.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="text-sm font-semibold text-blue-700 hover:underline truncate block"
+                  <span
+                    className="text-sm font-semibold text-blue-700 truncate block"
                   >
                     {primaryVal}
-                  </Link>
+                  </span>
                   <div className="text-xs text-slate-400 mt-0.5">
                     {secondaryCols.length} more field{secondaryCols.length !== 1 ? 's' : ''}
                   </div>

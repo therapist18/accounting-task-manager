@@ -3937,7 +3937,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 py-4">
+      <div className="flex-1">
         {activeDept && (
           <div className="overflow-hidden">
             {isTransposedView ? (
@@ -3964,6 +3964,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                 getTaskHierarchy={getTaskHierarchy}
                 getStaffName={getStaffName}
                 readOnly={isReadOnly}
+                areTabsVisible={areTabsVisible}
                 reportDocDefaults={reportDocDefaults}
                 allIndividualDocuments={allIndividualDocuments}
                 allCompanyDocuments={allCompanyDocuments}
@@ -4064,6 +4065,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                 toggleStageExpansion={toggleStageExpansion}
                 toggleDocumentExpansion={toggleDocumentExpansion}
                 readOnly={isReadOnly}
+                areTabsVisible={areTabsVisible}
                 showStats={showStats}
                 reportDocDefaults={reportDocDefaults}
                 allIndividualDocuments={allIndividualDocuments}

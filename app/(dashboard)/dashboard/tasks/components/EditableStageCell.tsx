@@ -1175,6 +1175,33 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
 
     const btnSizeClass = isCompact ? "h-6 w-6" : "h-7 w-7";
     const iconSizeClass = isCompact ? "h-16 w-16" : "h-16 w-16";
+
+    const stageLinkBtn = (() => {
+      if (!stageLink) return null;
+      if (stageLink.tab === 'billing') {
+        return (
+          <Button variant="ghost" size="icon" className={cn("text-blue-600 hover:bg-blue-50", btnSizeClass)} title="Preview bill" onClick={(e) => { e.stopPropagation(); setBillPreviewOpen(true); }}>
+            <CreditCard className={iconSizeClass} />
+          </Button>
+        );
+      }
+      if (stageLink.tab === 'requirements') {
+        return (
+          <Button variant="ghost" size="icon" className={cn("text-indigo-600 hover:bg-indigo-50", btnSizeClass)} title="Open requirements checklist" onClick={(e) => { e.stopPropagation(); onOpenRequirements?.(task); }}>
+            <ClipboardList className={iconSizeClass} />
+          </Button>
+        );
+      }
+      if (stageLink.tab === 'automation' && currentAutomationConfig) {
+        return (
+          <Button variant="ghost" size="icon" className={cn("text-purple-600 hover:bg-purple-50", btnSizeClass)} title={`Open automation: ${currentAutomationConfig.docName}`} onClick={(e) => { e.stopPropagation(); window.open(`/dashboard/tasks/${task.id}?tab=automation&automationId=${currentAutomationConfig.automationId}`, '_blank', 'noopener,noreferrer'); }}>
+            <Zap className={iconSizeClass} />
+          </Button>
+        );
+      }
+      return null;
+    })();
+
     if (readOnly) {
       const viewBtn = linkedDocument && (
         <Dialog>
@@ -1262,32 +1289,6 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         );
       }
     }
-
-    const stageLinkBtn = (() => {
-      if (!stageLink) return null;
-      if (stageLink.tab === 'billing') {
-        return (
-          <Button variant="ghost" size="icon" className={cn("text-blue-600 hover:bg-blue-50", btnSizeClass)} title="Preview bill" onClick={(e) => { e.stopPropagation(); setBillPreviewOpen(true); }}>
-            <CreditCard className={iconSizeClass} />
-          </Button>
-        );
-      }
-      if (stageLink.tab === 'requirements') {
-        return (
-          <Button variant="ghost" size="icon" className={cn("text-indigo-600 hover:bg-indigo-50", btnSizeClass)} title="Open requirements checklist" onClick={(e) => { e.stopPropagation(); onOpenRequirements?.(task); }}>
-            <ClipboardList className={iconSizeClass} />
-          </Button>
-        );
-      }
-      if (stageLink.tab === 'automation' && currentAutomationConfig) {
-        return (
-          <Button variant="ghost" size="icon" className={cn("text-purple-600 hover:bg-purple-50", btnSizeClass)} title={`Open automation: ${currentAutomationConfig.docName}`} onClick={(e) => { e.stopPropagation(); window.open(`/dashboard/tasks/${task.id}?tab=automation&automationId=${currentAutomationConfig.automationId}`, '_blank', 'noopener,noreferrer'); }}>
-            <Zap className={iconSizeClass} />
-          </Button>
-        );
-      }
-      return null;
-    })();
 
     const viewBtn = linkedDocument && (
       <Dialog>
