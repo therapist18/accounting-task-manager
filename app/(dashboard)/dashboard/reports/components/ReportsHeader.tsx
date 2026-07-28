@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { ChevronDown, Filter, RotateCcw, X, Download, Search, Send, ChevronRight, ChevronLeft, Plus, Minus, ArrowUpDown, SearchX, ChevronsLeft, ChevronsRight, Shield, User, Clock, Sparkles, AlertCircle, ListChecks, Check, Layers, Settings2, TableProperties, LayoutGrid, Building2, Eye, EyeOff, GitCompare } from "lucide-react";
+import { ChevronDown, Filter, RotateCcw, X, Download, Search, Send, ChevronRight, ChevronLeft, Plus, Minus, ArrowUpDown, SearchX, ChevronsLeft, ChevronsRight, Shield, User, Clock, Sparkles, AlertCircle, ListChecks, Check, Layers, Settings2, TableProperties, LayoutGrid, Building2, Eye, EyeOff, GitCompare, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -247,7 +247,7 @@ export function ReportsSidebar({ departments, activeDeptId, setActiveDeptId, act
   );
 }
 
-export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setView, handleSendReport, activeDepartment, activeSubDepartments, activeSubDeptIds, allTasksCount, wipTasksCount, writeUpCompletedCount, columns, visibleColumnIds, setVisibleColumnIds, showTime, setShowTime, showDelta, setShowDelta, showOfficers, setShowOfficers, showNARows, setShowNARows }: any) {
+export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setView, handleSendReport, activeDepartment, activeSubDepartments, activeSubDeptIds, allTasksCount, wipTasksCount, writeUpCompletedCount, columns, visibleColumnIds, setVisibleColumnIds, showTime, setShowTime, showDelta, setShowDelta, showOfficers, setShowOfficers, showNARows, setShowNARows, showDependentStages, setShowDependentStages }: any) {
 
   const [pendingExport, setPendingExport] = useState<{ reportType: 'officer' | 'manager'; exportFormat: 'excel' | 'pdf' } | null>(null);
 
@@ -317,6 +317,22 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
             >
               <User className="h-3.5 w-3.5" />
               Officers Cols: {showOfficers ? "Visible" : "Hidden"}
+            </Button>
+          )}
+
+          {/* Dependent Stages Toggle */}
+          {setShowDependentStages && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowDependentStages((v: boolean) => !v)}
+              className={cn(
+                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+                showDependentStages ? "bg-amber-50 border-amber-300 text-amber-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              <Lock className="h-3.5 w-3.5" />
+              Dep. Stages: {showDependentStages ? "Visible" : "Hidden"}
             </Button>
           )}
 
@@ -418,12 +434,14 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
 export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspective, setActivePerspective, officerTaskCounts = { all: 0 }, taskManagerTaskCounts = { all: 0 }, allTasksCount = 0, clientTaskCounts = { all: 0 }, availableOfficers = [], activeOfficerTab, setActiveOfficerTab, officerFilterMode, setOfficerFilterMode, availableTaskManagers = [], activeTaskManagerTab, setActiveTaskManagerTab, taskManagerFilterMode, setTaskManagerFilterMode, refreshData, loading, activeClassId, setActiveClassId, activeSubClassId, setActiveSubClassId, activeSubDepartments, activeSubDeptIds }: any) {
   const isOfficer = activePerspective === 'officers';
   const isManager = activePerspective === 'managers';
-  const currentData = isOfficer ? availableOfficers : availableTaskManagers;
-  const currentActive = isOfficer ? activeOfficerTab : activeTaskManagerTab;
-  const setTab = isOfficer ? setActiveOfficerTab : setActiveTaskManagerTab;
-  const counts = isOfficer ? officerTaskCounts : taskManagerTaskCounts;
-  const mode = isOfficer ? officerFilterMode : taskManagerFilterMode;
-  const setMode = isOfficer ? setOfficerFilterMode : setTaskManagerFilterMode;
+  const isClient = activePerspective === 'clients';
+  const isPersonView = isOfficer || isManager || isClient;
+  const currentData = isOfficer ? availableOfficers : isClient ? availableClients : availableTaskManagers;
+  const currentActive = isOfficer ? activeOfficerTab : isClient ? activeClientTab : activeTaskManagerTab;
+  const setTab = isOfficer ? setActiveOfficerTab : isClient ? setActiveClientTab : setActiveTaskManagerTab;
+  const counts = isOfficer ? officerTaskCounts : isClient ? clientTaskCounts : taskManagerTaskCounts;
+  const mode = isOfficer ? officerFilterMode : isClient ? clientFilterMode : taskManagerFilterMode;
+  const setMode = isOfficer ? setOfficerFilterMode : isClient ? setClientFilterMode : setTaskManagerFilterMode;
   const perspectiveCounts = { overview: allTasksCount || 0, officers: officerTaskCounts?.all || 0, managers: taskManagerTaskCounts?.all || 0, clients: clientTaskCounts?.all || 0 };
   const currentSubDept = (activeSubDepartments || []).find((s: any) => s.id.toString() === (activeSubDeptIds[0] || activeSubDepartments?.[0]?.id.toString()));
 
@@ -453,7 +471,8 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
             {[
               { id: 'overview', label: 'Overview', activeBg: 'bg-custom-blue', activeText: 'text-white' },
               { id: 'officers', label: 'Officers', activeBg: 'bg-amber-500', activeText: 'text-white' },
-              { id: 'managers', label: 'Managers', activeBg: 'bg-violet-500', activeText: 'text-white' }
+              { id: 'managers', label: 'Managers', activeBg: 'bg-violet-500', activeText: 'text-white' },
+              { id: 'clients', label: 'Clients', activeBg: 'bg-emerald-500', activeText: 'text-white' }
             ].map(p => (
               <button
                 key={p.id}
@@ -479,7 +498,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
           <div className="h-6 w-px bg-slate-200 mx-2 shrink-0" />
 
           {/* Mode Selector for Person Perspective */}
-          {(isOfficer || isManager) && (
+          {isPersonView && (
             <Select value={mode} onValueChange={setMode}>
               <SelectTrigger className="w-44 h-10 bg-white border-slate-300 rounded-full text-sm font-bold shadow-sm">
                 <div className="flex items-center gap-2">
@@ -568,15 +587,37 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
         </div>
       </div>
 
+      {/* Filter Description Banner */}
+      {isPersonView && (
+        <div className="px-8 py-2.5 flex items-center gap-3 border-b border-slate-100 bg-slate-50/80">
+          <div className={cn(
+            "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0",
+            isOfficer ? "bg-blue-100/60 text-blue-700" : isClient ? "bg-emerald-100/60 text-emerald-700" : "bg-violet-100/60 text-violet-700"
+          )}>
+            {isOfficer ? <Shield className="h-3.5 w-3.5" /> : isClient ? <Building2 className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+            <span>{isOfficer ? "Officer View" : isClient ? "Client View" : "Manager View"}</span>
+          </div>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            {isOfficer
+              ? "Showing tasks filtered by officer assignment. Select a specific officer below to view only their assigned tasks, or click All to see tasks across all officers."
+              : isClient
+              ? "Showing tasks filtered by client (company). Select a specific client below to view only their tasks, or click All to see tasks across all clients."
+              : "Showing tasks filtered by task manager assignment. Select a specific manager below to view only the tasks they manage, or click All to see tasks across all managers."
+            }
+            {mode === 'current' ? " Currently showing 'current assignment' data." : " Currently showing 'historical activity' data."}
+          </p>
+        </div>
+      )}
+
       {/* Tier 1.5: Assignee Pills with Counts */}
-      {(isOfficer || isManager) && (
+      {isPersonView && (
         <div className="px-8 py-4 flex flex-wrap items-center gap-1.5">
           <div className={cn(
             "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-black uppercase font-bold mr-1 shrink-0",
-            isOfficer ? "bg-blue-50 text-blue-600 border border-blue-100" : "bg-violet-50 text-violet-600 border border-violet-100"
+            isOfficer ? "bg-blue-50 text-blue-600 border border-blue-100" : isClient ? "bg-emerald-50 text-emerald-600 border border-emerald-100" : "bg-violet-50 text-violet-600 border border-violet-100"
           )}>
-            {isOfficer ? <Shield className="h-3 w-3" /> : <User className="h-3 w-3" />}
-            {isOfficer ? "Officers" : "Managers"}
+            {isOfficer ? <Shield className="h-3 w-3" /> : isClient ? <Building2 className="h-3 w-3" /> : <User className="h-3 w-3" />}
+            {isOfficer ? "Officers" : isClient ? "Clients" : "Managers"}
           </div>
 
           <button
@@ -608,7 +649,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                 className={cn(
                   "h-10 px-6 py-2 rounded-full text-sm font-bold transition-all border flex items-center gap-1.5",
                   isActive
-                    ? (isOfficer ? "bg-custom-blue border-custom-blue text-white shadow-sm" : "bg-violet-600 border-violet-600 text-white shadow-sm")
+                    ? (isOfficer ? "bg-custom-blue border-custom-blue text-white shadow-sm" : isClient ? "bg-emerald-600 border-emerald-600 text-white shadow-sm" : "bg-violet-600 border-violet-600 text-white shadow-sm")
                     : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
                 )}
               >

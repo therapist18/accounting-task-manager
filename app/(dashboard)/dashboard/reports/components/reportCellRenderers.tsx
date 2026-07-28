@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarPicker } from "@/components/ui/calendar";
-import { Upload, CheckCircle2, AlertTriangle, CalendarIcon, AlertCircle } from "lucide-react";
+import { Upload, CheckCircle2, AlertTriangle, CalendarIcon, AlertCircle, Lock } from "lucide-react";
 import { isValid, format } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -291,6 +291,23 @@ export function renderReportCellContent(task: any, col: any, opts: {
 
   // ── Combined stage_info cell ──
   if (rawCellVal && typeof rawCellVal === 'object' && rawCellVal.isCombinedStageDetails) {
+    if (rawCellVal.isDependencyLocked) {
+      return (
+        <TooltipProvider delayDuration={200}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex items-center gap-1.5 text-sm text-slate-300 font-medium italic cursor-default pl-1">
+                <Lock className="h-3 w-3 text-slate-300 shrink-0" />
+                Locked
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="bg-slate-800 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[9999]">
+              Waiting for: {rawCellVal.waitingOnNames?.join(', ') || 'previous stage'}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      );
+    }
     if (rawCellVal.isApplicable === false) {
       return (
         <TooltipProvider delayDuration={200}>

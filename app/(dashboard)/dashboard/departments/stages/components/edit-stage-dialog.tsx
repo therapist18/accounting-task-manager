@@ -769,13 +769,8 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                         options={[
                           { value: 'none', label: '-- Add a dependency --' },
                           ...allStages
-                            .filter(s => {
-                              const currentDeptName = getTargetDepartmentName();
-                              return s.id !== stage?.id
-                                && !(formData.dependencies || []).some(d => d.stageId === s.id)
-                                && (!currentDeptName || s.departmentName === currentDeptName);
-                            })
-                            .map(s => ({ value: s.id, label: s.name }))
+                            .filter(s => s.id !== stage?.id && !(formData.dependencies || []).some(d => d.stageId === s.id))
+                            .map(s => ({ value: s.id, label: s.departmentName ? `${s.name} (${s.departmentName})` : s.name }))
                         ]}
                         placeholder="Choose a stage to depend on"
                       />
@@ -849,8 +844,8 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                       <Input
                         value={formData.defaultValue || ''}
                         onChange={(e) => setFormData(prev => prev ? { ...prev, defaultValue: e.target.value } : null)}
-                        placeholder="Enter default value..."
-                        type={formData.stageInputType === 'number' ? 'number' : formData.stageInputType === 'date' ? 'date' : formData.stageInputType === 'datetime' ? 'datetime-local' : 'text'}
+                        placeholder={formData.stageInputType === 'date' ? 'dd/mm/yyyy' : formData.stageInputType === 'datetime' ? 'dd/mm/yyyy hh:mm' : 'Enter default value...'}
+                        type={formData.stageInputType === 'number' ? 'number' : 'text'}
                       />
                     </FormField>
                   )}

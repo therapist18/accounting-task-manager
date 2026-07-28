@@ -2173,7 +2173,7 @@ export default function Stages() {
             const cFol = row.getCell(currCol++);
             const officerIds = stage.officer_ids && stage.officer_ids.length > 0 ? stage.officer_ids : (stage.officer_id ? [stage.officer_id] : []);
             cFol.value = stage.follow_up === 'Officer' && officerIds.length > 0
-              ? officerIds.map(id => userData.officers.find(o => o.id === id)?.displayName).filter(Boolean).join(', ') || stage.follow_up
+              ? officerIds.map(id => (userData?.officers || []).find(o => o.id === id)?.displayName).filter(Boolean).join(', ') || stage.follow_up
               : stage.follow_up || '-';
             styleCell(cFol);
 
@@ -2359,7 +2359,7 @@ export default function Stages() {
               const c = row.getCell(currCell++);
               const officerIds = stage.officer_ids && stage.officer_ids.length > 0 ? stage.officer_ids : (stage.officer_id ? [stage.officer_id] : []);
               c.value = stage.follow_up === 'Officer' && officerIds.length > 0
-                ? officerIds.map(id => userData.officers.find(o => o.id === id)?.displayName).filter(Boolean).join(', ') || stage.follow_up
+                ? officerIds.map(id => (userData?.officers || []).find(o => o.id === id)?.displayName).filter(Boolean).join(', ') || stage.follow_up
                 : stage.follow_up || '-';
               c.alignment = { horizontal: 'center' };
             }
@@ -2816,7 +2816,7 @@ export default function Stages() {
                           {(() => {
                             const officerIds = stage.officer_ids && stage.officer_ids.length > 0 ? stage.officer_ids : (stage.officer_id ? [stage.officer_id] : []);
                             return stage.follow_up === 'Officer' && officerIds.length > 0
-                              ? officerIds.map(id => userData.officers.find(o => o.id === id)?.displayName).filter(Boolean).join(', ') || stage.follow_up
+                              ? officerIds.map(id => (userData?.officers || []).find(o => o.id === id)?.displayName).filter(Boolean).join(', ') || stage.follow_up
                               : stage.follow_up || "-";
                           })()}
                         </div>
@@ -3257,7 +3257,7 @@ export default function Stages() {
                         {(() => {
                           const officerIds = stage.officer_ids && stage.officer_ids.length > 0 ? stage.officer_ids : (stage.officer_id ? [stage.officer_id] : []);
                           return stage.follow_up === 'Officer' && officerIds.length > 0
-                            ? officerIds.map(id => userData.officers.find(o => o.id === id)?.displayName).filter(Boolean).join(', ') || stage.follow_up
+                            ? officerIds.map(id => (userData?.officers || []).find(o => o.id === id)?.displayName).filter(Boolean).join(', ') || stage.follow_up
                             : stage.follow_up || "-";
                         })()}
                       </div>
@@ -3714,7 +3714,7 @@ export default function Stages() {
             </TableBody>
           </Table>
         </div>
-        {totalPages > 1 && (
+        {totalItems > 0 && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-slate-50/50">
             <div className="flex items-center gap-2 text-sm text-gray-600">
               <span>Showing {((standardPage - 1) * standardPageSize) + 1}–{Math.min(standardPage * standardPageSize, totalItems)} of {totalItems} subdepartments</span>
@@ -3943,6 +3943,7 @@ export default function Stages() {
           stage={editingStage}
           onSave={handleUpdateStage}
           officers={userData.officers}
+          departmentName={currentDept?.name}
         />
       </div>
     </div>

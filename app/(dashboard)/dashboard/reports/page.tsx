@@ -170,6 +170,7 @@ export default function ReportsPage() {
   const [showOfficers, setShowOfficers] = useState(false);
   const [expandedSections, setExpandedSections] = useState(() => new Set(['task_details']));
   const [showNARows, setShowNARows] = useState(true);
+  const [showDependentStages, setShowDependentStages] = useState(false);
   const [showDocRequirementsColumns, setShowDocRequirementsColumns] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>([]);
   const [expandedStageColumns, setExpandedStageColumns] = useState<Set<string>>(new Set());
@@ -574,6 +575,19 @@ export default function ReportsPage() {
     return counts;
   }, [tasksByFilters, availableTaskManagers]);
 
+  const clientTaskCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: 0 };
+    for (const c of availableClients) {
+      const cTasks = tasksByFilters.filter(t => {
+        const company = getTaskCompanyParticipant(t);
+        return company && company.name === c.name;
+      });
+      counts[c.name] = cTasks.length;
+      counts.all += cTasks.length;
+    }
+    return counts;
+  }, [tasksByFilters, availableClients, getTaskCompanyParticipant]);
+
   const searchedTasks = useMemo(() => {
     let filtered = tasksByFilters.filter(task => {
       if (activeStatus === 'wip' && ['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'].includes(task.status)) return false;
@@ -725,7 +739,10 @@ export default function ReportsPage() {
     }
 
     const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
-    const sortedStages = stages.filter(s => activeStageIds.includes(s.id) && isStageApplicableToCurrentFilter(s.id)).sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+    const sortedStages = stages
+      .filter(s => activeStageIds.includes(s.id) && isStageApplicableToCurrentFilter(s.id))
+      .filter(s => showDependentStages || !(s.dependencies && s.dependencies.length > 0))
+      .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
 
     const stageInfoCols: any[] = [];
     sortedStages.forEach((stage) => {
@@ -790,7 +807,7 @@ export default function ReportsPage() {
     }
 
     return cols;
-  }, [activeReport, stages, isStageApplicableToCurrentFilter, expandedStageColumns, showDocRequirementsColumns, tasks, reportDocDefaults]);
+  }, [activeReport, stages, isStageApplicableToCurrentFilter, expandedStageColumns, showDocRequirementsColumns, tasks, reportDocDefaults, showDependentStages]);
 
   useEffect(() => {
     if (columns.length > 0) setVisibleColumnIds(prev => Array.from(new Set([...prev, ...columns.map(c => c.id)])));
@@ -831,6 +848,36 @@ export default function ReportsPage() {
           isCombinedStageDetails: true,
           isApplicable: false,
         };
+      }
+
+      const stageDependencies = stage.dependencies || [];
+      if (stageDependencies.length > 0) {
+        let depsMet = true;
+        const waitingOn: string[] = [];
+        for (const dep of stageDependencies) {
+          const parentStageData = task?.stages?.[dep.stageId];
+          const hasData = parentStageData?.date || parentStageData?.value || parentStageData?.status;
+          const isCompleted = parentStageData?.status === 'completed';
+          switch (dep.dependencyType) {
+            case 'visible_when_completed':
+            case 'sequential':
+              if (!isCompleted) { depsMet = false; waitingOn.push(dep.stageName || 'Unknown'); }
+              break;
+            case 'visible_when_started':
+              if (!hasData) { depsMet = false; waitingOn.push(dep.stageName || 'Unknown'); }
+              break;
+            case 'always_visible':
+            default:
+              break;
+          }
+        }
+        if (!depsMet) {
+          return {
+            isCombinedStageDetails: true,
+            isDependencyLocked: true,
+            waitingOnNames: waitingOn,
+          };
+        }
       }
 
       let officerNode: React.ReactNode = null;
@@ -1850,13 +1897,16 @@ export default function ReportsPage() {
           activeSubDeptIds={activeSubDeptIds} showTime={showTime} setShowTime={setShowTime} showDelta={showDelta} setShowDelta={setShowDelta}
           showOfficers={showOfficers} setShowOfficers={setShowOfficers}
           showNARows={showNARows} setShowNARows={setShowNARows}
+          showDependentStages={showDependentStages} setShowDependentStages={setShowDependentStages}
         />
         <PersonFilterStrip
           activePerspective={activePerspective} setActivePerspective={setActivePerspective} allTasksCount={allTasksCount}
-          officerTaskCounts={officerTaskCounts} taskManagerTaskCounts={taskManagerTaskCounts} clientTaskCounts={{}} availableOfficers={availableOfficers}
+          officerTaskCounts={officerTaskCounts} taskManagerTaskCounts={taskManagerTaskCounts} clientTaskCounts={clientTaskCounts} availableOfficers={availableOfficers}
           activeOfficerTab={activeOfficerTab} setActiveOfficerTab={setActiveOfficerTab} officerFilterMode={officerFilterMode} setOfficerFilterMode={setOfficerFilterMode}
           availableTaskManagers={availableTaskManagers} activeTaskManagerTab={activeTaskManagerTab} setActiveTaskManagerTab={setActiveTaskManagerTab}
           taskManagerFilterMode={taskManagerFilterMode} setTaskManagerFilterMode={setTaskManagerFilterMode}
+          availableClients={availableClients} activeClientTab={activeClientTab} setActiveClientTab={setActiveClientTab}
+          clientFilterMode={clientFilterMode} setClientFilterMode={setClientFilterMode}
           searchQuery={searchQuery} setSearchQuery={setSearchQuery} refreshData={handleManualRefresh} loading={isManualRefreshing}
           activeClassId={activeClassId} setActiveClassId={setActiveClassId} activeSubClassId={activeSubClassId} setActiveSubClassId={setActiveSubClassId}
           activeSubDepartments={activeSubDepartments} activeSubDeptIds={activeSubDeptIds}

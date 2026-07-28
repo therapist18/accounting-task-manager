@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, Loader2, SkipForward, Clock3, MoreHorizontal, CheckCircle2, Timer, AlertCircle, User, UserPlus, List, Link2, Type, Hash, Globe, Mail, Phone, AlignLeft, FileText as FileTextIcon, RotateCcw, ArrowUpRight, CreditCard, ClipboardList } from "lucide-react"
+import { Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, Loader2, SkipForward, Clock3, MoreHorizontal, CheckCircle2, Timer, AlertCircle, User, UserPlus, List, Link2, Type, Hash, Globe, Mail, Phone, AlignLeft, FileText as FileTextIcon, RotateCcw, ArrowUpRight, CreditCard, ClipboardList, Lock } from "lucide-react"
 import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
@@ -46,6 +46,26 @@ interface EditableStageCellProps {
 
 const documentFieldsCache = new Map<string, { fields: any[], timestamp: number }>();
 const CACHE_DURATION = 2 * 60 * 1000; // 2 minutes
+
+const isoToDisplayDate = (iso: string): string => {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  } catch { return iso; }
+};
+
+const displayToIsoDate = (display: string): string => {
+  if (!display) return '';
+  const match = display.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) return display;
+  const [, dd, mm, yyyy] = match;
+  return `${yyyy}-${mm}-${dd}`;
+};
 
 const isStageApplicableToTask = (stage: any, task: any, departments: any[] = []): boolean => {
   if (!task || !stage || !Array.isArray(departments) || departments.length === 0) {
@@ -712,11 +732,16 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         return (
           <div className="flex items-center gap-1 w-full relative z-10">
             <input
-              type="date"
-              value={customInputValue || ''}
-              onChange={(e) => setCustomInputValue(e.target.value)}
+              type="text"
+              value={customInputValue ? isoToDisplayDate(customInputValue) : ''}
+              onChange={(e) => {
+                const raw = e.target.value.replace(/[^\d/]/g, '');
+                setCustomInputValue(displayToIsoDate(raw));
+              }}
               onKeyDown={handleKeyDown}
               autoFocus
+              placeholder="dd/mm/yyyy"
+              maxLength={10}
               className={cn("flex-1 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500", btnClass)}
             />
             <Button size="sm" variant="ghost" className={cn("p-0 text-emerald-600 hover:text-emerald-700 w-6", btnClass)} onClick={() => handleCustomInputSave()} disabled={isLoading}><Check className="h-3.5 w-3.5" /></Button>
@@ -728,12 +753,29 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         return (
           <div className="flex items-center gap-1 w-full relative z-10">
             <input
-              type="datetime-local"
-              value={customInputValue || ''}
-              onChange={(e) => setCustomInputValue(e.target.value)}
+              type="text"
+              value={customInputValue ? isoToDisplayDate(customInputValue.split('T')[0]) : ''}
+              onChange={(e) => {
+                const raw = e.target.value.replace(/[^\d/]/g, '');
+                const isoDate = displayToIsoDate(raw);
+                const time = customInputValue?.split('T')[1] || '00:00';
+                setCustomInputValue(`${isoDate}T${time}`);
+              }}
               onKeyDown={handleKeyDown}
               autoFocus
+              placeholder="dd/mm/yyyy"
+              maxLength={10}
               className={cn("flex-1 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500", btnClass)}
+            />
+            <input
+              type="time"
+              value={customInputValue?.split('T')[1] || ''}
+              onChange={(e) => {
+                const date = customInputValue?.split('T')[0] || '';
+                setCustomInputValue(`${date}T${e.target.value}`);
+              }}
+              onKeyDown={handleKeyDown}
+              className={cn("w-24 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500", btnClass)}
             />
             <Button size="sm" variant="ghost" className={cn("p-0 text-emerald-600 hover:text-emerald-700 w-6", btnClass)} onClick={() => handleCustomInputSave()} disabled={isLoading}><Check className="h-3.5 w-3.5" /></Button>
             <Button size="sm" variant="ghost" className={cn("p-0 text-red-500 hover:text-red-700 w-6", btnClass)} onClick={() => { setIsEditing(false); setCustomInputValue(currentValue); }} disabled={isLoading}><X className="h-3.5 w-3.5" /></Button>
@@ -1098,10 +1140,12 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         <div className="flex items-center gap-1 w-full relative z-10">
           <div className="flex items-center h-7 rounded-md border border-input bg-background px-1 text-sm shadow-sm flex-1 max-w-[130px]">
             <input
-              id={`date-part-${stage.id}`} type="date" defaultValue={datePart} autoFocus
-              className="bg-transparent border-none p-0 h-full focus:outline-none focus:ring-0 text-[11px] font-medium text-slate-900 w-[78px]"
+              id={`date-part-${stage.id}`} type="text" defaultValue={datePart ? isoToDisplayDate(datePart) : ''} autoFocus
+              placeholder="dd/mm/yyyy"
+              maxLength={10}
+              className="bg-transparent border-none p-0 h-full focus:outline-none focus:ring-0 text-[11px] font-medium text-slate-900 w-[85px]"
               onKeyDown={handleKeyDownComposite}
-              onChange={(e) => { const t = (document.getElementById(`time-part-${stage.id}`) as HTMLInputElement)?.value || '00:00'; setEditValue(`${e.target.value}T${t}`); }}
+              onChange={(e) => { const raw = e.target.value.replace(/[^\d/]/g, ''); const isoDate = displayToIsoDate(raw); const t = (document.getElementById(`time-part-${stage.id}`) as HTMLInputElement)?.value || '00:00'; setEditValue(`${isoDate}T${t}`); }}
             />
             <span className="text-slate-200 mx-0.5">|</span>
             <input
@@ -1385,8 +1429,66 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     );
   };
 
+  const isDependencyMet = useMemo(() => {
+    const deps = stage?.dependencies || [];
+    if (deps.length === 0) return true;
+
+    for (const dep of deps) {
+      const parentStageData = task?.stages?.[dep.stageId];
+      const hasData = parentStageData?.date || parentStageData?.value || parentStageData?.status;
+      const isCompleted = parentStageData?.status === 'completed';
+
+      switch (dep.dependencyType) {
+        case 'visible_when_completed':
+          if (!isCompleted) return false;
+          break;
+        case 'visible_when_started':
+          if (!hasData) return false;
+          break;
+        case 'sequential':
+          if (!isCompleted) return false;
+          break;
+        case 'always_visible':
+        default:
+          break;
+      }
+    }
+    return true;
+  }, [stage?.dependencies, task?.stages]);
+
   const renderCellContent = () => {
     if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
+
+    if (!isDependencyMet) {
+      const waitingOn = (stage?.dependencies || [])
+        .filter((dep: any) => {
+          const parentStageData = task?.stages?.[dep.stageId];
+          const hasData = parentStageData?.date || parentStageData?.value || parentStageData?.status;
+          const isCompleted = parentStageData?.status === 'completed';
+          if (dep.dependencyType === 'visible_when_completed' || dep.dependencyType === 'sequential') return !isCompleted;
+          if (dep.dependencyType === 'visible_when_started') return !hasData;
+          return false;
+        })
+        .map((dep: any) => dep.stageName || 'Unknown')
+        .join(', ');
+
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-1.5 px-1 py-0.5 rounded bg-gray-50 border border-dashed border-gray-200 cursor-default w-full">
+                <Lock className="h-3 w-3 text-gray-300 shrink-0" />
+                <span className="text-[10px] text-gray-300 italic truncate">Locked</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="text-xs">Waiting for: {waitingOn}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      );
+    }
+
     if (renderMode === 'date') return renderDateContent(false);
     if (renderMode === 'actions') return renderActionsContent(false);
     
