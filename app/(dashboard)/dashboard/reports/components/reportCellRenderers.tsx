@@ -27,10 +27,15 @@ export const formatDateCell = (dateStr: string | null, showTime: boolean): strin
 
 export const formatEstimatedMins = (minutes: number): string => {
   if (!minutes || minutes <= 0) return "";
-  if (minutes < 60) return `${minutes}m`;
-  const h = Math.floor(minutes / 60);
-  const d = Math.floor(h / 24);
-  return d >= 1 ? `~${d}d` : `~${h}h`;
+  const total = Math.round(minutes);
+  const d = Math.floor(total / (60 * 24));
+  const h = Math.floor((total % (60 * 24)) / 60);
+  const m = total % 60;
+  const parts: string[] = [];
+  if (d > 0) parts.push(`${d}d`);
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0) parts.push(`${m}m`);
+  return parts.join(" ") || "0m";
 };
 
 export const DataCell = ({ val, isMissing, isPrimary, isAccent }: { val: React.ReactNode, isMissing: boolean, isPrimary?: boolean, isAccent?: boolean }) => (
@@ -389,6 +394,35 @@ export function renderReportCellContent(task: any, col: any, opts: {
   // ── Report doc / reference requirement: raw custom node rendered directly ──
   if (col.type === 'report_doc' || col.type === 'reference_requirement') {
     return rawCellVal;
+  }
+
+  // ── Overdue actual time cell ──
+  if (rawCellVal && typeof rawCellVal === 'object' && rawCellVal.isOverdueActualTime) {
+    return (
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-1 cursor-default select-none">
+              <span className="text-sm font-bold text-red-600 tabular-nums">
+                {rawCellVal.display}
+              </span>
+              {rawCellVal.exceededDisplay && (
+                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-red-500 bg-red-50 border border-red-200 rounded px-1 py-0.5">
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
+                    <path d="M5 2L5 8M5 2L2.5 4.5M5 2L7.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  {rawCellVal.exceededDisplay}
+                </span>
+              )}
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="bg-red-50 border-red-200 text-red-900 text-xs shadow-lg rounded-lg px-3 py-2 z-[9999]">
+            <p className="font-bold">Exceeds Expected Time</p>
+            <p>Over by {rawCellVal.exceededDisplay}</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
   }
 
   // ── Non-stage / task / N/A cell ──

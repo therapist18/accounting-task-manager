@@ -106,6 +106,8 @@ export default function Stages() {
     assistants: DisplayUser[];
     allUsers: DisplayUser[];
   }>({ officers: [], managers: [], assistants: [], allUsers: [] })
+  const [standardPage, setStandardPage] = useState(1)
+  const [standardPageSize, setStandardPageSize] = useState(25)
 
   const getEntityAutomation = (stage: Stage, entityKey: string) => {
     if (!stage.documents) return null;
@@ -588,6 +590,10 @@ export default function Stages() {
       setEntityVisibility(initialVisibility)
     }
   }, [entityVisibilityOptions])
+
+  useEffect(() => {
+    setStandardPage(1)
+  }, [activeTab])
 
   const handleColumnVisibilityChange = (columnId: string, visible: boolean) => {
     setColumnVisibility((prev) => ({
@@ -2971,6 +2977,13 @@ export default function Stages() {
           },
         ]
 
+    const totalItems = normalizedSubdepartments.length
+    const totalPages = Math.ceil(totalItems / standardPageSize)
+    const paginatedSubdepartments = normalizedSubdepartments.slice(
+      (standardPage - 1) * standardPageSize,
+      standardPage * standardPageSize,
+    )
+
     // The "Overall Expected Time" column sits between Entity and Stage Name, so every
     // sticky-left offset that used to start at Stage Name shifts right by its width (w-32).
     const expectedTimeLeftClass = columnVisibility.index && columnVisibility.entity
@@ -3319,7 +3332,7 @@ export default function Stages() {
               )}
             </TableHeader>
             <TableBody>
-              {normalizedSubdepartments.flatMap((subdept, subdeptIndex) => {
+              {paginatedSubdepartments.flatMap((subdept, subdeptIndex) => {
                 const subdeptRowId = `subdept-${subdept.id}`
                 const isExpanded = expandedRows.has(subdeptRowId)
                 const rows = []
@@ -3701,6 +3714,39 @@ export default function Stages() {
             </TableBody>
           </Table>
         </div>
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-slate-50/50">
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <span>Showing {((standardPage - 1) * standardPageSize) + 1}–{Math.min(standardPage * standardPageSize, totalItems)} of {totalItems} subdepartments</span>
+              <Select value={String(standardPageSize)} onValueChange={(val) => { setStandardPageSize(Number(val)); setStandardPage(1) }}>
+                <SelectTrigger className="h-8 w-24 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10 / page</SelectItem>
+                  <SelectItem value="25">25 / page</SelectItem>
+                  <SelectItem value="50">50 / page</SelectItem>
+                  <SelectItem value="100">100 / page</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="sm" onClick={() => setStandardPage(1)} disabled={standardPage === 1} className="h-8">
+                <ChevronLeft className="h-3 w-3" /><ChevronLeft className="h-3 w-3 -ml-2" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setStandardPage(p => Math.max(1, p - 1))} disabled={standardPage === 1} className="h-8">
+                <ChevronLeft className="h-3 w-3" />
+              </Button>
+              <span className="text-sm font-medium text-gray-700 px-3">Page {standardPage} of {totalPages}</span>
+              <Button variant="outline" size="sm" onClick={() => setStandardPage(p => Math.min(totalPages, p + 1))} disabled={standardPage === totalPages} className="h-8">
+                <ChevronRight className="h-3 w-3" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setStandardPage(totalPages)} disabled={standardPage === totalPages} className="h-8">
+                <ChevronRight className="h-3 w-3" /><ChevronRight className="h-3 w-3 -ml-2" />
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     )
   }

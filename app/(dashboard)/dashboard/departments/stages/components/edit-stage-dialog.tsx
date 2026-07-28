@@ -755,6 +755,68 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                     </FormField>
                   )}
                 </SectionWrapper>
+                <SectionWrapper title="Stage Dependencies" icon={<ArrowDownCircle />}>
+                  <p className="text-sm text-muted-foreground -mt-2">Define whether this stage depends on other stages for visibility or execution order.</p>
+                  <FormField label="Depends On" description="Select stages that must be completed before this one becomes visible.">
+                    <div className="space-y-3">
+                      <SearchableSelect
+                        value=""
+                        onValueChange={(value) => {
+                          if (value && value !== 'none') {
+                            addDependency(value);
+                          }
+                        }}
+                        options={[
+                          { value: 'none', label: '-- Add a dependency --' },
+                          ...allStages
+                            .filter(s => {
+                              const currentDeptName = getTargetDepartmentName();
+                              return s.id !== stage?.id
+                                && !(formData.dependencies || []).some(d => d.stageId === s.id)
+                                && (!currentDeptName || s.departmentName === currentDeptName);
+                            })
+                            .map(s => ({ value: s.id, label: s.name }))
+                        ]}
+                        placeholder="Choose a stage to depend on"
+                      />
+                      {(formData.dependencies || []).length > 0 && (
+                        <div className="space-y-2">
+                          {(formData.dependencies || []).map((dep) => (
+                            <div key={dep.stageId} className="flex items-center gap-3 p-3 border rounded-lg bg-slate-50">
+                              <ArrowDownCircle className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <span className="text-sm font-medium text-gray-800 truncate block">{dep.stageName || 'Unknown Stage'}</span>
+                              </div>
+                              <SearchableSelect
+                                value={dep.dependencyType}
+                                onValueChange={(value) => updateDependency(dep.stageId, { dependencyType: value })}
+                                options={[
+                                  { value: 'visible_when_completed', label: 'Visible when completed' },
+                                  { value: 'visible_when_started', label: 'Visible when started' },
+                                  { value: 'always_visible', label: 'Always visible (marked)' },
+                                  { value: 'sequential', label: 'Sequential (must complete first)' }
+                                ]}
+                                className="w-48"
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                onClick={() => removeDependency(dep.stageId)}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(formData.dependencies || []).length === 0 && (
+                        <p className="text-xs text-muted-foreground italic">No dependencies configured. This stage will be independently visible.</p>
+                      )}
+                    </div>
+                  </FormField>
+                </SectionWrapper>
               </TabsContent>
               <TabsContent value="input-config" className="mt-6 space-y-6">
                 <SectionWrapper title="Stage Input Type" icon={<Settings />}>
@@ -884,68 +946,6 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                   </FormField>
                 </SectionWrapper>
 
-                <SectionWrapper title="Stage Dependencies" icon={<ArrowDownCircle />}>
-                  <p className="text-sm text-muted-foreground -mt-2">Define whether this stage depends on other stages for visibility or execution order.</p>
-                  <FormField label="Depends On" description="Select stages that must be completed before this one becomes visible.">
-                    <div className="space-y-3">
-                      <SearchableSelect
-                        value=""
-                        onValueChange={(value) => {
-                          if (value && value !== 'none') {
-                            addDependency(value);
-                          }
-                        }}
-                        options={[
-                          { value: 'none', label: '-- Add a dependency --' },
-                          ...allStages
-                            .filter(s => {
-                              const currentDeptName = getTargetDepartmentName();
-                              return s.id !== stage?.id
-                                && !(formData.dependencies || []).some(d => d.stageId === s.id)
-                                && (!currentDeptName || s.departmentName === currentDeptName);
-                            })
-                            .map(s => ({ value: s.id, label: s.name }))
-                        ]}
-                        placeholder="Choose a stage to depend on"
-                      />
-                      {(formData.dependencies || []).length > 0 && (
-                        <div className="space-y-2">
-                          {(formData.dependencies || []).map((dep) => (
-                            <div key={dep.stageId} className="flex items-center gap-3 p-3 border rounded-lg bg-slate-50">
-                              <ArrowDownCircle className="h-4 w-4 text-blue-600 flex-shrink-0" />
-                              <div className="flex-1 min-w-0">
-                                <span className="text-sm font-medium text-gray-800 truncate block">{dep.stageName || 'Unknown Stage'}</span>
-                              </div>
-                              <SearchableSelect
-                                value={dep.dependencyType}
-                                onValueChange={(value) => updateDependency(dep.stageId, { dependencyType: value })}
-                                options={[
-                                  { value: 'visible_when_completed', label: 'Visible when completed' },
-                                  { value: 'visible_when_started', label: 'Visible when started' },
-                                  { value: 'always_visible', label: 'Always visible (marked)' },
-                                  { value: 'sequential', label: 'Sequential (must complete first)' }
-                                ]}
-                                className="w-48"
-                              />
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                                onClick={() => removeDependency(dep.stageId)}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {(formData.dependencies || []).length === 0 && (
-                        <p className="text-xs text-muted-foreground italic">No dependencies configured. This stage will be independently visible.</p>
-                      )}
-                    </div>
-                  </FormField>
-                </SectionWrapper>
               </TabsContent>
               <TabsContent value="documents" className="mt-6 space-y-6">
                 <SectionWrapper title="Stage Documents" icon={<FileText />} actionButton={

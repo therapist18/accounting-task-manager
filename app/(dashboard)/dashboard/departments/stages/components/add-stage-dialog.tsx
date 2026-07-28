@@ -200,13 +200,18 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
         try {
             const { data, error } = await supabase.from('tm_departments').select('id, name, stages');
             if (error) throw error;
-            const stages: any[] = [];
+            // Some stage ids exist in more than one department row (data predates a fix
+            // elsewhere) — dedupe by id so the dependency dropdown never renders the same
+            // <SelectItem key> twice, which React flags and can silently drop/duplicate.
+            const stagesById = new Map<string, any>();
             (data || []).forEach((dept: any) => {
                 (dept.stages || []).forEach((stage: any) => {
-                    stages.push({ ...stage, departmentName: dept.name });
+                    if (!stagesById.has(stage.id)) {
+                        stagesById.set(stage.id, { ...stage, departmentName: dept.name });
+                    }
                 });
             });
-            setAllStages(stages);
+            setAllStages(Array.from(stagesById.values()));
         } catch (error) {
             console.error('Error fetching stages:', error);
         }
@@ -408,7 +413,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
                                 </TabsList>
                                 {newStages.map((stage) => (
                                     <TabsContent key={stage.id} value={stage.id} className="space-y-6 mt-6">
-                                        <StageForm stage={stage} onUpdate={(updates) => updateNewStage(stage.id, updates)} officers={officers} allMasterFields={allMasterFields} loadingMasterFields={loadingMasterFields} allStages={allStages} />
+                                        <StageForm stage={stage} onUpdate={(updates) => updateNewStage(stage.id, updates)} officers={officers} allMasterFields={allMasterFields} loadingMasterFields={loadingMasterFields} allStages={allStages} departments={departments} selectedDepartment={selectedDepartment} />
                                         <Separator className="my-6" />
                                         <DocumentsSection
                                             stage={stage} entityOptions={entityOptions} loadingEntities={loadingEntities}
@@ -428,7 +433,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
                         ) : (
                             currentStage && (
                                 <div className="space-y-6">
-                                    <StageForm stage={currentStage} onUpdate={(updates) => updateNewStage(currentStage.id, updates)} officers={officers} allMasterFields={allMasterFields} loadingMasterFields={loadingMasterFields} allStages={allStages} />
+                                    <StageForm stage={currentStage} onUpdate={(updates) => updateNewStage(currentStage.id, updates)} officers={officers} allMasterFields={allMasterFields} loadingMasterFields={loadingMasterFields} allStages={allStages} departments={departments} selectedDepartment={selectedDepartment} />
                                     <Separator className="my-6" />
                                     <DocumentsSection
                                         stage={currentStage} entityOptions={entityOptions} loadingEntities={loadingEntities}
@@ -459,7 +464,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
     );
 }
 
-function StageForm({ stage, onUpdate, officers, allMasterFields, loadingMasterFields, allStages }: { stage: NewStage; onUpdate: (updates: Partial<NewStage>) => void; officers?: any[]; allMasterFields?: any[]; loadingMasterFields?: boolean; allStages?: any[] }) {
+function StageForm({ stage, onUpdate, officers, allMasterFields, loadingMasterFields, allStages, departments, selectedDepartment }: { stage: NewStage; onUpdate: (updates: Partial<NewStage>) => void; officers?: any[]; allMasterFields?: any[]; loadingMasterFields?: boolean; allStages?: any[]; departments?: any[]; selectedDepartment?: string }) {
     const addTimeConfig = () => onUpdate({ timeConfigs: [...stage.timeConfigs, { applicationType: '', days: 0, hours: 0, minutes: 0 }] });
     const removeTimeConfig = (index: number) => onUpdate({ timeConfigs: stage.timeConfigs.filter((_, i) => i !== index) });
     const updateTimeConfig = (index: number, updates: Partial<TimeConfig>) => {
@@ -656,7 +661,7 @@ function StageForm({ stage, onUpdate, officers, allMasterFields, loadingMasterFi
                         <SelectContent>
                             <SelectItem value="none">-- Add a dependency --</SelectItem>
                             {(allStages || []).filter(s => {
-                                const deptName = departments.find(d => d.id === selectedDepartment)?.name;
+                                const deptName = (departments || []).find(d => d.id === selectedDepartment)?.name;
                                 return s.id !== stage.id
                                     && !(stage.dependencies || []).some(d => d.stageId === s.id)
                                     && (!deptName || s.departmentName === deptName);
@@ -691,8 +696,8 @@ function StageForm({ stage, onUpdate, officers, allMasterFields, loadingMasterFi
     );
 }
 
-function DocumentsSection({ stage, entityOptions, loadingEntities, kycDocuments, loadingKycDocs, automationTypes, loadingAutomations, onAddDocument, onUpdateDocument, onRemoveDocument, onAddExtraction, onUpdateExtraction, onRemoveExtraction }: {
-    stage: NewStage; entityOptions: EntityOption[]; loadingEntities: boolean; kycDocuments: KYCDocument[]; loadingKycDocs: boolean;
+function DocumentsSection({ stage, entityOptions, loadingEntities, selectedDepartment, kycDocuments, loadingKycDocs, automationTypes, loadingAutomations, onAddDocument, onUpdateDocument, onRemoveDocument, onAddExtraction, onUpdateExtraction, onRemoveExtraction }: {
+    stage: NewStage; entityOptions: EntityOption[]; loadingEntities: boolean; selectedDepartment?: string; kycDocuments: KYCDocument[]; loadingKycDocs: boolean;
     automationTypes: AutomationType[]; loadingAutomations: boolean;
     onAddDocument: (isSpecial?: boolean) => void; onUpdateDocument: (docId: string, updates: Partial<StageDocument>) => void; onRemoveDocument: (docId: string) => void;
     onAddExtraction: (docId: string) => void; onUpdateExtraction: (docId: string, extractionId: string, updates: Partial<DocumentExtraction>) => void; onRemoveExtraction: (docId: string, extractionId: string) => void;
@@ -708,6 +713,7 @@ function DocumentsSection({ stage, entityOptions, loadingEntities, kycDocuments,
                     {stage.documents.map((doc, docIndex) => (
                         <DocumentCard
                             key={doc.id} doc={doc} docIndex={docIndex} entityOptions={entityOptions} loadingEntities={loadingEntities}
+                            selectedDepartment={selectedDepartment}
                             kycDocuments={kycDocuments} loadingKycDocs={loadingKycDocs}
                             automationTypes={automationTypes} loadingAutomations={loadingAutomations}
                             onUpdateDocument={(docId, updates) => onUpdateDocument(docId, updates)}
@@ -856,11 +862,11 @@ function MultiOfficerPicker({ officers, selectedOfficerIds = [], onSelectionChan
     );
 }
 
-function DocumentCard({ doc, docIndex, onUpdateDocument, onRemoveDocument, onAddExtraction, onUpdateExtraction, onRemoveExtraction, kycDocuments, loadingKycDocs, entityOptions, loadingEntities, automationTypes, loadingAutomations }: {
+function DocumentCard({ doc, docIndex, onUpdateDocument, onRemoveDocument, onAddExtraction, onUpdateExtraction, onRemoveExtraction, kycDocuments, loadingKycDocs, entityOptions, loadingEntities, selectedDepartment, automationTypes, loadingAutomations }: {
     doc: StageDocument; docIndex: number; onUpdateDocument: (docId: string, updates: Partial<StageDocument>) => void;
     onRemoveDocument: (docId: string) => void; onAddExtraction: (docId: string) => void; onUpdateExtraction: (docId: string, extractionId: string, updates: Partial<DocumentExtraction>) => void;
     onRemoveExtraction: (docId: string, extractionId: string) => void; kycDocuments: KYCDocument[]; loadingKycDocs: boolean;
-    entityOptions: EntityOption[]; loadingEntities: boolean; automationTypes: AutomationType[]; loadingAutomations: boolean;
+    entityOptions: EntityOption[]; loadingEntities: boolean; selectedDepartment?: string; automationTypes: AutomationType[]; loadingAutomations: boolean;
 }) {
     const [documentMode, setDocumentMode] = useState<'new' | 'existing'>(doc.linkedKycDocument ? 'existing' : 'new');
     const isLinkedDocument = !!doc.linkedKycDocument;

@@ -52,6 +52,7 @@ export type MemorizedReport = {
     subdepartment_id: number;
   };
   is_favorite?: boolean;
+  default_for_user_id?: string | null;
   sessionIncludedFields?: string[];
 };
 
@@ -67,6 +68,7 @@ interface MemorizedReportDialogProps {
   departments: Department[];
   subdepartments?: any[];
   classes?: any[];
+  currentUserId?: string | null;
 }
 
 const INITIAL_REPORT_CONFIG: ReportConfiguration = { taskFields: [{ id: 'applicant_name', isDefault: true }], stages: {} };
@@ -591,7 +593,7 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
   );
 });
 
-export function MemorizedReportDialog({ open, onOpenChange, department, stages, kycDocuments, onApplyReport, tableHeaders, availableJobLevels = [], departments = [], subdepartments = [], classes = [] }: MemorizedReportDialogProps) {
+export function MemorizedReportDialog({ open, onOpenChange, department, stages, kycDocuments, onApplyReport, tableHeaders, availableJobLevels = [], departments = [], subdepartments = [], classes = [], currentUserId = null }: MemorizedReportDialogProps) {
   const [reports, setReports] = useState<MemorizedReport[]>([])
   const [selectedReport, setSelectedReport] = useState<MemorizedReport | null>(null)
   const [isEditing, setIsEditing] = useState(false)
@@ -734,14 +736,35 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
     setShowSelectedOnly(false);
   };
 
-  const handleToggleFavorite = async (e: React.MouseEvent, report: MemorizedReport) => {
+  // Marks/unmarks a report as THIS user's default (auto-loaded on next visit to the
+  // Reports page). At most one report should carry this user's id in
+  // default_for_user_id at a time, so setting a new default always clears it off
+  // whichever report previously had it — both in the DB and in local state, so the
+  // list re-renders correctly without a refetch.
+  const handleToggleDefault = async (e: React.MouseEvent, report: MemorizedReport) => {
     e.stopPropagation();
-    const newStatus = !report.is_favorite;
-    setReports(prev => prev.map(r => r.id === report.id ? { ...r, is_favorite: newStatus } : r));
+    console.log('[MemorizedReportDialog] handleToggleDefault: currentUserId prop =', currentUserId, 'report =', report.id);
+    if (!currentUserId) {
+      toast({ title: "Error", description: "Could not identify current user.", variant: "destructive" });
+      return;
+    }
+    const isCurrentlyDefault = report.default_for_user_id === currentUserId;
+    const makeDefault = !isCurrentlyDefault;
+
+    setReports(prev => prev.map(r => {
+      if (r.id === report.id) return { ...r, default_for_user_id: makeDefault ? currentUserId : null };
+      if (r.default_for_user_id === currentUserId) return { ...r, default_for_user_id: null };
+      return r;
+    }));
+
     try {
-      await supabase.from('tm_memorized_reports').update({ is_favorite: newStatus }).eq('id', report.id);
+      await supabase.from('tm_memorized_reports').update({ default_for_user_id: null }).eq('default_for_user_id', currentUserId);
+      if (makeDefault) {
+        await supabase.from('tm_memorized_reports').update({ default_for_user_id: currentUserId }).eq('id', report.id);
+      }
+      toast({ title: "Success", description: makeDefault ? "Set as your default report." : "Removed as your default report." });
     } catch {
-      toast({ title: "Error", description: "Failed to update favorite status", variant: "destructive" });
+      toast({ title: "Error", description: "Failed to update default report.", variant: "destructive" });
       fetchReports();
     }
   };
@@ -1013,11 +1036,13 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
 
   const sortedReports = useMemo(() => {
     return [...reports].sort((a, b) => {
-      if (a.is_favorite && !b.is_favorite) return -1;
-      if (!a.is_favorite && b.is_favorite) return 1;
+      const aIsDefault = a.default_for_user_id === currentUserId;
+      const bIsDefault = b.default_for_user_id === currentUserId;
+      if (aIsDefault && !bIsDefault) return -1;
+      if (!aIsDefault && bIsDefault) return 1;
       return a.name.localeCompare(b.name);
     });
-  }, [reports]);
+  }, [reports, currentUserId]);
 
   const renderReportList = () => (
     <div className="flex flex-col gap-1 h-full">
@@ -1038,14 +1063,20 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
                 <Button
                   variant="ghost"
                   size="icon"
-                  className={cn("h-5 w-5 shrink-0", report.is_favorite ? 'text-amber-400 hover:text-amber-500' : 'text-slate-300 hover:text-amber-400')}
-                  onClick={(e) => handleToggleFavorite(e, report)}
+                  className={cn("h-5 w-5 shrink-0", report.default_for_user_id === currentUserId ? 'text-amber-400 hover:text-amber-500' : 'text-slate-300 hover:text-amber-400')}
+                  onClick={(e) => handleToggleDefault(e, report)}
+                  title={report.default_for_user_id === currentUserId ? "Your default report — click to unset" : "Set as your default report (auto-loads next time you open Reports)"}
                 >
-                  <Star className="h-3.5 w-3.5 fill-current" />
+                  <Star className={cn("h-3.5 w-3.5", report.default_for_user_id === currentUserId && "fill-current")} />
                 </Button>
                 <div className="flex flex-col min-w-0">
-                  <span className={cn("font-medium text-[13px] truncate leading-tight", selectedReport?.id === report.id ? 'text-blue-700' : 'text-slate-700')}>
+                  <span className={cn("font-medium text-[13px] truncate leading-tight flex items-center gap-1.5", selectedReport?.id === report.id ? 'text-blue-700' : 'text-slate-700')}>
                     {report.name}
+                    {report.default_for_user_id === currentUserId && (
+                      <Badge variant="outline" className="text-[9px] py-0 px-1.5 h-4 bg-blue-50 text-blue-600 border-blue-200 font-semibold shrink-0">
+                        Default
+                      </Badge>
+                    )}
                   </span>
                   {report.job_level && (
                     <span className="text-[11px] text-slate-400 truncate mt-0.5">

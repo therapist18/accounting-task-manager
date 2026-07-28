@@ -128,6 +128,7 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boo
 export default function ReportsPage() {
   const [activeReport, setActiveReport] = useState<any | null>(null);
   const [availableReports, setAvailableReports] = useState<any[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
   const [reportLoading, setReportLoading] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -235,13 +236,36 @@ export default function ReportsPage() {
     const init = async () => {
       setReportLoading(true);
       try {
+        // This app authenticates via a custom Firebase-backed session (see
+        // /api/auth/session, lib/auth/session.ts), NOT Supabase Auth — supabase.auth.getUser()
+        // always returns null here since the session cookie isn't a Supabase one. The
+        // session route's `user.id` is the same TM user id used everywhere else
+        // (officers/managers/assistants), which is what default_for_user_id is keyed on.
+        let userId: string | null = null;
+        try {
+          const sessionRes = await fetch('/api/auth/session');
+          const sessionJson = await sessionRes.json();
+          console.log('[Reports] /api/auth/session response:', sessionJson);
+          userId = sessionJson?.authenticated && sessionJson?.user ? (sessionJson.user.id || null) : null;
+        } catch (sessionErr) {
+          console.error('[Reports] Failed to fetch current user session:', sessionErr);
+        }
+        console.log('[Reports] Resolved currentUserId for default-report lookup:', userId);
+        setCurrentUserId(userId);
+
         const { data: reports, error } = await supabase
           .from('tm_memorized_reports')
           .select('*')
           .order('created_at', { ascending: false });
         if (error) throw error;
         setAvailableReports(reports || []);
-        if (reports?.length > 0) setActiveReport(reports[0]);
+
+        // Load whichever report THIS user marked as their own default (per-user, via
+        // default_for_user_id) — falling back to the most recently created report so
+        // the page still shows something sensible before anyone's picked a default.
+        const usersDefaultReport = userId ? reports?.find((r: any) => r.default_for_user_id === userId) : null;
+        if (usersDefaultReport) setActiveReport(usersDefaultReport);
+        else if (reports?.length > 0) setActiveReport(reports[0]);
 
         const depts = await fetchDepartments();
         setDepartments(depts);
@@ -956,12 +980,6 @@ export default function ReportsPage() {
     }
 
     if (col.type === 'total_time_actual') {
-      // Elapsed time since the task's first applicable stage (e.g. Enquiry) up to today —
-      // not "earliest dated stage to latest dated stage", since a task still in progress
-      // has no finish date yet and freezing at whatever stage last happened to get dated
-      // understates how long it's actually been running. Uses the full department stage
-      // list (not just col.relatedCols, which is scoped to stages this report happens to
-      // include) so the true first stage is found regardless of report configuration.
       const applicableStagesSorted = [...stages]
         .filter((s: any) => checkStageApplicableForTask(s, task))
         .sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
@@ -976,7 +994,38 @@ export default function ReportsPage() {
       if (!startDate) return 'N/A';
 
       const diffDays = differenceInDays(new Date(), startDate);
-      return `${diffDays}d`;
+      const display = `${diffDays}d`;
+
+      const jl = task.job_level || {};
+      const jobLevelKey = JSON.stringify({
+        department_id: Number(jl.department_id || activeDeptId),
+        subdepartment_id: jl.subdepartment_id || null,
+        class_id: jl.class_id || null,
+        subclass_id: jl.subclass_id || null
+      });
+      let expectedMinutes = expectedTimeByJobLevel.get(jobLevelKey);
+      if (typeof expectedMinutes !== 'number') {
+        expectedMinutes = 0;
+        (col.relatedCols || []).forEach((c: any) => {
+          const stage = stages.find(s => s.id === c.stageId);
+          if (stage?.estimated_time && checkStageApplicableForTask(stage, task)) expectedMinutes += stage.estimated_time;
+        });
+      }
+
+      const actualMinutes = diffDays * 24 * 60;
+      if (expectedMinutes > 0 && actualMinutes > expectedMinutes) {
+        const exceededMinutes = actualMinutes - expectedMinutes;
+        const eD = Math.floor(exceededMinutes / (60 * 24));
+        const eH = Math.floor((exceededMinutes % (60 * 24)) / 60);
+        const eM = exceededMinutes % 60;
+        const parts: string[] = [];
+        if (eD > 0) parts.push(`${eD}d`);
+        if (eH > 0) parts.push(`${eH}h`);
+        if (eM > 0) parts.push(`${eM}m`);
+        const exceededDisplay = parts.join(' ') || '0m';
+        return { display, isOverdueActualTime: true, exceededDisplay };
+      }
+      return display;
     }
 
    if (col.type === 'report_doc') {
@@ -1134,7 +1183,9 @@ export default function ReportsPage() {
     }
     if (col.type === 'total_time_expected' || col.type === 'total_time_actual') {
       const val = renderCellValue(task, col);
-      return typeof val === 'string' ? val : '';
+      if (typeof val === 'string') return val;
+      if (val && typeof val === 'object' && val.display) return val.display;
+      return '';
     }
     if (col.type === 'task') {
       const val = getRawCellValue(departments, task, col.field, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper);
@@ -1865,6 +1916,7 @@ export default function ReportsPage() {
         stages={stages} kycDocuments={kycDocuments} onApplyReport={(report) => { setActiveReport(report); setExpandedStageColumns(new Set()); setIsReportDialogOpen(false); }}
         tableHeaders={ENHANCED_TABLE_HEADERS_IMMIGRATION} availableJobLevels={availableJobLevels} departments={departments}
         subdepartments={departments.flatMap((d: any) => d.tm_subdepartments || [])} classes={departments.flatMap((d: any) => (d.tm_subdepartments || []).flatMap((s: any) => s.classes || []))}
+        currentUserId={currentUserId}
       />
     </div>
   );

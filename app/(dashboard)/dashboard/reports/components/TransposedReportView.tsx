@@ -319,9 +319,25 @@ export function TransposedReportView({
                                  </div>
                              );
                            }
-                      } else {
-                          content = safeRender(rawCellVal);
-                      }
+                      } else if (rawCellVal && typeof rawCellVal === 'object' && rawCellVal.isOverdueActualTime) {
+                          content = (
+                            <div className="flex items-center gap-1">
+                              <span className="text-sm font-bold text-red-600 tabular-nums">
+                                {rawCellVal.display}
+                              </span>
+                              {rawCellVal.exceededDisplay && (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-red-500 bg-red-50 border border-red-200 rounded px-1 py-0.5">
+                                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
+                                    <path d="M5 2L5 8M5 2L2.5 4.5M5 2L7.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                                  </svg>
+                                  {rawCellVal.exceededDisplay}
+                                </span>
+                              )}
+                            </div>
+                          );
+                       } else {
+                           content = safeRender(rawCellVal);
+                       }
 
                       return (
                         <TableCell key={task.id} className={cn(
