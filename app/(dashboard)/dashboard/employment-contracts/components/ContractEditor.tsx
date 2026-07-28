@@ -393,26 +393,31 @@ export function ContractEditor({
   return (
     <div className="flex flex-col h-full bg-[#F8F9FB] dark:bg-slate-950 relative overflow-hidden">
       {/* Progress header */}
-      <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-white dark:bg-slate-900 shadow-sm z-10">
+      <div className="px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-white dark:bg-slate-900 shadow-sm z-10">
         <div className="flex items-center">
           {STEPS.map((s, i) => {
             const isDone = s.key === 1 || (s.key === 2 && termsReady) || (s.key === 3 && termsReady);
+            const isCurrent = s.key === 4;
             return (
               <div key={s.key} className="flex items-center flex-1 last:flex-none">
                 <div className="flex items-center gap-3 shrink-0">
                   <span className={cn(
                     "w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 transition-colors",
-                    isDone ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-400"
+                    isDone
+                      ? "bg-blue-600 text-white"
+                      : isCurrent
+                        ? "bg-white text-blue-600 border-2 border-blue-500"
+                        : "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500"
                   )}>
-                    {s.key === 4 ? s.key : (isDone ? <Check className="w-4 h-4" /> : s.key)}
+                    {isDone ? <Check className="w-4 h-4" /> : s.key}
                   </span>
                   <span className="hidden lg:block text-left">
-                    <span className={cn("block text-[13px] font-semibold", s.key === 4 ? "text-blue-700" : "text-slate-700")}>{s.title}</span>
-                    <span className="block text-[11px] text-slate-400">{s.subtitle}</span>
+                    <span className={cn("block text-[13px] font-semibold", isCurrent ? "text-blue-700 dark:text-blue-400" : "text-slate-700 dark:text-slate-200")}>{s.title}</span>
+                    <span className="block text-[11px] text-slate-400 dark:text-slate-500">{s.subtitle}</span>
                   </span>
                 </div>
                 {i < STEPS.length - 1 && (
-                  <div className={cn("flex-1 h-[2px] mx-4", isDone ? "bg-blue-100" : "bg-slate-100")} />
+                  <div className={cn("flex-1 h-[2px] mx-4 rounded-full", isDone ? "bg-blue-500" : "bg-slate-200 dark:bg-slate-800")} />
                 )}
               </div>
             );
@@ -598,7 +603,7 @@ export function ContractEditor({
               {activePanelTab === 'sections' && (
                 <button
                   onClick={toggleAllSections}
-                  className="text-[12px] font-medium border border-slate-200 text-slate-700 px-3 py-1.5 rounded-md hover:bg-slate-50 transition-colors shrink-0"
+                  className="h-8 text-[12px] font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shrink-0"
                 >
                   {expandedSections.size === CONTRACT_SECTIONS.length ? 'Collapse All' : 'Expand All'}
                 </button>
@@ -805,20 +810,20 @@ export function ContractEditor({
                </div>
              </div>
            </div>
-           <button className="ml-auto shrink-0 text-[12px] font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-md px-3 py-1.5 flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+           <button className="ml-auto shrink-0 h-9 text-[12px] font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-lg px-3 flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
              <Settings2 className="w-3.5 h-3.5 text-slate-500" /> Edit Configurations
            </button>
         </div>
 
         <div className="flex items-center justify-end w-full xl:w-auto shrink-0">
-          <button
+          <Button
             onClick={onRefreshPreview}
             disabled={!selectedJobProfile}
-            className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-medium rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+            className="h-9 px-5 text-[13px] font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className="w-4 h-4 mr-2" />
             Update Preview
-          </button>
+          </Button>
         </div>
       </div>
     </div>

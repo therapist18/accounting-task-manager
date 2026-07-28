@@ -113,6 +113,8 @@ export interface AssembleContractHtmlParams {
   effectiveClauses: Record<string, string>; // section_key -> clause_id
   effectiveSettings: Record<string, any>;
   employeePlaceholderValues: Record<string, string>; // from utils/standardPlaceholders.ts
+  includeToc?: boolean;
+  includeSectionNumbers?: boolean;
 }
 
 /**
@@ -129,6 +131,8 @@ export function assembleContractHtml({
   effectiveClauses,
   effectiveSettings,
   employeePlaceholderValues,
+  includeToc = true,
+  includeSectionNumbers = true,
 }: AssembleContractHtmlParams): string {
   const mergedValues = { ...effectiveSettings, ...employeePlaceholderValues };
 
@@ -137,17 +141,72 @@ export function assembleContractHtml({
     .filter((s): s is ContractSectionDef => !!s)
     .sort((a, b) => a.order - b.order);
 
-  const html = orderedSections.map((section) => {
+  // Build sequential numbering: heading gets none, appendices get letters, rest get 1, 2, 3…
+  let clauseNum = 0;
+  let appendixIdx = 0;
+  const numMap: Record<string, string> = {};
+  for (const s of orderedSections) {
+    if (s.key === 'heading') {
+      numMap[s.key] = '';
+    } else if (s.key.startsWith('appendix_')) {
+      appendixIdx++;
+      numMap[s.key] = String.fromCharCode(64 + appendixIdx); // A, B, C …
+    } else {
+      clauseNum++;
+      numMap[s.key] = String(clauseNum);
+    }
+  }
+
+  // ── Table of Contents ──
+  let toc = '';
+  if (includeToc) {
+    const items = orderedSections
+      .filter((s) => s.key !== 'heading')
+      .map((s) => {
+        const n = numMap[s.key];
+        const isAppendix = s.key.startsWith('appendix_');
+        const prefix = isAppendix ? `Appendix ${n}` : `${n}.`;
+        return `<li class="cs-toc-item"><a class="cs-toc-link" href="#section-${s.key}"><span class="cs-toc-num">${prefix}</span> ${s.title}</a></li>`;
+      })
+      .join('\n');
+    toc = `<nav class="cs-toc"><div class="cs-toc-heading">Table of Contents</div><ol class="cs-toc-list">${items}</ol></nav>`;
+  }
+
+  // ── Sections ──
+  const sections = orderedSections.map((section) => {
     const clauseId = effectiveClauses[section.key];
     const clause = clauseId ? clausesById[clauseId] : undefined;
+    const n = numMap[section.key];
+    const isAppendix = section.key.startsWith('appendix_');
+
+    const idAttr = `id="section-${section.key}"`;
+    const cls = `cs-section cs-${section.key}`;
+    const dataAttr = `data-section="${section.key}"`;
+
     if (!clause) {
-      // No clause resolved for this section (missing default) - surface it
-      // visibly in the preview rather than silently dropping the section.
-      return `<section class="cs-section cs-${section.key}" data-section="${section.key}"><p class="cs-missing-clause">[No clause configured for "${section.title}"]</p></section>`;
+      return `<section ${idAttr} class="${cls}" ${dataAttr}><p class="cs-missing-clause">[No clause configured for "${section.title}"]</p></section>`;
     }
+
     const renderedContent = replacePlaceholders(clause.content, mergedValues);
-    return `<section class="cs-section cs-${section.key}" data-section="${section.key}">${renderedContent}</section>`;
+
+    // Prepend a numbered heading unless the clause content already starts with
+    // an h1/h2/h3 (in which case we inject the number into the existing tag).
+    let headingPrefix = '';
+    if (includeSectionNumbers && n) {
+      headingPrefix = isAppendix ? `Appendix ${n}. ${section.title}` : `${n}. ${section.title}`;
+    }
+
+    const contentHasOwnHeading = /^\s*<h[1-3]/i.test(renderedContent);
+    let body = renderedContent;
+    if (headingPrefix && !contentHasOwnHeading) {
+      body = `<h2 class="cs-section-heading">${headingPrefix}</h2>${renderedContent}`;
+    } else if (headingPrefix && contentHasOwnHeading) {
+      // Inject number before existing heading text
+      body = renderedContent.replace(/(<h[1-3][^>]*>)([^<]*)/, `$1${n}. $2`);
+    }
+
+    return `<section ${idAttr} class="${cls}" ${dataAttr}>${body}</section>`;
   });
 
-  return html.join('\n');
+  return toc + sections.join('\n');
 }

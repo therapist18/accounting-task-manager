@@ -1125,7 +1125,8 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       const handleCompositeSave = () => {
         const dateInput = document.getElementById(`date-part-${stage.id}`) as HTMLInputElement;
         const timeInput = document.getElementById(`time-part-${stage.id}`) as HTMLInputElement;
-        const d = dateInput?.value || datePart;
+        const rawDate = dateInput?.value || '';
+        const d = displayToIsoDate(rawDate) || datePart;
         const t = timeInput?.value || '00:00';
         if (!d) { toast({ title: "Error", description: "Please select a date", variant: "destructive" }); return; }
         handleSave(false, '', `${d}T${t}`);
@@ -1152,7 +1153,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
               id={`time-part-${stage.id}`} type="time" defaultValue={timePart}
               className="bg-transparent border-none p-0 h-full focus:outline-none focus:ring-0 text-[11px] text-slate-600 w-[45px]"
               onKeyDown={handleKeyDownComposite}
-              onChange={(e) => { const d = (document.getElementById(`date-part-${stage.id}`) as HTMLInputElement)?.value || ''; setEditValue(`${d}T${e.target.value}`); }}
+              onChange={(e) => { const rawDate = (document.getElementById(`date-part-${stage.id}`) as HTMLInputElement)?.value || ''; const isoDate = displayToIsoDate(rawDate); setEditValue(`${isoDate}T${e.target.value}`); }}
             />
           </div>
           <div className="flex items-center shrink-0">

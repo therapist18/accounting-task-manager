@@ -77,6 +77,15 @@ const BASE_SECTION_STYLES = `
   [data-section="appendix_company_policies"] { page-break-before: always; }
   [data-section="appendix_equipment_issued"] { page-break-before: always; }
   [data-section="signatures"] { page-break-inside: avoid; }
+
+  .cs-toc { margin-bottom: 28px; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; }
+  .cs-toc-heading { font-size: 12pt; font-weight: 700; padding: 10px 16px; margin: 0; text-transform: uppercase; letter-spacing: 0.05em; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+  .cs-toc-list { list-style: none; margin: 0; padding: 8px 0; }
+  .cs-toc-item { margin: 0; }
+  .cs-toc-link { display: block; padding: 5px 16px; text-decoration: none; color: inherit; font-size: 10.5pt; line-height: 1.5; transition: background 0.15s; }
+  .cs-toc-link:hover { background: #f1f5f9; }
+  .cs-toc-num { font-weight: 700; margin-right: 6px; min-width: 28px; display: inline-block; }
+  .cs-section-heading { margin-top: 20px; margin-bottom: 8px; }
 `;
 
 const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
