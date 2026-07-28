@@ -431,7 +431,7 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
   );
 }
 
-export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspective, setActivePerspective, officerTaskCounts = { all: 0 }, taskManagerTaskCounts = { all: 0 }, allTasksCount = 0, clientTaskCounts = { all: 0 }, availableOfficers = [], activeOfficerTab, setActiveOfficerTab, officerFilterMode, setOfficerFilterMode, availableTaskManagers = [], activeTaskManagerTab, setActiveTaskManagerTab, taskManagerFilterMode, setTaskManagerFilterMode, refreshData, loading, activeClassId, setActiveClassId, activeSubClassId, setActiveSubClassId, activeSubDepartments, activeSubDeptIds }: any) {
+export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspective, setActivePerspective, officerTaskCounts = { all: 0 }, taskManagerTaskCounts = { all: 0 }, allTasksCount = 0, clientTaskCounts = { all: 0 }, availableOfficers = [], activeOfficerTab, setActiveOfficerTab, officerFilterMode, setOfficerFilterMode, availableTaskManagers = [], activeTaskManagerTab, setActiveTaskManagerTab, taskManagerFilterMode, setTaskManagerFilterMode, availableClients = [], activeClientTab, setActiveClientTab, clientFilterMode, setClientFilterMode, refreshData, loading, activeClassId, setActiveClassId, activeSubClassId, setActiveSubClassId, activeSubDepartments, activeSubDeptIds }: any) {
   const isOfficer = activePerspective === 'officers';
   const isManager = activePerspective === 'managers';
   const isClient = activePerspective === 'clients';

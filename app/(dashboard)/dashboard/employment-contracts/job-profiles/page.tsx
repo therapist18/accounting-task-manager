@@ -12,10 +12,12 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import {
   Loader2, PlusCircle, Settings, Trash2, Briefcase, BookText,
   Search, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
-  Columns2, FileText, Database,
+  Columns2, FileText, Database, ChevronDown, Pencil, ShieldCheck, Laptop2,
+  Users, Megaphone, Car,
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
@@ -47,6 +49,33 @@ function groupSettings(settings: Record<string, any>): { label: string; items: [
     .filter((g) => g.items.length > 0);
 }
 
+// Assigns a recognizable icon + color to a profile purely from its department
+// name, so the list and detail header read at a glance instead of every row
+// showing the same generic briefcase.
+const DEPARTMENT_VISUALS: { test: RegExp; icon: typeof Briefcase; classes: string }[] = [
+  { test: /audit/i, icon: ShieldCheck, classes: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400' },
+  { test: /admin|reception/i, icon: Users, classes: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400' },
+  { test: /ict|it\b|software|tech|engineering/i, icon: Laptop2, classes: 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400' },
+  { test: /human resources|^hr\b|hr department/i, icon: Users, classes: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400' },
+  { test: /marketing/i, icon: Megaphone, classes: 'bg-teal-50 text-teal-600 dark:bg-teal-500/10 dark:text-teal-400' },
+  { test: /operations|driver|transport|logistics/i, icon: Car, classes: 'bg-slate-100 text-slate-600 dark:bg-slate-500/10 dark:text-slate-400' },
+  { test: /financ/i, icon: Briefcase, classes: 'bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400' },
+];
+
+function getProfileVisual(department: string | null) {
+  const match = department ? DEPARTMENT_VISUALS.find((d) => d.test.test(department)) : undefined;
+  return match || { icon: Briefcase, classes: 'bg-blue-50 text-custom-blue dark:bg-blue-500/10' };
+}
+
+const SECTION_BADGE_COLORS = [
+  'bg-blue-50 text-blue-700 border-blue-200',
+  'bg-purple-50 text-purple-700 border-purple-200',
+  'bg-teal-50 text-teal-700 border-teal-200',
+  'bg-rose-50 text-rose-700 border-rose-200',
+  'bg-amber-50 text-amber-700 border-amber-200',
+  'bg-emerald-50 text-emerald-700 border-emerald-200',
+];
+
 export default function JobProfilesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
@@ -59,6 +88,7 @@ export default function JobProfilesPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [detailTab, setDetailTab] = useState('overview');
 
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
   const editorPanelRef = useRef<ImperativePanelHandle>(null);
@@ -121,12 +151,20 @@ export default function JobProfilesPage() {
 
   const clauseSelections = useMemo(() => {
     if (!selectedProfile) return [];
-    return Object.entries(selectedProfile.section_clauses || {}).map(([sectionKey, clauseId]) => {
+    return Object.entries(selectedProfile.section_clauses || {}).map(([sectionKey, clauseId], i) => {
       const section = CONTRACT_SECTIONS.find((s) => s.key === sectionKey);
       const clause = clauses.find((c) => c.id === clauseId);
-      return { sectionKey, sectionTitle: section?.title || sectionKey, clauseLabel: clause?.label || 'Unknown' };
+      return {
+        sectionKey,
+        sectionTitle: section?.title || sectionKey,
+        clauseLabel: clause?.label || 'Unknown',
+        isDefault: !!clause?.is_default,
+        color: SECTION_BADGE_COLORS[i % SECTION_BADGE_COLORS.length],
+      };
     });
   }, [selectedProfile, clauses]);
+
+  useEffect(() => { setDetailTab('overview'); }, [selectedProfileId]);
 
   const openNew = (scope: JobProfileScope) => {
     setEditingProfile(null);
@@ -155,16 +193,18 @@ export default function JobProfilesPage() {
   return (
     <div className="max-h-[calc(100vh-1rem)] w-full overflow-hidden bg-slate-50 dark:bg-slate-950 flex flex-col rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
       {/* HEADER */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <h1 className="text-sm font-bold text-slate-800 dark:text-slate-100 shrink-0">Job Profiles</h1>
-          <div className="flex items-center gap-1 border-l border-slate-200 dark:border-slate-800 pl-3">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/50 dark:border-slate-800/50 bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl shrink-0 gap-3 relative z-20">
+        <div className="flex items-center gap-4 min-w-0">
+          <h1 className="text-lg font-bold bg-gradient-to-r from-slate-900 to-slate-600 dark:from-slate-100 dark:to-slate-400 bg-clip-text text-transparent shrink-0">
+            Job Profiles
+          </h1>
+          <div className="flex items-center gap-1 bg-slate-100/50 dark:bg-slate-800/50 p-1 rounded-lg border border-slate-200/50 dark:border-slate-700/50">
             <button
               onClick={() => togglePanel('sidebar')}
               title={collapsed.sidebar ? 'Show entities panel' : 'Hide entities panel'}
               className={cn(
-                "p-1.5 rounded-md transition-colors",
-                collapsed.sidebar ? "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" : "text-custom-blue bg-blue-50 dark:bg-blue-900/20"
+                "p-1.5 rounded-md transition-all",
+                collapsed.sidebar ? "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" : "bg-white dark:bg-slate-700 text-custom-blue shadow-sm"
               )}
             >
               {collapsed.sidebar ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
@@ -173,8 +213,8 @@ export default function JobProfilesPage() {
               onClick={() => togglePanel('editor')}
               title={collapsed.editor ? 'Show profiles panel' : 'Hide profiles panel'}
               className={cn(
-                "p-1.5 rounded-md transition-colors",
-                collapsed.editor ? "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" : "text-custom-blue bg-blue-50 dark:bg-blue-900/20"
+                "p-1.5 rounded-md transition-all",
+                collapsed.editor ? "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" : "bg-white dark:bg-slate-700 text-custom-blue shadow-sm"
               )}
             >
               <Columns2 className="w-4 h-4" />
@@ -183,19 +223,19 @@ export default function JobProfilesPage() {
               onClick={() => togglePanel('preview')}
               title={collapsed.preview ? 'Show summary panel' : 'Hide summary panel'}
               className={cn(
-                "p-1.5 rounded-md transition-colors",
-                collapsed.preview ? "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" : "text-custom-blue bg-blue-50 dark:bg-blue-900/20"
+                "p-1.5 rounded-md transition-all",
+                collapsed.preview ? "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" : "bg-white dark:bg-slate-700 text-custom-blue shadow-sm"
               )}
             >
               {collapsed.preview ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
             </button>
           </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <Link href="/dashboard/employment-contracts" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">Contracts</Link>
-          <Link href="/dashboard/employment-contracts/clause-library" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"><BookText className="w-3.5 h-3.5" /> Clauses</Link>
-          <Link href="/dashboard/employment-contracts/templates" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"><Settings className="w-3.5 h-3.5" /> Templates</Link>
-          <Link href="/dashboard/employment-contracts/placeholders" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"><Database className="w-3.5 h-3.5" /> Data Sources</Link>
+        <div className="flex items-center gap-1 shrink-0 bg-slate-50 dark:bg-slate-900 p-1 rounded-xl border border-slate-200/60 dark:border-slate-800/60 shadow-sm">
+          <Link href="/dashboard/employment-contracts" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg transition-colors">Contracts</Link>
+          <Link href="/dashboard/employment-contracts/clause-library" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg transition-colors"><BookText className="w-3.5 h-3.5" /> Clauses</Link>
+          <Link href="/dashboard/employment-contracts/templates" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg transition-colors"><Settings className="w-3.5 h-3.5" /> Templates</Link>
+          <Link href="/dashboard/employment-contracts/placeholders" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg transition-colors"><Database className="w-3.5 h-3.5" /> Data Sources</Link>
         </div>
       </div>
 
@@ -226,8 +266,8 @@ export default function JobProfilesPage() {
         {/* CENTER PANEL: Profile list & detail */}
         <Panel
           ref={editorPanelRef}
-          defaultSize={50}
-          minSize={30}
+          defaultSize={34}
+          minSize={26}
           collapsible
           collapsedSize={0}
           onCollapse={() => setCollapsed(prev => ({ ...prev, editor: true }))}
@@ -235,24 +275,29 @@ export default function JobProfilesPage() {
           className="bg-slate-50 dark:bg-slate-950 flex flex-col z-10 !overflow-auto"
         >
           <div className="flex flex-col h-full">
-            <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between shrink-0">
-              <div>
-                <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                  <Briefcase className="w-4 h-4 text-custom-blue" />
-                  {selectedCompanyId ? companies.find(c => String(c.id) === selectedCompanyId)?.company_name || 'Company' : 'All Companies'}
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">{filteredProfiles.length} profile{filteredProfiles.length !== 1 ? 's' : ''}</p>
+            <div className="px-4 pt-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between shrink-0 gap-3">
+              <div className="flex items-center gap-1">
+                <span className="text-sm font-bold text-slate-800 dark:text-slate-100 px-1 pb-2.5 border-b-2 border-custom-blue text-custom-blue">
+                  Job Profiles
+                </span>
               </div>
-              <div className="flex gap-1.5">
-                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => openNew('company')} disabled={!selectedCompanyId}>Company</Button>
-                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => openNew('department')} disabled={!selectedCompanyId}>Dept</Button>
-                <Button size="sm" className="h-8 text-xs" onClick={() => openNew('position')} disabled={!selectedCompanyId}>
-                  <PlusCircle className="h-3.5 w-3.5 mr-1.5" /> New Profile
-                </Button>
+              <div className="pb-2.5">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" className="h-8 text-xs" disabled={!selectedCompanyId}>
+                      <PlusCircle className="h-3.5 w-3.5 mr-1.5" /> Add Job Profile <ChevronDown className="h-3 w-3 ml-1.5 opacity-70" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem onClick={() => openNew('position')}>New Position Profile</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => openNew('department')}>New Department Defaults</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => openNew('company')}>New Company Defaults</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
 
-            <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
+            <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 space-y-2">
               <div className="relative">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
                 <Input
@@ -262,6 +307,10 @@ export default function JobProfilesPage() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
+              <p className="text-[11px] text-slate-400">
+                {selectedCompanyId ? companies.find(c => String(c.id) === selectedCompanyId)?.company_name || 'Company' : 'All Companies'}
+                {' · '}{filteredProfiles.length} profile{filteredProfiles.length !== 1 ? 's' : ''}
+              </p>
             </div>
 
             <ScrollArea className="flex-1">
@@ -277,20 +326,22 @@ export default function JobProfilesPage() {
                 <div className="p-2 space-y-1">
                   {filteredProfiles.map((profile) => {
                     const isSelected = selectedProfileId === profile.id;
+                    const visual = getProfileVisual(profile.department);
+                    const VisualIcon = visual.icon;
                     return (
                       <div
                         key={profile.id}
                         onClick={() => setSelectedProfileId(profile.id)}
                         className={cn(
-                          "flex items-center gap-2.5 p-2.5 rounded-lg cursor-pointer transition-colors",
+                          "flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-colors",
                           isSelected ? "bg-custom-blue text-white shadow-sm" : "hover:bg-slate-100 dark:hover:bg-slate-800"
                         )}
                       >
                         <div className={cn(
-                          "w-8 h-8 rounded-md flex items-center justify-center shrink-0",
-                          isSelected ? "bg-white/20" : "bg-blue-50 dark:bg-blue-900/30"
+                          "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
+                          isSelected ? "bg-white/20" : visual.classes
                         )}>
-                          <Briefcase className={cn("w-4 h-4", isSelected ? "text-white" : "text-custom-blue")} />
+                          <VisualIcon className={cn("w-4.5 h-4.5", isSelected && "text-white")} />
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="text-xs font-semibold truncate">{profile.name}</p>
@@ -299,42 +350,18 @@ export default function JobProfilesPage() {
                             {!profile.is_active && ' · Inactive'}
                           </p>
                         </div>
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "text-[10px] font-semibold rounded-full px-1.5 py-0 shrink-0 tabular-nums",
-                            isSelected ? "bg-white/20 text-white border-white/30" : "bg-slate-50 text-slate-500 border-slate-200"
-                          )}
-                        >
+                        <span className={cn(
+                          "text-xs font-bold shrink-0 tabular-nums",
+                          isSelected ? "text-white" : "text-slate-300 dark:text-slate-600"
+                        )}>
                           {Object.keys(profile.section_clauses || {}).length}
-                        </Badge>
+                        </span>
                       </div>
                     );
                   })}
                 </div>
               )}
             </ScrollArea>
-
-            {selectedProfile && (
-              <div className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
-                <div className="p-3 flex items-center justify-between">
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">{selectedProfile.name}</p>
-                    <p className="text-[11px] text-slate-500 truncate">
-                      {[selectedProfile.department, selectedProfile.job_level && `Level: ${selectedProfile.job_level}`, selectedProfile.employment_type && `Type: ${selectedProfile.employment_type}`].filter(Boolean).join(' · ') || scopeLabel(selectedProfile.scope)}
-                    </p>
-                  </div>
-                  <div className="flex gap-1 shrink-0">
-                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-400 hover:text-slate-700" onClick={() => openEdit(selectedProfile)}>
-                      <Settings className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-400 hover:text-red-600" onClick={() => setDeletingId(selectedProfile.id)}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </Panel>
 
@@ -343,8 +370,8 @@ export default function JobProfilesPage() {
         {/* RIGHT PANEL: Profile detail */}
         <Panel
           ref={previewPanelRef}
-          defaultSize={32}
-          minSize={22}
+          defaultSize={48}
+          minSize={30}
           collapsible
           collapsedSize={0}
           onCollapse={() => setCollapsed(prev => ({ ...prev, preview: true }))}
@@ -352,86 +379,212 @@ export default function JobProfilesPage() {
           className="bg-slate-100 dark:bg-slate-900 flex flex-col z-10 border-l border-slate-200 dark:border-slate-800 !overflow-auto"
         >
           <div className="flex flex-col h-full">
-            <div className="p-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
-              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                <FileText className="w-4 h-4 text-custom-blue" />
-                Profile Details
-              </h2>
-              <p className="text-[11px] text-slate-500 mt-0.5">{selectedProfile ? selectedProfile.name : 'Select a profile to view details'}</p>
-            </div>
-            <div className="flex-1 overflow-auto p-3">
-              {selectedProfile ? (
-                <Tabs defaultValue="overview">
-                  <TabsList className="bg-slate-100 dark:bg-slate-800 mb-3 w-full">
-                    <TabsTrigger value="overview" className="text-[11px] flex-1">Overview</TabsTrigger>
-                    <TabsTrigger value="settings" className="text-[11px] flex-1">Settings</TabsTrigger>
-                    <TabsTrigger value="clauses" className="text-[11px] flex-1">Clauses ({clauseSelections.length})</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="overview" className="space-y-3 mt-0">
-                    <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-3">
-                      <p className="text-xs font-bold text-slate-600 dark:text-slate-300 mb-2">Profile Information</p>
-                      <div className="grid grid-cols-2 gap-2 text-[11px]">
-                        <div><span className="text-slate-500">Scope:</span> <span className="font-medium text-slate-700 dark:text-slate-200">{scopeLabel(selectedProfile.scope)}</span></div>
-                        <div><span className="text-slate-500">Active:</span> <span className="font-medium text-slate-700 dark:text-slate-200">{selectedProfile.is_active ? 'Yes' : 'No'}</span></div>
-                        {selectedProfile.department && <div><span className="text-slate-500">Department:</span> <span className="font-medium text-slate-700 dark:text-slate-200">{selectedProfile.department}</span></div>}
-                        {selectedProfile.job_title && <div><span className="text-slate-500">Job Title:</span> <span className="font-medium text-slate-700 dark:text-slate-200">{selectedProfile.job_title}</span></div>}
-                        {selectedProfile.employment_type && <div><span className="text-slate-500">Type:</span> <span className="font-medium text-slate-700 dark:text-slate-200">{selectedProfile.employment_type}</span></div>}
-                        {selectedProfile.job_level && <div><span className="text-slate-500">Level:</span> <span className="font-medium text-slate-700 dark:text-slate-200">{selectedProfile.job_level}</span></div>}
-                        {selectedProfile.work_arrangement && <div><span className="text-slate-500">Mode:</span> <span className="font-medium text-slate-700 dark:text-slate-200">{selectedProfile.work_arrangement}</span></div>}
-                        <div><span className="text-slate-500">Updated:</span> <span className="font-medium text-slate-700 dark:text-slate-200">{new Date(selectedProfile.updated_at).toLocaleDateString()}</span></div>
+            {selectedProfile ? (() => {
+              const visual = getProfileVisual(selectedProfile.department);
+              const VisualIcon = visual.icon;
+              const tabs: [string, string][] = [
+                ['overview', 'Overview'],
+                ['description', 'Job Description'],
+                ['requirements', 'Requirements'],
+                ['responsibilities', `Key Responsibilities (${selectedProfile.key_responsibilities?.length || 0})`],
+                ['compensation', 'Compensation'],
+                ['clauses', `Linked Clauses (${clauseSelections.length})`],
+              ];
+              return (
+                <>
+                  {/* Header */}
+                  <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={cn("w-11 h-11 rounded-xl flex items-center justify-center shrink-0", visual.classes)}>
+                          <VisualIcon className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 truncate">{selectedProfile.name}</h2>
+                          <p className="text-[12px] text-slate-500 truncate">
+                            {selectedProfile.scope === 'position'
+                              ? [selectedProfile.department, selectedProfile.job_level && `Job Level: ${selectedProfile.job_level}`, selectedProfile.employment_type && `Employment Type: ${selectedProfile.employment_type}`].filter(Boolean).join(' · ') || scopeLabel(selectedProfile.scope)
+                              : scopeLabel(selectedProfile.scope)}
+                            {!selectedProfile.is_active && ' · Inactive'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => openEdit(selectedProfile)}>
+                          <Pencil className="h-3.5 w-3.5 mr-1.5" /> Edit Profile
+                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button size="sm" variant="outline" className="h-8 px-2">
+                              More <ChevronDown className="h-3 w-3 ml-1 opacity-70" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem onClick={() => openEdit(selectedProfile)}>
+                              <Pencil className="h-3.5 w-3.5 mr-2" /> Edit Profile
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={() => setDeletingId(selectedProfile.id)}>
+                              <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete Profile
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </div>
-                  </TabsContent>
+                  </div>
 
-                  <TabsContent value="settings" className="space-y-2 mt-0">
-                    {settingsGroups.length === 0 ? (
-                      <div className="text-[11px] text-slate-400 italic border border-dashed rounded-xl p-3 border-slate-200 dark:border-slate-800">No settings configured.</div>
-                    ) : (
-                      settingsGroups.map((group) => (
-                        <div key={group.label} className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-3">
-                          <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1.5">{group.label}</p>
-                          <div className="space-y-1">
-                            {group.items.map(([key, value]) => (
-                              <div key={key} className="flex justify-between text-[11px] gap-2">
-                                <span className="text-slate-500 font-mono truncate">{key}</span>
-                                <span className="text-slate-700 dark:text-slate-200 font-medium text-right">{String(value)}</span>
+                  {/* Tabs */}
+                  <Tabs value={detailTab} onValueChange={setDetailTab} className="flex-1 flex flex-col overflow-hidden">
+                    <div className="px-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 overflow-x-auto">
+                      <TabsList className="bg-transparent h-10 w-max justify-start gap-5 p-0 border-none">
+                        {tabs.map(([value, label]) => (
+                          <TabsTrigger
+                            key={value}
+                            value={value}
+                            className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-custom-blue data-[state=active]:text-custom-blue rounded-none px-0 font-medium text-xs text-slate-500 h-full whitespace-nowrap transition-colors"
+                          >
+                            {label}
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
+                    </div>
+
+                    <ScrollArea className="flex-1">
+                      <div className="p-4">
+                        <TabsContent value="overview" className="m-0 space-y-3">
+                          <div className="bg-white dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+                            <p className="text-xs font-bold text-slate-600 dark:text-slate-300 mb-3">Profile Information</p>
+                            <div className="space-y-2 text-[12px]">
+                              <div className="flex justify-between gap-2"><span className="text-slate-500">Job Title</span><span className="font-medium text-slate-700 dark:text-slate-200 text-right">{selectedProfile.job_title || scopeLabel(selectedProfile.scope)}</span></div>
+                              <div className="flex justify-between gap-2"><span className="text-slate-500">Department</span><span className="font-medium text-slate-700 dark:text-slate-200 text-right">{selectedProfile.department || '—'}</span></div>
+                              <div className="flex justify-between gap-2"><span className="text-slate-500">Job Level</span><span className="font-medium text-slate-700 dark:text-slate-200 text-right">{selectedProfile.job_level || '—'}</span></div>
+                              <div className="flex justify-between items-center gap-2">
+                                <span className="text-slate-500">Employment Type</span>
+                                {selectedProfile.employment_type ? (
+                                  <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">{selectedProfile.employment_type}</Badge>
+                                ) : <span className="font-medium text-slate-700 dark:text-slate-200">—</span>}
                               </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </TabsContent>
-
-                  <TabsContent value="clauses" className="space-y-2 mt-0">
-                    {clauseSelections.length === 0 ? (
-                      <div className="text-[11px] text-slate-400 italic border border-dashed rounded-xl p-3 border-slate-200 dark:border-slate-800">
-                        No clause overrides - uses section defaults.
-                      </div>
-                    ) : (
-                      <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-3">
-                        <div className="space-y-1.5">
-                          {clauseSelections.map(({ sectionKey, sectionTitle, clauseLabel }) => (
-                            <div key={sectionKey} className="flex items-center justify-between text-[11px] gap-2 py-0.5 border-b border-slate-100 dark:border-slate-800 last:border-0">
-                              <span className="text-slate-500 truncate shrink-0">{sectionTitle}</span>
-                              <Badge variant="outline" className="text-[9px] font-semibold bg-blue-50 text-blue-700 border-blue-200 rounded-full px-1.5 py-0 truncate max-w-[55%]">
-                                {clauseLabel}
-                              </Badge>
+                              <div className="flex justify-between gap-2"><span className="text-slate-500">Reports To</span><span className="font-medium text-slate-700 dark:text-slate-200 text-right">{selectedProfile.settings?.reports_to || '—'}</span></div>
+                              <div className="flex justify-between gap-2"><span className="text-slate-500">Created On</span><span className="font-medium text-slate-700 dark:text-slate-200 text-right">{new Date(selectedProfile.created_at).toLocaleDateString()}</span></div>
+                              <div className="flex justify-between gap-2"><span className="text-slate-500">Last Updated</span><span className="font-medium text-slate-700 dark:text-slate-200 text-right">{new Date(selectedProfile.updated_at).toLocaleDateString()}</span></div>
                             </div>
-                          ))}
-                        </div>
+                          </div>
+
+                          <div className="bg-white dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+                            <p className="text-xs font-bold text-slate-600 dark:text-slate-300 mb-3">Key Responsibilities ({selectedProfile.key_responsibilities?.length || 0})</p>
+                            {selectedProfile.key_responsibilities?.length ? (
+                              <ul className="space-y-1.5 text-[12px] text-slate-600 dark:text-slate-300 list-disc pl-4">
+                                {selectedProfile.key_responsibilities.slice(0, 4).map((item, i) => <li key={i}>{item}</li>)}
+                              </ul>
+                            ) : <p className="text-[12px] text-slate-400 italic">None listed yet.</p>}
+                            {selectedProfile.key_responsibilities?.length > 0 && (
+                              <Button variant="link" size="sm" className="h-auto p-0 mt-2 text-xs" onClick={() => setDetailTab('responsibilities')}>View All Responsibilities</Button>
+                            )}
+                          </div>
+
+                          <div className="bg-white dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+                            <p className="text-xs font-bold text-slate-600 dark:text-slate-300 mb-3">Linked Clauses ({clauseSelections.length})</p>
+                            {clauseSelections.length ? (
+                              <div className="space-y-1.5">
+                                {clauseSelections.slice(0, 4).map(({ sectionKey, sectionTitle, clauseLabel, isDefault, color }) => (
+                                  <div key={sectionKey} className="flex items-center justify-between gap-2 text-[11px]">
+                                    <Badge variant="outline" className={cn("text-[9px] font-semibold rounded-full px-1.5 py-0 shrink-0", color)}>{sectionTitle}</Badge>
+                                    <span className="text-slate-600 dark:text-slate-300 truncate flex-1 text-right">{clauseLabel}</span>
+                                    <Badge variant="outline" className={cn("text-[9px] font-semibold rounded-full px-1.5 py-0 shrink-0", isDefault ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-amber-50 text-amber-600 border-amber-200")}>
+                                      {isDefault ? 'Default' : 'Custom'}
+                                    </Badge>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : <p className="text-[12px] text-slate-400 italic">No clause overrides - uses section defaults.</p>}
+                            {clauseSelections.length > 0 && (
+                              <Button variant="link" size="sm" className="h-auto p-0 mt-2 text-xs" onClick={() => setDetailTab('clauses')}>View All Linked Clauses</Button>
+                            )}
+                          </div>
+                        </TabsContent>
+
+                        <TabsContent value="description" className="m-0">
+                          <div className="bg-white dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+                            {selectedProfile.job_description ? (
+                              <p className="text-[12px] text-slate-600 dark:text-slate-300 whitespace-pre-line leading-relaxed">{selectedProfile.job_description}</p>
+                            ) : (
+                              <p className="text-[12px] text-slate-400 italic">No job description added yet. Use Edit Profile to add one.</p>
+                            )}
+                          </div>
+                        </TabsContent>
+
+                        <TabsContent value="requirements" className="m-0">
+                          <div className="bg-white dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+                            {selectedProfile.requirements?.length ? (
+                              <ul className="space-y-1.5 text-[12px] text-slate-600 dark:text-slate-300 list-disc pl-4">
+                                {selectedProfile.requirements.map((item, i) => <li key={i}>{item}</li>)}
+                              </ul>
+                            ) : <p className="text-[12px] text-slate-400 italic">No requirements added yet. Use Edit Profile to add some.</p>}
+                          </div>
+                        </TabsContent>
+
+                        <TabsContent value="responsibilities" className="m-0">
+                          <div className="bg-white dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+                            {selectedProfile.key_responsibilities?.length ? (
+                              <ul className="space-y-1.5 text-[12px] text-slate-600 dark:text-slate-300 list-disc pl-4">
+                                {selectedProfile.key_responsibilities.map((item, i) => <li key={i}>{item}</li>)}
+                              </ul>
+                            ) : <p className="text-[12px] text-slate-400 italic">No responsibilities added yet. Use Edit Profile to add some.</p>}
+                          </div>
+                        </TabsContent>
+
+                        <TabsContent value="compensation" className="m-0 space-y-2">
+                          {settingsGroups.length === 0 ? (
+                            <div className="text-[12px] text-slate-400 italic border border-dashed rounded-xl p-4 border-slate-200 dark:border-slate-800">No settings configured.</div>
+                          ) : (
+                            settingsGroups.map((group) => (
+                              <div key={group.label} className="bg-white dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+                                <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-2">{group.label}</p>
+                                <div className="space-y-1">
+                                  {group.items.map(([key, value]) => (
+                                    <div key={key} className="flex justify-between text-[11px] gap-2">
+                                      <span className="text-slate-500 font-mono truncate">{key}</span>
+                                      <span className="text-slate-700 dark:text-slate-200 font-medium text-right">{String(value)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </TabsContent>
+
+                        <TabsContent value="clauses" className="m-0">
+                          {clauseSelections.length === 0 ? (
+                            <div className="text-[12px] text-slate-400 italic border border-dashed rounded-xl p-4 border-slate-200 dark:border-slate-800">
+                              No clause overrides - uses section defaults.
+                            </div>
+                          ) : (
+                            <div className="bg-white dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+                              <div className="space-y-2">
+                                {clauseSelections.map(({ sectionKey, sectionTitle, clauseLabel, isDefault, color }) => (
+                                  <div key={sectionKey} className="flex items-center justify-between gap-2 text-[12px] py-1 border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                    <Badge variant="outline" className={cn("text-[10px] font-semibold rounded-full px-2 py-0 shrink-0", color)}>{sectionTitle}</Badge>
+                                    <span className="text-slate-600 dark:text-slate-300 truncate flex-1 text-right">{clauseLabel}</span>
+                                    <Badge variant="outline" className={cn("text-[10px] font-semibold rounded-full px-2 py-0 shrink-0", isDefault ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-amber-50 text-amber-600 border-amber-200")}>
+                                      {isDefault ? 'Default' : 'Custom'}
+                                    </Badge>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </TabsContent>
                       </div>
-                    )}
-                  </TabsContent>
-                </Tabs>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full text-center">
-                  <FileText className="w-10 h-10 text-slate-300 mb-3" />
-                  <p className="text-xs text-slate-500">Select a profile to view details</p>
-                </div>
-              )}
-            </div>
+                    </ScrollArea>
+                  </Tabs>
+                </>
+              );
+            })() : (
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                <FileText className="w-10 h-10 text-slate-300 mb-3" />
+                <p className="text-xs text-slate-500">Select a profile to view details</p>
+              </div>
+            )}
           </div>
         </Panel>
       </PanelGroup>

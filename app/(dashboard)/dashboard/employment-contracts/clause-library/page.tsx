@@ -29,6 +29,7 @@ import { CONTRACT_SECTIONS } from '../utils/contractStructure';
 import { EcClause, fetchClauses, createClause, updateClause, deleteClause } from '../utils/clauseLibraryData';
 import { syncPlaceholdersFromContent } from '../utils/placeholderDetection';
 import { fetchCompanies, Company } from '../../companies/database';
+import { EMPLOYMENT_TYPE_OPTIONS, WORK_ARRANGEMENT_OPTIONS, withCurrentValue } from '../utils/profileOptions';
 
 const EMPTY_DRAFT: Partial<EcClause> = {
   section_key: CONTRACT_SECTIONS[0].key,
@@ -526,7 +527,7 @@ export default function ClauseLibraryPage() {
 
       {/* Clause Editor Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col rounded-2xl p-0">
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col rounded-2xl p-0 overflow-hidden">
           <DialogHeader className="sticky top-0 z-10 bg-white dark:bg-slate-900 px-6 pt-6 pb-4 border-b border-slate-200 dark:border-slate-800 rounded-t-2xl">
             <DialogTitle className="text-lg font-bold">{editingId ? 'Edit Clause' : 'New Clause'}</DialogTitle>
           </DialogHeader>
@@ -609,9 +610,25 @@ export default function ClauseLibraryPage() {
             <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-4 space-y-3">
               <Label className="text-sm font-semibold text-slate-600">Suggest this clause when... (optional)</Label>
               <div className="grid grid-cols-2 gap-3">
-                <Input className="h-9 text-sm" placeholder="Employment type" value={condition.employment_type || ''} onChange={(e) => setCondition({ ...condition, employment_type: e.target.value || undefined })} />
+                <Select value={condition.employment_type || '__any__'} onValueChange={(v) => setCondition({ ...condition, employment_type: v === '__any__' ? undefined : v })}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Employment type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__any__" className="text-slate-400 italic">Any employment type</SelectItem>
+                    {withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, condition.employment_type).map((opt) => (
+                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Input className="h-9 text-sm" placeholder="Job level" value={condition.job_level || ''} onChange={(e) => setCondition({ ...condition, job_level: e.target.value || undefined })} />
-                <Input className="h-9 text-sm" placeholder="Work arrangement" value={condition.work_arrangement || ''} onChange={(e) => setCondition({ ...condition, work_arrangement: e.target.value || undefined })} />
+                <Select value={condition.work_arrangement || '__any__'} onValueChange={(v) => setCondition({ ...condition, work_arrangement: v === '__any__' ? undefined : v })}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Work arrangement" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__any__" className="text-slate-400 italic">Any work arrangement</SelectItem>
+                    {withCurrentValue(WORK_ARRANGEMENT_OPTIONS, condition.work_arrangement).map((opt) => (
+                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Input className="h-9 text-sm" placeholder="Department" value={condition.department || ''} onChange={(e) => setCondition({ ...condition, department: e.target.value || undefined })} />
               </div>
               <div className="flex items-center gap-2">

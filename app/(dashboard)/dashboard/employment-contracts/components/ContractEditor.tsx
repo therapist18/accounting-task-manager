@@ -391,441 +391,331 @@ export function ContractEditor({
   }
 
   return (
-    <div className="flex flex-col h-full bg-[#F8F9FB] dark:bg-slate-950 relative overflow-hidden">
-      {/* Progress header */}
-      <div className="px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-white dark:bg-slate-900 shadow-sm z-10">
-        <div className="flex items-center">
-          {STEPS.map((s, i) => {
-            const isDone = s.key === 1 || (s.key === 2 && termsReady) || (s.key === 3 && termsReady);
-            const isCurrent = s.key === 4;
-            return (
-              <div key={s.key} className="flex items-center flex-1 last:flex-none">
-                <div className="flex items-center gap-3 shrink-0">
-                  <span className={cn(
-                    "w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 transition-colors",
-                    isDone
-                      ? "bg-blue-600 text-white"
-                      : isCurrent
-                        ? "bg-white text-blue-600 border-2 border-blue-500"
-                        : "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500"
-                  )}>
-                    {isDone ? <Check className="w-4 h-4" /> : s.key}
-                  </span>
-                  <span className="hidden lg:block text-left">
-                    <span className={cn("block text-[13px] font-semibold", isCurrent ? "text-blue-700 dark:text-blue-400" : "text-slate-700 dark:text-slate-200")}>{s.title}</span>
-                    <span className="block text-[11px] text-slate-400 dark:text-slate-500">{s.subtitle}</span>
-                  </span>
-                </div>
-                {i < STEPS.length - 1 && (
-                  <div className={cn("flex-1 h-[2px] mx-4 rounded-full", isDone ? "bg-blue-500" : "bg-slate-200 dark:bg-slate-800")} />
-                )}
-              </div>
-            );
-          })}
+    <div className="flex flex-col h-full bg-[#fcfdff] dark:bg-slate-950 relative overflow-hidden">
+      {/* Sleek Header */}
+      <div className="px-6 py-5 border-b border-slate-200/50 dark:border-slate-800/50 shrink-0 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl z-10 flex items-center justify-between sticky top-0">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-100 to-indigo-50 dark:from-blue-900/50 dark:to-indigo-900/50 flex items-center justify-center border border-blue-200/50 dark:border-blue-700/30 shadow-inner">
+            <UserRound className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 tracking-tight">
+              {employee?.fullName}
+            </h2>
+            <div className="flex items-center gap-2 text-[13px] text-slate-500 mt-0.5">
+              <span className="font-medium text-blue-600/80 dark:text-blue-400/80">EMP-{employee?.employeeNumber || '000000'}</span>
+              <span>•</span>
+              <span>{employee?.jobTitle || 'No Title'}</span>
+              <span>•</span>
+              <span>{employee?.department || 'No Dept'}</span>
+            </div>
+          </div>
         </div>
+        <Button
+          onClick={onRefreshPreview}
+          disabled={!selectedJobProfile}
+          className="h-10 px-5 text-[13px] font-medium bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 shadow-md rounded-full transition-all flex items-center gap-2"
+        >
+          <RefreshCw className="w-4 h-4" />
+          Update Preview
+        </Button>
       </div>
 
       <ScrollArea className="flex-1 overflow-auto">
-        <div className="grid grid-cols-2 items-start gap-5 p-5 pb-24 mx-auto">
+        <div className="max-w-4xl mx-auto p-6 space-y-6 pb-24">
+          
+          <Tabs defaultValue="setup" className="w-full">
+            <TabsList className="w-full h-12 grid grid-cols-3 p-1 bg-slate-100/80 dark:bg-slate-800/80 rounded-xl mb-6 shadow-inner">
+              <TabsTrigger value="setup" className="rounded-lg text-[13px] font-medium transition-all data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Setup & Details</TabsTrigger>
+              <TabsTrigger value="clauses" className="rounded-lg text-[13px] font-medium transition-all data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Sections & Clauses</TabsTrigger>
+              <TabsTrigger value="placeholders" className="rounded-lg text-[13px] font-medium transition-all data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Data & Values</TabsTrigger>
+            </TabsList>
 
-          {/* LEFT COLUMN: Employee, Summary, and Configuration Blocks */}
-          <div className="w-full col-span-1 shrink-0 space-y-5">
-            
-            {/* Employee & Position Card */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800">
-                <h3 className="text-[14px] font-semibold text-slate-900 dark:text-slate-100">Employee & Position</h3>
-                <button className="text-[13px] font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1.5">
-                  <Edit2 className="w-3.5 h-3.5" /> Edit
-                </button>
-              </div>
-              
-              <div className="p-5 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center shrink-0 border border-slate-200 overflow-hidden">
-                    {/* Placeholder image representation */}
-                    <UserRound className="w-7 h-7 text-slate-400" />
+            {/* SETUP TAB */}
+            <TabsContent value="setup" className="space-y-6 mt-0">
+              {/* Contract Configuration */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-sm overflow-hidden transition-all hover:shadow-md">
+                <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+                  <h3 className="text-[14px] font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <Settings2 className="w-4 h-4 text-blue-500" /> Contract Configuration
+                  </h3>
+                </div>
+                <div className="p-6 grid grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <Label className="text-[12px] font-medium text-slate-500">Contract Template</Label>
+                    <Select value={contractData.selectedTemplateId || ''} onValueChange={handleTemplateChange} disabled={templates.length === 0}>
+                      <SelectTrigger className="h-10 text-[13px] bg-slate-50/50 dark:bg-slate-900 hover:bg-slate-50 transition-colors border-slate-200 rounded-xl">
+                        <SelectValue placeholder="Select a template..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {templates.map(t => (
+                          <SelectItem key={t.id} value={t.id}>{t.name}{t.is_default ? ' (default)' : ''}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <div>
-                    <h4 className="text-[15px] font-semibold text-slate-900 dark:text-slate-100">{employee?.fullName}</h4>
-                    <p className="text-[13px] text-slate-500 mt-0.5">EMP-{employee?.employeeNumber || '000000'}</p>
-                    <p className="text-[13px] text-slate-500 truncate">{employee?.fullName?.toLowerCase().replace(' ', '.')}@example.com</p>
-                    <p className="text-[13px] text-slate-500">+254 712 345 678</p>
+                  <div className="space-y-2">
+                    <Label className="text-[12px] font-medium text-slate-500">Job Profile Base</Label>
+                    <Select value={selectedJobProfile?.id || ''} onValueChange={handleProfileChange}>
+                      <SelectTrigger className="h-10 text-[13px] bg-slate-50/50 dark:bg-slate-900 hover:bg-slate-50 transition-colors border-slate-200 rounded-xl">
+                        <SelectValue placeholder="Select a job profile..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {positionProfiles.map(p => (
+                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               </div>
 
-              <div className="px-5 py-2">
-                <div className="divide-y divide-slate-100 dark:divide-slate-800/50">
-                  <div className="flex justify-between items-center py-2.5">
-                    <span className="text-[13px] text-slate-500">Position</span>
-                    <span className="text-[13px] font-medium text-slate-900 dark:text-slate-200 text-right">{employee?.jobTitle || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-2.5">
-                    <span className="text-[13px] text-slate-500">Department</span>
-                    <span className="text-[13px] font-medium text-slate-900 dark:text-slate-200 text-right">{employee?.department || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-2.5">
-                    <span className="text-[13px] text-slate-500">Employment Type</span>
-                    <span className="text-[13px] font-medium text-slate-900 dark:text-slate-200 text-right">{employee?.employmentType || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-2.5">
-                    <span className="text-[13px] text-slate-500">Job Level</span>
-                    <span className="text-[13px] font-medium text-slate-900 dark:text-slate-200 text-right">{employee?.jobLevel || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-2.5">
-                    <span className="text-[13px] text-slate-500">Reports To</span>
-                    <span className="text-[13px] font-medium text-slate-900 dark:text-slate-200 text-right">{employee?.reportsTo || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-2.5">
-                    <span className="text-[13px] text-slate-500">Work Location</span>
-                    <span className="text-[13px] font-medium text-slate-900 dark:text-slate-200 text-right">{employee?.workLocation || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-2.5">
-                    <span className="text-[13px] text-slate-500">Start Date</span>
-                    <span className="text-[13px] font-medium text-slate-900 dark:text-slate-200 text-right">
-                      {offer.start_date ? new Date(offer.start_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'}
-                    </span>
-                  </div>
+              {/* Offer Adjustments */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-sm overflow-hidden transition-all hover:shadow-md">
+                <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+                  <h3 className="text-[14px] font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <Banknote className="w-4 h-4 text-emerald-500" /> Offer Adjustments
+                  </h3>
                 </div>
-              </div>
-            </div>
-
-            {/* Contract Summary Card */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800">
-                <h3 className="text-[14px] font-semibold text-slate-900 dark:text-slate-100">Contract Summary</h3>
-              </div>
-              <div className="px-5 py-2">
-                <div className="divide-y divide-slate-100 dark:divide-slate-800/50">
-                  <div className="flex justify-between items-center py-3">
-                    <span className="text-[13px] text-slate-500">Notice Period</span>
-                    <span className="text-[13px] font-medium text-slate-900 dark:text-slate-200">{effectiveSettings.notice_period || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-3">
-                    <span className="text-[13px] text-slate-500">Probation Period</span>
-                    <span className="text-[13px] font-medium text-slate-900 dark:text-slate-200">{effectiveSettings.probation_period || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-3">
-                    <span className="text-[13px] text-slate-500">Working Hours</span>
-                    <span className="text-[13px] font-medium text-slate-900 dark:text-slate-200">{effectiveSettings.working_hours || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-3">
-                    <span className="text-[13px] text-slate-500">Basic Salary</span>
-                    <span className="text-[13px] font-medium text-slate-900 dark:text-slate-200">{offer.currency || 'KES'} {offer.basic_salary?.toLocaleString(undefined, {minimumFractionDigits: 2}) || '0.00'}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-3">
-                    <span className="text-[13px] text-slate-500">Pay Frequency</span>
-                    <span className="text-[13px] font-medium text-slate-900 dark:text-slate-200">{effectiveSettings.payment_frequency || 'Monthly'}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-3">
-                    <span className="text-[13px] text-slate-500">Contract Duration</span>
-                    <span className="text-[13px] font-medium text-slate-900 dark:text-slate-200">{offer.end_date ? `Until ${offer.end_date}` : 'Indefinite'}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Restyled Maintained Sections - Forms */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm p-5 space-y-5">
-              
-              {/* Template Select */}
-              <div>
-                <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-200 mb-2">Contract Template</h3>
-                <Select value={contractData.selectedTemplateId || ''} onValueChange={handleTemplateChange} disabled={templates.length === 0}>
-                  <SelectTrigger className="bg-slate-50/50 h-9 border-slate-200 text-[13px]">
-                    <SelectValue placeholder="Select a template..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {templates.map(t => (
-                      <SelectItem key={t.id} value={t.id}>{t.name}{t.is_default ? ' (default)' : ''}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Job Profile Select */}
-              <div>
-                <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-200 mb-2">Job Profile Base</h3>
-                <Select value={selectedJobProfile?.id || ''} onValueChange={handleProfileChange}>
-                  <SelectTrigger className="bg-slate-50/50 h-9 border-slate-200 text-[13px]">
-                    <SelectValue placeholder="Select a job profile..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {positionProfiles.map(p => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Offer Editor (Salary & Dates) */}
-              <div>
-                <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-200 mb-3 flex items-center gap-2">
-                  <Settings2 className="w-4 h-4 text-blue-600" /> Offer Adjustments
-                </h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
+                <div className="p-6 grid grid-cols-2 gap-6">
+                  <div className="space-y-2">
                     <Label className="text-[12px] font-medium text-slate-500">Basic Salary</Label>
-                    <Input type="number" className="h-8 text-[13px] border-slate-200" value={offer.basic_salary ?? ''} onChange={(e) => updateOffer({ basic_salary: e.target.value === '' ? null : Number(e.target.value) })} />
+                    <Input type="number" className="h-10 text-[13px] border-slate-200 rounded-xl bg-slate-50/50 focus:bg-white transition-colors" value={offer.basic_salary ?? ''} onChange={(e) => updateOffer({ basic_salary: e.target.value === '' ? null : Number(e.target.value) })} />
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     <Label className="text-[12px] font-medium text-slate-500">Currency</Label>
-                    <Input className="h-8 text-[13px] border-slate-200" value={offer.currency ?? 'KES'} onChange={(e) => updateOffer({ currency: e.target.value })} />
+                    <Input className="h-10 text-[13px] border-slate-200 rounded-xl bg-slate-50/50 focus:bg-white transition-colors" value={offer.currency ?? 'KES'} onChange={(e) => updateOffer({ currency: e.target.value })} />
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     <Label className="text-[12px] font-medium text-slate-500">Start Date</Label>
-                    <Input type="date" className="h-8 text-[13px] border-slate-200" value={offer.start_date || ''} onChange={(e) => updateOffer({ start_date: e.target.value })} />
+                    <Input type="date" className="h-10 text-[13px] border-slate-200 rounded-xl bg-slate-50/50 focus:bg-white transition-colors" value={offer.start_date || ''} onChange={(e) => updateOffer({ start_date: e.target.value })} />
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[12px] font-medium text-slate-500">End Date</Label>
-                    <Input type="date" className="h-8 text-[13px] border-slate-200" value={offer.end_date || ''} onChange={(e) => updateOffer({ end_date: e.target.value })} />
+                  <div className="space-y-2">
+                    <Label className="text-[12px] font-medium text-slate-500">End Date (Optional)</Label>
+                    <Input type="date" className="h-10 text-[13px] border-slate-200 rounded-xl bg-slate-50/50 focus:bg-white transition-colors" value={offer.end_date || ''} onChange={(e) => updateOffer({ end_date: e.target.value })} />
                   </div>
                 </div>
               </div>
 
-            </div>
-          </div>
-
-          {/* MIDDLE COLUMN: Sections & Clauses / Placeholders & Values */}
-          <div className="flex-1 w-full col-span-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm flex flex-col h-fit lg:sticky lg:top-5">
-          <Tabs value={activePanelTab} onValueChange={(v) => setActivePanelTab(v as 'sections' | 'placeholders')}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800 gap-3">
-              <div className="min-w-0">
-                <TabsList className="h-9 mb-1.5">
-                  <TabsTrigger value="sections" className="text-xs">Sections & Clauses</TabsTrigger>
-                  <TabsTrigger value="placeholders" className="text-xs">Placeholders & Values</TabsTrigger>
-                </TabsList>
-                <p className="text-[13px] text-slate-500">
-                  {activePanelTab === 'sections' ? 'Review and customize clauses for this contract' : 'See where each {{token}} gets its value, and override any for this contract only'}
-                </p>
+              {/* Employee & Summary Info */}
+              <div className="grid grid-cols-2 gap-6">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-sm p-6 space-y-4 hover:shadow-md transition-shadow">
+                  <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100 border-b border-slate-100 pb-2">Employee Details</h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center"><span className="text-[13px] text-slate-500">Employment Type</span><span className="text-[13px] font-medium text-slate-900 dark:text-slate-200">{employee?.employmentType || 'N/A'}</span></div>
+                    <div className="flex justify-between items-center"><span className="text-[13px] text-slate-500">Job Level</span><span className="text-[13px] font-medium text-slate-900 dark:text-slate-200">{employee?.jobLevel || 'N/A'}</span></div>
+                    <div className="flex justify-between items-center"><span className="text-[13px] text-slate-500">Reports To</span><span className="text-[13px] font-medium text-slate-900 dark:text-slate-200">{employee?.reportsTo || 'N/A'}</span></div>
+                    <div className="flex justify-between items-center"><span className="text-[13px] text-slate-500">Location</span><span className="text-[13px] font-medium text-slate-900 dark:text-slate-200">{employee?.workLocation || 'N/A'}</span></div>
+                  </div>
+                </div>
+                <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-sm p-6 space-y-4 hover:shadow-md transition-shadow">
+                  <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100 border-b border-slate-100 pb-2">Contract Terms Summary</h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center"><span className="text-[13px] text-slate-500">Notice Period</span><span className="text-[13px] font-medium text-slate-900 dark:text-slate-200">{effectiveSettings.notice_period || 'N/A'}</span></div>
+                    <div className="flex justify-between items-center"><span className="text-[13px] text-slate-500">Probation Period</span><span className="text-[13px] font-medium text-slate-900 dark:text-slate-200">{effectiveSettings.probation_period || 'N/A'}</span></div>
+                    <div className="flex justify-between items-center"><span className="text-[13px] text-slate-500">Working Hours</span><span className="text-[13px] font-medium text-slate-900 dark:text-slate-200">{effectiveSettings.working_hours || 'N/A'}</span></div>
+                    <div className="flex justify-between items-center"><span className="text-[13px] text-slate-500">Pay Frequency</span><span className="text-[13px] font-medium text-slate-900 dark:text-slate-200">{effectiveSettings.payment_frequency || 'Monthly'}</span></div>
+                  </div>
+                </div>
               </div>
-              {activePanelTab === 'sections' && (
-                <button
-                  onClick={toggleAllSections}
-                  className="h-8 text-[12px] font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shrink-0"
-                >
-                  {expandedSections.size === CONTRACT_SECTIONS.length ? 'Collapse All' : 'Expand All'}
-                </button>
-              )}
-            </div>
-
-            <TabsContent value="sections" className="mt-0">
-            <div className="p-2">
-              <div className="divide-y divide-slate-50 dark:divide-slate-800/30">
-                {sectionRows.map(({ section, status, clauseLabel, clauseId, excluded }, index) => {
-                  let badgeStyles = "";
-                  switch(status) {
-                    case 'Included': badgeStyles = "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"; break;
-                    case 'Configured': badgeStyles = "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400"; break;
-                    case 'Excluded': badgeStyles = "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"; break;
-                  }
-                  const isExpanded = expandedSections.has(section.key);
-                  const resolvedClause = clauseId ? clausesById[clauseId] : undefined;
-                  const options = clauses.filter((c) => c.section_key === section.key);
-                  const ungrouped = options.filter((c) => !c.variant_group);
-                  const optionGroups = new Map<string, EcClause[]>();
-                  for (const c of options) {
-                    if (c.variant_group) {
-                      if (!optionGroups.has(c.variant_group)) optionGroups.set(c.variant_group, []);
-                      optionGroups.get(c.variant_group)!.push(c);
-                    }
-                  }
-                  const overrideValue = offer.section_clauses_overrides?.[section.key] || '__none__';
-
-                  return (
-                    <div key={section.key} className={cn("rounded-lg", status === 'Excluded' && "opacity-60")}>
-                      <div
-                        onClick={() => toggleSection(section.key)}
-                        className="flex items-center justify-between px-3 py-3 hover:bg-slate-50/80 dark:hover:bg-slate-800/50 rounded-lg cursor-pointer transition-colors group"
-                        title={clauseLabel}
-                      >
-                        <div className="flex items-center gap-4">
-                          {getSectionIcon(section.key)}
-                          <span className="text-[14px] font-medium text-slate-700 dark:text-slate-200 group-hover:text-slate-900">
-                            {index + 1}. {section.title}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-4">
-                          <span className={cn("text-[11px] font-semibold px-2.5 py-0.5 rounded-full", badgeStyles)}>
-                            {status}
-                          </span>
-                          <ChevronDown className={cn("w-4 h-4 text-slate-400 group-hover:text-slate-600 transition-transform", isExpanded && "rotate-180")} />
-                        </div>
-                      </div>
-
-                      {isExpanded && (
-                        <div className="px-3 pb-4 pt-1 space-y-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <Label className="text-[12px] font-medium text-slate-500">Clause used for this contract</Label>
-                            <Link
-                              href="/dashboard/employment-contracts/clause-library"
-                              target="_blank"
-                              className="text-[11px] font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1 shrink-0"
-                            >
-                              <ExternalLink className="w-3 h-3" /> Edit in Clause Library
-                            </Link>
-                          </div>
-
-                          <Select
-                            value={overrideValue}
-                            onValueChange={(v) => handleSectionClauseOverride(section.key, v)}
-                            disabled={excluded}
-                          >
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue placeholder="Use default" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">Use default (Job Profile / Company / Section default)</SelectItem>
-                              {ungrouped.map((c) => (
-                                <SelectItem key={c.id} value={c.id}>{c.label}{c.is_default ? ' (default)' : ''}</SelectItem>
-                              ))}
-                              {Array.from(optionGroups.entries()).map(([group, items]) => (
-                                <SelectGroup key={group}>
-                                  <SelectLabel>{group}</SelectLabel>
-                                  {items.map((c) => (
-                                    <SelectItem key={c.id} value={c.id}>{c.label}{c.is_default ? ' (default)' : ''}</SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              ))}
-                            </SelectContent>
-                          </Select>
-
-                          {excluded ? (
-                            <p className="text-[12px] text-slate-400 italic">Excluded by the selected contract template - this section won't appear in the generated contract.</p>
-                          ) : resolvedClause ? (
-                            <div className="border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3 space-y-2">
-                              <div className="flex items-center justify-between gap-2">
-                                <p className="text-[12px] font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
-                                  {resolvedClause.is_default && <Star className="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" />}
-                                  {resolvedClause.label}
-                                </p>
-                                <span className="text-[11px] font-mono text-slate-400 shrink-0">{resolvedClause.clause_key}</span>
-                              </div>
-                              <div
-                                className="prose prose-xs max-w-none text-slate-600 dark:text-slate-300 max-h-40 overflow-auto [&_strong]:text-slate-800 [&_strong]:dark:text-slate-100"
-                                dangerouslySetInnerHTML={{ __html: resolvedClause.content }}
-                              />
-                            </div>
-                          ) : (
-                            <p className="text-[12px] text-amber-600 italic">No clause resolved for this section - pick one above or set a section default in the Clause Library.</p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Legend Footer */}
-            <div className="px-5 py-3.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-6 text-[12px] text-slate-600 dark:text-slate-400">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Included
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span> Configured
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-slate-600"></span> Excluded
-              </div>
-            </div>
             </TabsContent>
 
-            <TabsContent value="placeholders" className="mt-0 p-4 space-y-4">
-              {PLACEHOLDER_GROUPS.map((group) => (
-                <div key={group.title}>
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1.5 px-0.5">{group.title}</p>
-                  <div className="space-y-1">
-                    {group.fields.map((f) => {
-                      const overrideVal = offer.placeholder_overrides?.[f.key];
-                      const computedVal = placeholderValues[f.key] ?? '';
-                      const isOverridden = overrideVal !== undefined;
+            {/* CLAUSES TAB */}
+            <TabsContent value="clauses" className="mt-0">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+                  <div className="min-w-0">
+                    <h3 className="text-[14px] font-semibold text-slate-900 dark:text-slate-100">Sections & Clauses</h3>
+                    <p className="text-[12px] text-slate-500 mt-1">Review and customize clauses for this specific contract</p>
+                  </div>
+                  <button
+                    onClick={toggleAllSections}
+                    className="h-8 text-[12px] font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+                  >
+                    {expandedSections.size === CONTRACT_SECTIONS.length ? 'Collapse All' : 'Expand All'}
+                  </button>
+                </div>
+                <div className="p-2">
+                  <div className="divide-y divide-slate-100/50 dark:divide-slate-800/30">
+                    {sectionRows.map(({ section, status, clauseLabel, clauseId, excluded }, index) => {
+                      let badgeStyles = "";
+                      switch(status) {
+                        case 'Included': badgeStyles = "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30"; break;
+                        case 'Configured': badgeStyles = "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 border-amber-200 dark:border-amber-500/30"; break;
+                        case 'Excluded': badgeStyles = "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700"; break;
+                      }
+                      const isExpanded = expandedSections.has(section.key);
+                      const resolvedClause = clauseId ? clausesById[clauseId] : undefined;
+                      const options = clauses.filter((c) => c.section_key === section.key);
+                      const ungrouped = options.filter((c) => !c.variant_group);
+                      const optionGroups = new Map<string, EcClause[]>();
+                      for (const c of options) {
+                        if (c.variant_group) {
+                          if (!optionGroups.has(c.variant_group)) optionGroups.set(c.variant_group, []);
+                          optionGroups.get(c.variant_group)!.push(c);
+                        }
+                      }
+                      const overrideValue = offer.section_clauses_overrides?.[section.key] || '__none__';
+
                       return (
-                        <div key={f.key} className="grid grid-cols-[minmax(110px,38%)_1fr_auto] gap-2 items-center">
-                          <span className="text-[12px] text-slate-500 truncate" title={`{{${f.key}}}`}>{f.label}</span>
-                          {f.editable ? (
-                            <Input
-                              className={cn("h-7 text-xs", isOverridden && "border-amber-300 dark:border-amber-700")}
-                              value={overrideVal ?? computedVal}
-                              onChange={(e) => handlePlaceholderOverride(f.key, e.target.value)}
-                            />
-                          ) : (
-                            <span className="text-xs text-slate-700 dark:text-slate-300 truncate px-1">{computedVal || '—'}</span>
-                          )}
-                          {f.editable ? (
-                            isOverridden ? (
-                              <button
-                                type="button"
-                                title="Reset to default"
-                                onClick={() => handlePlaceholderOverride(f.key, undefined)}
-                                className="text-slate-400 hover:text-red-600 shrink-0"
-                              >
-                                <RotateCcw className="w-3.5 h-3.5" />
-                              </button>
-                            ) : <span />
-                          ) : (
-                            <span className="text-[10px] text-slate-400 italic shrink-0">{f.hint}</span>
+                        <div key={section.key} className={cn("rounded-xl my-1 overflow-hidden transition-colors", status === 'Excluded' && "opacity-60", isExpanded && "bg-slate-50 dark:bg-slate-900/50")}>
+                          <div
+                            onClick={() => toggleSection(section.key)}
+                            className="flex items-center justify-between px-4 py-3 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors group"
+                            title={clauseLabel}
+                          >
+                            <div className="flex items-center gap-4">
+                              <div className="w-8 h-8 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
+                                {getSectionIcon(section.key)}
+                              </div>
+                              <span className="text-[14px] font-medium text-slate-700 dark:text-slate-200 group-hover:text-slate-900 dark:group-hover:text-white transition-colors">
+                                {index + 1}. {section.title}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-4">
+                              <span className={cn("text-[11px] font-semibold px-2.5 py-0.5 rounded-full border", badgeStyles)}>
+                                {status}
+                              </span>
+                              <ChevronDown className={cn("w-4 h-4 text-slate-400 group-hover:text-slate-600 transition-transform", isExpanded && "rotate-180")} />
+                            </div>
+                          </div>
+
+                          {isExpanded && (
+                            <div className="px-4 pb-4 pt-2 space-y-4 ml-[52px]">
+                              <div className="flex flex-col gap-2">
+                                <div className="flex items-center justify-between">
+                                  <Label className="text-[12px] font-medium text-slate-500">Clause Override</Label>
+                                  <Link
+                                    href="/dashboard/employment-contracts/clause-library"
+                                    target="_blank"
+                                    className="text-[11px] font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                                  >
+                                    <ExternalLink className="w-3 h-3" /> Edit Library
+                                  </Link>
+                                </div>
+                                <Select
+                                  value={overrideValue}
+                                  onValueChange={(v) => handleSectionClauseOverride(section.key, v)}
+                                  disabled={excluded}
+                                >
+                                  <SelectTrigger className="h-9 text-[13px] bg-white dark:bg-slate-900 rounded-lg">
+                                    <SelectValue placeholder="Use default" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">Use default (Job Profile / Company / Section default)</SelectItem>
+                                    {ungrouped.map((c) => (
+                                      <SelectItem key={c.id} value={c.id}>{c.label}{c.is_default ? ' (default)' : ''}</SelectItem>
+                                    ))}
+                                    {Array.from(optionGroups.entries()).map(([group, items]) => (
+                                      <SelectGroup key={group}>
+                                        <SelectLabel>{group}</SelectLabel>
+                                        {items.map((c) => (
+                                          <SelectItem key={c.id} value={c.id}>{c.label}{c.is_default ? ' (default)' : ''}</SelectItem>
+                                        ))}
+                                      </SelectGroup>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {excluded ? (
+                                <p className="text-[12px] text-slate-400 italic bg-white/50 p-3 rounded-lg border border-slate-100">Excluded by the selected template.</p>
+                              ) : resolvedClause ? (
+                                <div className="border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 p-4 shadow-sm space-y-3">
+                                  <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
+                                    <p className="text-[13px] font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                                      {resolvedClause.is_default && <Star className="w-3.5 h-3.5 text-amber-500" fill="currentColor" />}
+                                      {resolvedClause.label}
+                                    </p>
+                                    <span className="text-[10px] font-mono text-slate-400 px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded-full">{resolvedClause.clause_key}</span>
+                                  </div>
+                                  <div
+                                    className="prose prose-sm max-w-none text-slate-600 dark:text-slate-300 max-h-60 overflow-auto scrollbar-thin scrollbar-thumb-slate-200 [&_strong]:text-slate-800 [&_strong]:dark:text-slate-100"
+                                    dangerouslySetInnerHTML={{ __html: resolvedClause.content }}
+                                  />
+                                </div>
+                              ) : (
+                                <p className="text-[12px] text-amber-600 italic bg-amber-50 p-3 rounded-lg border border-amber-100">No clause resolved for this section.</p>
+                              )}
+                            </div>
                           )}
                         </div>
                       );
                     })}
                   </div>
                 </div>
-              ))}
+              </div>
+            </TabsContent>
+
+            {/* PLACEHOLDERS TAB */}
+            <TabsContent value="placeholders" className="mt-0">
+               <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-sm overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+                  <h3 className="text-[14px] font-semibold text-slate-900 dark:text-slate-100">Data & Values</h3>
+                  <p className="text-[12px] text-slate-500 mt-1">Review placeholder tokens and optionally override them for this contract.</p>
+                </div>
+                <div className="p-6 space-y-8">
+                  {PLACEHOLDER_GROUPS.map((group) => (
+                    <div key={group.title} className="space-y-3">
+                      <h4 className="text-[12px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                        {group.title}
+                        <div className="h-px flex-1 bg-slate-100 dark:bg-slate-800"></div>
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+                        {group.fields.map((f) => {
+                          const overrideVal = offer.placeholder_overrides?.[f.key];
+                          const computedVal = placeholderValues[f.key] ?? '';
+                          const isOverridden = overrideVal !== undefined;
+                          return (
+                            <div key={f.key} className="flex flex-col gap-1.5 p-2.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group/field border border-transparent hover:border-slate-100 dark:hover:border-slate-800">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[12px] font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5" title={`{{${f.key}}}`}>
+                                  {f.label}
+                                  {isOverridden && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" title="Overridden"></span>}
+                                </span>
+                                {f.editable && isOverridden && (
+                                  <button
+                                    type="button"
+                                    title="Reset to default"
+                                    onClick={() => handlePlaceholderOverride(f.key, undefined)}
+                                    className="text-slate-400 hover:text-red-500 opacity-0 group-hover/field:opacity-100 transition-opacity"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                              {f.editable ? (
+                                <Input
+                                  className={cn(
+                                    "h-8 text-[13px] transition-colors rounded-lg",
+                                    isOverridden 
+                                      ? "border-amber-200 bg-amber-50/30 dark:border-amber-900/50 dark:bg-amber-900/10 focus-visible:ring-amber-500/20" 
+                                      : "border-slate-200 bg-white shadow-sm focus-visible:ring-blue-500/20"
+                                  )}
+                                  value={overrideVal ?? computedVal}
+                                  onChange={(e) => handlePlaceholderOverride(f.key, e.target.value)}
+                                  placeholder="Leave blank for default"
+                                />
+                              ) : (
+                                <div className="h-8 flex items-center px-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-800">
+                                  <span className="text-[13px] text-slate-700 dark:text-slate-300 truncate w-full">{computedVal || '—'}</span>
+                                  {f.hint && <span className="text-[10px] text-slate-400 italic shrink-0 ml-2">{f.hint}</span>}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+               </div>
             </TabsContent>
           </Tabs>
-          </div>
 
         </div>
       </ScrollArea>
-
-      {/* Floating Action Bar */}
-      <div className="absolute bottom-0 left-0 right-0 px-6 py-3.5 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-20">
-
-        {/* Active Configurations Summary */}
-        <div className="hidden xl:flex items-center gap-5 flex-1 min-w-0 pr-5 border-r border-slate-200 dark:border-slate-800">
-           <span className="text-[12px] font-semibold text-slate-900 dark:text-slate-100 shrink-0">Active Configurations</span>
-           <div className="flex items-center gap-5 min-w-0 overflow-hidden">
-             <div className="flex items-center gap-2 min-w-0">
-               <UserRound className="w-4 h-4 text-emerald-500 shrink-0" />
-               <div className="flex flex-col min-w-0">
-                 <span className="text-[10px] text-slate-400 dark:text-slate-500 leading-tight">Employment Type</span>
-                 <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 leading-tight truncate">{employee?.employmentType || 'N/A'}</span>
-               </div>
-             </div>
-             <div className="flex items-center gap-2 min-w-0">
-               <Briefcase className="w-4 h-4 text-amber-500 shrink-0" />
-               <div className="flex flex-col min-w-0">
-                 <span className="text-[10px] text-slate-400 dark:text-slate-500 leading-tight">Job Level</span>
-                 <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 leading-tight truncate">{employee?.jobLevel || 'N/A'}</span>
-               </div>
-             </div>
-             <div className="flex items-center gap-2 min-w-0">
-               <Clock className="w-4 h-4 text-blue-500 shrink-0" />
-               <div className="flex flex-col min-w-0">
-                 <span className="text-[10px] text-slate-400 dark:text-slate-500 leading-tight">Working Schedule</span>
-                 <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 leading-tight truncate">{effectiveSettings.working_hours || 'N/A'}</span>
-               </div>
-             </div>
-           </div>
-           <button className="ml-auto shrink-0 h-9 text-[12px] font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-lg px-3 flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-             <Settings2 className="w-3.5 h-3.5 text-slate-500" /> Edit Configurations
-           </button>
-        </div>
-
-        <div className="flex items-center justify-end w-full xl:w-auto shrink-0">
-          <Button
-            onClick={onRefreshPreview}
-            disabled={!selectedJobProfile}
-            className="h-9 px-5 text-[13px] font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Update Preview
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }

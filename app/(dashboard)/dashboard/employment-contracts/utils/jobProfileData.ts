@@ -12,6 +12,9 @@ export interface EcJobProfile {
   employment_type: string | null;
   job_level: string | null;
   work_arrangement: string | null;
+  job_description: string | null;
+  requirements: string[];
+  key_responsibilities: string[];
   settings: Record<string, any>;
   section_clauses: Record<string, string>;
   is_active: boolean;

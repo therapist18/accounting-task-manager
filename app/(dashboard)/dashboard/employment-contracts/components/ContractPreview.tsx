@@ -5,13 +5,14 @@ import { Button } from '@/components/ui/button';
 import {
   Download, Loader2, Save, FileText, FileWarning, Palette, FileDown,
   ZoomIn, ZoomOut, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  List,
+  ChevronDown, List,
 } from 'lucide-react';
 import { saveAs } from 'file-saver';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ContractThemePanel } from './ContractThemePanel';
 import { ContractThemeSettings, DEFAULT_CONTRACT_THEME, applyThemeToHtml } from '../utils/themeEngine';
 import {
@@ -336,87 +337,93 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const hasOutput = !!bodyHtml;
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-slate-900 shadow-sm overflow-hidden flex-1 lg:min-w-[600px] relative">
+    <div className="flex flex-col h-full bg-slate-100/50 dark:bg-slate-900 shadow-inner overflow-hidden flex-1 lg:min-w-[600px] relative">
       
-      {/* Header & Toolbar */}
-      <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-white dark:bg-slate-900 z-10 gap-4 flex-wrap">
-        <div>
-          <h2 className="text-[15px] font-semibold text-slate-900 dark:text-slate-100 mb-0.5">
-            Contract Preview
-          </h2>
-          <div className="text-[12px] text-slate-500">
-            <span>Theme: {themeSettings.name || 'Custom'}</span>
+      {/* Sleek Glassy Toolbar */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2.5 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200/60 dark:border-slate-700/60 shadow-lg shadow-slate-200/20 dark:shadow-black/20 rounded-2xl z-20 flex items-center gap-4 transition-all">
+        <div className="flex items-center gap-2">
+          {/* Zoom Controls */}
+          <div className="flex items-center h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden">
+            <button
+              onClick={() => setZoomPct((z) => Math.max(40, z - 10))}
+              disabled={zoomPct <= 40}
+              title="Zoom out"
+              className="px-2 h-full text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-800 dark:hover:text-slate-200 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300 w-10 text-center tabular-nums select-none">
+              {zoomPct}%
+            </span>
+            <button
+              onClick={() => setZoomPct((z) => Math.min(150, z + 10))}
+              disabled={zoomPct >= 150}
+              title="Zoom in"
+              className="px-2 h-full text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-800 dark:hover:text-slate-200 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {/* View controls: zoom, TOC, Theme — grouped as one segmented bar */}
-          <div className="flex items-center h-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 divide-x divide-slate-200 dark:divide-slate-700 overflow-hidden">
-            <div className="flex items-center h-full">
-              <button
-                onClick={() => setZoomPct((z) => Math.max(40, z - 10))}
-                disabled={zoomPct <= 40}
-                className="px-2.5 h-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-200 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
-              >
-                <ZoomOut className="w-3.5 h-3.5" />
-              </button>
-              <span className="text-[12px] font-medium text-slate-600 dark:text-slate-300 w-11 text-center tabular-nums select-none">
-                {zoomPct}%
-              </span>
-              <button
-                onClick={() => setZoomPct((z) => Math.min(150, z + 10))}
-                disabled={zoomPct >= 150}
-                className="px-2.5 h-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-200 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
-              >
-                <ZoomIn className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <button
-              onClick={() => setShowToc((v) => !v)}
-              className={cn(
-                "px-3 h-full flex items-center gap-1.5 text-[12.5px] font-medium transition-colors",
-                showToc
-                  ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
-                  : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-200"
-              )}
-            >
-              <List className="w-3.5 h-3.5" /> TOC
-            </button>
-            <button
-              onClick={() => setThemePanelOpen(true)}
-              className="px-3 h-full flex items-center gap-1.5 text-[12.5px] font-medium text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
-            >
-              <Palette className="w-3.5 h-3.5" /> Theme
-            </button>
-          </div>
+        <div className="h-5 w-px bg-slate-200 dark:bg-slate-700" />
 
-          {/* Export actions */}
-          <div className="flex items-center h-9 rounded-lg border border-slate-200 dark:border-slate-700 divide-x divide-slate-200 dark:divide-slate-700 overflow-hidden">
-            <button
-              onClick={handleDownloadPdf}
-              disabled={!hasOutput || loadingContext || isGeneratingPdf}
-              className="px-3 h-full flex items-center gap-1.5 text-[12.5px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
-            >
-              {isGeneratingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5 text-slate-400" />} PDF
-            </button>
-            <button
-              onClick={handleDownloadWord}
-              disabled={!hasOutput || loadingContext}
-              className="px-3 h-full flex items-center gap-1.5 text-[12.5px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
-            >
-              <FileText className="w-3.5 h-3.5 text-slate-400" /> Word
-            </button>
-          </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setShowToc((v) => !v)}
+            title="Toggle table of contents"
+            className={cn(
+              "w-8 h-8 flex items-center justify-center rounded-lg transition-colors",
+              showToc
+                ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
+                : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+            )}
+          >
+            <List className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setThemePanelOpen(true)}
+            title="Customize theme"
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          >
+            <Palette className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="h-5 w-px bg-slate-200 dark:bg-slate-700" />
+
+        <div className="flex items-center gap-2">
+          {/* Export menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                disabled={!hasOutput || loadingContext}
+                className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-[12px] font-medium bg-slate-50 border border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
+              >
+                {isGeneratingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                Export
+                <ChevronDown className="w-3 h-3 ml-0.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40 rounded-xl">
+              <DropdownMenuItem onClick={handleDownloadPdf} disabled={!hasOutput || loadingContext || isGeneratingPdf}>
+                <FileDown className="w-3.5 h-3.5 mr-2 text-slate-400" /> PDF Document
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleDownloadWord} disabled={!hasOutput || loadingContext}>
+                <FileText className="w-3.5 h-3.5 mr-2 text-slate-400" /> Word Document
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* Primary action */}
           <Button
             size="sm"
-            className="h-9 px-4 text-[13px] font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-sm ml-1"
+            className="h-8 px-4 text-[12px] font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md rounded-lg"
             onClick={handleSaveToDb}
             disabled={!hasOutput || loadingContext || isSaving}
           >
             {isSaving ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-2" />}
-            Generate & Save
+            Generate
           </Button>
         </div>
       </div>
@@ -424,7 +431,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
       {/* Main Preview Area - Scrollable */}
       <div 
         ref={scrollContainerRef}
-        className="flex-1 overflow-auto bg-[#F8F9FB] dark:bg-slate-950/50"
+        className="flex-1 overflow-auto bg-slate-100/50 dark:bg-slate-950/50 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700 pt-16"
       >
         {!contractTemplate && !loadingContext ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-400">
@@ -436,15 +443,15 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
             <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
           </div>
         ) : (
-          <div className="py-8 px-4 flex flex-col items-center min-h-full">
-            {/* Scaled wrapper – accounts for zoom in scroll layout */}
+          <div className="py-12 px-4 flex flex-col items-center min-h-full">
+            {/* Scaled wrapper */}
             <div
-              className="relative shrink-0"
+              className="relative shrink-0 shadow-2xl shadow-slate-300/30 dark:shadow-black/40 transition-transform duration-200"
               style={{ width: PAGE_WIDTH_PX * zoomRatio, height: pageCanvasHeightPx * zoomRatio }}
             >
-              {/* Document canvas at 100% scale, visually scaled */}
+              {/* Document canvas */}
               <div
-                className="absolute top-0 left-0 bg-white shadow-md border border-slate-200/80 origin-top-left"
+                className="absolute top-0 left-0 bg-white origin-top-left"
                 style={{
                   width: PAGE_WIDTH_PX,
                   height: pageCanvasHeightPx,
@@ -459,7 +466,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
                     className="absolute left-0 right-0 pointer-events-none z-10"
                     style={{ top: (i + 1) * PAGE_HEIGHT_PX }}
                   >
-                    <div className="border-t border-dashed border-slate-300/40" style={{ marginLeft: 48, marginRight: 48 }} />
+                    <div className="border-t border-dashed border-slate-300/60" style={{ marginLeft: 48, marginRight: 48 }} />
                   </div>
                 ))}
 
@@ -475,24 +482,24 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
 
       {/* Sticky Pagination Controls - Fixed to the bottom */}
       {contractTemplate && !loadingContext && (
-        <div className="shrink-0 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-2.5 flex items-center justify-center gap-6 text-[13px] text-slate-600 dark:text-slate-300 font-medium z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-          <div className="flex items-center gap-1">
-            <button onClick={() => scrollToPage(1)} disabled={currentPage <= 1} className="p-1.5 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
-              <ChevronsLeft className="w-4 h-4" />
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white/90 dark:bg-slate-900/90 backdrop-blur border border-slate-200 dark:border-slate-800 rounded-full py-1.5 px-4 flex items-center justify-center gap-4 text-[12px] text-slate-600 dark:text-slate-300 font-medium z-10 shadow-lg shadow-slate-200/20 dark:shadow-black/20">
+          <div className="flex items-center gap-0.5">
+            <button onClick={() => scrollToPage(1)} disabled={currentPage <= 1} className="p-1 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+              <ChevronsLeft className="w-3.5 h-3.5" />
             </button>
-            <button onClick={() => scrollToPage(currentPage - 1)} disabled={currentPage <= 1} className="p-1.5 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
-              <ChevronLeft className="w-4 h-4" />
+            <button onClick={() => scrollToPage(currentPage - 1)} disabled={currentPage <= 1} className="p-1 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+              <ChevronLeft className="w-3.5 h-3.5" />
             </button>
           </div>
           
-          <span className="tabular-nums min-w-[100px] text-center">Page {currentPage} of {totalPages}</span>
+          <span className="tabular-nums min-w-[70px] text-center font-semibold">Page {currentPage} / {totalPages}</span>
           
-          <div className="flex items-center gap-1">
-            <button onClick={() => scrollToPage(currentPage + 1)} disabled={currentPage >= totalPages} className="p-1.5 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
-              <ChevronRight className="w-4 h-4" />
+          <div className="flex items-center gap-0.5">
+            <button onClick={() => scrollToPage(currentPage + 1)} disabled={currentPage >= totalPages} className="p-1 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
-            <button onClick={() => scrollToPage(totalPages)} disabled={currentPage >= totalPages} className="p-1.5 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
-              <ChevronsRight className="w-4 h-4" />
+            <button onClick={() => scrollToPage(totalPages)} disabled={currentPage >= totalPages} className="p-1 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+              <ChevronsRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -505,11 +512,6 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
         onChange={updateThemeSettings}
       />
 
-      {/* 
-        HIDDEN RENDER TARGETS
-        1. measure-target: Accurately sizes the pure DOM unscaled for pagination math.
-        Must strictly match the visual container (p-12) to keep math accurate.
-      */}
       <div 
         className="absolute top-0 left-0 pointer-events-none z-[-1] opacity-0" 
         aria-hidden="true"
@@ -524,7 +526,6 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
           </div>
         </div>
         
-        {/* capture-target: Pure DOM with safety padding for PDF extraction. */}
         <div ref={htmlCaptureRef} className="bg-white text-black p-12 text-[14.5px] leading-relaxed" style={{ width: PAGE_WIDTH_PX }}>
           <div dangerouslySetInnerHTML={{ __html: themedHtml }} />
         </div>

@@ -37,74 +37,81 @@ export default function EmploymentContractsPage() {
   };
 
   return (
-    <div className="max-h-[100vh] w-full overflow-hidden bg-slate-50 dark:bg-slate-950 flex flex-col shadow-sm">
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
-        <div className="flex items-center gap-3">
-          <h1 className="text-sm font-bold text-slate-800 dark:text-slate-100">Employment Contracts</h1>
-          <div className="flex items-center gap-1 border-l border-slate-200 dark:border-slate-800 pl-3">
-            <button
-              onClick={() => togglePanel('sidebar')}
-              title={collapsed.sidebar ? 'Show entities panel' : 'Hide entities panel'}
-              className={cn(
-                "p-1.5 rounded-md transition-colors",
-                collapsed.sidebar ? "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" : "text-custom-blue bg-blue-50 dark:bg-blue-900/20"
-              )}
-            >
-              {collapsed.sidebar ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
-            </button>
-            <button
-              onClick={() => togglePanel('editor')}
-              title={collapsed.editor ? 'Show configuration panel' : 'Hide configuration panel'}
-              className={cn(
-                "p-1.5 rounded-md transition-colors",
-                collapsed.editor ? "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" : "text-custom-blue bg-blue-50 dark:bg-blue-900/20"
-              )}
-            >
-              <Columns2 className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => togglePanel('preview')}
-              title={collapsed.preview ? 'Show preview panel' : 'Hide preview panel'}
-              className={cn(
-                "p-1.5 rounded-md transition-colors",
-                collapsed.preview ? "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" : "text-custom-blue bg-blue-50 dark:bg-blue-900/20"
-              )}
-            >
-              {collapsed.preview ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
-            </button>
+    <div className="max-h-[100vh] w-full overflow-hidden bg-[#f3f4f6] dark:bg-[#0a0a0a] flex flex-col shadow-sm">
+      <div className="flex items-center justify-between px-6 py-3 border-b border-slate-200/80 dark:border-slate-800/80 bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl shrink-0 z-10 shadow-sm relative">
+        <div className="flex items-center gap-6">
+          <h1 className="text-[16px] font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent dark:from-blue-400 dark:to-indigo-400">
+            Employment Contracts
+          </h1>
+          
+          <div className="flex items-center gap-1 border-l border-slate-200 dark:border-slate-800 pl-6">
+            <div className="flex items-center bg-slate-100/80 dark:bg-slate-800/80 rounded-lg p-1 border border-slate-200/50 dark:border-slate-700/50 shadow-inner">
+              <button
+                onClick={() => togglePanel('sidebar')}
+                title={collapsed.sidebar ? 'Show entities panel' : 'Hide entities panel'}
+                className={cn(
+                  "p-1.5 rounded-md transition-all",
+                  collapsed.sidebar ? "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200" : "text-blue-600 bg-white dark:bg-slate-950 dark:text-blue-400 shadow-sm"
+                )}
+              >
+                {collapsed.sidebar ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+              </button>
+              <button
+                onClick={() => togglePanel('editor')}
+                title={collapsed.editor ? 'Show configuration panel' : 'Hide configuration panel'}
+                className={cn(
+                  "p-1.5 rounded-md transition-all mx-1",
+                  collapsed.editor ? "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200" : "text-blue-600 bg-white dark:bg-slate-950 dark:text-blue-400 shadow-sm"
+                )}
+              >
+                <Columns2 className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => togglePanel('preview')}
+                title={collapsed.preview ? 'Show preview panel' : 'Hide preview panel'}
+                className={cn(
+                  "p-1.5 rounded-md transition-all",
+                  collapsed.preview ? "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200" : "text-blue-600 bg-white dark:bg-slate-950 dark:text-blue-400 shadow-sm"
+                )}
+              >
+                {collapsed.preview ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        
+        <div className="flex items-center gap-2">
           <Link
             href="/dashboard/employment-contracts/clause-library"
-            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 text-[13px] font-medium text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
           >
-            <BookText className="w-3.5 h-3.5" />
+            <BookText className="w-4 h-4" />
             Clauses
           </Link>
           <Link
             href="/dashboard/employment-contracts/job-profiles"
-            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 text-[13px] font-medium text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
           >
-            <Briefcase className="w-3.5 h-3.5" />
+            <Briefcase className="w-4 h-4" />
             Job Profiles
           </Link>
           <Link
             href="/dashboard/employment-contracts/templates"
-            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 text-[13px] font-medium text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
           >
-            <Settings className="w-3.5 h-3.5" />
+            <Settings className="w-4 h-4" />
             Templates
           </Link>
           <Link
             href="/dashboard/employment-contracts/placeholders"
-            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 text-[13px] font-medium text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
           >
-            <Database className="w-3.5 h-3.5" />
+            <Database className="w-4 h-4" />
             Data Sources
           </Link>
         </div>
       </div>
+      
       <PanelGroup direction="horizontal" className="h-full w-full">
         {/* LEFT PANEL: Hierarchy (Companies -> Employees) */}
         <Panel
@@ -116,7 +123,7 @@ export default function EmploymentContractsPage() {
           collapsedSize={0}
           onCollapse={() => setCollapsed(prev => ({ ...prev, sidebar: true }))}
           onExpand={() => setCollapsed(prev => ({ ...prev, sidebar: false }))}
-          className="bg-white dark:bg-slate-900 flex flex-col z-10 overflow-auto"
+          className="bg-white/50 dark:bg-slate-900/50 flex flex-col z-10 overflow-auto"
         >
           <ContractsSidebar
             selectedCompanyId={selectedCompanyId}
@@ -126,7 +133,7 @@ export default function EmploymentContractsPage() {
           />
         </Panel>
 
-        <PanelResizeHandle className="w-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-20" />
+        <PanelResizeHandle className="w-1.5 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-20" />
 
         {/* CENTER PANEL: Configuration & Form */}
         <Panel
@@ -137,7 +144,7 @@ export default function EmploymentContractsPage() {
           collapsedSize={0}
           onCollapse={() => setCollapsed(prev => ({ ...prev, editor: true }))}
           onExpand={() => setCollapsed(prev => ({ ...prev, editor: false }))}
-          className="bg-slate-50 dark:bg-slate-950 flex flex-col z-10 !overflow-auto"
+          className="bg-slate-50 dark:bg-slate-950 flex flex-col z-10 !overflow-auto shadow-[0_0_15px_rgba(0,0,0,0.02)]"
         >
           <ContractEditor
             companyId={selectedCompanyId}
@@ -150,7 +157,7 @@ export default function EmploymentContractsPage() {
           />
         </Panel>
 
-        <PanelResizeHandle className="w-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-20" />
+        <PanelResizeHandle className="w-1.5 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-20" />
 
         {/* RIGHT PANEL: Live Document Preview */}
         <Panel
@@ -161,7 +168,7 @@ export default function EmploymentContractsPage() {
           collapsedSize={0}
           onCollapse={() => setCollapsed(prev => ({ ...prev, preview: true }))}
           onExpand={() => setCollapsed(prev => ({ ...prev, preview: false }))}
-          className="bg-slate-100 dark:bg-slate-900 flex flex-col z-10 !overflow-auto"
+          className="bg-slate-100/80 dark:bg-slate-900/80 flex flex-col z-10 !overflow-auto"
         >
           <ContractPreview
             key={previewKey}

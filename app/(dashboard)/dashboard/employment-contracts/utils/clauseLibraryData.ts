@@ -9,12 +9,6 @@ export interface EcClause {
   content: string;
   is_default: boolean;
   company_id: string | null;
-  // Groups this clause with sibling clauses in the same section as
-  // alternatives of one conceptual component (e.g. "office_hours" groups
-  // "Standard Office Hours" / "Extended Office Hours"). Purely an authoring
-  // grouping label - null means the clause stands alone. Doesn't change
-  // contract assembly, which still resolves exactly one clause id per
-  // section (see utils/clauseEngine.ts).
   variant_group: string | null;
   suggest_conditions: ClauseSuggestionCondition[];
   suggest_priority: number;
