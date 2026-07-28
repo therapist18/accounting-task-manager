@@ -12,6 +12,11 @@ const PUBLIC_PATHS = [
   "/cv-generator",
   "/dashboard/cv-generator",
   "/api/cv/extract",
+  // Called by the BCL Meetings mobile app, which has no web session cookie for this
+  // domain — it authenticates via a shared-secret header instead (checked in the route
+  // itself, see TASKS_REPORT_API_KEY), not the cookie-based session this middleware
+  // otherwise enforces.
+  "/api/tasks-report",
 ];
 
 function isPublicPath(pathname: string): boolean {

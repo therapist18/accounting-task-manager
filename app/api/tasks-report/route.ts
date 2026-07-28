@@ -79,8 +79,28 @@ function resolveStageDisplayDate(
   return null;
 }
 
+// This route is listed in PUBLIC_PATHS (middleware.ts) so it's reachable without the
+// web app's session cookie — the BCL Meetings mobile app has no such cookie for this
+// domain. In its place, require a shared secret the mobile app sends as a header. The
+// route returns real applicant PII (names, R numbers, passport numbers), so it must not
+// be reachable with no auth at all.
+function isAuthorizedMobileRequest(req: NextRequest): boolean {
+  const expected = process.env.TASKS_REPORT_API_KEY;
+  if (!expected) {
+    // Fail closed: an unset secret must never be treated as "no auth required".
+    console.error("TASKS_REPORT_API_KEY is not configured — rejecting all requests to /api/tasks-report");
+    return false;
+  }
+  const provided = req.headers.get("x-tasks-api-key");
+  return provided === expected;
+}
+
 export async function GET(req: NextRequest) {
   try {
+    if (!isAuthorizedMobileRequest(req)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const supabase = createServerSupabaseClient();
     const subDeptId = req.nextUrl.searchParams.get("subDeptId") || null;
 
