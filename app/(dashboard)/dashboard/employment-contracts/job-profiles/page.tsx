@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { saveAs } from 'file-saver';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -93,14 +94,29 @@ const SECTION_BADGE_COLORS = [
 // above but split across the three thematic tabs instead of one dumping
 // ground, plus "Contract Rules" catches anything that doesn't match any of
 // them so no key is ever silently hidden.
-const EMPLOYMENT_RULES_HINTS = ['notice_period', 'probation_period', 'probation_notice', 'termination_reason'];
-const WORKING_ARRANGEMENT_HINTS = ['working_days', 'working_hours', 'start_time', 'end_time', 'break_duration', 'rest_days', 'work_mode'];
-const BENEFITS_HINTS = [
-  'medical_cover', 'housing_allowance', 'transport_allowance', 'telephone_allowance', 'meal_allowance', 'pension_scheme',
-  'annual_leave_days', 'sick_leave_days', 'maternity_leave_days', 'paternity_leave_days', 'compassionate_leave_days',
-  'payment_frequency', 'payment_day',
+const EMPLOYMENT_RULES_HINTS = [
+  'notice_period', 'probation_period', 'probation_notice', 'termination_reason', 'confirmation_required',
+  'confidentiality_policy', 'intellectual_property_policy', 'data_protection_policy', 'code_of_conduct_policy',
+  'disciplinary_policy', 'company_property_policy',
 ];
-const ALL_KNOWN_SETTINGS_HINTS = [...EMPLOYMENT_RULES_HINTS, ...WORKING_ARRANGEMENT_HINTS, ...BENEFITS_HINTS];
+const WORKING_ARRANGEMENT_HINTS = [
+  'working_days', 'working_hours', 'start_time', 'end_time', 'break_duration', 'rest_days', 'work_mode',
+  'remote_work_allowed', 'remote_days', 'weekend_work', 'weekend_approval_required', 'overtime_eligible',
+  'overtime_approval_required', 'overtime_compensation',
+];
+const BENEFITS_HINTS = [
+  'salary_currency', 'salary_min', 'salary_max', 'medical_cover', 'housing_allowance', 'transport_allowance', 'telephone_allowance', 'meal_allowance', 'internet_allowance', 'pension_scheme',
+  'annual_leave_days', 'sick_leave_days', 'maternity_leave_days', 'paternity_leave_days', 'compassionate_leave_days',
+  'payment_frequency', 'payment_day', 'bonus_scheme',
+];
+const ALL_KNOWN_SETTINGS_HINTS = ['reports_to', ...EMPLOYMENT_RULES_HINTS, ...WORKING_ARRANGEMENT_HINTS, ...BENEFITS_HINTS];
+
+const JOB_LEVEL_OPTIONS = ['Entry Level', 'Junior', 'Mid-Level', 'Senior', 'Manager', 'Executive'];
+const PROBATION_OPTIONS = ['Not Applicable', '1 Month', '3 Months', '6 Months'];
+const NOTICE_OPTIONS = ['1 Week', '2 Weeks', '1 Month', '2 Months', '3 Months'];
+const LEAVE_DAY_OPTIONS = ['7 Days', '14 Days', '21 Days', '30 Days', 'According to Company Policy'];
+const PAYMENT_FREQUENCY_OPTIONS = ['Monthly', 'Bi-weekly', 'Weekly'];
+const ALLOWANCE_OPTIONS = ['No', 'Optional', 'Yes', 'According to Company Policy'];
 
 // Bullet-list editor for Requirements / Key Responsibilities - free-form
 // prose lines, distinct from the short keyword chips TagListEditor handles.
@@ -205,6 +221,78 @@ function SettingsEditorCard({ title, hints, settings, onChange, excludeKnown }: 
           <PlusCircle className="h-3.5 w-3.5" />
         </Button>
       </div>
+    </div>
+  );
+}
+
+function FormField({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
+  return (
+    <div className={cn("space-y-1.5", className)}>
+      <label className="text-[11px] font-semibold text-slate-500">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function SettingInput({ label, settingKey, settings, onChange, placeholder, type = 'text' }: {
+  label: string; settingKey: string; settings: Record<string, any>; onChange: (key: string, value: string) => void; placeholder?: string; type?: string;
+}) {
+  return (
+    <FormField label={label}>
+      <Input
+        type={type}
+        value={settings?.[settingKey] || ''}
+        onChange={(e) => onChange(settingKey, e.target.value)}
+        className="h-9 text-xs bg-white dark:bg-slate-900"
+        placeholder={placeholder || 'Not set'}
+      />
+    </FormField>
+  );
+}
+
+function SettingSelect({ label, settingKey, options, settings, onChange, placeholder = 'Select' }: {
+  label: string; settingKey: string; options: string[]; settings: Record<string, any>; onChange: (key: string, value: string) => void; placeholder?: string;
+}) {
+  const current = settings?.[settingKey] ? String(settings[settingKey]) : null;
+  return (
+    <FormField label={label}>
+      <Select value={current || '__unset__'} onValueChange={(v) => onChange(settingKey, v === '__unset__' ? '' : v)}>
+        <SelectTrigger className="h-9 text-xs bg-white dark:bg-slate-900">
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>
+          {withCurrentValue(options, current).map((opt) => (
+            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </FormField>
+  );
+}
+
+function SettingSwitch({ label, settingKey, settings, onChange }: {
+  label: string; settingKey: string; settings: Record<string, any>; onChange: (key: string, value: string) => void;
+}) {
+  const checked = String(settings?.[settingKey] || '').toLowerCase() === 'yes';
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2.5">
+      <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{label}</span>
+      <Switch checked={checked} onCheckedChange={(next) => onChange(settingKey, next ? 'Yes' : 'No')} />
+    </div>
+  );
+}
+
+function SectionPanel({ title, description, children, className }: {
+  title: string; description?: string; children: ReactNode; className?: string;
+}) {
+  return (
+    <div className={cn("bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-5 shadow-sm", className)}>
+      <div className="mb-4">
+        <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">{title}</h3>
+        {description && <p className="text-xs text-slate-500 mt-1">{description}</p>}
+      </div>
+      {children}
     </div>
   );
 }
@@ -501,6 +589,7 @@ export default function JobProfilesPage() {
 
   const tabs: { value: string; label: string; icon: any }[] = [
     { value: 'overview', label: 'Overview', icon: LayoutTemplate },
+    { value: 'requirements', label: 'Requirements', icon: ShieldCheck },
     { value: 'responsibilities', label: 'Responsibilities', icon: UserCog },
     { value: 'employment_rules', label: 'Employment Rules', icon: FileCheck },
     { value: 'working_arrangement', label: 'Working Arrangement', icon: Briefcase },
@@ -805,33 +894,32 @@ export default function JobProfilesPage() {
 
                     <ScrollArea className="flex-1">
                         <TabsContent value="overview" className="m-0 focus:outline-none">
-                          <div className="p-8 max-w-[1400px] mx-auto space-y-6">
-
-                            {/* Top row */}
-                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                              {/* Left: Basic Info (col-span-7) */}
-                              <div className="lg:col-span-7 flex flex-col gap-6">
-                                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                                  <h3 className="text-sm font-bold text-slate-800 mb-5">Basic Information</h3>
-                                  <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-                                    <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Job Title</label>
-                                      <Input value={draft.job_title || ''} onChange={(e) => updateDraft({ job_title: e.target.value })} className="h-9 text-xs" placeholder="e.g. Accountant" />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Job Code</label>
-                                      <Input value={draft.job_code || ''} onChange={(e) => updateDraft({ job_code: e.target.value })} className="h-9 text-xs" placeholder="e.g. ACC-001" />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Department {draft.scope === 'department' && <span className="text-red-500">*</span>}</label>
-                                      <Input value={draft.department || ''} onChange={(e) => updateDraft({ department: e.target.value })} className="h-9 text-xs" placeholder="e.g. Finance Department" />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Job Level</label>
-                                      <Input value={draft.job_level || ''} onChange={(e) => updateDraft({ job_level: e.target.value })} className="h-9 text-xs" placeholder="e.g. Mid Level" />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Employment Type</label>
+                          <div className="p-8 max-w-[1180px] mx-auto space-y-6">
+                            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-6">
+                              <div className="space-y-6">
+                                <SectionPanel title="Profile Identity" description="The stable facts that identify this role and help the contract engine match the right profile.">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-4">
+                                    <FormField label="Job Title">
+                                      <Input value={draft.job_title || ''} onChange={(e) => updateDraft({ job_title: e.target.value })} className="h-9 text-xs" placeholder="e.g. Software Developer" />
+                                    </FormField>
+                                    <FormField label="Job Code">
+                                      <Input value={draft.job_code || ''} onChange={(e) => updateDraft({ job_code: e.target.value })} className="h-9 text-xs" placeholder="e.g. ICT-SD-001" />
+                                    </FormField>
+                                    <FormField label={`Department${draft.scope === 'department' ? ' *' : ''}`}>
+                                      <Input value={draft.department || ''} onChange={(e) => updateDraft({ department: e.target.value })} className="h-9 text-xs" placeholder="e.g. ICT" />
+                                    </FormField>
+                                    <FormField label="Job Level">
+                                      <Select value={draft.job_level || '__unset__'} onValueChange={(v) => updateDraft({ job_level: v === '__unset__' ? null : v })}>
+                                        <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select level" /></SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>
+                                          {withCurrentValue(JOB_LEVEL_OPTIONS, draft.job_level).map((opt) => (
+                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </FormField>
+                                    <FormField label="Employment Type">
                                       <Select value={draft.employment_type || '__unset__'} onValueChange={(v) => updateDraft({ employment_type: v === '__unset__' ? null : v })}>
                                         <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select type" /></SelectTrigger>
                                         <SelectContent>
@@ -841,21 +929,17 @@ export default function JobProfilesPage() {
                                           ))}
                                         </SelectContent>
                                       </Select>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Reports To</label>
-                                      <Input value={draft.settings?.reports_to || ''} onChange={(e) => updateDraftSettings('reports_to', e.target.value)} className="h-9 text-xs" placeholder="e.g. Finance Manager" />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Job Family</label>
-                                      <Input value={draft.job_family || ''} onChange={(e) => updateDraft({ job_family: e.target.value })} className="h-9 text-xs" placeholder="e.g. Finance & Accounting" />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Work Location</label>
+                                    </FormField>
+                                    <FormField label="Reports To">
+                                      <Input value={draft.settings?.reports_to || ''} onChange={(e) => updateDraftSettings('reports_to', e.target.value)} className="h-9 text-xs" placeholder="e.g. Head of ICT" />
+                                    </FormField>
+                                    <FormField label="Job Family">
+                                      <Input value={draft.job_family || ''} onChange={(e) => updateDraft({ job_family: e.target.value })} className="h-9 text-xs" placeholder="e.g. Technology" />
+                                    </FormField>
+                                    <FormField label="Work Location">
                                       <Input value={draft.work_location || ''} onChange={(e) => updateDraft({ work_location: e.target.value })} className="h-9 text-xs" placeholder="e.g. Head Office" />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Work Arrangement</label>
+                                    </FormField>
+                                    <FormField label="Work Arrangement">
                                       <Select value={draft.work_arrangement || '__unset__'} onValueChange={(v) => updateDraft({ work_arrangement: v === '__unset__' ? null : v })}>
                                         <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select arrangement" /></SelectTrigger>
                                         <SelectContent>
@@ -865,11 +949,10 @@ export default function JobProfilesPage() {
                                           ))}
                                         </SelectContent>
                                       </Select>
-                                    </div>
-                                    <div className="space-y-1.5 col-span-2">
-                                      <label className="text-[11px] font-semibold text-slate-500">Default Contract Template</label>
+                                    </FormField>
+                                    <FormField label="Default Contract Template">
                                       <Select value={draft.default_template_id || '__none__'} onValueChange={(v) => updateDraft({ default_template_id: v === '__none__' ? null : v })}>
-                                        <SelectTrigger className="h-9 text-xs w-[calc(50%-12px)]"><SelectValue placeholder="Use company default" /></SelectTrigger>
+                                        <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Use company default" /></SelectTrigger>
                                         <SelectContent>
                                           <SelectItem value="__none__" className="text-slate-400 italic">Use company default</SelectItem>
                                           {templates.map((t) => (
@@ -877,161 +960,195 @@ export default function JobProfilesPage() {
                                           ))}
                                         </SelectContent>
                                       </Select>
-                                    </div>
-                                    <div className="space-y-1.5 col-span-2">
-                                      <label className="text-[11px] font-semibold text-slate-500">Job Summary</label>
-                                      <Textarea
-                                        className="min-h-[80px] text-xs"
-                                        placeholder="A short summary of what this role does..."
-                                        value={draft.job_description || ''}
-                                        onChange={(e) => updateDraft({ job_description: e.target.value })}
-                                      />
-                                    </div>
+                                    </FormField>
                                   </div>
-                                </div>
+                                </SectionPanel>
 
-                                <div className="grid grid-cols-2 gap-6">
-                                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                                    <h3 className="text-sm font-bold text-slate-800 mb-4">Qualifications & Experience</h3>
-                                    <StringListEditor items={draft.requirements || []} onChange={(v) => updateDraft({ requirements: v })} placeholder="e.g. Bachelor's degree in Accounting" />
-                                  </div>
-                                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                                    <h3 className="text-sm font-bold text-slate-800 mb-4">Core Skills</h3>
-                                    <TagListEditor items={draft.skills || []} onChange={(v) => updateDraft({ skills: v })} placeholder="Type a skill, press Enter" badgeClassName="bg-blue-50 text-blue-700 hover:bg-blue-100" />
-                                  </div>
-                                </div>
+                                <SectionPanel title="Job Summary" description="This is the role purpose that can feed the job description appendix.">
+                                  <Textarea
+                                    className="min-h-[120px] text-xs"
+                                    placeholder="A short summary of what this role does..."
+                                    value={draft.job_description || ''}
+                                    onChange={(e) => updateDraft({ job_description: e.target.value })}
+                                  />
+                                </SectionPanel>
                               </div>
 
-                              {/* Middle: Snapshot (col-span-3) */}
-                              <div className="lg:col-span-3 flex flex-col gap-6">
-                                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                                  <div className="flex items-center gap-2 mb-5">
-                                    <FileCheck className="w-4 h-4 text-slate-400" />
-                                    <h3 className="text-sm font-bold text-slate-800">Employment Snapshot</h3>
-                                  </div>
+                              <div className="space-y-6">
+                                <SectionPanel title="Contract Readiness">
                                   <div className="space-y-3 text-xs">
                                     {[
-                                      { key: 'notice_period', label: 'Notice Period' },
-                                      { key: 'probation_period', label: 'Probation Period' },
-                                      { key: 'annual_leave_days', label: 'Annual Leave' },
-                                      { key: 'sick_leave_days', label: 'Sick Leave' },
-                                    ].map((row) => (
-                                      <div key={row.key} className="flex justify-between items-center gap-2">
-                                        <span className="text-slate-500 shrink-0">{row.label}</span>
-                                        <Input
-                                          value={draft.settings?.[row.key] || ''}
-                                          onChange={(e) => updateDraftSettings(row.key, e.target.value)}
-                                          className="h-7 text-xs w-24 text-right"
-                                          placeholder="Not set"
-                                        />
+                                      { label: 'Identity', done: !!(draft.job_title && draft.department && draft.job_level) },
+                                      { label: 'Employment rules', done: !!(draft.employment_type && draft.settings?.notice_period) },
+                                      { label: 'Working arrangement', done: !!(draft.work_arrangement && draft.settings?.working_days) },
+                                      { label: 'Clauses', done: clauseSelections.length > 0 },
+                                      { label: 'Template', done: !!previewTemplate },
+                                    ].map((item) => (
+                                      <div key={item.label} className="flex items-center justify-between gap-3">
+                                        <span className="text-slate-600">{item.label}</span>
+                                        <Badge variant="outline" className={cn("rounded-full border-transparent text-[10px]", item.done ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500")}>
+                                          {item.done ? 'Set' : 'Missing'}
+                                        </Badge>
                                       </div>
                                     ))}
-                                    <div className="flex justify-between items-center pt-1">
-                                      <span className="text-slate-500">Remote Work Allowed</span>
-                                      <span className="font-semibold text-slate-800">
-                                        {draft.work_arrangement === 'Remote' || draft.work_arrangement === 'Hybrid' ? 'Yes' : draft.work_arrangement === 'Office' ? 'No' : 'Not set'}
-                                      </span>
-                                    </div>
                                   </div>
-                                </div>
-                              </div>
+                                  <div className="mt-4 flex gap-2">
+                                    <Button variant="outline" size="sm" className="h-8 flex-1 text-xs" onClick={() => setDetailTab('preview')}>Preview</Button>
+                                    <Button size="sm" className="h-8 flex-1 text-xs bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setLinkModalOpen(true)}>Clauses</Button>
+                                  </div>
+                                </SectionPanel>
 
-                              {/* Right: Tags, Quick Actions, Equipment (col-span-2) */}
-                              <div className="lg:col-span-2 flex flex-col gap-6">
-                                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                                  <h3 className="text-sm font-bold text-slate-800 mb-4">Job Tags</h3>
-                                  <TagListEditor items={draft.tags || []} onChange={(v) => updateDraft({ tags: v })} placeholder="Add a tag" badgeClassName="bg-indigo-50 text-indigo-700 hover:bg-indigo-100" />
-                                </div>
+                                <SectionPanel title="Supporting Details" description="Useful context, but not the first thing users need to solve.">
+                                  <div className="space-y-5">
+                                    <FormField label="Tags">
+                                      <TagListEditor items={draft.tags || []} onChange={(v) => updateDraft({ tags: v })} placeholder="Add a tag" badgeClassName="bg-indigo-50 text-indigo-700 hover:bg-indigo-100" />
+                                    </FormField>
+                                    <FormField label="Equipment & Assets">
+                                      <TagListEditor items={draft.equipment || []} onChange={(v) => updateDraft({ equipment: v })} placeholder="Add an item" badgeClassName="bg-emerald-50 text-emerald-700 hover:bg-emerald-100" />
+                                    </FormField>
+                                  </div>
+                                </SectionPanel>
 
-                                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                                  <h3 className="text-sm font-bold text-slate-800 mb-4">Quick Actions</h3>
+                                <SectionPanel title="Quick Actions">
                                   <div className="space-y-3">
                                     <button onClick={handleDuplicate} className="flex items-center gap-3 text-xs text-slate-600 hover:text-blue-600 w-full font-medium">
-                                      <Copy className="h-4 w-4 text-slate-400" /> Duplicate Job Profile
+                                      <Copy className="h-4 w-4 text-slate-400" /> Duplicate profile
                                     </button>
                                     <button onClick={handleDownloadJobDescription} className="flex items-center gap-3 text-xs text-slate-600 hover:text-blue-600 w-full font-medium">
-                                      <Download className="h-4 w-4 text-slate-400" /> Download Job Description
-                                    </button>
-                                    <button onClick={() => setDetailTab('preview')} className="flex items-center gap-3 text-xs text-slate-600 hover:text-blue-600 w-full font-medium">
-                                      <FileText className="h-4 w-4 text-slate-400" /> Generate Contract Preview
+                                      <Download className="h-4 w-4 text-slate-400" /> Download job description
                                     </button>
                                   </div>
-                                </div>
-
-                                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                                  <h3 className="text-sm font-bold text-slate-800 mb-4">Equipment & Assets</h3>
-                                  <TagListEditor items={draft.equipment || []} onChange={(v) => updateDraft({ equipment: v })} placeholder="Add an item" badgeClassName="bg-emerald-50 text-emerald-700 hover:bg-emerald-100" />
-                                </div>
+                                </SectionPanel>
                               </div>
                             </div>
+                          </div>
+                        </TabsContent>
 
-                            {/* Linked Clauses Section */}
-                            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                               <div className="flex items-center gap-2 mb-6">
-                                 <h3 className="text-sm font-bold text-slate-800">Linked Clauses</h3>
-                                 <span className="text-[11px] text-slate-500 font-medium">Sections this profile has a clause selected for</span>
-                               </div>
-
-                               <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                                  {clauseSelections.slice(0, 5).map((sel) => (
-                                    <div key={sel.sectionKey} className="border border-slate-200 rounded-xl p-4 flex flex-col gap-3 hover:border-blue-300 transition-colors">
-                                      <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-blue-50 text-blue-600">
-                                        <FileSignature className="w-4 h-4" />
-                                      </div>
-                                      <div>
-                                        <p className="text-[10px] font-bold text-slate-800 uppercase tracking-wider mb-1">{sel.sectionTitle}</p>
-                                        <p className="text-xs font-semibold text-slate-700 truncate">{sel.clauseLabel}</p>
-                                      </div>
-                                      <div className="mt-auto flex justify-end">
-                                        <span className={cn("text-[9px] font-bold px-2 py-0.5 rounded-sm", sel.isDefault ? "text-emerald-600 bg-emerald-50" : "text-amber-600 bg-amber-50")}>{sel.isDefault ? 'Default' : 'Custom'}</span>
-                                      </div>
-                                    </div>
-                                  ))}
-
-                                  <div
-                                    className="border border-dashed border-slate-300 rounded-xl p-4 flex flex-col items-center justify-center gap-2 hover:border-blue-400 hover:bg-blue-50/50 transition-colors cursor-pointer"
-                                    onClick={() => setLinkModalOpen(true)}
-                                  >
-                                     <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-blue-50 text-blue-600 pointer-events-none">
-                                       <PlusCircle className="h-5 w-5" />
-                                     </Button>
-                                     <p className="text-xs font-semibold text-blue-600 text-center">Manage all {clauseSelections.length}<br/>linked clauses</p>
-                                  </div>
-                               </div>
-
-                               <div className="mt-6 flex items-center justify-between pt-4 border-t border-slate-100">
-                                 <div className="flex items-center gap-2 text-xs text-slate-500">
-                                   <AlertCircle className="w-4 h-4 text-blue-500" />
-                                   Sections without a selection here fall back to the department/company default clause.
-                                 </div>
-                                 <div className="flex items-center gap-3">
-                                   <Button variant="outline" size="sm" className="h-9 px-4 rounded-full font-semibold" onClick={() => setDetailTab('preview')}>Preview Contract</Button>
-                                   <Button size="sm" className="h-9 px-6 rounded-full font-semibold bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setLinkModalOpen(true)}>
-                                     Manage Linked Clauses
-                                   </Button>
-                                 </div>
-                               </div>
-                            </div>
+                        <TabsContent value="requirements" className="m-0 p-8">
+                          <div className="max-w-[980px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <SectionPanel title="Qualifications & Experience" description="Recruitment-facing requirements; these can appear in the job description but should not drive clause selection unless you later add rules for them.">
+                              <StringListEditor items={draft.requirements || []} onChange={(v) => updateDraft({ requirements: v })} placeholder="e.g. Bachelor's degree in Computer Science" />
+                            </SectionPanel>
+                            <SectionPanel title="Core Skills" description="Short skill tags for scanning and filtering.">
+                              <TagListEditor items={draft.skills || []} onChange={(v) => updateDraft({ skills: v })} placeholder="Type a skill, press Enter" badgeClassName="bg-blue-50 text-blue-700 hover:bg-blue-100" />
+                            </SectionPanel>
                           </div>
                         </TabsContent>
 
                         <TabsContent value="responsibilities" className="m-0 p-8">
-                          <div className="bg-white dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 max-w-2xl">
-                            <h3 className="text-sm font-bold text-slate-800 mb-4">Key Responsibilities</h3>
+                          <SectionPanel title="Key Responsibilities" description="Contract appendix content: the concrete duties attached to this role." className="max-w-2xl">
                             <StringListEditor items={draft.key_responsibilities || []} onChange={(v) => updateDraft({ key_responsibilities: v })} placeholder="e.g. Maintain accurate financial records" />
+                          </SectionPanel>
+                        </TabsContent>
+
+                        <TabsContent value="employment_rules" className="m-0 p-8">
+                          <div className="max-w-[980px] mx-auto space-y-6">
+                            <SectionPanel title="Employment & Termination" description="These fields should influence probation, notice and termination clauses.">
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <FormField label="Employment Type">
+                                  <Select value={draft.employment_type || '__unset__'} onValueChange={(v) => updateDraft({ employment_type: v === '__unset__' ? null : v })}>
+                                    <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select type" /></SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>
+                                      {withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, draft.employment_type).map((opt) => (
+                                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </FormField>
+                                <SettingSelect label="Probation Period" settingKey="probation_period" options={PROBATION_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Notice Period" settingKey="notice_period" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Probation Notice" settingKey="probation_notice" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Confirmation Required" settingKey="confirmation_required" options={['Yes', 'No']} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingInput label="Termination Reason Rule" settingKey="termination_reason" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. According to contract and applicable law" />
+                              </div>
+                            </SectionPanel>
+
+                            <SectionPanel title="Contractual Policies" description="Use these as clause-selection signals; the clause wording still lives in the Clause Library.">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <SettingSwitch label="Confidentiality" settingKey="confidentiality_policy" settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSwitch label="Intellectual Property" settingKey="intellectual_property_policy" settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSwitch label="Data Protection" settingKey="data_protection_policy" settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSwitch label="Code of Conduct" settingKey="code_of_conduct_policy" settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSwitch label="Disciplinary Policy" settingKey="disciplinary_policy" settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSwitch label="Company Property" settingKey="company_property_policy" settings={draft.settings || {}} onChange={updateDraftSettings} />
+                              </div>
+                            </SectionPanel>
                           </div>
                         </TabsContent>
 
-                        <TabsContent value="employment_rules" className="m-0 p-8 space-y-4 max-w-2xl">
-                          <SettingsEditorCard title="Employment Type & Termination" hints={EMPLOYMENT_RULES_HINTS} settings={draft.settings || {}} onChange={updateDraftSettingsObject} />
+                        <TabsContent value="working_arrangement" className="m-0 p-8">
+                          <div className="max-w-[980px] mx-auto space-y-6">
+                            <SectionPanel title="Normal Schedule" description="The basic working pattern that feeds working-hours and remote-work clauses.">
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <FormField label="Work Mode">
+                                  <Select value={draft.work_arrangement || '__unset__'} onValueChange={(v) => updateDraft({ work_arrangement: v === '__unset__' ? null : v })}>
+                                    <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select arrangement" /></SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>
+                                      {withCurrentValue(WORK_ARRANGEMENT_OPTIONS, draft.work_arrangement).map((opt) => (
+                                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </FormField>
+                                <SettingSelect label="Working Days" settingKey="working_days" options={['Monday-Friday', 'Monday-Saturday', 'Shift Based', 'Flexible']} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Rest Days" settingKey="rest_days" options={['Saturday & Sunday', 'Sunday', 'As rostered', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingInput label="Start Time" settingKey="start_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="08:00" type="time" />
+                                <SettingInput label="End Time" settingKey="end_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="17:00" type="time" />
+                                <SettingSelect label="Break" settingKey="break_duration" options={['30 Minutes', '45 Minutes', '1 Hour', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                              </div>
+                            </SectionPanel>
+
+                            <SectionPanel title="Remote, Weekend & Overtime Rules">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <SettingSwitch label="Remote Work Allowed" settingKey="remote_work_allowed" settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Remote Days" settingKey="remote_days" options={['Up to 1 day per week', 'Up to 2 days per week', 'Up to 3 days per week', 'As approved']} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Weekend Work" settingKey="weekend_work" options={['No', 'Occasional', 'Shift Based', 'As required']} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSwitch label="Weekend Approval Required" settingKey="weekend_approval_required" settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSwitch label="Overtime Eligible" settingKey="overtime_eligible" settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSwitch label="Overtime Approval Required" settingKey="overtime_approval_required" settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Overtime Compensation" settingKey="overtime_compensation" options={['According to Company Policy', 'Paid', 'Time off in lieu', 'Not applicable']} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                              </div>
+                            </SectionPanel>
+                          </div>
                         </TabsContent>
 
-                        <TabsContent value="working_arrangement" className="m-0 p-8 space-y-4 max-w-2xl">
-                          <SettingsEditorCard title="Working Hours" hints={WORKING_ARRANGEMENT_HINTS} settings={draft.settings || {}} onChange={updateDraftSettingsObject} />
-                        </TabsContent>
+                        <TabsContent value="benefits" className="m-0 p-8">
+                          <div className="max-w-[980px] mx-auto space-y-6">
+                            <SectionPanel title="Salary Structure" description="Set a role range here; the actual employee salary can still be entered on the offer/contract.">
+                              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                <SettingSelect label="Currency" settingKey="salary_currency" options={['KES', 'USD', 'GBP', 'EUR']} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingInput label="Minimum" settingKey="salary_min" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="100000" />
+                                <SettingInput label="Maximum" settingKey="salary_max" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="180000" />
+                                <SettingSelect label="Pay Frequency" settingKey="payment_frequency" options={PAYMENT_FREQUENCY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                              </div>
+                            </SectionPanel>
 
-                        <TabsContent value="benefits" className="m-0 p-8 space-y-4 max-w-2xl">
-                          <SettingsEditorCard title="Compensation, Benefits & Leave" hints={BENEFITS_HINTS} settings={draft.settings || {}} onChange={updateDraftSettingsObject} />
+                            <SectionPanel title="Allowances & Benefits">
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <SettingSelect label="Medical Cover" settingKey="medical_cover" options={['No', 'Standard Company Scheme', 'Enhanced Scheme', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Housing Allowance" settingKey="housing_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Transport Allowance" settingKey="transport_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Telephone Allowance" settingKey="telephone_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Internet Allowance" settingKey="internet_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Meal Allowance" settingKey="meal_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Pension" settingKey="pension_scheme" options={['No', 'Applicable', 'After Confirmation', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Bonus" settingKey="bonus_scheme" options={['No', 'Performance-Based', 'Discretionary', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                              </div>
+                            </SectionPanel>
+
+                            <SectionPanel title="Leave">
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <SettingSelect label="Annual Leave" settingKey="annual_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Sick Leave" settingKey="sick_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Maternity Leave" settingKey="maternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Paternity Leave" settingKey="paternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingSelect label="Compassionate Leave" settingKey="compassionate_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                                <SettingInput label="Payment Day" settingKey="payment_day" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Last working day" />
+                              </div>
+                            </SectionPanel>
+                          </div>
                         </TabsContent>
 
                         <TabsContent value="contract_rules" className="m-0 p-8 space-y-4 max-w-2xl">

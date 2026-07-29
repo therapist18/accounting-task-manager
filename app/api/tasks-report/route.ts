@@ -130,6 +130,23 @@ export async function GET(req: NextRequest) {
       subDeptNameMap.set(String(s.id), s.name || "")
     );
 
+    // Officer/Manager tabs on the web Reports module aren't built from whoever happens to
+    // have a task right now — they're the department's actual roster, sourced from
+    // tm_role_assignments (see lib/shared-user-assignment-service.ts's getDepartmentUsers /
+    // userService.getAllUserData), so a newly-assigned officer with zero current tasks
+    // still shows up. Mirror that here instead of only surfacing officers/managers who
+    // already appear in this department's tasks.
+    const { data: roleAssignments } = await supabase
+      .from("tm_role_assignments")
+      .select("role, user_id, department_id")
+      .eq("department_id", Number(deptId));
+    const officerRosterIds = new Set<string>();
+    const managerRosterIds = new Set<string>();
+    (roleAssignments || []).forEach((a: any) => {
+      if (a.role === "officer") officerRosterIds.add(String(a.user_id));
+      if (a.role === "manager") managerRosterIds.add(String(a.user_id));
+    });
+
     let taskQuery = supabase
       .from("tm_tasks")
       .select(`
@@ -470,12 +487,30 @@ export async function GET(req: NextRequest) {
       cg.tasks.push(t);
     }
 
+    // Add roster members with no current tasks as zero-count groups — matches the web
+    // Reports module always listing the full department roster, not just whoever's busy
+    // right now.
+    officerRosterIds.forEach((id) => {
+      if (!officerMap.has(id)) {
+        officerMap.set(id, { id, name: usersMap.get(id) || "Unknown", count: 0, tasks: [] });
+      }
+    });
+    managerRosterIds.forEach((id) => {
+      if (!managerMap.has(id)) {
+        managerMap.set(id, { id, name: usersMap.get(id) || "Unknown", count: 0, tasks: [] });
+      }
+    });
+
     const clean = (arr: any[]) =>
       arr.map(({ _officerId, _managerId, ...rest }: any) => rest);
 
     return NextResponse.json({
       report: { id: report.id, name: report.name },
       department: department ? { name: department.name } : null,
+      // Full sub-unit roster for this department (not just sub-units that happen to have a
+      // task in the current fetch) — mirrors activeSubDepartments in the web Reports module,
+      // which reads straight off tm_departments.tm_subdepartments.
+      subDepartments: Array.from(subDeptNameMap.entries()).map(([id, name]) => ({ id, name })),
       summary: {
         total: taskList.length,
         byOfficer: Array.from(officerMap.values()).map((g) => ({
