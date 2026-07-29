@@ -159,10 +159,6 @@ export default function ReportsPage() {
   const [activeTaskManagerTab, setActiveTaskManagerTab] = useState<string>("all");
   const [taskManagerFilterMode, setTaskManagerFilterMode] = useState<'current' | 'history'>('current');
   const [availableTaskManagers, setAvailableTaskManagers] = useState<any[]>([]);
-  const [selectedClients, setSelectedClients] = useState<string[]>([]);
-  const [activeClientTab, setActiveClientTab] = useState<string>("all");
-  const [clientFilterMode, setClientFilterMode] = useState<'current' | 'history'>('current');
-  const [availableClients, setAvailableClients] = useState<any[]>([]);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [view, setView] = useState<'standard' | 'transposed'>('standard');
   const [showTime, setShowTime] = useState(false);
@@ -174,7 +170,7 @@ export default function ReportsPage() {
   const [showDocRequirementsColumns, setShowDocRequirementsColumns] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>([]);
   const [expandedStageColumns, setExpandedStageColumns] = useState<Set<string>>(new Set());
-  const [activePerspective, setActivePerspective] = useState<'overview' | 'officers' | 'managers' | 'clients' | 'companies'>('overview');
+  const [activePerspective, setActivePerspective] = useState<'overview' | 'officers' | 'managers' | 'clients'>('overview');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [reportDocDefaults, setReportDocDefaults] = useState<any[]>([]);
   const [expectedTimeByJobLevel, setExpectedTimeByJobLevel] = useState<Map<string, number>>(new Map());
@@ -447,53 +443,49 @@ export default function ReportsPage() {
     fetchReportDocDefaults();
   }, [activeDeptId, activeSubDeptIds, activeClassId, activeSubClassId, tasks]);
 
-  const getTaskCompanyParticipant = useCallback((task: any) => {
-    return task.participants_details?.find((p: any) => {
-      const role = p.role?.toString().toLowerCase() || '';
-      const type = p.type?.toString().toLowerCase() || '';
-      return type === 'company' || role.includes('sponsor') || role.includes('company');
-    });
-  }, []);
-
-  useEffect(() => {
-    const clientsMap = new Map<string, any>();
-    tasks.forEach(task => {
-      const company = getTaskCompanyParticipant(task);
-      if (company && company.name) {
-        if (!clientsMap.has(company.name)) {
-          clientsMap.set(company.name, { id: company.name, name: company.name, full_name: company.name });
-        }
-      }
-    });
-    setAvailableClients(Array.from(clientsMap.values()));
-  }, [tasks, getTaskCompanyParticipant]);
-
   const effectiveOfficerIds = useMemo(() => Array.from(new Set(activeOfficerTab !== 'all' && activeOfficerTab !== '__unallocated__' ? [activeOfficerTab, ...selectedOfficers] : selectedOfficers)), [activeOfficerTab, selectedOfficers]);
   const effectiveTaskManagerIds = useMemo(() => Array.from(new Set(activeTaskManagerTab !== 'all' && activeTaskManagerTab !== '__unallocated__' ? [activeTaskManagerTab, ...selectedTaskManagers] : selectedTaskManagers)), [activeTaskManagerTab, selectedTaskManagers]);
-  const effectiveClientIds = useMemo(() => Array.from(new Set(activeClientTab !== 'all' ? [activeClientTab, ...selectedClients] : selectedClients)), [activeClientTab, selectedClients]);
 
-  const getCurrentStageTracking = useCallback((task: any) => {
+  // Rich "is this stage actually done" check — mirrors isStageCompleted inside
+  // getCurrentStageStatus (tasks/overall-view/tableUtils.tsx), which is what actually drives
+  // the visible "Current Stage Follow-Up" column. The old officer/client/manager checks here
+  // used a narrower test (literal stageData.status === 'completed') that let stages finished
+  // via a date/document, without ever getting an explicit 'completed' status written, keep
+  // counting as "current" long after the task had moved on — e.g. an officer's stage showing
+  // as the task's current owner while the visible column already reads "BCL"/"Client".
+  const isStageCompleted = useCallback((stage: any, task: any) => {
+    const stageData = task?.stages?.[stage?.id];
+    if (!stageData) return false;
+    const requiresDocuments = stage.documents?.length > 0;
+    if (stageData.status === 'completed' || stageData.completedAt || (stageData.documents && Object.keys(stageData.documents).length > 0)) return true;
+    if (!requiresDocuments && stageData.date) return true;
+    if (requiresDocuments && stageData.documents) {
+      const hasUploadedDocs = Object.values(stageData.documents).some((doc: any) => doc.status === 'uploaded' || doc.status === 'linked');
+      if (hasUploadedDocs) return true;
+    }
+    return false;
+  }, []);
+
+  // The task's single, real current stage — same "highest completed index, then next
+  // applicable stage" algorithm as getCurrentStageStatus, so "current" means the same thing
+  // here as it does in the visible Current Stage Follow-Up column. This is now the one
+  // source of truth for "which follow_up bucket (officer/BCL/client) is this task in right
+  // now" — officer/manager/client perspective filtering all key off this single pointer
+  // instead of three separate ad-hoc stage scans that could (and did) disagree with each
+  // other and with the displayed column.
+  const getCanonicalCurrentStage = useCallback((task: any) => {
     const applicableStages = [...stages].filter(stage => isStageApplicableToTask(stage, task, departments)).sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-    let latest: { stage: any; handledAt: Date } | null = null;
-    applicableStages.forEach(stage => {
-      const stageData = task?.stages?.[stage?.id];
-      if (!stageData) return;
-      const directDate = parseDateSafe(stageData.completedAt || stageData.skippedAt || stageData.date_completed || stageData.date || stageData.lastUpdated || null);
-      if (directDate) {
-        if (!latest || directDate.getTime() > latest.handledAt.getTime()) latest = { stage, handledAt: directDate };
-      }
-    });
-    return latest;
-  }, [stages, departments]);
+    if (!applicableStages.length) return null;
+    let highestCompletedIndex = -1;
+    applicableStages.forEach((stage, i) => { if (isStageCompleted(stage, task)) highestCompletedIndex = i; });
+    if (highestCompletedIndex === -1) return applicableStages[0];
+    return applicableStages[highestCompletedIndex + 1] || applicableStages[highestCompletedIndex];
+  }, [stages, departments, isStageCompleted]);
 
   const getCurrentOfficerStage = useCallback((task: any) => {
-    const applicableStages = [...stages].filter(stage => isStageApplicableToTask(stage, task, departments)).sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-    return applicableStages.find(stage => {
-      const stageData = task?.stages?.[stage.id];
-      const status = stageData?.status?.toString().toLowerCase();
-      return stageData && stage.follow_up?.toLowerCase() === 'officer' && status !== 'completed' && status !== 'skipped';
-    }) || null;
-  }, [stages, departments]);
+    const current = getCanonicalCurrentStage(task);
+    return current && current.follow_up?.toLowerCase() === 'officer' ? current : null;
+  }, [getCanonicalCurrentStage]);
 
   const getStageOfficerIds = useCallback((task: any, mode: 'current' | 'history' = 'current') => {
     const normalizeIds = (ids: any) => Array.isArray(ids) ? ids.map(id => id?.toString()).filter(Boolean) : [];
@@ -501,10 +493,18 @@ export default function ReportsPage() {
       const currentOfficerStage = getCurrentOfficerStage(task);
       return normalizeIds(currentOfficerStage ? task?.stages?.[currentOfficerStage.id]?.officer_ids : []);
     }
+    // 'history' = "Tasks Handled" (payroll basis): officers get task-credit for a *completed*
+    // officer stage, not merely having been attached to one at some point regardless of
+    // whether it ever finished — an open/pending assignment isn't billable work yet, that's
+    // what 'current' mode is for.
     const officerIds = new Set<string>();
-    Object.values(task?.stages || {}).forEach((stageData: any) => normalizeIds(stageData?.officer_ids).forEach(id => officerIds.add(id)));
+    stages.forEach((stage: any) => {
+      if (stage.follow_up?.toLowerCase() !== 'officer') return;
+      if (!isStageCompleted(stage, task)) return;
+      normalizeIds(task?.stages?.[stage.id]?.officer_ids).forEach(id => officerIds.add(id));
+    });
     return Array.from(officerIds);
-  }, [getCurrentOfficerStage]);
+  }, [getCurrentOfficerStage, stages, isStageCompleted]);
 
   const taskHasStageOfficer = useCallback((task: any, officerIds: string[], mode: 'current' | 'history') => {
     if (!officerIds.length) return true;
@@ -512,96 +512,179 @@ export default function ReportsPage() {
   }, [getStageOfficerIds]);
 
   const isTaskWithClient = useCallback((task: any) => {
-    const tracking = getCurrentStageTracking(task);
-    return tracking?.stage?.follow_up?.toString().toLowerCase() === 'client';
-  }, [getCurrentStageTracking]);
+    const current = getCanonicalCurrentStage(task);
+    return current?.follow_up?.toString().toLowerCase() === 'client';
+  }, [getCanonicalCurrentStage]);
 
+  // Department/subdepartment/class/subclass scope only — the base pool everything else
+  // (status tab badges, officer/manager/client badges, and the rows actually rendered)
+  // narrows down from.
+  const deptScopedTasks = useMemo(() => tasks.filter(task => {
+    if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
+    if (activeSubDeptIds.length > 0 && !activeSubDeptIds.includes(task.subdepartment_id?.toString())) return false;
+    if (activeClassId !== 'all' && task.class_id?.toString() !== activeClassId) return false;
+    if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
+    return true;
+  }), [tasks, activeDeptId, activeSubDeptIds, activeClassId, activeSubClassId]);
+
+  const matchesActiveStatus = useCallback((task: any) => {
+    if (activeStatus === 'wip' && ['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'].includes(task.status)) return false;
+    if (activeStatus === 'write_up_completed' && task.status !== 'write_up_completed') return false;
+    if (activeStatus === 'endorsed' && task.status !== 'endorsed') return false;
+    if (activeStatus === 'cancelled' && task.status !== 'cancel') return false;
+    return true;
+  }, [activeStatus]);
+
+  // + the active StatusFilterBar tab. This is the pool officer/manager/client badge counts
+  // are computed from — deliberately NOT narrowed by which specific officer/manager/client
+  // tab is currently selected, so selecting one tab doesn't zero out every other tab's count.
+  const statusScopedTasks = useMemo(() => deptScopedTasks.filter(matchesActiveStatus), [deptScopedTasks, matchesActiveStatus]);
+
+  // + the active perspective's own tab/selection — this is what actually gets rendered as rows.
   const tasksByFilters = useMemo(() => {
-    return tasks.filter(task => {
-      if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
-      if (activeSubDeptIds.length > 0 && !activeSubDeptIds.includes(task.subdepartment_id?.toString())) return false;
-      if (activeClassId !== 'all' && task.class_id?.toString() !== activeClassId) return false;
-      if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
+    return statusScopedTasks.filter(task => {
       if (activePerspective === 'officers') {
-        if (activeOfficerTab === '__unallocated__' && getStageOfficerIds(task, 'current').length !== 0) return false;
-        else if (effectiveOfficerIds.length > 0 && !taskHasStageOfficer(task, effectiveOfficerIds, officerFilterMode)) return false;
+        // 'current' mode is scoped to tasks actually AT an officer stage right now — symmetric
+        // with managers' BCL gate below. A task at a BCL/Client stage isn't "Officer
+        // Unallocated", it simply isn't in the Officers perspective at all right now.
+        // 'history' mode has no such gate: a task can have moved on to BCL/Client while still
+        // counting toward an officer's completed-stage history (payroll basis).
+        if (officerFilterMode === 'current') {
+          if (!getCurrentOfficerStage(task)) return false;
+          if (activeOfficerTab === '__unallocated__') {
+            if (getStageOfficerIds(task, 'current').length !== 0) return false;
+          } else if (effectiveOfficerIds.length > 0 && !taskHasStageOfficer(task, effectiveOfficerIds, 'current')) return false;
+        } else {
+          if (activeOfficerTab === '__unallocated__') {
+            if (getStageOfficerIds(task, 'history').length !== 0) return false;
+          } else if (effectiveOfficerIds.length > 0 && !taskHasStageOfficer(task, effectiveOfficerIds, 'history')) return false;
+        }
       }
       if (activePerspective === 'managers') {
-        const tracking = getCurrentStageTracking(task);
+        // Scoped to tasks actually AT a BCL stage right now — that's the manager's court.
+        if (getCanonicalCurrentStage(task)?.follow_up?.toLowerCase() !== 'bcl') return false;
         if (activeTaskManagerTab === '__unallocated__') {
-          if (!tracking || tracking.stage.follow_up !== 'BCL' || task.task_manager?.id) return false;
+          if (task.task_manager?.id) return false;
         } else if (effectiveTaskManagerIds.length > 0) {
-          if (!tracking || tracking.stage.follow_up !== 'BCL' || !task.task_manager?.id || !effectiveTaskManagerIds.includes(task.task_manager.id.toString())) return false;
+          if (!task.task_manager?.id || !effectiveTaskManagerIds.includes(task.task_manager.id.toString())) return false;
         }
       }
       if (activePerspective === 'clients' && !isTaskWithClient(task)) return false;
-      if (activePerspective === 'companies' && effectiveClientIds.length > 0) {
-        const company = getTaskCompanyParticipant(task);
-        if (!company || !company.name || !effectiveClientIds.includes(company.name)) return false;
-      }
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptIds, activeClassId, activeSubClassId, activePerspective, activeOfficerTab, activeTaskManagerTab, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, effectiveClientIds, clientFilterMode, stages, getCurrentStageTracking, taskHasStageOfficer, isTaskWithClient, getTaskCompanyParticipant, getStageOfficerIds]);
+  }, [statusScopedTasks, activePerspective, activeOfficerTab, activeTaskManagerTab, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, getCanonicalCurrentStage, getCurrentOfficerStage, taskHasStageOfficer, isTaskWithClient, getStageOfficerIds]);
 
-  const allTasksCount = useMemo(() => tasksByFilters.length, [tasksByFilters]);
-  const wipTasksCount = useMemo(() => tasksByFilters.filter(task => !['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'].includes(task.status)).length, [tasksByFilters]);
-  const writeUpCompletedCount = useMemo(() => tasksByFilters.filter(t => t.status === 'write_up_completed').length, [tasksByFilters]);
-  const endorsedCount = useMemo(() => tasksByFilters.filter(t => t.status === 'endorsed').length, [tasksByFilters]);
-  const cancelledCount = useMemo(() => tasksByFilters.filter(t => t.status === 'cancel').length, [tasksByFilters]);
+  // StatusFilterBar's own tab badges: totals per status, unaffected by which status tab or
+  // which officer/manager/client tab is currently selected — sourced from deptScopedTasks,
+  // not statusScopedTasks/tasksByFilters.
+  const allTasksCount = useMemo(() => deptScopedTasks.length, [deptScopedTasks]);
+  const wipTasksCount = useMemo(() => deptScopedTasks.filter(task => !['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'].includes(task.status)).length, [deptScopedTasks]);
+  const writeUpCompletedCount = useMemo(() => deptScopedTasks.filter(t => t.status === 'write_up_completed').length, [deptScopedTasks]);
+  const endorsedCount = useMemo(() => deptScopedTasks.filter(t => t.status === 'endorsed').length, [deptScopedTasks]);
+  const cancelledCount = useMemo(() => deptScopedTasks.filter(t => t.status === 'cancel').length, [deptScopedTasks]);
 
+  // Respects officerFilterMode so the tab badges always match what clicking the tab actually
+  // shows: 'current' = Report A (current basket, scoped to tasks AT an officer stage right
+  // now — same isOfficerStage gate as tasksByFilters), 'history' = Report B (tasks handled —
+  // completed officer-stage ownership, the payroll basis, no stage-position gate).
   const officerTaskCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 };
+    const pool = officerFilterMode === 'current'
+      ? statusScopedTasks.filter(t => getCurrentOfficerStage(t) !== null)
+      : statusScopedTasks;
     for (const o of availableOfficers) {
-      const oTasks = tasksByFilters.filter(t => getStageOfficerIds(t, 'current').includes(o.id.toString()));
+      const oTasks = pool.filter(t => getStageOfficerIds(t, officerFilterMode).includes(o.id.toString()));
       counts[o.id.toString()] = oTasks.length;
       counts.all += oTasks.length;
     }
-    const unallocated = tasksByFilters.filter(t => getStageOfficerIds(t, 'current').length === 0);
+    const unallocated = pool.filter(t => getStageOfficerIds(t, officerFilterMode).length === 0);
     counts.__unallocated__ = unallocated.length;
     counts.all += unallocated.length;
     return counts;
-  }, [tasksByFilters, availableOfficers, getStageOfficerIds]);
+  }, [statusScopedTasks, availableOfficers, getStageOfficerIds, officerFilterMode, getCurrentOfficerStage]);
 
+  // Scoped to tasks AT a BCL stage right now — same gate as tasksByFilters, so this badge
+  // never disagrees with what clicking the tab actually shows (it used to: a manager's badge
+  // counted every task ever assigned to them regardless of current stage, while the rows
+  // shown after clicking their tab were already BCL-gated).
   const taskManagerTaskCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 };
+    const pool = statusScopedTasks.filter(t => getCanonicalCurrentStage(t)?.follow_up?.toLowerCase() === 'bcl');
     for (const tm of availableTaskManagers) {
-      const tmTasks = tasksByFilters.filter(t => t.task_manager?.id?.toString() === tm.id.toString());
+      const tmTasks = pool.filter(t => t.task_manager?.id?.toString() === tm.id.toString());
       counts[tm.id.toString()] = tmTasks.length;
       counts.all += tmTasks.length;
     }
-    const unallocated = tasksByFilters.filter(t => !t.task_manager?.id);
+    const unallocated = pool.filter(t => !t.task_manager?.id);
     counts.__unallocated__ = unallocated.length;
     counts.all += unallocated.length;
     return counts;
-  }, [tasksByFilters, availableTaskManagers]);
+  }, [statusScopedTasks, availableTaskManagers, getCanonicalCurrentStage]);
 
-  const clientTaskCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: 0 };
-    for (const c of availableClients) {
-      const cTasks = tasksByFilters.filter(t => {
-        const company = getTaskCompanyParticipant(t);
-        return company && company.name === c.name;
-      });
-      counts[c.name] = cTasks.length;
-      counts.all += cTasks.length;
+  // Clients has no company sub-tabs — it's a single perspective whose purpose is "tasks
+  // currently sitting on a 'client' follow_up stage", so this is just a plain count for the
+  // perspective switcher's badge, not a per-entity breakdown.
+  const clientsAwaitingCount = useMemo(() => statusScopedTasks.filter(t => isTaskWithClient(t)).length, [statusScopedTasks, isTaskWithClient]);
+
+  // Diagnostic logging to compare against /api/tasks-report's server-side console output for
+  // the same department — that route mirrors this filtering logic, and the two have been
+  // observed to disagree on officer/manager tallies for real data. Logged once whenever the
+  // underlying task/stage set actually changes, not on every render.
+  useEffect(() => {
+    if (!stages.length) return;
+    console.log(
+      '[reports] stages=%d %o',
+      stages.length,
+      [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0)).map(s => ({ id: s.id, name: s.name, follow_up: s.follow_up, order_num: s.order_num }))
+    );
+  }, [stages]);
+
+  useEffect(() => {
+    if (!statusScopedTasks.length) return;
+    // Deliberately based on statusScopedTasks, not tasksByFilters — the latter is narrowed by
+    // whichever officer/manager/client tab is currently selected, which would reintroduce the
+    // exact "other tabs lose their count" bug into this diagnostic itself.
+    const withOfficerId = statusScopedTasks.filter(t => getStageOfficerIds(t, 'current').length > 0).length;
+    const withRawOfficerIdColumn = statusScopedTasks.filter(t => t.officer_id != null).length;
+    const withManagerId = statusScopedTasks.filter(t => !!t.task_manager?.id).length;
+    const withRawTaskManagerIdColumn = statusScopedTasks.filter(t => t.task_manager_id != null).length;
+    const awaitingClient = statusScopedTasks.filter(t => isTaskWithClient(t)).length;
+
+    console.log(
+      '[reports] deptId=%s subDeptIds=%o activeStatus=%s tasks=%d (rendered=%d) withOfficerId(current-stage)=%d withRawOfficerIdColumn=%d withManagerId(participant)=%d withRawTaskManagerIdColumn=%d awaitingClient=%d',
+      activeDeptId, activeSubDeptIds, activeStatus, statusScopedTasks.length, tasksByFilters.length,
+      withOfficerId, withRawOfficerIdColumn, withManagerId, withRawTaskManagerIdColumn, awaitingClient
+    );
+    console.log(
+      '[reports] officerTaskCounts=%o taskManagerTaskCounts=%o clientsAwaitingCount=%o',
+      officerTaskCounts, taskManagerTaskCounts, clientsAwaitingCount
+    );
+
+    // Deep-dive a single task so its raw stage data / resolved fields can be diffed directly
+    // against the API's "sample task.stages for task id=..." log line for the same task.
+    const sampleId = statusScopedTasks.some(t => String(t.id) === '1302') ? '1302' : String(statusScopedTasks[0]?.id ?? '');
+    const sample = statusScopedTasks.find(t => String(t.id) === sampleId);
+    if (sample) {
+      const currentOfficerStage = getCurrentOfficerStage(sample);
+      console.log(
+        '[reports] sample task id=%s officer_id=%o task_manager_id=%o task_manager(participant)=%o currentOfficerStage=%o stageOfficerIds(current)=%o isTaskWithClient=%o stages=%s',
+        sample.id,
+        sample.officer_id,
+        sample.task_manager_id,
+        sample.task_manager,
+        currentOfficerStage ? { id: currentOfficerStage.id, name: currentOfficerStage.name, follow_up: currentOfficerStage.follow_up } : null,
+        getStageOfficerIds(sample, 'current'),
+        isTaskWithClient(sample),
+        JSON.stringify(sample.stages).slice(0, 2000)
+      );
     }
-    return counts;
-  }, [tasksByFilters, availableClients, getTaskCompanyParticipant]);
+  }, [statusScopedTasks, tasksByFilters, stages, activeDeptId, activeSubDeptIds, activeStatus, officerTaskCounts, taskManagerTaskCounts, clientsAwaitingCount, getStageOfficerIds, isTaskWithClient, getCurrentOfficerStage]);
 
   const searchedTasks = useMemo(() => {
-    let filtered = tasksByFilters.filter(task => {
-      if (activeStatus === 'wip' && ['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'].includes(task.status)) return false;
-      if (activeStatus === 'write_up_completed' && task.status !== 'write_up_completed') return false;
-      if (activeStatus === 'endorsed' && task.status !== 'endorsed') return false;
-      if (activeStatus === 'cancelled' && task.status !== 'cancel') return false;
-      return true;
-    });
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      filtered = filtered.filter(t => t.id.toString().includes(q) || (t.applicant_name && t.applicant_name.toLowerCase().includes(q)) || (t.company_name && t.company_name.toLowerCase().includes(q)) || (companies.get(t.company_id)?.name?.toLowerCase().includes(q)));
-    }
-    return filtered;
-  }, [tasksByFilters, activeStatus, searchQuery, companies]);
+    if (!searchQuery) return tasksByFilters;
+    const q = searchQuery.toLowerCase();
+    return tasksByFilters.filter(t => t.id.toString().includes(q) || (t.applicant_name && t.applicant_name.toLowerCase().includes(q)) || (t.company_name && t.company_name.toLowerCase().includes(q)) || (companies.get(t.company_id)?.name?.toLowerCase().includes(q)));
+  }, [tasksByFilters, searchQuery, companies]);
 
   function checkStageApplicableForTask(stage: any, task: any): boolean {
     return isStageApplicableToTask(stage, task, departments);
@@ -1452,7 +1535,7 @@ export default function ReportsPage() {
             : activeStatus === 'cancelled' ? 'Cancelled'
               : activeStatus;
     const dateStr = format(new Date(), 'dd MMM yyyy');
-    const reportTitle = reportType === 'officer' ? 'Officer Report'
+    const reportTitle = reportType === 'officer' ? (officerFilterMode === 'history' ? 'Officer Report — Tasks Handled' : 'Officer Report')
       : reportType === 'manager' ? 'Manager Report'
         : 'Client Follow-Up Report';
     const accentHex = reportType === 'officer' ? '2563EB' : reportType === 'manager' ? '7C3AED' : 'EA580C';
@@ -1461,18 +1544,29 @@ export default function ReportsPage() {
     const groups: Group[] = [];
 
     if (reportType === 'officer') {
+      // Respects officerFilterMode: 'current' exports the current-basket Officer Report,
+      // scoped to tasks actually AT an officer stage right now (symmetric with the manager
+      // export's BCL gate below) — 'history' exports Tasks Handled (completed officer-stage
+      // ownership, no stage-position gate) — the report admin would actually run for
+      // officer payroll.
+      const officerPool = officerFilterMode === 'current'
+        ? filteredByNARows.filter(t => getCurrentOfficerStage(t) !== null)
+        : filteredByNARows;
       for (const o of availableOfficers) {
-        const oTasks = filteredByNARows.filter(t => getStageOfficerIds(t, 'current').includes(o.id));
+        const oTasks = officerPool.filter(t => getStageOfficerIds(t, officerFilterMode).includes(o.id.toString()));
         if (oTasks.length > 0) groups.push({ name: o.full_name || o.name || o.displayName || `Officer ${o.id}`, tasks: oTasks });
       }
-      const unallocated = filteredByNARows.filter(t => getStageOfficerIds(t, 'current').length === 0);
+      const unallocated = officerPool.filter(t => getStageOfficerIds(t, officerFilterMode).length === 0);
       if (unallocated.length > 0) groups.push({ name: 'Unallocated', tasks: unallocated });
     } else if (reportType === 'manager') {
+      // Scoped to tasks AT a BCL stage right now — the manager's court, same gate as the
+      // interactive Managers perspective.
+      const managerPool = filteredByNARows.filter(t => getCanonicalCurrentStage(t)?.follow_up?.toLowerCase() === 'bcl');
       for (const tm of availableTaskManagers) {
-        const tmTasks = filteredByNARows.filter(t => t.task_manager?.id?.toString() === tm.id);
+        const tmTasks = managerPool.filter(t => t.task_manager?.id?.toString() === tm.id);
         if (tmTasks.length > 0) groups.push({ name: tm.full_name || tm.name || tm.displayName || `Manager ${tm.id}`, tasks: tmTasks });
       }
-      const unallocated = filteredByNARows.filter(t => !t.task_manager?.id);
+      const unallocated = managerPool.filter(t => !t.task_manager?.id);
       if (unallocated.length > 0) groups.push({ name: 'Unallocated', tasks: unallocated });
     } else {
       const clientTasks = filteredByNARows.filter(t => isTaskWithClient(t));
@@ -1861,7 +1955,7 @@ export default function ReportsPage() {
     }
 
     toast({ title: 'Report Downloaded', description: `${reportTitle} exported as ${exportFormat.toUpperCase()}.` });
-  }, [activeDepartment, activeSubDeptIds, activeSubDepartments, activeStatus, filteredColumns, filteredByNARows, availableOfficers, availableTaskManagers, getStageOfficerIds, isTaskWithClient, getExportCellValue]);
+  }, [activeDepartment, activeSubDeptIds, activeSubDepartments, activeStatus, filteredColumns, filteredByNARows, availableOfficers, availableTaskManagers, officerFilterMode, getStageOfficerIds, getCurrentOfficerStage, getCanonicalCurrentStage, isTaskWithClient, getExportCellValue]);
 
   const columnGroups = useMemo(() => {
     if (!filteredColumns.length) return [];
@@ -1952,12 +2046,10 @@ export default function ReportsPage() {
         />
         <PersonFilterStrip
           activePerspective={activePerspective} setActivePerspective={setActivePerspective} allTasksCount={allTasksCount}
-          officerTaskCounts={officerTaskCounts} taskManagerTaskCounts={taskManagerTaskCounts} clientTaskCounts={clientTaskCounts} availableOfficers={availableOfficers}
+          officerTaskCounts={officerTaskCounts} taskManagerTaskCounts={taskManagerTaskCounts} clientsAwaitingCount={clientsAwaitingCount} availableOfficers={availableOfficers}
           activeOfficerTab={activeOfficerTab} setActiveOfficerTab={setActiveOfficerTab} officerFilterMode={officerFilterMode} setOfficerFilterMode={setOfficerFilterMode}
           availableTaskManagers={availableTaskManagers} activeTaskManagerTab={activeTaskManagerTab} setActiveTaskManagerTab={setActiveTaskManagerTab}
           taskManagerFilterMode={taskManagerFilterMode} setTaskManagerFilterMode={setTaskManagerFilterMode}
-          availableClients={availableClients} activeClientTab={activeClientTab} setActiveClientTab={setActiveClientTab}
-          clientFilterMode={clientFilterMode} setClientFilterMode={setClientFilterMode}
           searchQuery={searchQuery} setSearchQuery={setSearchQuery} refreshData={handleManualRefresh} loading={isManualRefreshing}
           activeClassId={activeClassId} setActiveClassId={setActiveClassId} activeSubClassId={activeSubClassId} setActiveSubClassId={setActiveSubClassId}
           activeSubDepartments={activeSubDepartments} activeSubDeptIds={activeSubDeptIds}

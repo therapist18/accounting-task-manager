@@ -431,18 +431,19 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
   );
 }
 
-export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspective, setActivePerspective, officerTaskCounts = { all: 0 }, taskManagerTaskCounts = { all: 0 }, allTasksCount = 0, clientTaskCounts = { all: 0 }, availableOfficers = [], activeOfficerTab, setActiveOfficerTab, officerFilterMode, setOfficerFilterMode, availableTaskManagers = [], activeTaskManagerTab, setActiveTaskManagerTab, taskManagerFilterMode, setTaskManagerFilterMode, availableClients = [], activeClientTab, setActiveClientTab, clientFilterMode, setClientFilterMode, refreshData, loading, activeClassId, setActiveClassId, activeSubClassId, setActiveSubClassId, activeSubDepartments, activeSubDeptIds }: any) {
+export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspective, setActivePerspective, officerTaskCounts = { all: 0 }, taskManagerTaskCounts = { all: 0 }, allTasksCount = 0, clientsAwaitingCount = 0, availableOfficers = [], activeOfficerTab, setActiveOfficerTab, officerFilterMode, setOfficerFilterMode, availableTaskManagers = [], activeTaskManagerTab, setActiveTaskManagerTab, taskManagerFilterMode, setTaskManagerFilterMode, refreshData, loading, activeClassId, setActiveClassId, activeSubClassId, setActiveSubClassId, activeSubDepartments, activeSubDeptIds }: any) {
   const isOfficer = activePerspective === 'officers';
   const isManager = activePerspective === 'managers';
-  const isClient = activePerspective === 'clients';
-  const isPersonView = isOfficer || isManager || isClient;
-  const currentData = isOfficer ? availableOfficers : isClient ? availableClients : availableTaskManagers;
-  const currentActive = isOfficer ? activeOfficerTab : isClient ? activeClientTab : activeTaskManagerTab;
-  const setTab = isOfficer ? setActiveOfficerTab : isClient ? setActiveClientTab : setActiveTaskManagerTab;
-  const counts = isOfficer ? officerTaskCounts : isClient ? clientTaskCounts : taskManagerTaskCounts;
-  const mode = isOfficer ? officerFilterMode : isClient ? clientFilterMode : taskManagerFilterMode;
-  const setMode = isOfficer ? setOfficerFilterMode : isClient ? setClientFilterMode : setTaskManagerFilterMode;
-  const perspectiveCounts = { overview: allTasksCount || 0, officers: officerTaskCounts?.all || 0, managers: taskManagerTaskCounts?.all || 0, clients: clientTaskCounts?.all || 0 };
+  // Clients has no sub-tabs to pick from — it's a single perspective ("tasks currently on a
+  // 'client' follow_up stage"), so it's deliberately excluded from isPersonView below.
+  const isPersonView = isOfficer || isManager;
+  const currentData = isOfficer ? availableOfficers : availableTaskManagers;
+  const currentActive = isOfficer ? activeOfficerTab : activeTaskManagerTab;
+  const setTab = isOfficer ? setActiveOfficerTab : setActiveTaskManagerTab;
+  const counts = isOfficer ? officerTaskCounts : taskManagerTaskCounts;
+  const mode = isOfficer ? officerFilterMode : taskManagerFilterMode;
+  const setMode = isOfficer ? setOfficerFilterMode : setTaskManagerFilterMode;
+  const perspectiveCounts = { overview: allTasksCount || 0, officers: officerTaskCounts?.all || 0, managers: taskManagerTaskCounts?.all || 0, clients: clientsAwaitingCount || 0 };
   const currentSubDept = (activeSubDepartments || []).find((s: any) => s.id.toString() === (activeSubDeptIds[0] || activeSubDepartments?.[0]?.id.toString()));
 
   return (
@@ -592,16 +593,14 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
         <div className="px-8 py-2.5 flex items-center gap-3 border-b border-slate-100 bg-slate-50/80">
           <div className={cn(
             "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0",
-            isOfficer ? "bg-blue-100/60 text-blue-700" : isClient ? "bg-emerald-100/60 text-emerald-700" : "bg-violet-100/60 text-violet-700"
+            isOfficer ? "bg-blue-100/60 text-blue-700" : "bg-violet-100/60 text-violet-700"
           )}>
-            {isOfficer ? <Shield className="h-3.5 w-3.5" /> : isClient ? <Building2 className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
-            <span>{isOfficer ? "Officer View" : isClient ? "Client View" : "Manager View"}</span>
+            {isOfficer ? <Shield className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+            <span>{isOfficer ? "Officer View" : "Manager View"}</span>
           </div>
           <p className="text-xs text-slate-500 leading-relaxed">
             {isOfficer
               ? "Showing tasks filtered by officer assignment. Select a specific officer below to view only their assigned tasks, or click All to see tasks across all officers."
-              : isClient
-              ? "Showing tasks filtered by client (company). Select a specific client below to view only their tasks, or click All to see tasks across all clients."
               : "Showing tasks filtered by task manager assignment. Select a specific manager below to view only the tasks they manage, or click All to see tasks across all managers."
             }
             {mode === 'current' ? " Currently showing 'current assignment' data." : " Currently showing 'historical activity' data."}
@@ -614,10 +613,10 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
         <div className="px-8 py-4 flex flex-wrap items-center gap-1.5">
           <div className={cn(
             "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-black uppercase font-bold mr-1 shrink-0",
-            isOfficer ? "bg-blue-50 text-blue-600 border border-blue-100" : isClient ? "bg-emerald-50 text-emerald-600 border border-emerald-100" : "bg-violet-50 text-violet-600 border border-violet-100"
+            isOfficer ? "bg-blue-50 text-blue-600 border border-blue-100" : "bg-violet-50 text-violet-600 border border-violet-100"
           )}>
-            {isOfficer ? <Shield className="h-3 w-3" /> : isClient ? <Building2 className="h-3 w-3" /> : <User className="h-3 w-3" />}
-            {isOfficer ? "Officers" : isClient ? "Clients" : "Managers"}
+            {isOfficer ? <Shield className="h-3 w-3" /> : <User className="h-3 w-3" />}
+            {isOfficer ? "Officers" : "Managers"}
           </div>
 
           <button
@@ -649,7 +648,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                 className={cn(
                   "h-10 px-6 py-2 rounded-full text-sm font-bold transition-all border flex items-center gap-1.5",
                   isActive
-                    ? (isOfficer ? "bg-custom-blue border-custom-blue text-white shadow-sm" : isClient ? "bg-emerald-600 border-emerald-600 text-white shadow-sm" : "bg-violet-600 border-violet-600 text-white shadow-sm")
+                    ? (isOfficer ? "bg-custom-blue border-custom-blue text-white shadow-sm" : "bg-violet-600 border-violet-600 text-white shadow-sm")
                     : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
                 )}
               >

@@ -178,6 +178,12 @@ export function StandardReportView({
     return rows;
   }, [subDeptGroups]);
 
+  // Compute the start position for the section name (column 3 = after index + first sticky column)
+  const col3Start = useMemo(() => {
+    const stickyKeys = Object.keys(stickyColumnOffsets);
+    return stickyKeys.length >= 2 ? stickyColumnOffsets[stickyKeys[1]] : INDEX_COL_WIDTH + DEFAULT_COL_WIDTH;
+  }, [stickyColumnOffsets]);
+
   // A refresh (or filter/sort change) can shrink the result set out from under
   // whatever page the user was sitting on — snap back into range instead of
   // rendering a blank "page 5 of 2" table.
@@ -373,12 +379,15 @@ export function StandardReportView({
                   if (item.type === 'section') {
                     return (
                       <TableRow key={`section-${item.name}`} className="border-0 hover:bg-transparent">
+                        <TableCell className="sticky left-0 z-30 border-r border-b-2 border-t border-slate-300 py-2.5 px-2 bg-slate-100/80 text-center" style={{ left: 0 }}>
+                          <Layers className="h-3.5 w-3.5 text-slate-500 mx-auto shrink-0" />
+                        </TableCell>
                         <TableCell
-                          colSpan={interleavedColumns.length + 1}
-                          className="px-4 py-2 border-b-2 border-t border-slate-300 bg-slate-100/80"
+                          colSpan={interleavedColumns.length}
+                          className="sticky left-0 z-30 px-4 py-2 border-b-2 border-t border-slate-300 bg-slate-100/80 shadow-[2px_0_4px_rgba(0,0,0,0.08)]"
+                          style={{ left: `${col3Start}px` }}
                         >
                           <div className="flex items-center gap-2">
-                            <Layers className="h-3.5 w-3.5 text-slate-500 shrink-0" />
                             <span className="text-[11px] font-bold uppercase tracking-widest text-slate-600">
                               {item.name === 'N/A' ? 'Unassigned' : item.name}
                             </span>

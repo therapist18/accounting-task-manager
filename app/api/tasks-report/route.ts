@@ -91,36 +91,42 @@ function parseDateSafe(s: string | null | undefined): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
-// Mirrors getCurrentStageTracking in the web Reports module: the applicable stage with the
-// most recently "handled" (completed/skipped/dated) timestamp — used to decide whether a
-// task is currently awaiting client follow-up (isTaskWithClient checks this stage's
-// follow_up, not whichever stage is merely "next incomplete"). Searches the full department
-// stage list rather than filtering by per-task applicability (isStageApplicableToTask) — same
-// simplification already used for officer-stage resolution below, since this route doesn't
-// fetch the nested subdepartment/class/subclass applicability overrides that function needs.
-//
-// Deliberately checks `updatedAt` in addition to the web module's original field list
-// (completedAt/skippedAt/date_completed/date/lastUpdated). Without it, a stage that's
-// actively in progress but only carries `updatedAt` (e.g. an officer was just assigned, no
-// formal completion yet) is invisible to this function, which then falls back to whichever
-// earlier stage WAS formally completed — misreporting tasks currently sitting with an
-// officer as "awaiting client" simply because their last completed stage happened to be a
-// client follow_up. Confirmed against production data (task 1429): current stage is an
-// incomplete 'Officer' stage with only `updatedAt` set, but the last completed stage before
-// it was 'Client', so this function returned the Client stage as "current" until this fix.
-function getCurrentStageTracking(task: any, stages: any[]): { stage: any; handledAt: Date } | null {
-  let latest: { stage: any; handledAt: Date } | null = null;
-  for (const stage of stages) {
-    const stageData = task?.stages?.[stage?.id];
-    if (!stageData) continue;
-    const directDate = parseDateSafe(
-      stageData.completedAt || stageData.skippedAt || stageData.date_completed || stageData.date || stageData.updatedAt || stageData.lastUpdated || null
+// Rich "is this stage actually done" check — mirrors isStageCompleted inside
+// getCurrentStageStatus (tasks/overall-view/tableUtils.tsx), the function that actually
+// drives the web Reports module's visible "Current Stage Follow-Up" column. The narrower
+// check this route used before (literal stageData.status === "completed") let stages
+// finished via a date/document, without ever getting an explicit 'completed' status
+// written, keep counting as "current" long after the task had moved on.
+function isStageCompleted(stage: any, task: any): boolean {
+  const stageData = task?.stages?.[stage?.id];
+  if (!stageData) return false;
+  const requiresDocuments = stage.documents?.length > 0;
+  if (stageData.status === "completed" || stageData.completedAt || (stageData.documents && Object.keys(stageData.documents).length > 0)) return true;
+  if (!requiresDocuments && stageData.date) return true;
+  if (requiresDocuments && stageData.documents) {
+    const hasUploadedDocs = Object.values(stageData.documents).some(
+      (doc: any) => doc.status === "uploaded" || doc.status === "linked"
     );
-    if (directDate && (!latest || directDate.getTime() > latest.handledAt.getTime())) {
-      latest = { stage, handledAt: directDate };
-    }
+    if (hasUploadedDocs) return true;
   }
-  return latest;
+  return false;
+}
+
+// The task's single, real current stage — same "highest completed index, then next stage"
+// algorithm as getCurrentStageStatus/the web Reports module's getCanonicalCurrentStage, so
+// "current" means the same thing here as the visible Current Stage Follow-Up column. This
+// is the one source of truth every "who does this task belong to right now" check (officer/
+// manager/client) is derived from below, instead of three separate ad-hoc stage scans that
+// could (and did) disagree with each other and with the displayed column. Uses the full
+// department stage list rather than filtering by per-task applicability
+// (isStageApplicableToTask) — this route doesn't fetch the nested subdepartment/class/
+// subclass applicability overrides that function needs.
+function getCanonicalCurrentStage(task: any, stages: any[]): any | null {
+  if (!stages.length) return null;
+  let highestCompletedIndex = -1;
+  stages.forEach((stage: any, i: number) => { if (isStageCompleted(stage, task)) highestCompletedIndex = i; });
+  if (highestCompletedIndex === -1) return stages[0];
+  return stages[highestCompletedIndex + 1] || stages[highestCompletedIndex];
 }
 
 // This route is listed in PUBLIC_PATHS (middleware.ts) so it's reachable without the
@@ -396,17 +402,9 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const activeStageIds = Object.keys(report.configuration?.stages || {});
-    const applicableStages = (stages || [])
-      .filter((s: any) => activeStageIds.includes(s.id))
-      .sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
-
     let loggedSample = false;
 
     const taskList = (tasks || []).map((task: any) => {
-      let currentStageName = "";
-      let currentStageFollowUp = "";
-
       if (!loggedSample) {
         loggedSample = true;
         console.log(
@@ -416,58 +414,25 @@ export async function GET(req: NextRequest) {
         );
       }
 
-      for (const stage of applicableStages) {
-        const stageData = task.stages?.[stage.id];
-        if (!stageData) continue;
-        const status = stageData.status?.toString().toLowerCase();
-        if (status !== "completed" && status !== "skipped") {
-          currentStageName = stage.name;
-          currentStageFollowUp = stage.follow_up || "";
-          break;
-        }
-      }
+      // Single canonical current stage for this task — see getCanonicalCurrentStage above.
+      // current_stage_name/follow_up, officer ownership, and "awaiting client" all derive
+      // from this ONE pointer rather than three separate scans, so they can't disagree with
+      // each other (or with what the web Reports module's own Current Stage Follow-Up
+      // column would show for the same task).
+      const canonicalCurrentStage = getCanonicalCurrentStage(task, stages || []);
+      const currentStageName = canonicalCurrentStage?.name || "";
+      const currentStageFollowUp = canonicalCurrentStage?.follow_up || "";
 
-      if (!currentStageName && applicableStages.length > 0) {
-        const last = applicableStages[applicableStages.length - 1];
-        currentStageName = last.name;
-        currentStageFollowUp = last.follow_up || "";
-      }
-
-      // Officer grouping mirrors getCurrentOfficerStage/getStageOfficerIds in the web
-      // Reports module: only the stage currently awaiting an "officer" follow_up carries
-      // an officer assignment — not just whichever stage happens to be in progress. A task
-      // sitting on a "client"/"bcl" follow_up stage has no current officer and is correctly
-      // Unallocated, but grouping by "first incomplete stage" (regardless of follow_up)
-      // was picking up stages with no officer_ids at all, dumping nearly everything into
-      // Unallocated.
-      //
-      // This must search the FULL department stage list (`stages`), not `applicableStages`
-      // (which is narrowed to whichever stages this specific memorized report chose to
-      // display as columns) — getCurrentOfficerStage on the web searches every stage in the
-      // department regardless of report column config, and the "officer" follow_up stage is
-      // frequently NOT one of the report's chosen display columns. Scoping to
-      // applicableStages meant the officer stage was essentially never found, so nearly
-      // every task fell into Unallocated.
-      const currentOfficerStage = (stages || []).find((stage: any) => {
-        const stageData = task.stages?.[stage.id];
-        const status = stageData?.status?.toString().toLowerCase();
-        return (
-          stageData &&
-          stage.follow_up?.toLowerCase() === "officer" &&
-          status !== "completed" &&
-          status !== "skipped"
-        );
-      });
+      const currentOfficerStage = canonicalCurrentStage?.follow_up?.toLowerCase() === "officer" ? canonicalCurrentStage : null;
       // Prefer the stage-level officer_ids (matches getStageOfficerIds on the web Reports
       // module exactly, including counting a task once per officer when a stage carries
-      // multiple ids — see the grouping loop below). But in production, most of this
-      // department's tasks simply aren't currently sitting on an incomplete "officer"
-      // follow_up stage at all (they're between officer touchpoints, e.g. on a BCL/Client
-      // stage), which made stage-only resolution report ~0% of tasks as officer-owned —
-      // useless for a report whose entire purpose is "which officer owns this". Falling
-      // back to tm_tasks.officer_id (the persisted "case officer" set at task creation,
-      // read directly by DepartmentTasksManager's own officer filters) recovers real
-      // ownership for those tasks instead of dumping them all into Unallocated.
+      // multiple ids — see the grouping loop below). But in production, some tasks have no
+      // officer_ids recorded on their current officer stage at all, which made stage-only
+      // resolution under-report officer ownership — useless for a report whose entire
+      // purpose is "which officer owns this". Falling back to tm_tasks.officer_id (the
+      // persisted "case officer" set at task creation, read directly by
+      // DepartmentTasksManager's own officer filters) recovers real ownership for those
+      // tasks instead of dumping them all into Unallocated.
       const stageOfficerIds: string[] = currentOfficerStage
         ? (Array.isArray(task.stages?.[currentOfficerStage.id]?.officer_ids)
             ? task.stages[currentOfficerStage.id].officer_ids.map((id: any) => String(id)).filter(Boolean)
@@ -478,10 +443,8 @@ export async function GET(req: NextRequest) {
         : (task.officer_id != null ? [String(task.officer_id)] : []);
 
       // Mirrors isTaskWithClient in the web Reports module: a task is "awaiting client
-      // response" when its most-recently-handled stage (not merely "next incomplete") has
-      // follow_up === 'client'.
-      const stageTracking = getCurrentStageTracking(task, stages || []);
-      const awaitingClient = stageTracking?.stage?.follow_up?.toString().toLowerCase() === "client";
+      // response" when its canonical current stage's follow_up is 'client'.
+      const awaitingClient = canonicalCurrentStage?.follow_up?.toString().toLowerCase() === "client";
 
       // participants_details is the richer source when populated (fetchTasks()/EnquiryDialog
       // derive task_manager the same way on the web side), but for this department it's
@@ -618,7 +581,7 @@ export async function GET(req: NextRequest) {
 
     // Mirrors the web Reports module's Client Follow-Up Report exactly: not grouped by
     // company/client name at all, just a single bucket of tasks currently awaiting a
-    // 'client' follow_up stage (see _awaitingClient / getCurrentStageTracking above).
+    // 'client' follow_up stage (see _awaitingClient / getCanonicalCurrentStage above).
     const awaitingClientTasks = taskList.filter((t: any) => t._awaitingClient);
 
     // Add roster members with no current tasks as zero-count groups — matches the web
@@ -635,16 +598,65 @@ export async function GET(req: NextRequest) {
       }
     });
 
+    const clean = (arr: any[]) =>
+      arr.map(({ _officerIds, _managerId, _awaitingClient, ...rest }: any) => rest);
+
+    // "Tasks Handled" (payroll basis) — mirrors officerFilterMode='history' on the web
+    // Reports module: officers are paid per task, not per stage, so a task only ever
+    // contributes ONE credit to a given officer here even if they owned several of its
+    // officer-stages. A single task CAN still generate credit for more than one officer
+    // (e.g. JM owned stages 1-7, T owned 8-11) — each gets their own entry. Only stages that
+    // are actually completed count; an open/pending assignment belongs in byOfficer
+    // ("current basket"), not here. handled_at is the latest completion date among that
+    // officer's completed officer-stages on the task, for sorting/period-filtering by pay run.
+    const officerHandledMap = new Map<string, Map<number, { task: any; handledAt: Date | null }>>();
+    (tasks || []).forEach((task: any) => {
+      stages.forEach((stage: any) => {
+        if (stage.follow_up?.toLowerCase() !== "officer") return;
+        if (!isStageCompleted(stage, task)) return;
+        const stageData = task.stages?.[stage.id];
+        const officerIds: string[] = Array.isArray(stageData?.officer_ids)
+          ? stageData.officer_ids.map((id: any) => String(id)).filter(Boolean)
+          : [];
+        if (!officerIds.length) return;
+        const completedAt = parseDateSafe(stageData.completedAt || stageData.date || stageData.date_completed || null);
+        officerIds.forEach((officerId) => {
+          if (!officerHandledMap.has(officerId)) officerHandledMap.set(officerId, new Map());
+          const perTask = officerHandledMap.get(officerId)!;
+          const existing = perTask.get(task.id);
+          if (!existing || (completedAt && (!existing.handledAt || completedAt.getTime() > existing.handledAt.getTime()))) {
+            perTask.set(task.id, { task, handledAt: completedAt });
+          }
+        });
+      });
+    });
+
+    const taskListById = new Map<number, any>(taskList.map((t: any) => [t.id, t]));
+    const officerHandledGroups = new Map<string, { id: string; name: string; count: number; tasks: any[] }>();
+    officerRosterIds.forEach((id) => {
+      officerHandledGroups.set(id, { id, name: usersMap.get(id) || "Unknown", count: 0, tasks: [] });
+    });
+    officerHandledMap.forEach((perTask, officerId) => {
+      if (!officerHandledGroups.has(officerId)) {
+        officerHandledGroups.set(officerId, { id: officerId, name: usersMap.get(officerId) || "Unknown", count: 0, tasks: [] });
+      }
+      const group = officerHandledGroups.get(officerId)!;
+      perTask.forEach(({ task, handledAt }) => {
+        const rawTask = taskListById.get(task.id);
+        if (!rawTask) return;
+        group.count++;
+        group.tasks.push({ ...clean([rawTask])[0], handled_at: handledAt ? formatDisplayDate(handledAt.toISOString()) : null });
+      });
+    });
+
     console.log(
-      "[tasks-report] officerRoster=%d managerRoster=%d byOfficer=%o byManager=%o",
+      "[tasks-report] officerRoster=%d managerRoster=%d byOfficer=%o byManager=%o byOfficerHandled=%o",
       officerRosterIds.size,
       managerRosterIds.size,
       Array.from(officerMap.values()).map((g) => ({ id: g.id, name: g.name, count: g.count })),
-      Array.from(managerMap.values()).map((g) => ({ id: g.id, name: g.name, count: g.count }))
+      Array.from(managerMap.values()).map((g) => ({ id: g.id, name: g.name, count: g.count })),
+      Array.from(officerHandledGroups.values()).map((g) => ({ id: g.id, name: g.name, count: g.count }))
     );
-
-    const clean = (arr: any[]) =>
-      arr.map(({ _officerIds, _managerId, _awaitingClient, ...rest }: any) => rest);
 
     const byClient = awaitingClientTasks.length > 0
       ? [{ clientName: "Tasks Awaiting Client Response", count: awaitingClientTasks.length, tasks: clean(awaitingClientTasks) }]
@@ -659,6 +671,8 @@ export async function GET(req: NextRequest) {
       subDepartments: Array.from(subDeptNameMap.entries()).map(([id, name]) => ({ id, name })),
       summary: {
         total: taskList.length,
+        // "Current basket" — what each officer/manager owns right now (see
+        // getCanonicalCurrentStage above).
         byOfficer: Array.from(officerMap.values()).map((g) => ({
           ...g,
           tasks: clean(g.tasks),
@@ -668,6 +682,10 @@ export async function GET(req: NextRequest) {
           tasks: clean(g.tasks),
         })),
         byClient,
+        // "Tasks Handled" — payroll basis: one credit per (officer, task) for completed
+        // officer-stage ownership, dated by handled_at on each task entry. Additive field;
+        // byOfficer/byManager/byClient are unchanged for existing consumers.
+        byOfficerHandled: Array.from(officerHandledGroups.values()),
       },
     });
   } catch (error) {
