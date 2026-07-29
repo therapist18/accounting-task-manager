@@ -79,6 +79,40 @@ function resolveStageDisplayDate(
   return null;
 }
 
+function parseDateSafe(s: string | null | undefined): Date | null {
+  if (!s || typeof s !== "string") return null;
+  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+  if (m) {
+    const [, dd, mm, yyyy, hh, min] = m;
+    const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd), hh ? Number(hh) : 0, min ? Number(min) : 0);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// Mirrors getCurrentStageTracking in the web Reports module: the applicable stage with the
+// most recently "handled" (completed/skipped/dated) timestamp — used to decide whether a
+// task is currently awaiting client follow-up (isTaskWithClient checks this stage's
+// follow_up, not whichever stage is merely "next incomplete"). Searches the full department
+// stage list rather than filtering by per-task applicability (isStageApplicableToTask) — same
+// simplification already used for officer-stage resolution below, since this route doesn't
+// fetch the nested subdepartment/class/subclass applicability overrides that function needs.
+function getCurrentStageTracking(task: any, stages: any[]): { stage: any; handledAt: Date } | null {
+  let latest: { stage: any; handledAt: Date } | null = null;
+  for (const stage of stages) {
+    const stageData = task?.stages?.[stage?.id];
+    if (!stageData) continue;
+    const directDate = parseDateSafe(
+      stageData.completedAt || stageData.skippedAt || stageData.date_completed || stageData.date || stageData.lastUpdated || null
+    );
+    if (directDate && (!latest || directDate.getTime() > latest.handledAt.getTime())) {
+      latest = { stage, handledAt: directDate };
+    }
+  }
+  return latest;
+}
+
 // This route is listed in PUBLIC_PATHS (middleware.ts) so it's reachable without the
 // web app's session cookie — the BCL Meetings mobile app has no such cookie for this
 // domain. In its place, require a shared secret the mobile app sends as a header. The
@@ -362,7 +396,6 @@ export async function GET(req: NextRequest) {
     const taskList = (tasks || []).map((task: any) => {
       let currentStageName = "";
       let currentStageFollowUp = "";
-      let currentOfficerId = "";
 
       if (!loggedSample) {
         loggedSample = true;
@@ -415,21 +448,22 @@ export async function GET(req: NextRequest) {
           status !== "skipped"
         );
       });
-      if (currentOfficerStage) {
-        const officerIds = task.stages?.[currentOfficerStage.id]?.officer_ids;
-        if (Array.isArray(officerIds) && officerIds.length > 0) {
-          currentOfficerId = officerIds[0].toString();
-        }
-      }
-      // Fall back to tm_tasks.officer_id — a simpler, persisted "case officer" column that
-      // new-task-dialog.tsx writes directly (a numeric tm_users id, NOT the UUID scanner_users
-      // id used by tm_role_assignments/stage officer_ids). DepartmentTasksManager's own
-      // officer tabs/filters (task.officer_ids / task.officer_id) read this same column, so
-      // when no stage is currently sitting on an "officer" follow_up, this is what that
-      // module falls back to as well rather than showing Unallocated.
-      if (!currentOfficerId && task.officer_id != null) {
-        currentOfficerId = String(task.officer_id);
-      }
+      // Deliberately no fallback to tm_tasks.officer_id here: getStageOfficerIds on the web
+      // Reports module has none either — a task with no current officer-follow_up stage is
+      // Unallocated, full stop. A task can also carry MULTIPLE officer_ids on that stage, in
+      // which case the web module counts it once per matching officer (see the grouping loop
+      // below), not just the first id.
+      const currentOfficerIds: string[] = currentOfficerStage
+        ? (Array.isArray(task.stages?.[currentOfficerStage.id]?.officer_ids)
+            ? task.stages[currentOfficerStage.id].officer_ids.map((id: any) => String(id)).filter(Boolean)
+            : [])
+        : [];
+
+      // Mirrors isTaskWithClient in the web Reports module: a task is "awaiting client
+      // response" when its most-recently-handled stage (not merely "next incomplete") has
+      // follow_up === 'client'.
+      const stageTracking = getCurrentStageTracking(task, stages || []);
+      const awaitingClient = stageTracking?.stage?.follow_up?.toString().toLowerCase() === "client";
 
       // task_manager_id/task_assistant_id are not reliably populated columns — the real
       // assignment lives in participants_details, exactly as fetchTasks()/EnquiryDialog
@@ -490,18 +524,19 @@ export async function GET(req: NextRequest) {
         task_assistant: taskAssistant,
         required_documents: resolveRequiredDocuments(task),
         ...namedStageDates,
-        _officerId: currentOfficerId,
+        _officerIds: currentOfficerIds,
         _managerId: taskManagerId,
+        _awaitingClient: awaitingClient,
       };
     });
 
     console.log(
-      "[tasks-report] tasks=%d withOfficerId=%d withManagerId=%d withAnyNamedDate=%d withRawOfficerIdColumn=%d",
+      "[tasks-report] tasks=%d withOfficerId=%d withManagerId=%d withAnyNamedDate=%d awaitingClient=%d",
       taskList.length,
-      taskList.filter((t: any) => t._officerId).length,
+      taskList.filter((t: any) => t._officerIds.length > 0).length,
       taskList.filter((t: any) => t._managerId).length,
       taskList.filter((t: any) => NAMED_STAGE_DATES.some(({ key }) => t[key])).length,
-      (tasks || []).filter((t: any) => t.officer_id != null).length
+      taskList.filter((t: any) => t._awaitingClient).length
     );
 
     const officerMap = new Map<
@@ -512,29 +547,37 @@ export async function GET(req: NextRequest) {
       string,
       { id: string; name: string; count: number; tasks: any[] }
     >();
-    const clientMap = new Map<
-      string,
-      { clientName: string; count: number; tasks: any[] }
-    >();
 
     for (const t of taskList) {
-      const officerId = t._officerId;
-      // "Unallocated" means no officer id at all (truly unassigned) — an id that just
-      // failed to resolve to a name is a data gap, not "unallocated", so it must not be
-      // labeled the same way (that conflation was rendering as duplicate "Unallocated"
-      // cards for two actually-different groups).
-      const officerName = officerId ? (usersMap.get(officerId) || "Unknown") : "Unallocated";
-      if (!officerMap.has(officerId)) {
-        officerMap.set(officerId, {
-          id: officerId,
-          name: officerName,
-          count: 0,
-          tasks: [],
-        });
+      // Mirrors handleSendReport's officer grouping on the web: a task with multiple
+      // officer_ids on its current officer-follow_up stage is counted once per matching
+      // officer, not just the first. "Unallocated" means no current officer stage at all —
+      // an id that just failed to resolve to a name is a data gap, not "unallocated", so it
+      // must not be labeled the same way (that conflation was rendering as duplicate
+      // "Unallocated" cards for two actually-different groups).
+      const officerIds: string[] = t._officerIds;
+      if (officerIds.length === 0) {
+        if (!officerMap.has("")) {
+          officerMap.set("", { id: "", name: "Unallocated", count: 0, tasks: [] });
+        }
+        const og = officerMap.get("")!;
+        og.count++;
+        og.tasks.push(t);
+      } else {
+        for (const officerId of officerIds) {
+          if (!officerMap.has(officerId)) {
+            officerMap.set(officerId, {
+              id: officerId,
+              name: usersMap.get(officerId) || "Unknown",
+              count: 0,
+              tasks: [],
+            });
+          }
+          const og = officerMap.get(officerId)!;
+          og.count++;
+          og.tasks.push(t);
+        }
       }
-      const og = officerMap.get(officerId)!;
-      og.count++;
-      og.tasks.push(t);
 
       const managerId = t._managerId || "";
       const managerName = managerId ? (t.task_manager || usersMap.get(managerId) || "Unknown") : "Unallocated";
@@ -549,15 +592,12 @@ export async function GET(req: NextRequest) {
       const mg = managerMap.get(managerId)!;
       mg.count++;
       mg.tasks.push(t);
-
-      const clientName = t.company_name || "Unknown Client";
-      if (!clientMap.has(clientName)) {
-        clientMap.set(clientName, { clientName, count: 0, tasks: [] });
-      }
-      const cg = clientMap.get(clientName)!;
-      cg.count++;
-      cg.tasks.push(t);
     }
+
+    // Mirrors the web Reports module's Client Follow-Up Report exactly: not grouped by
+    // company/client name at all, just a single bucket of tasks currently awaiting a
+    // 'client' follow_up stage (see _awaitingClient / getCurrentStageTracking above).
+    const awaitingClientTasks = taskList.filter((t: any) => t._awaitingClient);
 
     // Add roster members with no current tasks as zero-count groups — matches the web
     // Reports module always listing the full department roster, not just whoever's busy
@@ -582,7 +622,11 @@ export async function GET(req: NextRequest) {
     );
 
     const clean = (arr: any[]) =>
-      arr.map(({ _officerId, _managerId, ...rest }: any) => rest);
+      arr.map(({ _officerIds, _managerId, _awaitingClient, ...rest }: any) => rest);
+
+    const byClient = awaitingClientTasks.length > 0
+      ? [{ clientName: "Tasks Awaiting Client Response", count: awaitingClientTasks.length, tasks: clean(awaitingClientTasks) }]
+      : [];
 
     return NextResponse.json({
       report: { id: report.id, name: report.name },
@@ -601,10 +645,7 @@ export async function GET(req: NextRequest) {
           ...g,
           tasks: clean(g.tasks),
         })),
-        byClient: Array.from(clientMap.values()).map((g) => ({
-          ...g,
-          tasks: clean(g.tasks),
-        })),
+        byClient,
       },
     });
   } catch (error) {
