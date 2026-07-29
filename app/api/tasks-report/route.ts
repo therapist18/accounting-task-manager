@@ -448,16 +448,24 @@ export async function GET(req: NextRequest) {
           status !== "skipped"
         );
       });
-      // Deliberately no fallback to tm_tasks.officer_id here: getStageOfficerIds on the web
-      // Reports module has none either — a task with no current officer-follow_up stage is
-      // Unallocated, full stop. A task can also carry MULTIPLE officer_ids on that stage, in
-      // which case the web module counts it once per matching officer (see the grouping loop
-      // below), not just the first id.
-      const currentOfficerIds: string[] = currentOfficerStage
+      // Prefer the stage-level officer_ids (matches getStageOfficerIds on the web Reports
+      // module exactly, including counting a task once per officer when a stage carries
+      // multiple ids — see the grouping loop below). But in production, most of this
+      // department's tasks simply aren't currently sitting on an incomplete "officer"
+      // follow_up stage at all (they're between officer touchpoints, e.g. on a BCL/Client
+      // stage), which made stage-only resolution report ~0% of tasks as officer-owned —
+      // useless for a report whose entire purpose is "which officer owns this". Falling
+      // back to tm_tasks.officer_id (the persisted "case officer" set at task creation,
+      // read directly by DepartmentTasksManager's own officer filters) recovers real
+      // ownership for those tasks instead of dumping them all into Unallocated.
+      const stageOfficerIds: string[] = currentOfficerStage
         ? (Array.isArray(task.stages?.[currentOfficerStage.id]?.officer_ids)
             ? task.stages[currentOfficerStage.id].officer_ids.map((id: any) => String(id)).filter(Boolean)
             : [])
         : [];
+      const currentOfficerIds: string[] = stageOfficerIds.length > 0
+        ? stageOfficerIds
+        : (task.officer_id != null ? [String(task.officer_id)] : []);
 
       // Mirrors isTaskWithClient in the web Reports module: a task is "awaiting client
       // response" when its most-recently-handled stage (not merely "next incomplete") has
@@ -465,16 +473,20 @@ export async function GET(req: NextRequest) {
       const stageTracking = getCurrentStageTracking(task, stages || []);
       const awaitingClient = stageTracking?.stage?.follow_up?.toString().toLowerCase() === "client";
 
-      // task_manager_id/task_assistant_id are not reliably populated columns — the real
-      // assignment lives in participants_details, exactly as fetchTasks()/EnquiryDialog
-      // derive it on the web side.
+      // participants_details is the richer source when populated (fetchTasks()/EnquiryDialog
+      // derive task_manager the same way on the web side), but for this department it's
+      // sparse in practice — same gap as officer_id above. Fall back to the persisted
+      // tm_tasks.task_manager_id column (read directly by DepartmentTasksManager's own
+      // manager filters) rather than reporting real assignments as Unallocated.
       const taskManagerParticipant = task.participants_details?.find((p: any) =>
         p.role?.includes("task_manager")
       );
       const taskAssistantParticipant = task.participants_details?.find((p: any) =>
         p.role?.includes("task_assistant")
       );
-      const taskManagerId = taskManagerParticipant?.id != null ? String(taskManagerParticipant.id) : "";
+      const taskManagerId = taskManagerParticipant?.id != null
+        ? String(taskManagerParticipant.id)
+        : (task.task_manager_id != null ? String(task.task_manager_id) : "");
       const taskAssistantId = taskAssistantParticipant?.id != null ? String(taskAssistantParticipant.id) : "";
       const taskManager = taskManagerParticipant?.name || usersMap.get(taskManagerId) || "";
       const taskAssistant = taskAssistantParticipant?.name || usersMap.get(taskAssistantId) || "";
