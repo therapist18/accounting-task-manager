@@ -16,35 +16,40 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { ContractThemePanel } from './ContractThemePanel';
 import { ContractThemeSettings, DEFAULT_CONTRACT_THEME, applyThemeToHtml } from '../utils/themeEngine';
 import {
-  resolveEffectiveSettings, resolveEffectiveClauses, buildDefaultClauseMap, assembleContractHtml,
+  resolveEffectiveSettings, resolveEffectiveClauses, assembleContractHtml,
 } from '../utils/clauseEngine';
 import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
 import { EcJobProfile, fetchJobProfiles, findCompanyDefaults, findDepartmentDefaults } from '../utils/jobProfileData';
-import { EcContractTemplate, fetchEffectiveContractTemplate, fetchContractTemplateById } from '../utils/contractTemplateData';
 import { EmploymentOffer, createEmploymentOffer, updateEmploymentOffer } from '../utils/employmentOfferData';
 import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
+import { CONTRACT_SECTIONS } from '../utils/contractStructure';
 import { fetchCompanies, Company } from '../../companies/database';
 
 interface ContractPreviewProps {
   contractData: any;
   setContractData?: (updater: any) => void;
   selectedJobProfile: EcJobProfile | null;
+  previewOnly?: boolean;
+  // Overrides the root wrapper's layout classes - the default sizing
+  // (flex-1 lg:min-w-[600px], flex-row sibling of ContractEditor) is tuned
+  // for the main Employment Contracts page's flex layout, which fights the
+  // parent's own sizing when this is embedded inside a react-resizable-panels
+  // Panel elsewhere (e.g. job-profiles' live preview).
+  className?: string;
 }
 
-export function ContractPreview({ contractData, setContractData, selectedJobProfile }: ContractPreviewProps) {
+export function ContractPreview({ contractData, setContractData, selectedJobProfile, previewOnly, className }: ContractPreviewProps) {
   const employee = contractData?.employee;
   const offer: Partial<EmploymentOffer> | undefined = contractData?.offer;
   const companyId = employee?.companyId;
-  const selectedTemplateId = contractData?.selectedTemplateId;
 
   const [clauses, setClauses] = useState<EcClause[]>([]);
   const [orgProfiles, setOrgProfiles] = useState<EcJobProfile[]>([]);
   const [company, setCompany] = useState<Company | null>(null);
-  const [contractTemplate, setContractTemplate] = useState<EcContractTemplate | null>(null);
   const [loadingContext, setLoadingContext] = useState(false);
 
-  const [themeOverride, setThemeOverride] = useState<ContractThemeSettings | null>(null);
+  const [themeOverride, setThemeOverride] = useState<ContractThemeSettings | null>(contractData?.metadata?.themeSettings || null);
   const [themePanelOpen, setThemePanelOpen] = useState(false);
 
   const [isSaving, setIsSaving] = useState(false);
@@ -60,9 +65,21 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const PAGE_WIDTH_PX = 794; // Standard A4 width at 96dpi
   const PAGE_HEIGHT_PX = 1123; // Standard A4 height at 96dpi
   const [zoomPct, setZoomPct] = useState(80);
-  const zoomRatio = zoomPct / 100;
+  const manualZoomRatio = zoomPct / 100;
+  const [sizingMode, setSizingMode] = useState<'manual' | 'fit' | 'fill'>('manual');
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+  const FIT_PADDING_PX = 64;
+  const zoomRatio = useMemo(() => {
+    if (sizingMode === 'fit' && containerSize.width > 0) return Math.max(0.1, (containerSize.width - FIT_PADDING_PX) / PAGE_WIDTH_PX);
+    if (sizingMode === 'fill' && containerSize.height > 0) return Math.max(0.1, (containerSize.height - FIT_PADDING_PX) / PAGE_HEIGHT_PX);
+    return manualZoomRatio;
+  }, [sizingMode, containerSize, manualZoomRatio]);
+  const setManualZoom = (updater: (z: number) => number) => {
+    setSizingMode('manual');
+    setZoomPct((z) => Math.min(150, Math.max(40, updater(z))));
+  };
   const [contentHeightPx, setContentHeightPx] = useState(0);
-  
+
   // Calculate total pages safely based on real measured height
   const totalPages = Math.max(1, Math.ceil(contentHeightPx / PAGE_HEIGHT_PX));
   // The visible page canvas is snapped to a whole multiple of the page height,
@@ -70,39 +87,43 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   // content happens to end (which left a gray gap below short documents).
   const pageCanvasHeightPx = totalPages * PAGE_HEIGHT_PX;
 
-  // Load base context
+  // Load base context - companyId is optional (job profiles can be scoped
+  // "General / No Company"), in which case orgProfiles/company just stay
+  // empty/null but clauses (global) still resolve, so the preview keeps
+  // working instead of getting stuck on a fetch that never runs.
   useEffect(() => {
     async function loadContext() {
-      if (!companyId) return;
       setLoadingContext(true);
       const [allClauses, profiles, companies] = await Promise.all([
         fetchClauses(),
-        fetchJobProfiles(companyId),
+        fetchJobProfiles(companyId || undefined),
         fetchCompanies(),
       ]);
       setClauses(allClauses);
       setOrgProfiles(profiles);
-      setCompany(companies.find((c) => String(c.id) === String(companyId)) || null);
+      setCompany(companyId ? companies.find((c) => String(c.id) === String(companyId)) || null : null);
       setLoadingContext(false);
     }
     loadContext();
   }, [companyId]);
 
-  // Resolve template
+  // Reset the live theme customization whenever we switch to a different
+  // employee's contract, preloading whatever theme was saved on it last time.
   useEffect(() => {
-    async function resolveTemplate() {
-      if (!companyId) return;
-      if (selectedTemplateId) {
-        const t = await fetchContractTemplateById(selectedTemplateId);
-        setContractTemplate(t);
-      } else {
-        const t = await fetchEffectiveContractTemplate(companyId);
-        setContractTemplate(t);
-      }
-      setThemeOverride(null);
-    }
-    resolveTemplate();
-  }, [companyId, selectedTemplateId]);
+    setThemeOverride(contractData?.metadata?.themeSettings || null);
+  }, [employee?.individualId]);
+
+  // Track the scroll container's box size for the fit/fill sizing modes.
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) setContainerSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Track natural unscaled height for pagination math
   useEffect(() => {
@@ -124,7 +145,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
       observer.disconnect();
       images.forEach(img => img.removeEventListener('load', measure));
     };
-  }, [contractTemplate, themeOverride, showToc]);
+  }, [themeOverride, showToc]);
 
   // Scroll-based page tracking + TOC anchor click interception
   useEffect(() => {
@@ -176,10 +197,9 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   useEffect(() => {
     scrollContainerRef.current?.scrollTo({ top: 0 });
     setCurrentPage(1);
-  }, [employee?.individualId, contractTemplate?.id, showToc]);
+  }, [employee?.individualId, showToc]);
 
   const clausesById = useMemo(() => Object.fromEntries(clauses.map((c) => [c.id, c])), [clauses]);
-  const defaultClauseMap = useMemo(() => buildDefaultClauseMap(clauses), [clauses]);
   const companyDefaults = useMemo(() => (companyId ? findCompanyDefaults(orgProfiles, companyId) : undefined), [orgProfiles, companyId]);
   const departmentDefaults = useMemo(() => (companyId ? findDepartmentDefaults(orgProfiles, companyId, employee?.department) : undefined), [orgProfiles, companyId, employee]);
 
@@ -189,7 +209,20 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
 
   const effectiveClauses = useMemo(() => resolveEffectiveClauses([
     companyDefaults, departmentDefaults, selectedJobProfile, offer ? { section_clauses: offer.section_clauses_overrides } : null,
-  ], defaultClauseMap), [companyDefaults, departmentDefaults, selectedJobProfile, offer, defaultClauseMap]);
+  ]), [companyDefaults, departmentDefaults, selectedJobProfile, offer]);
+
+  // Temporary diagnostic logging for the clause-resolution cascade - remove
+  // once the no-default-fallback behavior is confirmed working end to end.
+  useEffect(() => {
+    console.log('[ContractPreview] clause resolution', {
+      companyDefaults_section_clauses: companyDefaults?.section_clauses,
+      departmentDefaults_section_clauses: departmentDefaults?.section_clauses,
+      selectedJobProfile_section_clauses: selectedJobProfile?.section_clauses,
+      offer_section_clauses_overrides: offer?.section_clauses_overrides,
+      effectiveClauses,
+      unresolvedSections: CONTRACT_SECTIONS.map((s) => s.key).filter((k) => !effectiveClauses[k]),
+    });
+  }, [companyDefaults, departmentDefaults, selectedJobProfile, offer, effectiveClauses]);
 
   const { ecPlaceholders, masterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
 
@@ -199,18 +232,18 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   );
 
   const bodyHtml = useMemo(() => {
-    if (!contractTemplate || !employee) return '';
+    if (!employee) return '';
     return assembleContractHtml({
-      sectionKeys: contractTemplate.section_keys,
+      sectionKeys: CONTRACT_SECTIONS.map((s) => s.key),
       clausesById,
       effectiveClauses,
       effectiveSettings,
       employeePlaceholderValues: employeeValues,
       includeToc: showToc,
     });
-  }, [contractTemplate, clausesById, effectiveClauses, effectiveSettings, employeeValues, employee, showToc]);
+  }, [clausesById, effectiveClauses, effectiveSettings, employeeValues, employee, showToc]);
 
-  const themeSettings: ContractThemeSettings = themeOverride || contractTemplate?.theme_settings || DEFAULT_CONTRACT_THEME;
+  const themeSettings: ContractThemeSettings = themeOverride || DEFAULT_CONTRACT_THEME;
   const mergedValues = { ...effectiveSettings, ...employeeValues };
 
   const themedHtml = bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings), mergedValues) : '';
@@ -276,7 +309,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
 
   const handleSaveToDb = async () => {
     const output = buildOutput();
-    if (!output || !employee || !offer || !contractTemplate || !selectedJobProfile) return;
+    if (!output || !employee || !offer || !selectedJobProfile) return;
     setIsSaving(true);
     try {
       const offerPayload = { ...offer, job_profile_id: selectedJobProfile.id, status: 'active' as const };
@@ -297,10 +330,9 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
           contract_number: `CNT-${Date.now()}`,
           employee_id: String(employee.individualId),
           company_id: String(employee.companyId),
-          template_id: contractTemplate.id,
           status: 'generated',
           docx_path: fileName,
-          metadata: { jobProfileId: selectedJobProfile.id, employmentOfferId: persistedOffer.id, contractTemplateId: contractTemplate.id, effectiveSettings, themeSettings },
+          metadata: { jobProfileId: selectedJobProfile.id, employmentOfferId: persistedOffer.id, effectiveSettings, themeSettings },
           generated_by: session?.user?.id || null
         }])
         .select()
@@ -324,12 +356,12 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
 
   if (!employee || !selectedJobProfile) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-500 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm mx-5 mb-5 lg:ml-0 lg:flex-1 lg:min-w-[600px]">
+      <div className={className || "flex flex-col items-center justify-center h-full text-slate-500 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm mx-5 mb-5 lg:ml-0 lg:flex-1 lg:min-w-[600px]"}>
         <FileWarning className="w-12 h-12 mb-4 text-slate-300 dark:text-slate-700" />
-        <h3 className="text-[15px] font-medium text-slate-700 dark:text-slate-300">
+        <h3 className="text-base font-medium text-slate-700 dark:text-slate-300">
           {!employee ? 'No Employee Selected' : 'No Job Profile Selected'}
         </h3>
-        <p className="text-[13px] mt-1 text-slate-500">Configure the basic terms to preview the document.</p>
+        <p className="text-sm mt-1 text-slate-500">Configure the basic terms to preview the document.</p>
       </div>
     );
   }
@@ -337,7 +369,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const hasOutput = !!bodyHtml;
 
   return (
-    <div className="flex flex-col h-full bg-slate-100/50 dark:bg-slate-900 shadow-inner overflow-hidden flex-1 lg:min-w-[600px] relative">
+    <div className={className || "flex flex-col h-full bg-slate-100/50 dark:bg-slate-900 shadow-inner overflow-hidden flex-1 lg:min-w-[600px] relative"}>
       
       {/* Sleek Glassy Toolbar */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2.5 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200/60 dark:border-slate-700/60 shadow-lg shadow-slate-200/20 dark:shadow-black/20 rounded-2xl z-20 flex items-center gap-4 transition-all">
@@ -345,23 +377,47 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
           {/* Zoom Controls */}
           <div className="flex items-center h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden">
             <button
-              onClick={() => setZoomPct((z) => Math.max(40, z - 10))}
-              disabled={zoomPct <= 40}
+              onClick={() => setManualZoom((z) => z - 10)}
+              disabled={sizingMode === 'manual' && zoomPct <= 40}
               title="Zoom out"
               className="px-2 h-full text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-800 dark:hover:text-slate-200 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
             >
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
-            <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300 w-10 text-center tabular-nums select-none">
-              {zoomPct}%
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-300 w-10 text-center tabular-nums select-none">
+              {Math.round(zoomRatio * 100)}%
             </span>
             <button
-              onClick={() => setZoomPct((z) => Math.min(150, z + 10))}
-              disabled={zoomPct >= 150}
+              onClick={() => setManualZoom((z) => z + 10)}
+              disabled={sizingMode === 'manual' && zoomPct >= 150}
               title="Zoom in"
               className="px-2 h-full text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-800 dark:hover:text-slate-200 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
             >
               <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Sizing Mode: Fit width / Fill height */}
+          <div className="flex items-center h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden">
+            <button
+              onClick={() => setSizingMode('fit')}
+              title="Fit page to width"
+              className={cn(
+                "px-2.5 h-full text-[10px] font-bold uppercase tracking-wide transition-colors",
+                sizingMode === 'fit' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" : "text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
+              )}
+            >
+              Fit
+            </button>
+            <button
+              onClick={() => setSizingMode('fill')}
+              title="Fill available height"
+              className={cn(
+                "px-2.5 h-full text-[10px] font-bold uppercase tracking-wide transition-colors border-l border-slate-200 dark:border-slate-700",
+                sizingMode === 'fill' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" : "text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
+              )}
+            >
+              Fill
             </button>
           </div>
         </div>
@@ -398,7 +454,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
             <DropdownMenuTrigger asChild>
               <button
                 disabled={!hasOutput || loadingContext}
-                className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-[12px] font-medium bg-slate-50 border border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
+                className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
               >
                 {isGeneratingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                 Export
@@ -416,15 +472,17 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
           </DropdownMenu>
 
           {/* Primary action */}
-          <Button
-            size="sm"
-            className="h-8 px-4 text-[12px] font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md rounded-lg"
-            onClick={handleSaveToDb}
-            disabled={!hasOutput || loadingContext || isSaving}
-          >
-            {isSaving ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-2" />}
-            Generate
-          </Button>
+          {!previewOnly && (
+            <Button
+              size="sm"
+              className="h-8 px-4 text-xs font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md rounded-lg"
+              onClick={handleSaveToDb}
+              disabled={!hasOutput || loadingContext || isSaving}
+            >
+              {isSaving ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-2" />}
+              Generate
+            </Button>
+          )}
         </div>
       </div>
 
@@ -433,10 +491,10 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
         ref={scrollContainerRef}
         className="flex-1 overflow-auto bg-slate-100/50 dark:bg-slate-950/50 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700 pt-16"
       >
-        {!contractTemplate && !loadingContext ? (
+        {!hasOutput && !loadingContext ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-400">
             <FileWarning className="w-10 h-10 mb-3" />
-            <p className="text-[13px]">No Contract Template configured.</p>
+            <p className="text-sm">Nothing to preview yet.</p>
           </div>
         ) : loadingContext ? (
           <div className="flex items-center justify-center h-full min-h-[300px]">
@@ -481,8 +539,8 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
       </div>
 
       {/* Sticky Pagination Controls - Fixed to the bottom */}
-      {contractTemplate && !loadingContext && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white/90 dark:bg-slate-900/90 backdrop-blur border border-slate-200 dark:border-slate-800 rounded-full py-1.5 px-4 flex items-center justify-center gap-4 text-[12px] text-slate-600 dark:text-slate-300 font-medium z-10 shadow-lg shadow-slate-200/20 dark:shadow-black/20">
+      {hasOutput && !loadingContext && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white/90 dark:bg-slate-900/90 backdrop-blur border border-slate-200 dark:border-slate-800 rounded-full py-1.5 px-4 flex items-center justify-center gap-4 text-xs text-slate-600 dark:text-slate-300 font-medium z-10 shadow-lg shadow-slate-200/20 dark:shadow-black/20">
           <div className="flex items-center gap-0.5">
             <button onClick={() => scrollToPage(1)} disabled={currentPage <= 1} className="p-1 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
               <ChevronsLeft className="w-3.5 h-3.5" />

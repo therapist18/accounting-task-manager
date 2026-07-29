@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchableSelect } from '../components/SearchableSelect';
 import { Switch } from '@/components/ui/switch';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -18,32 +18,29 @@ import {
 } from '@/components/ui/alert-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import {
-  Loader2, PlusCircle, Settings, Trash2, Briefcase, BookText,
+  Loader2, PlusCircle, Trash2, Briefcase, BookText,
   Search, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
   Columns2, FileText, Database, ChevronDown, ShieldCheck, Laptop2,
   Users, Megaphone, Car, LayoutTemplate, UserCog, FileCheck, Link as LinkIcon, PlayCircle,
-  Copy, Download, AlertCircle, CheckCircle2, ChevronRight, X, FileSignature,
+  Copy, Download, AlertCircle, CheckCircle2, ChevronRight, X, FileSignature, Check, ChevronsUpDown,
+  ChevronDownIcon, ChevronUpIcon,
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { fetchCompanies, Company } from '../../companies/database';
 import {
   EcJobProfile, fetchJobProfiles, createJobProfile, updateJobProfile, deleteJobProfile,
-  JobProfileScope, findCompanyDefaults, findDepartmentDefaults,
+  JobProfileScope,
 } from '../utils/jobProfileData';
 import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
-import {
-  resolveEffectiveSettings, resolveEffectiveClauses, buildDefaultClauseMap, assembleContractHtml,
-} from '../utils/clauseEngine';
-
-
-import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
-import { replacePlaceholders } from '../../tasks-requirements/utils/templateFormatters';
+import { buildDefaultClauseMap } from '../utils/clauseEngine';
 import type { ContractEmployeeInfo } from '../utils/data';
-import { CompaniesSidebar } from '../components/CompaniesSidebar';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
 import { EMPLOYMENT_TYPE_OPTIONS, WORK_ARRANGEMENT_OPTIONS, withCurrentValue } from '../utils/profileOptions';
+import { ContractPreview } from '../components/ContractPreview';
 
 const SETTINGS_GROUPS: { label: string; test: RegExp }[] = [
   { label: 'Compensation & Benefits', test: /allowance|medical|pension|salary|payment/i },
@@ -51,20 +48,6 @@ const SETTINGS_GROUPS: { label: string; test: RegExp }[] = [
   { label: 'Leave', test: /leave_days$/i },
   { label: 'Termination & Probation', test: /notice_|probation_/i },
 ];
-
-function groupSettings(settings: Record<string, any>): { label: string; items: [string, any][] }[] {
-  const buckets = new Map<string, [string, any][]>();
-  for (const group of SETTINGS_GROUPS) buckets.set(group.label, []);
-  buckets.set('Other', []);
-
-  for (const entry of Object.entries(settings || {})) {
-    const group = SETTINGS_GROUPS.find((g) => g.test.test(entry[0]));
-    buckets.get(group?.label || 'Other')!.push(entry);
-  }
-  return Array.from(buckets.entries())
-    .map(([label, items]) => ({ label, items }))
-    .filter((g) => g.items.length > 0);
-}
 
 const DEPARTMENT_VISUALS: { test: RegExp; icon: typeof Briefcase; classes: string }[] = [
   { test: /audit/i, icon: ShieldCheck, classes: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400' },
@@ -90,137 +73,31 @@ const SECTION_BADGE_COLORS = [
   'bg-emerald-50 text-emerald-700 border-emerald-200',
 ];
 
-// Which settings keys belong on which editable tab - mirrors SETTINGS_GROUPS
-// above but split across the three thematic tabs instead of one dumping
-// ground, plus "Contract Rules" catches anything that doesn't match any of
-// them so no key is ever silently hidden.
-const EMPLOYMENT_RULES_HINTS = [
-  'notice_period', 'probation_period', 'probation_notice', 'termination_reason', 'confirmation_required',
-  'confidentiality_policy', 'intellectual_property_policy', 'data_protection_policy', 'code_of_conduct_policy',
-  'disciplinary_policy', 'company_property_policy',
-];
-const WORKING_ARRANGEMENT_HINTS = [
-  'working_days', 'working_hours', 'start_time', 'end_time', 'break_duration', 'rest_days', 'work_mode',
-  'remote_work_allowed', 'remote_days', 'weekend_work', 'weekend_approval_required', 'overtime_eligible',
-  'overtime_approval_required', 'overtime_compensation',
-];
-const BENEFITS_HINTS = [
-  'salary_currency', 'salary_min', 'salary_max', 'medical_cover', 'housing_allowance', 'transport_allowance', 'telephone_allowance', 'meal_allowance', 'internet_allowance', 'pension_scheme',
-  'annual_leave_days', 'sick_leave_days', 'maternity_leave_days', 'paternity_leave_days', 'compassionate_leave_days',
-  'payment_frequency', 'payment_day', 'bonus_scheme',
-];
-const ALL_KNOWN_SETTINGS_HINTS = ['reports_to', ...EMPLOYMENT_RULES_HINTS, ...WORKING_ARRANGEMENT_HINTS, ...BENEFITS_HINTS];
-
 const JOB_LEVEL_OPTIONS = ['Entry Level', 'Junior', 'Mid-Level', 'Senior', 'Manager', 'Executive'];
 const PROBATION_OPTIONS = ['Not Applicable', '1 Month', '3 Months', '6 Months'];
 const NOTICE_OPTIONS = ['1 Week', '2 Weeks', '1 Month', '2 Months', '3 Months'];
 const LEAVE_DAY_OPTIONS = ['7 Days', '14 Days', '21 Days', '30 Days', 'According to Company Policy'];
-const PAYMENT_FREQUENCY_OPTIONS = ['Monthly', 'Bi-weekly', 'Weekly'];
 const ALLOWANCE_OPTIONS = ['No', 'Optional', 'Yes', 'According to Company Policy'];
 
-// Bullet-list editor for Requirements / Key Responsibilities - free-form
-// prose lines, distinct from the short keyword chips TagListEditor handles.
 function StringListEditor({ items, onChange, placeholder }: { items: string[]; onChange: (items: string[]) => void; placeholder: string }) {
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {items.map((item, i) => (
-        <div key={i} className="flex items-center gap-2">
+        <div key={i} className="flex items-center gap-2 group">
           <Input
-            className="h-8 text-xs bg-white dark:bg-slate-900"
+            className="h-10 text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm focus-visible:ring-1 focus-visible:ring-blue-500/50"
             placeholder={placeholder}
             value={item}
             onChange={(e) => onChange(items.map((it, ii) => (ii === i ? e.target.value : it)))}
           />
-          <button type="button" onClick={() => onChange(items.filter((_, ii) => ii !== i))} className="text-slate-400 hover:text-red-600 shrink-0">
+          <button type="button" onClick={() => onChange(items.filter((_, ii) => ii !== i))} className="text-slate-400 hover:text-red-500 shrink-0 transition-colors p-1.5 rounded-lg hover:bg-red-50">
             <X className="h-4 w-4" />
           </button>
         </div>
       ))}
-      <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" onClick={() => onChange([...items, ''])}>
-        <PlusCircle className="h-3 w-3 mr-1.5" /> Add
+      <Button type="button" variant="outline" size="sm" className="h-9 text-xs rounded-lg border-dashed border-slate-300 dark:border-slate-700 bg-transparent hover:bg-slate-50 text-slate-600" onClick={() => onChange([...items, ''])}>
+        <PlusCircle className="h-3.5 w-3.5 mr-1.5" /> Add Item
       </Button>
-    </div>
-  );
-}
-
-// Chip editor for Skills / Job Tags / Equipment - type + Enter (or comma) to
-// add, click the x to remove. Used for short keyword-style lists.
-function TagListEditor({ items, onChange, placeholder, badgeClassName }: { items: string[]; onChange: (items: string[]) => void; placeholder: string; badgeClassName?: string }) {
-  const [value, setValue] = useState('');
-  const addTag = () => {
-    const v = value.trim();
-    if (!v || items.includes(v)) { setValue(''); return; }
-    onChange([...items, v]);
-    setValue('');
-  };
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      {items.map((item, i) => (
-        <Badge key={i} variant="secondary" className={cn("font-medium text-[10px] py-0.5 pl-2.5 pr-1.5 h-6 flex items-center gap-1 border-transparent", badgeClassName || "bg-blue-50 text-blue-700 hover:bg-blue-100")}>
-          {item}
-          <button type="button" onClick={() => onChange(items.filter((_, ii) => ii !== i))} className="hover:opacity-70">
-            <X className="h-3 w-3" />
-          </button>
-        </Badge>
-      ))}
-      <input
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(); } }}
-        onBlur={addTag}
-        placeholder={placeholder}
-        className="text-xs h-6 px-2.5 border border-dashed border-slate-300 dark:border-slate-700 rounded-full outline-none focus:border-blue-400 bg-transparent w-36"
-      />
-    </div>
-  );
-}
-
-// Editable key/value card for a thematic slice of the free-form `settings`
-// bag. `hints` are the keys this card owns; clicking one that isn't set yet
-// adds it, and a custom key/value row covers anything not in the list.
-function SettingsEditorCard({ title, hints, settings, onChange, excludeKnown }: {
-  title: string; hints: string[]; settings: Record<string, any>; onChange: (next: Record<string, any>) => void; excludeKnown?: boolean;
-}) {
-  const [newKey, setNewKey] = useState('');
-  const [newValue, setNewValue] = useState('');
-  const safeSettings = settings || {};
-  const entries = excludeKnown
-    ? Object.entries(safeSettings).filter(([k]) => !ALL_KNOWN_SETTINGS_HINTS.includes(k))
-    : Object.entries(safeSettings).filter(([k]) => hints.includes(k));
-  const remainingHints = hints.filter((h) => safeSettings[h] === undefined);
-
-  const setKey = (key: string, value: string) => onChange({ ...safeSettings, [key]: value });
-  const removeKey = (key: string) => { const next = { ...safeSettings }; delete next[key]; onChange(next); };
-
-  return (
-    <div className="bg-white dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
-      <p className="text-sm font-bold text-slate-800 dark:text-slate-300 mb-4">{title}</p>
-      <div className="space-y-2.5">
-        {entries.length === 0 && <p className="text-xs text-slate-400 italic mb-1">Nothing set yet.</p>}
-        {entries.map(([key, value]) => (
-          <div key={key} className="flex items-center gap-2">
-            <span className="text-xs font-mono text-slate-500 w-40 truncate shrink-0" title={key}>{key}</span>
-            <Input className="h-8 text-xs flex-1 bg-white dark:bg-slate-900" value={String(value)} onChange={(e) => setKey(key, e.target.value)} />
-            <button type="button" onClick={() => removeKey(key)} className="text-slate-400 hover:text-red-600 shrink-0"><X className="h-4 w-4" /></button>
-          </div>
-        ))}
-      </div>
-      {remainingHints.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mt-4">
-          {remainingHints.map((hint) => (
-            <button key={hint} type="button" onClick={() => setKey(hint, '')} className="text-[10px] font-mono text-slate-500 border border-dashed border-slate-300 dark:border-slate-700 rounded-full px-2 py-1 hover:bg-slate-50 dark:hover:bg-slate-900 hover:text-slate-800 dark:hover:text-slate-200">
-              + {hint}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-        <Input className="h-8 text-xs font-mono bg-white dark:bg-slate-900" placeholder="custom_key" value={newKey} onChange={(e) => setNewKey(e.target.value)} />
-        <Input className="h-8 text-xs bg-white dark:bg-slate-900" placeholder="value" value={newValue} onChange={(e) => setNewValue(e.target.value)} />
-        <Button type="button" size="sm" variant="outline" className="h-8 text-xs shrink-0 px-2.5" onClick={() => { if (!newKey.trim()) return; setKey(newKey.trim(), newValue); setNewKey(''); setNewValue(''); }}>
-          <PlusCircle className="h-3.5 w-3.5" />
-        </Button>
-      </div>
     </div>
   );
 }
@@ -228,7 +105,7 @@ function SettingsEditorCard({ title, hints, settings, onChange, excludeKnown }: 
 function FormField({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
     <div className={cn("space-y-1.5", className)}>
-      <label className="text-[11px] font-semibold text-slate-500">{label}</label>
+      <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">{label}</label>
       {children}
     </div>
   );
@@ -243,7 +120,7 @@ function SettingInput({ label, settingKey, settings, onChange, placeholder, type
         type={type}
         value={settings?.[settingKey] || ''}
         onChange={(e) => onChange(settingKey, e.target.value)}
-        className="h-9 text-xs bg-white dark:bg-slate-900"
+        className="h-10 text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm focus-visible:ring-1 focus-visible:ring-blue-500/50"
         placeholder={placeholder || 'Not set'}
       />
     </FormField>
@@ -256,30 +133,17 @@ function SettingSelect({ label, settingKey, options, settings, onChange, placeho
   const current = settings?.[settingKey] ? String(settings[settingKey]) : null;
   return (
     <FormField label={label}>
-      <Select value={current || '__unset__'} onValueChange={(v) => onChange(settingKey, v === '__unset__' ? '' : v)}>
-        <SelectTrigger className="h-9 text-xs bg-white dark:bg-slate-900">
-          <SelectValue placeholder={placeholder} />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>
-          {withCurrentValue(options, current).map((opt) => (
-            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <SearchableSelect
+        value={current || '__unset__'}
+        onChange={(v) => onChange(settingKey, v === '__unset__' ? '' : v)}
+        placeholder={placeholder}
+        searchPlaceholder={`Search ${label.toLowerCase() || 'options'}...`}
+        options={[
+          { value: '__unset__', label: 'Not set' },
+          ...withCurrentValue(options, current).map((opt) => ({ value: opt, label: opt })),
+        ]}
+      />
     </FormField>
-  );
-}
-
-function SettingSwitch({ label, settingKey, settings, onChange }: {
-  label: string; settingKey: string; settings: Record<string, any>; onChange: (key: string, value: string) => void;
-}) {
-  const checked = String(settings?.[settingKey] || '').toLowerCase() === 'yes';
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2.5">
-      <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{label}</span>
-      <Switch checked={checked} onCheckedChange={(next) => onChange(settingKey, next ? 'Yes' : 'No')} />
-    </div>
   );
 }
 
@@ -287,10 +151,10 @@ function SectionPanel({ title, description, children, className }: {
   title: string; description?: string; children: ReactNode; className?: string;
 }) {
   return (
-    <div className={cn("bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-5 shadow-sm", className)}>
-      <div className="mb-4">
-        <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">{title}</h3>
-        {description && <p className="text-xs text-slate-500 mt-1">{description}</p>}
+    <div className={cn("bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800/60 p-6 md:p-8 shadow-[0_1px_3px_0_rgb(0,0,0,0.02)]", className)}>
+      <div className="mb-7">
+        <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 tracking-tight">{title}</h3>
+        {description && <p className="text-sm text-slate-500 mt-1.5">{description}</p>}
       </div>
       {children}
     </div>
@@ -300,6 +164,7 @@ function SectionPanel({ title, description, children, className }: {
 export default function JobProfilesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
+  const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
   const [profiles, setProfiles] = useState<EcJobProfile[]>([]);
   const [allProfiles, setAllProfiles] = useState<EcJobProfile[]>([]);
   const [clauses, setClauses] = useState<EcClause[]>([]);
@@ -309,8 +174,10 @@ export default function JobProfilesPage() {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [detailTab, setDetailTab] = useState('overview');
+  
   const [linkSectionKey, setLinkSectionKey] = useState<string>(CONTRACT_SECTIONS[0].key);
   const [linkSearch, setLinkSearch] = useState('');
+  const [expandedClauseId, setExpandedClauseId] = useState<string | null>(null);
 
   const [draft, setDraft] = useState<EcJobProfile | null>(null);
   const [saving, setSaving] = useState(false);
@@ -384,11 +251,6 @@ export default function JobProfilesPage() {
     [profiles, selectedProfileId]
   );
 
-  // Local editable copy - every field on the page reads/writes `draft`, and
-  // nothing hits the database until Save Changes. Re-syncs whenever the
-  // selection changes OR the underlying profiles list refreshes (e.g. right
-  // after a successful save), so a save clears the dirty state instead of
-  // leaving stale local edits around.
   useEffect(() => {
     setDraft(selectedProfile ? { ...selectedProfile } : null);
   }, [selectedProfileId, selectedProfile]);
@@ -403,9 +265,12 @@ export default function JobProfilesPage() {
   const updateDraft = (patch: Partial<EcJobProfile>) => setDraft((prev) => (prev ? { ...prev, ...patch } : prev));
   const updateDraftSettings = (key: string, value: string) =>
     setDraft((prev) => (prev ? { ...prev, settings: { ...(prev.settings || {}), [key]: value } } : prev));
-  const updateDraftSettingsObject = (next: Record<string, any>) => updateDraft({ settings: next });
-
-  const settingsGroups = useMemo(() => (draft ? groupSettings(draft.settings || {}) : []), [draft]);
+  // Builds the next section_clauses off `prev` (the latest committed draft),
+  // not the render-scope `draft` closure - so two clause picks in the same
+  // React batch (e.g. quick successive clicks) both land instead of the
+  // second one clobbering section_clauses back to a version missing the first.
+  const updateDraftSectionClauses = (updater: (prev: Record<string, string>) => Record<string, string>) =>
+    setDraft((prev) => (prev ? { ...prev, section_clauses: updater(prev.section_clauses || {}) } : prev));
 
   const clausesById = useMemo(() => Object.fromEntries(clauses.map((c) => [c.id, c])), [clauses]);
   const defaultClauseMap = useMemo(() => buildDefaultClauseMap(clauses), [clauses]);
@@ -493,6 +358,24 @@ export default function JobProfilesPage() {
 
   const handleCancelEdits = () => { if (selectedProfile) setDraft({ ...selectedProfile }); };
 
+  const handleAutoFillDefaults = () => {
+    if (!draft) return;
+    updateDraftSectionClauses((prev) => {
+      const next = { ...prev };
+      for (const section of CONTRACT_SECTIONS) {
+        if (defaultClauseMap[section.key]) {
+          next[section.key] = defaultClauseMap[section.key];
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleClearAllSelections = () => {
+    if (!draft) return;
+    updateDraftSectionClauses(() => ({}));
+  };
+
   const handleDuplicate = async () => {
     if (!selectedProfile) return;
     try {
@@ -508,17 +391,6 @@ export default function JobProfilesPage() {
     }
   };
 
-  const handleDownloadJobDescription = () => {
-    if (!draft) return;
-    const parts = [`<h1>${draft.name}</h1>`];
-    if (draft.job_title) parts.push(`<p><strong>${draft.job_title}</strong></p>`);
-    if (draft.job_description) parts.push(`<p>${draft.job_description.replace(/\n/g, '<br/>')}</p>`);
-    if (draft.key_responsibilities?.length) parts.push(`<h2>Key Responsibilities</h2><ul>${draft.key_responsibilities.map((r) => `<li>${r}</li>`).join('')}</ul>`);
-    if (draft.requirements?.length) parts.push(`<h2>Requirements</h2><ul>${draft.requirements.map((r) => `<li>${r}</li>`).join('')}</ul>`);
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${draft.name} Job Description</title></head><body>${parts.join('')}</body></html>`;
-    saveAs(new Blob([html], { type: 'application/msword' }), `${draft.name.replace(/\s+/g, '_')}_Job_Description.doc`);
-  };
-
   const handleDelete = async (id: string) => {
     const ok = await deleteJobProfile(id);
     if (ok) {
@@ -532,52 +404,19 @@ export default function JobProfilesPage() {
 
   const scopeLabel = (scope: JobProfileScope) => scope === 'company' ? 'Company Defaults' : scope === 'department' ? 'Department Defaults' : 'Position';
 
-  // ── Preview tab: reuses the same cascade + assembly engine the real
-  // Contract Editor uses, layered as Company Defaults -> Department Defaults
-  // -> this profile (itself, always winning). A Job Profile isn't tied to a
-  // real employee, so identity placeholders come from a clearly-labeled
-  // sample employee - only the profile/company data is real.
-  const companyDefaults = useMemo(() => (selectedCompanyId ? findCompanyDefaults(profiles, selectedCompanyId) : undefined), [profiles, selectedCompanyId]);
-  const departmentDefaults = useMemo(() => (selectedCompanyId ? findDepartmentDefaults(profiles, selectedCompanyId, draft?.department) : undefined), [profiles, selectedCompanyId, draft?.department]);
-
-  const previewEffectiveSettings = useMemo(() => resolveEffectiveSettings([
-    companyDefaults, departmentDefaults, draft ? { settings: draft.settings } : null,
-  ]), [companyDefaults, departmentDefaults, draft]);
-
-  const previewEffectiveClauses = useMemo(() => resolveEffectiveClauses([
-    companyDefaults, departmentDefaults, draft ? { section_clauses: draft.section_clauses } : null,
-  ], defaultClauseMap), [companyDefaults, departmentDefaults, draft, defaultClauseMap]);
-
-  const previewCompany = useMemo(() => companies.find((c) => String(c.id) === selectedCompanyId) || null, [companies, selectedCompanyId]);
-
-  const previewEmployeeValues = useMemo(() => {
-    const sampleEmployee: ContractEmployeeInfo = {
-      id: 'sample', individualId: 0, companyId: Number(selectedCompanyId) || 0,
-      fullName: 'Sample Employee', firstName: 'Sample', lastName: 'Employee',
-      employeeNumber: 'EMP-0000', kraPin: '', nationalId: '', nssfNumber: '', nhifNumber: '', shifNumber: '',
-      department: draft?.department || '', jobTitle: draft?.job_title || draft?.name || '',
-      employmentType: draft?.employment_type || '', employmentStatus: 'Active', jobLevel: draft?.job_level || '',
-      reportsTo: String(draft?.settings?.reports_to || ''), workLocation: draft?.work_location || '',
-      workArrangement: draft?.work_arrangement || '', status: 'Active', basicSalary: 0, grossSalary: 0,
-      bankName: '', bankBranch: '', bankAccount: '', contactEmail: '', contactPhone: '', startDate: '',
-    };
-    return buildStandardPlaceholderValues(sampleEmployee, previewCompany, undefined, previewEffectiveSettings);
-  }, [draft, previewCompany, previewEffectiveSettings, selectedCompanyId]);
-
-  const previewHtml = useMemo(() => {
-    if (!draft) return '';
-    const linkedKeys = Object.keys(draft.section_clauses || {});
-    if (linkedKeys.length === 0) return '';
-    const body = assembleContractHtml({
-      sectionKeys: linkedKeys,
-      clausesById,
-      effectiveClauses: previewEffectiveClauses,
-      effectiveSettings: previewEffectiveSettings,
-      employeePlaceholderValues: previewEmployeeValues,
-      includeToc: false,
-    });
-    return replacePlaceholders(body, { ...previewEffectiveSettings, ...previewEmployeeValues });
-  }, [draft, clausesById, previewEffectiveClauses, previewEffectiveSettings, previewEmployeeValues]);
+  // A stand-in employee so the shared ContractPreview component (same one the
+  // main Employment Contracts editor uses) can resolve and render this draft
+  // profile's clauses/settings without a real employee/offer existing yet.
+  const sampleEmployee: ContractEmployeeInfo = useMemo(() => ({
+    id: 'sample', individualId: 0, companyId: Number(selectedCompanyId) || 0,
+    fullName: 'Sample Employee', firstName: 'Sample', lastName: 'Employee',
+    employeeNumber: 'EMP-0000', kraPin: 'A000000000Z', nationalId: '12345678', nssfNumber: 'NS0001', nhifNumber: 'NH0001', shifNumber: '',
+    department: draft?.department || '', jobTitle: draft?.job_title || draft?.name || '',
+    employmentType: draft?.employment_type || '', employmentStatus: 'Active', jobLevel: draft?.job_level || '',
+    reportsTo: String(draft?.settings?.reports_to || ''), workLocation: draft?.work_location || '',
+    workArrangement: draft?.work_arrangement || '', status: 'Active', basicSalary: 0, grossSalary: 0,
+    bankName: '', bankBranch: '', bankAccount: '', contactEmail: '', contactPhone: '', startDate: '',
+  }), [draft, selectedCompanyId]);
 
   const tabs: { value: string; label: string; icon: any }[] = [
     { value: 'overview', label: 'Overview', icon: LayoutTemplate },
@@ -590,269 +429,259 @@ export default function JobProfilesPage() {
   ];
 
   return (
-    <div className="max-h-[calc(100vh-1rem)] w-full overflow-hidden bg-slate-50 dark:bg-slate-950 flex flex-col rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-      {/* HEADER */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/50 dark:border-slate-800/50 bg-white dark:bg-slate-900 shrink-0 gap-3 relative z-20">
+    <div className="h-[calc(100vh-1rem)] w-full flex flex-col bg-slate-50/50 dark:bg-slate-950/50 rounded-xl overflow-hidden shadow-[0_2px_10px_-3px_rgba(55,107,174,0.15)] border border-slate-200 dark:border-slate-800">
+      
+      {/* GLOBAL HEADER */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shrink-0 gap-4 relative z-20 shadow-[0_1px_2px_0_rgb(0,0,0,0.02)]">
+        
+        {/* Left Side: Prominent Company Selector */}
         <div className="flex items-center gap-4 min-w-0">
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500">
-            <LayoutTemplate className="h-5 w-5" />
-          </Button>
-          <div className="flex flex-col">
-            <h1 className="text-base font-bold text-slate-800 dark:text-slate-100 leading-tight">
-              Job Profiles
-            </h1>
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium mt-0.5">
+          <div className="flex items-center justify-center w-10 h-10 bg-custom-blue rounded-xl shadow-sm shrink-0">
+            <LayoutTemplate className="h-5 w-5 text-white" />
+          </div>
+          
+          <div className="flex flex-col min-w-0">
+            <Popover open={companyDropdownOpen} onOpenChange={setCompanyDropdownOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" role="combobox" aria-expanded={companyDropdownOpen} className="h-auto px-1 py-0.5 -ml-1 justify-start hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2 max-w-[300px] md:max-w-[400px]">
+                  <span className="text-xl font-extrabold text-slate-900 dark:text-slate-100 truncate tracking-tight">
+                    {selectedCompanyId === '__general__' ? 'General (No Company)' : companies.find(c => String(c.id) === selectedCompanyId)?.company_name || 'Select Workspace...'}
+                  </span>
+                  <ChevronsUpDown className="h-4 w-4 shrink-0 text-slate-400" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[300px] p-0 rounded-xl shadow-xl" align="start">
+                <Command>
+                  <CommandInput placeholder="Search companies..." className="h-10 text-sm" />
+                  <CommandList>
+                    <CommandEmpty>No company found.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem
+                        value="General (No Company)"
+                        onSelect={() => { setSelectedCompanyId('__general__'); setSelectedProfileId(null); setCompanyDropdownOpen(false); }}
+                        className="text-sm font-medium"
+                      >
+                        <Check className={cn("mr-2 h-4 w-4 text-blue-600", selectedCompanyId === '__general__' ? "opacity-100" : "opacity-0")} />
+                        General (No Company)
+                      </CommandItem>
+                      {companies.map((c) => (
+                        <CommandItem
+                          key={c.id}
+                          value={c.company_name}
+                          onSelect={() => { setSelectedCompanyId(String(c.id)); setSelectedProfileId(null); setCompanyDropdownOpen(false); }}
+                          className="text-sm font-medium"
+                        >
+                          <Check className={cn("mr-2 h-4 w-4 text-blue-600", selectedCompanyId === String(c.id) ? "opacity-100" : "opacity-0")} />
+                          {c.company_name}
+                          <Badge variant="secondary" className="ml-auto text-xs">{companyCounts[c.id] || 0}</Badge>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium px-0.5 whitespace-nowrap mt-0.5">
               <span>Settings</span>
-              <ChevronRight className="h-3 w-3" />
-              <span>Job Profiles</span>
-              <ChevronRight className="h-3 w-3" />
-              <span className="text-slate-700 dark:text-slate-300">{selectedProfile ? selectedProfile.name : 'All'}</span>
+              <ChevronRight className="h-3 w-3 shrink-0" />
+              <span className="text-blue-600 dark:text-blue-400 font-semibold">Job Profiles</span>
+              {selectedProfile && (
+                <>
+                  <ChevronRight className="h-3 w-3 shrink-0" />
+                  <span className="text-slate-700 dark:text-slate-300 truncate max-w-[200px]">{selectedProfile.name}</span>
+                </>
+              )}
             </div>
           </div>
-          <div className="flex items-center gap-1 bg-slate-100/50 dark:bg-slate-800/50 p-1 rounded-lg border border-slate-200/50 dark:border-slate-700/50 ml-4">
-            <button
-              onClick={() => togglePanel('sidebar')}
-              title={collapsed.sidebar ? 'Show entities panel' : 'Hide entities panel'}
-              className={cn(
-                "p-1.5 rounded-md transition-all",
-                collapsed.sidebar ? "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" : "bg-white dark:bg-slate-700 text-blue-600 shadow-sm"
-              )}
-            >
-              {collapsed.sidebar ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+        </div>
+
+        {/* Right Side: Quick Links & Panel Toggles */}
+        <div className="flex items-center gap-5 shrink-0">
+          <div className="hidden lg:flex items-center bg-slate-50 dark:bg-slate-900 p-1 rounded-full border border-slate-200 dark:border-slate-800/80 shadow-sm gap-1">
+            <Link href="/dashboard/employment-contracts" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"><FileSignature className="w-3.5 h-3.5" /> Contracts</Link>
+            <Link href="/dashboard/employment-contracts/clause-library" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"><BookText className="w-3.5 h-3.5" /> Clauses</Link>
+          </div>
+
+          <div className="w-px h-6 bg-slate-200 dark:bg-slate-800 hidden md:block"></div>
+
+          <div className="hidden md:flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-full border border-slate-200 dark:border-slate-800/80">
+            <button onClick={() => togglePanel('editor')} title={collapsed.editor ? 'Show profiles list' : 'Hide profiles list'} className={cn("p-1.5 rounded-full transition-all", collapsed.editor ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm dark:bg-slate-800 dark:text-blue-600")}>
+              <PanelLeftClose className="w-4 h-4" />
             </button>
-            <button
-              onClick={() => togglePanel('editor')}
-              title={collapsed.editor ? 'Show profiles panel' : 'Hide profiles panel'}
-              className={cn(
-                "p-1.5 rounded-md transition-all",
-                collapsed.editor ? "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" : "bg-white dark:bg-slate-700 text-blue-600 shadow-sm"
-              )}
-            >
+            <button onClick={() => togglePanel('detail')} title={collapsed.detail ? 'Show editor panel' : 'Hide editor panel'} className={cn("p-1.5 rounded-full transition-all", collapsed.detail ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm dark:bg-slate-800 dark:text-blue-600")}>
               <Columns2 className="w-4 h-4" />
             </button>
-            <button
-              onClick={() => togglePanel('preview')}
-              title={collapsed.preview ? 'Show preview panel' : 'Hide preview panel'}
-              className={cn(
-                "p-1.5 rounded-md transition-all",
-                collapsed.preview ? "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" : "bg-white dark:bg-slate-700 text-blue-600 shadow-sm"
-              )}
-            >
+            <button onClick={() => togglePanel('preview')} title={collapsed.preview ? 'Show preview panel' : 'Hide preview panel'} className={cn("p-1.5 rounded-full transition-all", collapsed.preview ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm dark:bg-slate-800 dark:text-blue-600")}>
               {collapsed.preview ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
             </button>
           </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0 bg-slate-50 dark:bg-slate-900 p-1 rounded-xl border border-slate-200/60 dark:border-slate-800/60 shadow-sm">
-          <Link href="/dashboard/employment-contracts" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg transition-colors">Contracts</Link>
-          <Link href="/dashboard/employment-contracts/clause-library" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg transition-colors"><BookText className="w-3.5 h-3.5" /> Clauses</Link>
-          <Link href="/dashboard/employment-contracts/templates" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg transition-colors"><Settings className="w-3.5 h-3.5" /> Templates</Link>
-          <Link href="/dashboard/employment-contracts/placeholders" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg transition-colors"><Database className="w-3.5 h-3.5" /> Data Sources</Link>
-        </div>
       </div>
 
-      <PanelGroup direction="horizontal" className="h-full w-full">
-        {/* LEFT PANEL: Companies */}
-        <Panel
-          ref={sidebarPanelRef}
-          defaultSize={18}
-          minSize={14}
-          maxSize={28}
-          collapsible
-          collapsedSize={0}
-          onCollapse={() => setCollapsed(prev => ({ ...prev, sidebar: true }))}
-          onExpand={() => setCollapsed(prev => ({ ...prev, sidebar: false }))}
-          className="bg-white dark:bg-slate-900 flex flex-col z-10 overflow-auto"
-        >
-          <CompaniesSidebar
-            companies={companies}
-            selectedCompanyId={selectedCompanyId || null}
-            onSelectCompany={(id) => { setSelectedCompanyId(id || ''); setSelectedProfileId(null); }}
-            companyCounts={companyCounts}
-            subtitle="Manage job profiles"
-            topItems={[{ id: '__general__', label: 'General', count: allProfiles.filter(p => !p.company_id).length }]}
-          />
-        </Panel>
+      <div className="flex-1 w-full relative overflow-hidden bg-transparent">
+        <PanelGroup direction="horizontal" className="h-full w-full">
 
-        <PanelResizeHandle className="w-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-20" />
-
-        {/* CENTER PANEL: Profile list */}
-        <Panel
-          ref={editorPanelRef}
-          defaultSize={22}
-          minSize={18}
-          collapsible
-          collapsedSize={0}
-          onCollapse={() => setCollapsed(prev => ({ ...prev, editor: true }))}
-          onExpand={() => setCollapsed(prev => ({ ...prev, editor: false }))}
-          className="bg-white dark:bg-slate-950 flex flex-col z-10 !overflow-auto"
-        >
-          <div className="flex flex-col h-full border-r border-slate-200 dark:border-slate-800">
-            <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900 shrink-0 space-y-4">
-              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100">Job Profiles</h2>
-              <div className="flex flex-col gap-3">
-                <div className="relative">
+          {/* PANEL 1: PROFILES LIST */}
+          <Panel
+            ref={editorPanelRef}
+            defaultSize={22}
+            minSize={18}
+            maxSize={30}
+            collapsible
+            onCollapse={() => setCollapsed(prev => ({ ...prev, editor: true }))}
+            onExpand={() => setCollapsed(prev => ({ ...prev, editor: false }))}
+          >
+            <div className="h-full w-full flex flex-col bg-slate-50 dark:bg-slate-900/50 border-r border-slate-200 dark:border-slate-800">
+              <div className="p-5 border-b border-slate-200 dark:border-slate-800 shrink-0 space-y-4 bg-white/50 dark:bg-slate-900/50">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-bold text-slate-800 dark:text-slate-200 tracking-tight">Saved Profiles</h2>
+                  <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded-full px-2.5 font-bold text-xs">{filteredProfiles.length}</Badge>
+                </div>
+                <div className="relative shadow-sm rounded-full">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <Input
-                    placeholder="Search profiles..."
-                    className="pl-9 h-9 text-xs bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 rounded-full"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
+                  <Input placeholder="Search profiles..." className="pl-9 h-9 rounded-full text-sm bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus-visible:ring-1 focus-visible:ring-blue-500/50 transition-all" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
                 </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button size="sm" className="h-9 w-full text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-sm" disabled={!selectedCompanyId}>
-                      <PlusCircle className="h-4 w-4 mr-2" /> Add Job Profile
+                    <Button size="sm" className="h-9 w-full rounded-full text-sm bg-custom-blue hover:bg-[#2d5a94] dark:bg-blue-600 dark:hover:bg-blue-700 text-white shadow-sm transition-all" disabled={!selectedCompanyId && selectedCompanyId !== '__general__'}>
+                      <PlusCircle className="h-4 w-4 mr-2" /> Add Profile
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-56">
-                    <DropdownMenuItem onClick={() => openNew('position')}>New Position Profile</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => openNew('department')}>New Department Defaults</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => openNew('company')}>New Company Defaults</DropdownMenuItem>
+                  <DropdownMenuContent align="start" className="w-56 rounded-xl shadow-lg border-slate-200">
+                    <DropdownMenuItem className="rounded-lg cursor-pointer" onClick={() => openNew('position')}>New Position Profile</DropdownMenuItem>
+                    <DropdownMenuItem className="rounded-lg cursor-pointer" onClick={() => openNew('department')}>New Department Defaults</DropdownMenuItem>
+                    <DropdownMenuItem className="rounded-lg cursor-pointer" onClick={() => openNew('company')}>New Company Defaults</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
+
+              <ScrollArea className="flex-1 bg-transparent">
+                {isLoading ? (
+                  <div className="flex justify-center items-center h-40"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>
+                ) : filteredProfiles.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-40 text-center m-6">
+                    <div className="w-14 h-14 bg-white dark:bg-slate-900 shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center mb-3">
+                      <Briefcase className="h-6 w-6 text-slate-300" />
+                    </div>
+                    <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">No profiles found</h3>
+                    <p className="text-xs text-slate-500 mt-1">Create a new profile to start.</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col p-3 gap-1.5">
+                    {filteredProfiles.map((profile) => {
+                      const isSelected = selectedProfileId === profile.id;
+                      const visual = getProfileVisual(profile.department);
+                      const VisualIcon = visual.icon;
+                      return (
+                        <div
+                          key={profile.id}
+                          onClick={() => setSelectedProfileId(profile.id)}
+                          className={cn(
+                            "group flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all border",
+                            isSelected
+                              ? "bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 shadow-[0_2px_8px_-3px_rgba(0,0,0,0.05)] ring-1 ring-blue-500/20"
+                              : "bg-transparent border-transparent hover:bg-white/60 dark:hover:bg-slate-800/50 hover:border-slate-200"
+                          )}
+                        >
+                          <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5", visual.classes)}>
+                            <VisualIcon className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className={cn("text-base font-semibold truncate tracking-tight transition-colors", isSelected ? "text-blue-700 dark:text-blue-400" : "text-slate-800 dark:text-slate-200 group-hover:text-slate-900")}>{profile.name}</p>
+                            <p className="text-xs text-slate-500 truncate mt-0.5 font-medium">
+                              {profile.department || scopeLabel(profile.scope)}
+                            </p>
+                          </div>
+                          {profile.is_active === false && (
+                            <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full text-slate-500 bg-slate-100 dark:bg-slate-800 mt-1 shrink-0">
+                              Inactive
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </ScrollArea>
             </div>
+          </Panel>
 
-            <ScrollArea className="flex-1 bg-white dark:bg-slate-950">
-              {isLoading ? (
-                <div className="flex justify-center items-center h-40"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-              ) : filteredProfiles.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-40 text-center border-2 border-dashed rounded-2xl border-slate-200 dark:border-slate-800 m-4">
-                  <Briefcase className="h-10 w-10 text-slate-300 mb-3" />
-                  <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">No profiles yet</h3>
-                  <p className="text-xs text-slate-500 mt-1">Create a new profile to get started.</p>
-                </div>
-              ) : (
-                <div className="flex flex-col">
-                  {filteredProfiles.map((profile) => {
-                    const isSelected = selectedProfileId === profile.id;
-                    const visual = getProfileVisual(profile.department);
-                    const VisualIcon = visual.icon;
-                    return (
-                      <div
-                        key={profile.id}
-                        onClick={() => setSelectedProfileId(profile.id)}
-                        className={cn(
-                          "flex items-start gap-3 p-4 cursor-pointer transition-colors border-b border-slate-100 dark:border-slate-800 last:border-0 relative",
-                          isSelected ? "bg-slate-50 dark:bg-slate-800/50" : "hover:bg-slate-50/50 dark:hover:bg-slate-800/30"
-                        )}
-                      >
-                        {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600" />}
-                        <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm mt-0.5", visual.classes)}>
-                          <VisualIcon className="w-5 h-5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-bold truncate text-slate-900 dark:text-slate-100">{profile.name}</p>
-                          <p className="text-[11px] text-slate-500 truncate mt-1">
-                            {profile.department || scopeLabel(profile.scope)}
-                          </p>
-                          {profile.job_level && <p className="text-[11px] text-slate-500 truncate">{profile.job_level}</p>}
-                        </div>
-                        <span className={cn(
-                          "text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0",
-                          profile.is_active !== false ? "text-emerald-600 bg-emerald-50" : "text-slate-500 bg-slate-100"
-                        )}>
-                          {profile.is_active !== false ? 'Active' : 'Inactive'}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </ScrollArea>
-          </div>
-        </Panel>
+          {!collapsed.editor && (
+            <PanelResizeHandle className="relative w-1.5 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-10" />
+          )}
 
-        <PanelResizeHandle className="w-1.5 bg-slate-200 dark:border-slate-800 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-20" />
-
-        {/* DETAIL PANEL: Profile editor */}
-        <Panel
-          ref={detailPanelRef}
-          defaultSize={42}
-          minSize={30}
-          collapsible
-          collapsedSize={0}
-          onCollapse={() => setCollapsed(prev => ({ ...prev, detail: true }))}
-          onExpand={() => setCollapsed(prev => ({ ...prev, detail: false }))}
-          className="bg-slate-50 dark:bg-slate-900 flex flex-col z-10 !overflow-auto"
-        >
-          <div className="flex flex-col h-full">
-            {draft && selectedProfile ? (() => {
-              const visual = getProfileVisual(draft.department);
-              const VisualIcon = visual.icon;
-              return (
-                <>
-                  {/* Header */}
-                  <div className="px-8 py-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
-                    <div className="flex items-start justify-between gap-6">
-                      <div className="flex flex-col gap-4 min-w-0">
-                        <div className="flex items-center gap-4">
-                           <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-sm", visual.classes)}>
-                             <VisualIcon className="w-7 h-7" />
-                           </div>
-                           <div className="min-w-0">
-                             <div className="flex items-center gap-3 mb-1">
-                               <input
-                                 value={draft.name}
-                                 onChange={(e) => updateDraft({ name: e.target.value })}
-                                 className="text-2xl font-bold text-slate-900 dark:text-slate-100 bg-transparent outline-none border-b border-transparent focus:border-blue-300 min-w-0"
-                                 style={{ width: `${Math.max(draft.name.length, 8)}ch` }}
-                               />
-                               <button
-                                 type="button"
-                                 onClick={() => updateDraft({ is_active: !draft.is_active })}
-                                 title="Toggle active status"
-                               >
-                                 <Badge className={cn(
-                                   "text-xs px-2 py-0 rounded-full h-6 shrink-0 cursor-pointer",
-                                   draft.is_active ? "bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-200" : "bg-slate-100 text-slate-500 hover:bg-slate-200 border-slate-200"
-                                 )}>
-                                   {draft.is_active ? 'Active' : 'Inactive'}
-                                 </Badge>
-                               </button>
-                             </div>
-                             <p className="text-sm text-slate-600 dark:text-slate-400 font-medium truncate">
-                               {draft.department || scopeLabel(draft.scope)}
-                               {draft.job_level ? ` • ${draft.job_level}` : ''}
-                               {draft.employment_type ? ` • ${draft.employment_type}` : ''}
-                             </p>
-                             {draft.scope === 'position' && (
-                               <p className="text-xs text-slate-500 mt-1">
-                                 Reports to: <span className="font-medium text-slate-700 dark:text-slate-300">{draft.settings?.reports_to || 'Not set'}</span>
-                               </p>
-                             )}
-                           </div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col items-end justify-between gap-4 shrink-0 h-full">
-                        <div className="flex gap-6 text-[11px] text-slate-500 text-right">
-                          <div className="flex flex-col gap-1">
-                             <p>Created: <span className="font-medium text-slate-700 dark:text-slate-300">{new Date(draft.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span></p>
-                             <p>Last Updated: <span className="font-medium text-slate-700 dark:text-slate-300">{new Date(draft.updated_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span></p>
+          {/* PANEL 2: MAIN EDITOR */}
+          <Panel
+            ref={detailPanelRef}
+            defaultSize={53}
+            minSize={40}
+            collapsible
+            onCollapse={() => setCollapsed(prev => ({ ...prev, detail: true }))}
+            onExpand={() => setCollapsed(prev => ({ ...prev, detail: false }))}
+          >
+            <div className="h-full w-full flex flex-col bg-slate-50/40 dark:bg-slate-950/40 relative border-r border-slate-200 dark:border-slate-800">
+              {draft && selectedProfile ? (() => {
+                const visual = getProfileVisual(draft.department);
+                const VisualIcon = visual.icon;
+                return (
+                  <>
+                    {/* Editor Header */}
+                    <div className="px-8 py-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 shadow-[0_1px_2px_0_rgb(0,0,0,0.01)] z-10">
+                      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-5">
+                        <div className="flex flex-col gap-3 min-w-0 flex-1">
+                          <div className="flex items-start gap-5">
+                            <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-sm mt-0.5 border border-white/50", visual.classes)}>
+                              <VisualIcon className="w-7 h-7" />
+                            </div>
+                            <div className="min-w-0 flex flex-col gap-1 w-full">
+                              <div className="flex items-center gap-3 flex-wrap">
+                                <input
+                                  value={draft.name}
+                                  onChange={(e) => updateDraft({ name: e.target.value })}
+                                  className="text-xl font-extrabold text-slate-900 dark:text-slate-100 bg-transparent hover:bg-slate-50 dark:hover:bg-slate-800 px-2 py-1 -ml-2 rounded-lg outline-none border border-transparent focus:border-slate-300 dark:focus:border-slate-700 focus:bg-white dark:focus:bg-slate-950 transition-colors w-full max-w-lg truncate tracking-tight"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => updateDraft({ is_active: !draft.is_active })}
+                                  title="Toggle active status"
+                                >
+                                  <Badge className={cn(
+                                    "text-xs px-2.5 py-0.5 rounded-full h-5 shrink-0 cursor-pointer shadow-sm border-transparent transition-colors font-bold uppercase tracking-wider",
+                                    draft.is_active ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-400" : "bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400"
+                                  )}>
+                                    {draft.is_active ? 'Active' : 'Inactive'}
+                                  </Badge>
+                                </button>
+                              </div>
+                              <p className="text-sm text-slate-500 font-medium truncate px-0.5 flex items-center gap-2">
+                                <span>{draft.department || scopeLabel(draft.scope)}</span>
+                                {draft.job_level && <><span className="w-1 h-1 rounded-full bg-slate-300"></span><span>{draft.job_level}</span></>}
+                                {draft.employment_type && <><span className="w-1 h-1 rounded-full bg-slate-300"></span><span>{draft.employment_type}</span></>}
+                              </p>
+                            </div>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-3">
-                          <Button variant="outline" size="sm" className="h-9 px-4 rounded-full font-semibold" onClick={handleCancelEdits} disabled={!isDirty || saving}>Cancel</Button>
-                          <div className="flex rounded-full shadow-sm bg-blue-600">
-                            <Button size="sm" className="h-9 bg-transparent hover:bg-blue-700 text-white rounded-l-full rounded-r-none border-r border-blue-700 font-semibold px-4 disabled:opacity-60" onClick={handleSaveProfile} disabled={!isDirty || saving}>
+                        <div className="flex items-center gap-3 shrink-0 lg:self-start ml-20 lg:ml-0 mt-2 lg:mt-0">
+                          <Button variant="outline" size="sm" className="h-9 px-4 rounded-full text-sm font-semibold border-slate-200 shadow-sm hover:bg-slate-50 bg-white" onClick={handleCancelEdits} disabled={!isDirty || saving}>Cancel</Button>
+                          <div className="flex rounded-full shadow-sm bg-custom-blue">
+                            <Button size="sm" className="h-9 bg-transparent hover:bg-[#2d5a94] text-white rounded-l-full rounded-r-none border-r border-[#2d5a94]/50 text-sm font-semibold px-5 disabled:opacity-60 transition-colors" onClick={handleSaveProfile} disabled={!isDirty || saving}>
                               {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
                               Save Changes
                             </Button>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
-                                <Button size="sm" className="h-9 bg-transparent hover:bg-blue-700 text-white rounded-r-full rounded-l-none px-2.5">
+                                <Button size="sm" className="h-9 bg-transparent hover:bg-[#2d5a94] text-white rounded-r-full rounded-l-none px-2.5">
                                   <ChevronDown className="h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="rounded-xl">
-                                <DropdownMenuItem onClick={handleDuplicate}>
-                                  <Copy className="h-4 w-4 mr-2" /> Duplicate Job Profile
+                              <DropdownMenuContent align="end" className="rounded-xl shadow-lg border-slate-200">
+                                <DropdownMenuItem className="rounded-lg cursor-pointer text-sm font-medium" onClick={handleDuplicate}>
+                                  <Copy className="h-4 w-4 mr-2 text-slate-400" /> Duplicate Profile
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={() => setDeletingId(selectedProfile.id)}>
+                                <DropdownMenuItem className="rounded-lg cursor-pointer text-sm font-medium text-red-600 focus:text-red-600 focus:bg-red-50" onClick={() => setDeletingId(selectedProfile.id)}>
                                   <Trash2 className="h-4 w-4 mr-2" /> Delete Profile
                                 </DropdownMenuItem>
                               </DropdownMenuContent>
@@ -861,592 +690,418 @@ export default function JobProfilesPage() {
                         </div>
                       </div>
                     </div>
-                  </div>
 
-                  {/* Tabs */}
-                  <Tabs value={detailTab} onValueChange={setDetailTab} className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-950">
-                    <div className="px-8 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 overflow-x-auto">
-                      <TabsList className="bg-transparent h-14 w-max justify-start gap-8 p-0 border-none">
-                        {tabs.map((tab) => {
-                          const Icon = tab.icon;
-                          return (
-                            <TabsTrigger
-                              key={tab.value}
-                              value={tab.value}
-                              className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 rounded-none px-0 font-semibold text-[13px] text-slate-500 h-full whitespace-nowrap transition-colors flex items-center gap-2 hover:text-slate-700"
-                            >
-                              <Icon className="w-4 h-4" />
-                              {tab.label}
-                            </TabsTrigger>
-                          );
-                        })}
-                      </TabsList>
-                    </div>
+                    <div className="flex flex-1 overflow-hidden bg-transparent">
+                      <Tabs value={detailTab === 'preview' ? 'overview' : detailTab} onValueChange={setDetailTab} className="flex-1 flex flex-col overflow-hidden">
+                        
+                        {/* Tabs Header */}
+                        <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 lg:px-8 shrink-0 overflow-x-auto scrollbar-hide z-0">
+                          <TabsList className="bg-transparent h-14 p-0 border-none inline-flex w-max gap-6">
+                            {tabs.filter(t => t.value !== 'preview').map((tab) => {
+                              const Icon = tab.icon;
+                              const isActive = detailTab === tab.value;
+                              return (
+                                <TabsTrigger
+                                  key={tab.value}
+                                  value={tab.value}
+                                  className={cn(
+                                    "h-14 rounded-none border-b-[3px] font-semibold text-sm px-1 transition-all gap-2.5 whitespace-nowrap bg-transparent shadow-none data-[state=active]:bg-transparent data-[state=active]:shadow-none",
+                                    isActive 
+                                      ? "border-blue-600 text-blue-700 dark:border-blue-500 dark:text-blue-400" 
+                                      : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300 dark:hover:text-slate-300"
+                                  )}
+                                >
+                                  <Icon className={cn("w-4 h-4", isActive ? "text-blue-600" : "text-slate-400")} />
+                                  {tab.label}
+                                </TabsTrigger>
+                              );
+                            })}
+                          </TabsList>
+                        </div>
 
-                    <ScrollArea className="flex-1">
-                        <TabsContent value="overview" className="m-0 focus:outline-none">
-                          <div className="p-8 max-w-[1180px] mx-auto space-y-6">
-                            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-6">
-                              <div className="space-y-6">
-                                <SectionPanel title="Profile Identity" description="The stable facts that identify this role and help the contract engine match the right profile.">
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-4">
-                                    <FormField label="Job Title">
-                                      <Input value={draft.job_title || ''} onChange={(e) => updateDraft({ job_title: e.target.value })} className="h-9 text-xs" placeholder="e.g. Software Developer" />
-                                    </FormField>
-                                    <FormField label={`Department${draft.scope === 'department' ? ' *' : ''}`}>
-                                      <Input value={draft.department || ''} onChange={(e) => updateDraft({ department: e.target.value })} className="h-9 text-xs" placeholder="e.g. ICT" />
-                                    </FormField>
+                        <ScrollArea className="flex-1 bg-slate-50/50 dark:bg-slate-950/30">
+                          <div className="p-6 lg:p-8">
+                            <TabsContent value="overview" className="m-0 focus:outline-none">
+                              <div className="max-w-4xl mx-auto space-y-6 lg:space-y-8">
+                                <SectionPanel title="Profile Identity" description="The stable facts that identify this role.">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                                    <FormField label="Job Title"><Input value={draft.job_title || ''} onChange={(e) => updateDraft({ job_title: e.target.value })} className="h-10 text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm" placeholder="e.g. Software Developer" /></FormField>
+                                    <FormField label={`Department${draft.scope === 'department' ? ' *' : ''}`}><Input value={draft.department || ''} onChange={(e) => updateDraft({ department: e.target.value })} className="h-10 text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm" placeholder="e.g. ICT" /></FormField>
                                     <FormField label="Job Level">
-                                      <Select value={draft.job_level || '__unset__'} onValueChange={(v) => updateDraft({ job_level: v === '__unset__' ? null : v })}>
-                                        <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select level" /></SelectTrigger>
-                                        <SelectContent>
-                                          <SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>
-                                          {withCurrentValue(JOB_LEVEL_OPTIONS, draft.job_level).map((opt) => (
-                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
+                                      <SearchableSelect
+                                        value={draft.job_level || '__unset__'}
+                                        onChange={(v) => updateDraft({ job_level: v === '__unset__' ? null : v })}
+                                        placeholder="Select level"
+                                        searchPlaceholder="Search levels..."
+                                        options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(JOB_LEVEL_OPTIONS, draft.job_level).map((opt) => ({ value: opt, label: opt }))]}
+                                      />
                                     </FormField>
                                     <FormField label="Employment Type">
-                                      <Select value={draft.employment_type || '__unset__'} onValueChange={(v) => updateDraft({ employment_type: v === '__unset__' ? null : v })}>
-                                        <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select type" /></SelectTrigger>
-                                        <SelectContent>
-                                          <SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>
-                                          {withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, draft.employment_type).map((opt) => (
-                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
-                                    </FormField>
-                                    <FormField label="Reports To">
-                                      <Input value={draft.settings?.reports_to || ''} onChange={(e) => updateDraftSettings('reports_to', e.target.value)} className="h-9 text-xs" placeholder="e.g. Head of ICT" />
-                                    </FormField>
-                                    <FormField label="Work Location">
-                                      <Input value={draft.work_location || ''} onChange={(e) => updateDraft({ work_location: e.target.value })} className="h-9 text-xs" placeholder="e.g. Head Office" />
+                                      <SearchableSelect
+                                        value={draft.employment_type || '__unset__'}
+                                        onChange={(v) => updateDraft({ employment_type: v === '__unset__' ? null : v })}
+                                        placeholder="Select type"
+                                        searchPlaceholder="Search types..."
+                                        options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, draft.employment_type).map((opt) => ({ value: opt, label: opt }))]}
+                                      />
                                     </FormField>
                                     <FormField label="Work Arrangement">
-                                      <Select value={draft.work_arrangement || '__unset__'} onValueChange={(v) => updateDraft({ work_arrangement: v === '__unset__' ? null : v })}>
-                                        <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select arrangement" /></SelectTrigger>
-                                        <SelectContent>
-                                          <SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>
-                                          {withCurrentValue(WORK_ARRANGEMENT_OPTIONS, draft.work_arrangement).map((opt) => (
-                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
+                                      <SearchableSelect
+                                        value={draft.work_arrangement || '__unset__'}
+                                        onChange={(v) => updateDraft({ work_arrangement: v === '__unset__' ? null : v })}
+                                        placeholder="Select arrangement"
+                                        searchPlaceholder="Search arrangements..."
+                                        options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(WORK_ARRANGEMENT_OPTIONS, draft.work_arrangement).map((opt) => ({ value: opt, label: opt }))]}
+                                      />
                                     </FormField>
-
                                   </div>
                                 </SectionPanel>
 
                                 <SectionPanel title="Job Summary" description="This is the role purpose that can feed the job description appendix.">
-                                  <Textarea
-                                    className="min-h-[120px] text-xs"
-                                    placeholder="A short summary of what this role does..."
-                                    value={draft.job_description || ''}
-                                    onChange={(e) => updateDraft({ job_description: e.target.value })}
-                                  />
+                                  <Textarea className="min-h-[160px] text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm p-4 leading-relaxed" placeholder="A short summary of what this role does..." value={draft.job_description || ''} onChange={(e) => updateDraft({ job_description: e.target.value })} />
                                 </SectionPanel>
                               </div>
+                            </TabsContent>
 
-                              <div className="space-y-6">
-                                <SectionPanel title="Contract Readiness">
-                                  <div className="space-y-3 text-xs">
-                                    {[
-                                      { label: 'Identity', done: !!(draft.job_title && draft.department && draft.job_level) },
-                                      { label: 'Employment rules', done: !!(draft.employment_type && draft.settings?.notice_period) },
-                                      { label: 'Working arrangement', done: !!(draft.work_arrangement && draft.settings?.working_days) },
-                                      { label: 'Clauses', done: clauseSelections.length > 0 },
-                                    ].map((item) => (
-                                      <div key={item.label} className="flex items-center justify-between gap-3">
-                                        <span className="text-slate-600">{item.label}</span>
-                                        <Badge variant="outline" className={cn("rounded-full border-transparent text-[10px]", item.done ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500")}>
-                                          {item.done ? 'Set' : 'Missing'}
-                                        </Badge>
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <div className="mt-4 flex gap-2">
-                                    <Button variant="outline" size="sm" className="h-8 flex-1 text-xs" onClick={() => togglePanel('preview')}>Preview</Button>
-                                    <Button size="sm" className="h-8 flex-1 text-xs bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setDetailTab('clauses')}>Clauses</Button>
-                                  </div>
+                            <TabsContent value="requirements" className="m-0 focus:outline-none">
+                              <div className="max-w-4xl mx-auto space-y-6">
+                                <SectionPanel title="Qualifications & Experience">
+                                  <StringListEditor items={draft.requirements || []} onChange={(v) => updateDraft({ requirements: v })} placeholder="e.g. Bachelor's degree in Computer Science" />
                                 </SectionPanel>
+                              </div>
+                            </TabsContent>
 
-                                <SectionPanel title="Supporting Details" description="Useful context, but not the first thing users need to solve.">
-                                  <div className="space-y-5">
-                                    <FormField label="Tags">
-                                      <TagListEditor items={draft.tags || []} onChange={(v) => updateDraft({ tags: v })} placeholder="Add a tag" badgeClassName="bg-indigo-50 text-indigo-700 hover:bg-indigo-100" />
-                                    </FormField>
-                                    <FormField label="Equipment & Assets">
-                                      <TagListEditor items={draft.equipment || []} onChange={(v) => updateDraft({ equipment: v })} placeholder="Add an item" badgeClassName="bg-emerald-50 text-emerald-700 hover:bg-emerald-100" />
-                                    </FormField>
-                                  </div>
+                            <TabsContent value="responsibilities" className="m-0 focus:outline-none">
+                              <div className="max-w-4xl mx-auto space-y-6">
+                                <SectionPanel title="Key Responsibilities">
+                                  <StringListEditor items={draft.key_responsibilities || []} onChange={(v) => updateDraft({ key_responsibilities: v })} placeholder="e.g. Maintain accurate financial records" />
                                 </SectionPanel>
+                              </div>
+                            </TabsContent>
 
-                                <SectionPanel title="Quick Actions">
-                                  <div className="space-y-3">
-                                    <button onClick={handleDuplicate} className="flex items-center gap-3 text-xs text-slate-600 hover:text-blue-600 w-full font-medium">
-                                      <Copy className="h-4 w-4 text-slate-400" /> Duplicate profile
-                                    </button>
-                                    <button onClick={handleDownloadJobDescription} className="flex items-center gap-3 text-xs text-slate-600 hover:text-blue-600 w-full font-medium">
-                                      <Download className="h-4 w-4 text-slate-400" /> Download job description
-                                    </button>
+                            <TabsContent value="employment_rules" className="m-0 focus:outline-none">
+                              <div className="max-w-4xl mx-auto space-y-6">
+                                <SectionPanel title="Employment & Termination">
+                                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Probation Period</span><SettingSelect label="" settingKey="probation_period" options={PROBATION_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Notice Period</span><SettingSelect label="" settingKey="notice_period" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
                                   </div>
                                 </SectionPanel>
                               </div>
-                            </div>
-                          </div>
-                        </TabsContent>
+                            </TabsContent>
 
-                        <TabsContent value="requirements" className="m-0 p-8">
-                          <div className="max-w-[980px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <SectionPanel title="Qualifications & Experience" description="Recruitment-facing requirements; these can appear in the job description but should not drive clause selection unless you later add rules for them.">
-                              <StringListEditor items={draft.requirements || []} onChange={(v) => updateDraft({ requirements: v })} placeholder="e.g. Bachelor's degree in Computer Science" />
-                            </SectionPanel>
-                            <SectionPanel title="Core Skills" description="Short skill tags for scanning and filtering.">
-                              <TagListEditor items={draft.skills || []} onChange={(v) => updateDraft({ skills: v })} placeholder="Type a skill, press Enter" badgeClassName="bg-blue-50 text-blue-700 hover:bg-blue-100" />
-                            </SectionPanel>
-                          </div>
-                        </TabsContent>
-
-                        <TabsContent value="responsibilities" className="m-0 p-8">
-                          <SectionPanel title="Key Responsibilities" description="Contract appendix content: the concrete duties attached to this role." className="max-w-2xl">
-                            <StringListEditor items={draft.key_responsibilities || []} onChange={(v) => updateDraft({ key_responsibilities: v })} placeholder="e.g. Maintain accurate financial records" />
-                          </SectionPanel>
-                        </TabsContent>
-
-                        <TabsContent value="employment_rules" className="m-0 p-8">
-                          <div className="max-w-[980px] mx-auto space-y-6">
-                            <SectionPanel title="Employment & Termination" description="These fields should influence probation, notice and termination clauses.">
-                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {[
-                                  { label: 'Employment Type', node: <Select value={draft.employment_type || '__unset__'} onValueChange={(v) => updateDraft({ employment_type: v === '__unset__' ? null : v })}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select type" /></SelectTrigger><SelectContent><SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>{withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, draft.employment_type).map((opt) => (<SelectItem key={opt} value={opt}>{opt}</SelectItem>))}</SelectContent></Select> },
-                                  { label: 'Probation Period', node: <SettingSelect label="" settingKey="probation_period" options={PROBATION_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Notice Period', node: <SettingSelect label="" settingKey="notice_period" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Probation Notice', node: <SettingSelect label="" settingKey="probation_notice" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Confirmation Required', node: <SettingSelect label="" settingKey="confirmation_required" options={['Yes', 'No']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Termination Reason Rule', node: <SettingInput label="" settingKey="termination_reason" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. According to contract and applicable law" /> },
-                                ].map(({ label, node }) => (
-                                  <div key={label} className="grid grid-cols-[180px_1fr] gap-4 py-3 items-center">
-                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>
-                                    <div>{node}</div>
+                            <TabsContent value="working_arrangement" className="m-0 focus:outline-none">
+                              <div className="max-w-4xl mx-auto space-y-6">
+                                <SectionPanel title="Schedule & Overtime">
+                                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Working Days</span><SettingSelect label="" settingKey="working_days" options={['Monday-Friday', 'Monday-Saturday', 'Shift Based', 'Flexible']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Start Time</span><SettingInput label="" settingKey="start_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="08:00" type="time" /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">End Time</span><SettingInput label="" settingKey="end_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="17:00" type="time" /></div>
                                   </div>
-                                ))}
+                                </SectionPanel>
                               </div>
-                            </SectionPanel>
+                            </TabsContent>
 
-                            <SectionPanel title="Contractual Policies" description="Use these as clause-selection signals; the clause wording still lives in the Clause Library.">
-                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {[
-                                  { label: 'Confidentiality', node: <SettingSwitch label="" settingKey="confidentiality_policy" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Intellectual Property', node: <SettingSwitch label="" settingKey="intellectual_property_policy" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Data Protection', node: <SettingSwitch label="" settingKey="data_protection_policy" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Code of Conduct', node: <SettingSwitch label="" settingKey="code_of_conduct_policy" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Disciplinary Policy', node: <SettingSwitch label="" settingKey="disciplinary_policy" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Company Property', node: <SettingSwitch label="" settingKey="company_property_policy" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                ].map(({ label, node }) => (
-                                  <div key={label} className="grid grid-cols-[180px_1fr] gap-4 py-3 items-center">
-                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>
-                                    <div>{node}</div>
+                            <TabsContent value="benefits" className="m-0 focus:outline-none">
+                              <div className="max-w-4xl mx-auto space-y-6">
+                                <SectionPanel title="Compensation">
+                                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Currency</span><SettingSelect label="" settingKey="salary_currency" options={['KES', 'USD', 'GBP', 'EUR']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Annual Leave</span><SettingSelect label="" settingKey="annual_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
                                   </div>
-                                ))}
+                                </SectionPanel>
                               </div>
-                            </SectionPanel>
-                          </div>
-                        </TabsContent>
+                            </TabsContent>
 
-                        <TabsContent value="working_arrangement" className="m-0 p-8">
-                          <div className="max-w-[980px] mx-auto space-y-6">
-                            <SectionPanel title="Normal Schedule" description="The basic working pattern that feeds working-hours and remote-work clauses.">
-                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {[
-                                  { label: 'Work Mode', node: <Select value={draft.work_arrangement || '__unset__'} onValueChange={(v) => updateDraft({ work_arrangement: v === '__unset__' ? null : v })}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select arrangement" /></SelectTrigger><SelectContent><SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>{withCurrentValue(WORK_ARRANGEMENT_OPTIONS, draft.work_arrangement).map((opt) => (<SelectItem key={opt} value={opt}>{opt}</SelectItem>))}</SelectContent></Select> },
-                                  { label: 'Working Days', node: <SettingSelect label="" settingKey="working_days" options={['Monday-Friday', 'Monday-Saturday', 'Shift Based', 'Flexible']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Rest Days', node: <SettingSelect label="" settingKey="rest_days" options={['Saturday & Sunday', 'Sunday', 'As rostered', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Start Time', node: <SettingInput label="" settingKey="start_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="08:00" type="time" /> },
-                                  { label: 'End Time', node: <SettingInput label="" settingKey="end_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="17:00" type="time" /> },
-                                  { label: 'Break', node: <SettingSelect label="" settingKey="break_duration" options={['30 Minutes', '45 Minutes', '1 Hour', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                ].map(({ label, node }) => (
-                                  <div key={label} className="grid grid-cols-[180px_1fr] gap-4 py-3 items-center">
-                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>
-                                    <div>{node}</div>
+                            {/* Linked Clauses: Merged Panels Layout */}
+                            <TabsContent value="clauses" className="m-0 h-[750px] -mx-6 lg:-mx-8 -mt-6 lg:-mt-8 mb-8 focus:outline-none">
+                              <div className="bg-slate-50 dark:bg-slate-950 flex h-full border-b border-slate-200 dark:border-slate-800">
+                                
+                                {/* Col 1: Sections (Sidebar style) */}
+                                <div className="w-[260px] border-r border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/30 flex flex-col shrink-0">
+                                  <div className="p-5 border-b border-slate-200 dark:border-slate-800 space-y-3.5 bg-slate-50/50">
+                                    <div>
+                                      <p className="text-base font-bold text-slate-900 dark:text-slate-100">Contract Sections</p>
+                                      <p className="text-xs text-slate-500 mt-0.5 font-medium">{CONTRACT_SECTIONS.length} sections to configure</p>
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <Button variant="outline" size="sm" className="flex-1 text-xs h-8 bg-white border-slate-200 shadow-sm hover:bg-blue-50 hover:text-blue-700" onClick={handleAutoFillDefaults}>Apply Defaults</Button>
+                                      <Button variant="outline" size="sm" className="px-3 text-xs h-8 text-red-600 border-slate-200 bg-white shadow-sm hover:bg-red-50 hover:border-red-200" onClick={handleClearAllSelections} title="Clear All">Clear</Button>
+                                    </div>
                                   </div>
-                                ))}
-                              </div>
-                            </SectionPanel>
+                                  <ScrollArea className="flex-1">
+                                    <div className="p-3 space-y-1">
+                                      {CONTRACT_SECTIONS.map((section) => {
+                                        const count = clauses.filter((c) => c.section_key === section.key).length;
+                                        const hasSelection = !!draft?.section_clauses?.[section.key];
+                                        return (
+                                          <div
+                                            key={section.key}
+                                            onClick={() => { setLinkSectionKey(section.key); setLinkSearch(''); setExpandedClauseId(null); }}
+                                            className={cn("flex items-center justify-between p-3 rounded-xl text-sm font-semibold cursor-pointer transition-all", section.key === linkSectionKey ? "bg-white shadow-[0_2px_8px_-4px_rgba(0,0,0,0.1)] border border-slate-200 text-blue-700 dark:bg-blue-900/30 dark:border-blue-800/50 dark:text-blue-400" : "text-slate-600 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-800 border border-transparent")}
+                                          >
+                                            <div className="flex items-center gap-2.5 min-w-0">
+                                              {hasSelection ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" /> : <FileText className="w-4 h-4 shrink-0 opacity-40" />}
+                                              <span className="truncate">{section.title}</span>
+                                            </div>
+                                            <Badge variant="secondary" className={cn("text-xs h-4.5 px-2 min-w-[20px] flex items-center justify-center shrink-0 rounded-full font-bold", section.key === linkSectionKey ? "bg-blue-100 text-blue-700" : "bg-slate-200/70 text-slate-500")}>{count}</Badge>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </ScrollArea>
+                                </div>
 
-                            <SectionPanel title="Remote, Weekend & Overtime Rules">
-                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {[
-                                  { label: 'Remote Work Allowed', node: <SettingSwitch label="" settingKey="remote_work_allowed" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Remote Days', node: <SettingSelect label="" settingKey="remote_days" options={['Up to 1 day per week', 'Up to 2 days per week', 'Up to 3 days per week', 'As approved']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Weekend Work', node: <SettingSelect label="" settingKey="weekend_work" options={['No', 'Occasional', 'Shift Based', 'As required']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Weekend Approval Required', node: <SettingSwitch label="" settingKey="weekend_approval_required" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Overtime Eligible', node: <SettingSwitch label="" settingKey="overtime_eligible" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Overtime Approval Required', node: <SettingSwitch label="" settingKey="overtime_approval_required" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Overtime Compensation', node: <SettingSelect label="" settingKey="overtime_compensation" options={['According to Company Policy', 'Paid', 'Time off in lieu', 'Not applicable']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                ].map(({ label, node }) => (
-                                  <div key={label} className="grid grid-cols-[180px_1fr] gap-4 py-3 items-center">
-                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>
-                                    <div>{node}</div>
+                                {/* Col 2: Main Area - Cards + Previews */}
+                                <div className="flex-1 flex flex-col min-w-0 bg-slate-50/50 dark:bg-slate-950">
+                                  <div className="px-8 py-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-white/50 dark:bg-slate-900/20 shrink-0 shadow-[0_1px_2px_0_rgb(0,0,0,0.01)]">
+                                    <div>
+                                      <p className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                                        {CONTRACT_SECTIONS.find((s) => s.key === linkSectionKey)?.title}
+                                      </p>
+                                      <p className="text-sm text-slate-500 mt-1">Select a clause to apply to this section.</p>
+                                    </div>
+                                    <div className="relative w-[280px]">
+                                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                                      <Input placeholder="Search clauses in section..." className="pl-9 h-10 rounded-full text-sm bg-white border-slate-200 shadow-sm focus-visible:ring-1 focus-visible:ring-blue-500/50" value={linkSearch} onChange={(e) => setLinkSearch(e.target.value)} />
+                                    </div>
                                   </div>
-                                ))}
-                              </div>
-                            </SectionPanel>
-                          </div>
-                        </TabsContent>
 
-                        <TabsContent value="benefits" className="m-0 p-8">
-                          <div className="max-w-[980px] mx-auto space-y-6">
-                            <SectionPanel title="Salary Structure" description="Set a role range here; the actual employee salary can still be entered on the offer/contract.">
-                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {[
-                                  { label: 'Currency', node: <SettingSelect label="" settingKey="salary_currency" options={['KES', 'USD', 'GBP', 'EUR']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Minimum', node: <SettingInput label="" settingKey="salary_min" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="100000" /> },
-                                  { label: 'Maximum', node: <SettingInput label="" settingKey="salary_max" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="180000" /> },
-                                  { label: 'Pay Frequency', node: <SettingSelect label="" settingKey="payment_frequency" options={PAYMENT_FREQUENCY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                ].map(({ label, node }) => (
-                                  <div key={label} className="grid grid-cols-[180px_1fr] gap-4 py-3 items-center">
-                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>
-                                    <div>{node}</div>
-                                  </div>
-                                ))}
-                              </div>
-                            </SectionPanel>
-
-                            <SectionPanel title="Allowances & Benefits">
-                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {[
-                                  { label: 'Medical Cover', node: <SettingSelect label="" settingKey="medical_cover" options={['No', 'Standard Company Scheme', 'Enhanced Scheme', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Housing Allowance', node: <SettingSelect label="" settingKey="housing_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Transport Allowance', node: <SettingSelect label="" settingKey="transport_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Telephone Allowance', node: <SettingSelect label="" settingKey="telephone_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Internet Allowance', node: <SettingSelect label="" settingKey="internet_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Meal Allowance', node: <SettingSelect label="" settingKey="meal_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Pension', node: <SettingSelect label="" settingKey="pension_scheme" options={['No', 'Applicable', 'After Confirmation', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Bonus', node: <SettingSelect label="" settingKey="bonus_scheme" options={['No', 'Performance-Based', 'Discretionary', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                ].map(({ label, node }) => (
-                                  <div key={label} className="grid grid-cols-[180px_1fr] gap-4 py-3 items-center">
-                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>
-                                    <div>{node}</div>
-                                  </div>
-                                ))}
-                              </div>
-                            </SectionPanel>
-
-                            <SectionPanel title="Leave">
-                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {[
-                                  { label: 'Annual Leave', node: <SettingSelect label="" settingKey="annual_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Sick Leave', node: <SettingSelect label="" settingKey="sick_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Maternity Leave', node: <SettingSelect label="" settingKey="maternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Paternity Leave', node: <SettingSelect label="" settingKey="paternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Compassionate Leave', node: <SettingSelect label="" settingKey="compassionate_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
-                                  { label: 'Payment Day', node: <SettingInput label="" settingKey="payment_day" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Last working day" /> },
-                                ].map(({ label, node }) => (
-                                  <div key={label} className="grid grid-cols-[180px_1fr] gap-4 py-3 items-center">
-                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>
-                                    <div>{node}</div>
-                                  </div>
-                                ))}
-                              </div>
-                            </SectionPanel>
-                          </div>
-                        </TabsContent>
-
-                        <TabsContent value="clauses" className="">
-                          <div className="flex overflow-hidden dark:bg-slate-950" style={{ maxHeight: 'calc(100vh - 280px)' }}>
-                            {/* Col 1: Sections */}
-                            <div className="w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col shrink-0">
-                              <div className="p-4 border-b border-slate-100 dark:border-slate-800">
-                                <p className="text-sm font-bold text-slate-800 dark:text-slate-200">Contract Sections</p>
-                                <p className="text-xs text-slate-500 mt-0.5">{CONTRACT_SECTIONS.length} sections</p>
-                              </div>
-                              <ScrollArea className="flex-1">
-                                <div className="p-2 space-y-1">
-                                  {CONTRACT_SECTIONS.map((section) => {
-                                    const count = clauses.filter((c) => c.section_key === section.key).length;
-                                    const hasSelection = !!draft?.section_clauses?.[section.key];
-                                    return (
-                                      <div
-                                        key={section.key}
-                                        onClick={() => { setLinkSectionKey(section.key); setLinkSearch(''); }}
-                                        className={cn("flex items-center justify-between p-2 rounded-lg text-xs font-medium cursor-pointer transition-colors", section.key === linkSectionKey ? "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400" : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800")}
+                                  <ScrollArea className="flex-1 p-8">
+                                    <div className="space-y-5 max-w-5xl mx-auto">
+                                      
+                                      {/* Deselect / Default Option */}
+                                      <div 
+                                        className={cn(
+                                          "flex items-center justify-between p-4 rounded-2xl border transition-all cursor-pointer bg-white",
+                                          !draft?.section_clauses?.[linkSectionKey] ? "border-blue-500 shadow-[0_4px_12px_-4px_rgba(37,99,235,0.2)] ring-1 ring-blue-500/20" : "border-slate-200 border-dashed hover:border-slate-400 shadow-sm"
+                                        )}
+                                        onClick={() => { if (!draft) return; updateDraftSectionClauses((prev) => { const next = { ...prev }; delete next[linkSectionKey]; return next; }); setExpandedClauseId(null); }}
                                       >
-                                        <div className="flex items-center gap-2 min-w-0">
-                                          <FileText className="w-3.5 h-3.5 opacity-70 shrink-0" />
-                                          <span className="truncate">{section.title}</span>
-                                          {hasSelection && <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />}
-                                        </div>
-                                        <Badge variant="outline" className={cn("text-[10px] h-5 px-1.5 min-w-[20px] flex items-center justify-center border-transparent shrink-0", section.key === linkSectionKey ? "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400" : "bg-slate-100 dark:bg-slate-800 text-slate-500")}>{count}</Badge>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </ScrollArea>
-                            </div>
-
-                            {/* Col 2: Clauses in selected section */}
-                            <div className="w-80 border-r border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex flex-col shrink-0">
-                              <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900">
-                                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">Clauses in &ldquo;{CONTRACT_SECTIONS.find((s) => s.key === linkSectionKey)?.title}&rdquo;</p>
-                                <p className="text-xs text-slate-500 mt-0.5">{clauses.filter((c) => c.section_key === linkSectionKey).length} clauses available</p>
-                              </div>
-                              <div className="p-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
-                                <div className="relative">
-                                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                                  <Input placeholder="Search clauses..." className="h-8 pl-8 text-xs bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800" value={linkSearch} onChange={(e) => setLinkSearch(e.target.value)} />
-                                </div>
-                              </div>
-                              <ScrollArea className="flex-1 p-4">
-                                <div className="space-y-3">
-                                  <button
-                                    type="button"
-                                    onClick={() => { if (!draft) return; const next = { ...(draft.section_clauses || {}) }; delete next[linkSectionKey]; updateDraft({ section_clauses: next }); }}
-                                    className={cn(
-                                      "w-full text-left bg-white dark:bg-slate-950 border rounded-xl p-3 text-xs font-medium transition-colors",
-                                      !draft?.section_clauses?.[linkSectionKey] ? "border-blue-500 text-blue-700" : "border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:border-slate-400"
-                                    )}
-                                  >
-                                    Use section default {defaultClauseMap[linkSectionKey] && `(${clausesById[defaultClauseMap[linkSectionKey]]?.label || 'none'})`}
-                                  </button>
-                                  {clauses
-                                    .filter((c) => c.section_key === linkSectionKey && c.label.toLowerCase().includes(linkSearch.toLowerCase()))
-                                    .sort((a, b) => (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) || a.label.localeCompare(b.label))
-                                    .map((clause) => {
-                                      const isSelected = draft?.section_clauses?.[linkSectionKey] === clause.id;
-                                      const usageCount = allProfiles.filter((p) => p.section_clauses?.[linkSectionKey] === clause.id).length;
-                                      return (
-                                        <div
-                                          key={clause.id}
-                                          onClick={() => updateDraft({ section_clauses: { ...(draft?.section_clauses || {}), [linkSectionKey]: clause.id } })}
-                                          className={cn(
-                                            "bg-white dark:bg-slate-950 border rounded-xl p-4 shadow-sm relative cursor-pointer transition-colors",
-                                            isSelected ? "border-2 border-blue-500" : "border-slate-200 dark:border-slate-700 hover:border-slate-300"
-                                          )}
-                                        >
-                                          <div className={cn("absolute top-4 right-4 w-4 h-4 rounded-full border-2 bg-white dark:bg-slate-950", isSelected ? "border-blue-500" : "border-slate-300")} />
-                                          <p className="text-sm font-bold text-slate-900 dark:text-slate-100 pr-6">{clause.label}</p>
-                                          <p className="text-[10px] text-slate-500 font-mono mb-3">{clause.clause_key}</p>
-                                          <div className="flex items-center gap-2 mb-3 flex-wrap">
-                                            {clause.is_default && <Badge variant="secondary" className="bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400 hover:bg-amber-100 text-[10px] py-0 border-transparent font-medium">Section Default</Badge>}
-                                            {clause.variant_group && <Badge variant="secondary" className="bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400 hover:bg-purple-100 text-[10px] py-0 border-transparent font-medium">{clause.variant_group}</Badge>}
-                                          </div>
-                                          <div className="space-y-1.5 text-[11px]">
-                                            <div className="flex justify-between"><span className="text-slate-500">Scope:</span><span className="font-medium text-slate-700 dark:text-slate-300">{clause.company_id ? 'Company' : 'Global'}</span></div>
-                                            <div className="text-slate-500 pt-2 border-t border-slate-100 dark:border-slate-800 mt-2">Used in {usageCount} job profile{usageCount !== 1 ? 's' : ''}</div>
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                </div>
-                              </ScrollArea>
-                            </div>
-
-                            {/* Col 3: Suggestion rules & preview */}
-                            <div className="flex-1 bg-white dark:bg-slate-950 flex flex-col min-w-0">
-                              <div className="p-6 flex gap-8 h-full min-h-0">
-                                {(() => {
-                                  const selectedClauseId = draft?.section_clauses?.[linkSectionKey];
-                                  const selectedClause = selectedClauseId ? clausesById[selectedClauseId] : undefined;
-                                  const conditions = (selectedClause as any)?.suggest_conditions as Array<Record<string, string>> | undefined;
-                                  const facts = { employment_type: draft?.employment_type, job_level: draft?.job_level, work_arrangement: draft?.work_arrangement, department: draft?.department };
-                                  return (
-                                    <>
-                                      <div className="w-64 space-y-6 flex flex-col shrink-0">
                                         <div>
-                                          <p className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-1">Suggestion Rules</p>
-                                          <p className="text-[11px] text-slate-500 mb-4">Why this clause might apply</p>
-                                          {!selectedClause ? (
-                                            <p className="text-xs text-slate-400 italic">Select a clause to see details.</p>
-                                          ) : !conditions?.length ? (
-                                            <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-4 text-xs text-slate-500">No suggestion rules defined for this clause - it's a manual pick.</div>
-                                          ) : (
-                                            <div className="bg-emerald-50/50 dark:bg-emerald-500/5 border border-emerald-100 dark:border-emerald-500/20 rounded-xl p-4">
-                                              <ul className="space-y-2 text-[11px]">
-                                                {Object.entries(conditions[0] || {}).filter(([, v]) => v).map(([key, value]) => {
-                                                  const matches = facts[key as keyof typeof facts] === value;
-                                                  return (
-                                                    <li key={key} className="flex justify-between items-center gap-2">
-                                                      <span className="text-slate-600 dark:text-slate-400">{key.replace(/_/g, ' ')}: {value}</span>
-                                                      <span className={cn("font-medium shrink-0", matches ? "text-emerald-600" : "text-slate-400")}>{matches ? 'Matches' : 'No match'}</span>
-                                                    </li>
-                                                  );
-                                                })}
-                                              </ul>
-                                            </div>
-                                          )}
+                                          <p className={cn("text-sm font-bold", !draft?.section_clauses?.[linkSectionKey] ? "text-blue-700" : "text-slate-600")}>No Clause</p>
+                                          <p className="text-xs text-slate-500 mt-0.5">
+                                            This section is left out of the contract until you apply a clause below.
+                                            {defaultClauseMap[linkSectionKey] && <> Suggested: <span className="font-semibold">{clausesById[defaultClauseMap[linkSectionKey]]?.label}</span>.</>}
+                                          </p>
+                                        </div>
+                                        <div className={cn("w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0", !draft?.section_clauses?.[linkSectionKey] ? "border-custom-blue bg-custom-blue" : "border-slate-300")}>
+                                          {!draft?.section_clauses?.[linkSectionKey] && <Check className="w-3 h-3 text-white" />}
                                         </div>
                                       </div>
 
-                                      <div className="flex-1 flex flex-col min-w-0">
-                                        <p className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-1">Clause Preview</p>
-                                        <p className="text-[11px] text-slate-500 mb-4">Preview how it will appear in the contract</p>
-                                        {!selectedClause ? (
-                                          <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-5 flex-1 flex items-center justify-center text-sm text-slate-400">
-                                            Select a clause on the left to preview it.
-                                          </div>
-                                        ) : (
-                                          <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-5 flex-1 flex flex-col relative overflow-hidden min-h-0">
-                                            <div className="flex justify-between items-start mb-4 shrink-0">
-                                              <div>
-                                                <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{selectedClause.label}</p>
-                                                <p className="text-[10px] text-slate-500 font-mono mt-0.5">Key: {selectedClause.clause_key}</p>
-                                              </div>
-                                              <Badge variant="outline" className="text-[10px] font-semibold bg-white dark:bg-slate-950 shrink-0">{selectedClause.company_id ? 'Company' : 'Global'}</Badge>
-                                            </div>
-                                            <p className="text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-2 uppercase tracking-wider shrink-0">Content</p>
+                                      {/* Clause Cards Feed */}
+                                      {clauses
+                                        .filter((c) => c.section_key === linkSectionKey && c.label.toLowerCase().includes(linkSearch.toLowerCase()))
+                                        .sort((a, b) => (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) || a.label.localeCompare(b.label))
+                                        .map((clause) => {
+                                          const isSelected = draft?.section_clauses?.[linkSectionKey] === clause.id;
+                                          const isExpanded = expandedClauseId === clause.id;
+                                          const usageCount = allProfiles.filter((p) => p.section_clauses?.[linkSectionKey] === clause.id).length;
+                                          const conditions = (clause as any)?.suggest_conditions as Array<Record<string, string>> | undefined;
+                                          const facts = { employment_type: draft?.employment_type, job_level: draft?.job_level, work_arrangement: draft?.work_arrangement, department: draft?.department };
+
+                                          return (
                                             <div
-                                              className="prose prose-xs max-w-none text-[11px] text-slate-700 dark:text-slate-300 leading-relaxed flex-1 overflow-auto pr-2 [&_strong]:text-slate-900 dark:[&_strong]:text-slate-100"
-                                              dangerouslySetInnerHTML={{ __html: selectedClause.content }}
-                                            />
-                                            {selectedClause.content?.includes('{{') && (
-                                              <div className="pt-4 border-t border-slate-200 dark:border-slate-700 mt-4 shrink-0">
-                                                <p className="text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-3 uppercase tracking-wider">Placeholders Used</p>
-                                                <div className="flex flex-wrap gap-2">
-                                                  {Array.from(new Set(Array.from(selectedClause.content.matchAll(/\{\{(\w+)\}\}/g)).map((m) => m[1]))).map((p) => (
-                                                    <span key={p} className="text-[10px] font-mono bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-600 px-2 py-1 rounded-md">{'{{' + p + '}}'}</span>
-                                                  ))}
+                                              key={clause.id}
+                                              className={cn(
+                                                "bg-white dark:bg-slate-900 border rounded-2xl overflow-hidden transition-all duration-200",
+                                                isSelected ? "border-blue-500 shadow-[0_4px_12px_-4px_rgba(37,99,235,0.15)] ring-1 ring-blue-500/20" : "border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md hover:border-slate-300"
+                                              )}
+                                            >
+                                              {/* Card Header (Clickable to expand) */}
+                                              <div 
+                                                className="p-5 flex items-center justify-between cursor-pointer group"
+                                                onClick={() => setExpandedClauseId(isExpanded ? null : clause.id)}
+                                              >
+                                                <div className="flex-1 min-w-0 pr-6">
+                                                  <div className="flex items-center gap-3 mb-1.5">
+                                                    <h4 className="text-base font-bold text-slate-900 dark:text-slate-100">{clause.label}</h4>
+                                                    {clause.is_default && <Badge variant="secondary" className="bg-amber-100 text-amber-800 text-xs py-0 px-2 uppercase tracking-wider font-bold rounded-md">Default</Badge>}
+                                                    {clause.company_id && <Badge variant="secondary" className="bg-slate-100 text-slate-600 text-xs py-0 px-2 uppercase tracking-wider font-bold rounded-md">Company specific</Badge>}
+                                                  </div>
+                                                  <div className="flex items-center gap-4 text-xs text-slate-500 font-medium">
+                                                    <span className="font-mono text-xs bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">{clause.clause_key}</span>
+                                                    <span>Used in {usageCount} profile{usageCount !== 1 ? 's' : ''}</span>
+                                                  </div>
+                                                </div>
+                                                
+                                                <div className="flex items-center gap-6 shrink-0">
+                                                  {/* The Selection Button */}
+                                                  <Button
+                                                    size="sm"
+                                                    variant={isSelected ? "default" : "outline"}
+                                                    className={cn("h-9 rounded-full px-5 text-sm font-bold shadow-sm transition-all", isSelected ? "bg-custom-blue text-white" : "bg-white text-slate-700 hover:bg-slate-50")}
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      updateDraftSectionClauses((prev) => ({ ...prev, [linkSectionKey]: clause.id }));
+                                                      if(!isExpanded) setExpandedClauseId(clause.id);
+                                                    }}
+                                                  >
+                                                    {isSelected ? <><CheckCircle2 className="w-4 h-4 mr-1.5" /> Applied</> : "Apply Clause"}
+                                                  </Button>
+                                                  
+                                                  <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-slate-100 group-hover:text-slate-600 transition-colors">
+                                                    {isExpanded ? <ChevronUpIcon className="w-5 h-5" /> : <ChevronDownIcon className="w-5 h-5" />}
+                                                  </div>
                                                 </div>
                                               </div>
-                                            )}
-                                          </div>
-                                        )}
-                                      </div>
-                                    </>
-                                  );
-                                })()}
+
+                                              {/* Expanded Content (Rules & Preview) */}
+                                              {isExpanded && (
+                                                <div className="border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-6 flex flex-col xl:flex-row gap-8">
+                                                  
+                                                  {/* HTML Preview (Styled like a document snippet) */}
+                                                  <div className="flex-1 min-w-0">
+                                                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Content Preview</p>
+                                                    <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-[0_1px_3px_0_rgba(0,0,0,0.05)]">
+                                                      <div
+                                                        className="prose prose-sm max-w-none text-slate-700 dark:text-slate-300 leading-relaxed [&_table]:w-full [&_table]:my-4 [&_td]:p-2 [&_th]:p-2 [&_td]:align-top"
+                                                        dangerouslySetInnerHTML={{ __html: clause.content }}
+                                                      />
+                                                      {clause.content?.includes('{{') && (
+                                                        <div className="pt-4 border-t border-slate-100 mt-5 shrink-0">
+                                                          <div className="flex flex-wrap gap-2">
+                                                            {Array.from(new Set(Array.from(clause.content.matchAll(/\{\{(\w+)\}\}/g)).map((m) => m[1]))).map((p) => (
+                                                              <span key={p} className="text-xs font-mono bg-blue-50 text-blue-700 px-2 py-1 rounded-md">{'{{' + p + '}}'}</span>
+                                                            ))}
+                                                          </div>
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  </div>
+
+                                                  {/* Rules sidebar inside card */}
+                                                  <div className="w-full xl:w-[280px] shrink-0">
+                                                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Suggestion Rules</p>
+                                                    {!conditions?.length ? (
+                                                      <div className="bg-white border border-slate-200 rounded-xl p-5 text-sm text-slate-500 shadow-[0_1px_3px_0_rgba(0,0,0,0.02)]">
+                                                        No automated rules. Manual selection only.
+                                                      </div>
+                                                    ) : (
+                                                      <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-5 shadow-[0_1px_3px_0_rgba(0,0,0,0.02)]">
+                                                        <ul className="space-y-3 text-xs">
+                                                          {Object.entries(conditions[0] || {}).filter(([, v]) => v).map(([key, value]) => {
+                                                            const matches = facts[key as keyof typeof facts] === value;
+                                                            return (
+                                                              <li key={key} className="flex justify-between items-center gap-3 border-b border-emerald-100/50 pb-2 last:border-0 last:pb-0">
+                                                                <span className="text-slate-600 font-medium capitalize">{key.replace(/_/g, ' ')}: <span className="font-bold text-slate-800">{value}</span></span>
+                                                                {matches ? (
+                                                                  <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-xs px-1.5 py-0 border-transparent shadow-none">Matches</Badge>
+                                                                ) : (
+                                                                  <Badge variant="outline" className="text-slate-400 text-xs px-1.5 py-0 shadow-none">No match</Badge>
+                                                                )}
+                                                              </li>
+                                                            );
+                                                          })}
+                                                        </ul>
+                                                      </div>
+                                                    )}
+                                                  </div>
+
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                    </div>
+                                  </ScrollArea>
+                                </div>
                               </div>
-                            </div>
+                            </TabsContent>
                           </div>
-                        </TabsContent>
-
-
-                    </ScrollArea>
-                  </Tabs>
-                </>
-              );
-            })() : (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <FileText className="w-10 h-10 text-slate-300 mb-3" />
-                <p className="text-xs text-slate-500">Select a profile to view details</p>
-              </div>
-            )}
-          </div>
-        </Panel>
-
-        <PanelResizeHandle className="w-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-20" />
-
-        {/* PREVIEW PANEL: Sticky right */}
-        <Panel
-          ref={previewPanelRef}
-          defaultSize={25}
-          minSize={18}
-          maxSize={45}
-          collapsible
-          collapsedSize={0}
-          onCollapse={() => setCollapsed(prev => ({ ...prev, preview: true }))}
-          onExpand={() => setCollapsed(prev => ({ ...prev, preview: false }))}
-          className="bg-white dark:bg-slate-950 flex flex-col z-10 !overflow-auto"
-        >
-          <div className="flex flex-col h-full">
-            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-bold text-slate-800 dark:text-slate-200">Contract Preview</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Based on linked clauses</p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setDetailTab('clauses')}
-                    title="Manage linked clauses"
-                    className="p-1.5 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors"
-                  >
-                    <LinkIcon className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div className="flex-1 overflow-auto">
-              {draft ? (
-                <div className="p-4">
-                  {previewHtml ? (
-                    <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-5 text-xs leading-relaxed text-black">
-                      <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
+                        </ScrollArea>
+                      </Tabs>
                     </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center h-40 text-center border-2 border-dashed rounded-lg border-slate-200 dark:border-slate-800">
-                      <LinkIcon className="w-8 h-8 text-slate-300 mb-2" />
-                      <p className="text-sm font-medium text-slate-500">No clauses linked</p>
-                      <p className="text-xs text-slate-400 mt-1">Link clauses in the Clauses tab to build a preview.</p>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full text-center p-6">
-                  <FileText className="w-8 h-8 text-slate-300 mb-2" />
-                  <p className="text-sm text-slate-500">Select a profile to preview</p>
+                  </>
+                );
+              })() : (
+                <div className="flex flex-col items-center justify-center h-full text-center p-12 bg-slate-50/40 dark:bg-slate-950/40">
+                  <div className="w-24 h-24 bg-white dark:bg-slate-900 shadow-sm rounded-[2rem] flex items-center justify-center mb-6 border border-slate-200 dark:border-slate-800">
+                    <FileText className="w-10 h-10 text-blue-500/40" />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2 tracking-tight">No Profile Selected</h3>
+                  <p className="text-sm text-slate-500 max-w-[280px] leading-relaxed">Select a job profile from the left sidebar to view or edit its details, or create a new profile.</p>
                 </div>
               )}
             </div>
-          </div>
-        </Panel>
-      </PanelGroup>
+          </Panel>
 
+          {!collapsed.preview && (
+            <PanelResizeHandle className="relative w-1.5 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-10" />
+          )}
 
+          {/* PANEL 3: PREVIEW (Document Style) */}
+          <Panel
+            ref={previewPanelRef}
+            defaultSize={25}
+            minSize={20}
+            maxSize={45}
+            collapsible
+            onCollapse={() => setCollapsed(prev => ({ ...prev, preview: true }))}
+            onExpand={() => setCollapsed(prev => ({ ...prev, preview: false }))}
+          >
+            <div className="h-full w-full flex flex-col bg-slate-100/70 dark:bg-slate-950/70 overflow-hidden relative">
+              <button
+                onClick={() => togglePanel('preview')}
+                title="Hide preview panel"
+                className="absolute top-4 right-4 z-30 text-slate-400 hover:text-slate-700 hover:bg-white dark:hover:bg-slate-800 rounded-lg h-8 w-8 flex items-center justify-center transition-colors shadow-sm bg-white/80 dark:bg-slate-900/80 backdrop-blur"
+              >
+                <X className="w-4 h-4" />
+              </button>
 
-      {/* New Job Profile - minimal creation step; everything else is filled
-          in on the live-editable Overview tab right after creating. */}
+              {selectedProfile && draft ? (
+                <ContractPreview
+                  contractData={{ employee: sampleEmployee }}
+                  selectedJobProfile={draft}
+                  previewOnly
+                  className="flex flex-col h-full bg-slate-100/70 dark:bg-slate-950/70 relative"
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-center opacity-50">
+                  <p className="text-sm font-medium text-slate-500">Select a profile to preview document</p>
+                </div>
+              )}
+            </div>
+          </Panel>
+
+        </PanelGroup>
+      </div>
+
+      {/* Dialogs */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-md rounded-2xl">
-          <DialogTitle className="text-lg font-bold">
+        <DialogContent className="max-w-md rounded-2xl p-6 shadow-xl border-slate-200">
+          <DialogTitle className="text-lg font-bold text-slate-900 dark:text-slate-100">
             New {createScope === 'company' ? 'Company Defaults' : createScope === 'department' ? 'Department Defaults' : 'Position'} Profile
           </DialogTitle>
-          <div className="space-y-4 pt-2">
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-600">Name</label>
-              <Input
-                autoFocus
-                value={createName}
-                onChange={(e) => setCreateName(e.target.value)}
-                placeholder={createScope === 'company' ? 'Company Defaults' : createScope === 'department' ? 'Finance Department Defaults' : 'Senior Accountant'}
-                className="h-10"
-              />
+          <div className="space-y-5 pt-5">
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Profile Name</label>
+              <Input autoFocus value={createName} onChange={(e) => setCreateName(e.target.value)} placeholder="e.g. Senior Accountant" className="h-10 rounded-xl text-sm shadow-sm border-slate-200" />
             </div>
             {createScope !== 'company' && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-600">Department {createScope === 'department' && <span className="text-red-500">*</span>}</label>
-                <Input value={createDepartment} onChange={(e) => setCreateDepartment(e.target.value)} placeholder="Finance" className="h-10" />
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Department {createScope === 'department' && <span className="text-red-500">*</span>}</label>
+                <Input value={createDepartment} onChange={(e) => setCreateDepartment(e.target.value)} placeholder="e.g. Finance" className="h-10 rounded-xl text-sm shadow-sm border-slate-200" />
               </div>
             )}
           </div>
-          <div className="flex justify-end gap-2 pt-4">
-            <Button variant="ghost" onClick={() => setCreateOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={creating}>
-              {creating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-              Create Profile
-            </Button>
+          <div className="flex justify-end gap-3 pt-8">
+            <Button variant="ghost" onClick={() => setCreateOpen(false)} className="rounded-full font-semibold text-slate-600 hover:bg-slate-100">Cancel</Button>
+            <Button onClick={handleCreate} disabled={creating} className="rounded-full font-semibold bg-custom-blue hover:bg-[#2d5a94] text-white shadow-sm px-6">{creating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Create Profile</Button>
           </div>
         </DialogContent>
       </Dialog>
 
       <AlertDialog open={!!deletingId} onOpenChange={(open) => !open && setDeletingId(null)}>
-        <AlertDialogContent className="rounded-2xl max-w-sm">
+        <AlertDialogContent className="rounded-2xl max-w-sm shadow-xl border-slate-200">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-base font-bold text-slate-800">Delete this profile?</AlertDialogTitle>
-            <AlertDialogDescription className="text-xs text-slate-500">
-              This cannot be undone. Deletion is blocked while any Employment Offer still references it.
-            </AlertDialogDescription>
+            <AlertDialogTitle className="text-lg font-bold">Delete this profile?</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm text-slate-500">This action cannot be undone.</AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="gap-2 mt-4">
-            <AlertDialogCancel className="h-9 px-4 rounded-full text-xs font-semibold">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => { if (deletingId) handleDelete(deletingId); setDeletingId(null); }}
-              className="h-9 px-4 rounded-full bg-red-600 hover:bg-red-700 text-white text-xs font-semibold shadow-md shadow-red-500/10 border-0"
-            >
-              Delete
-            </AlertDialogAction>
+          <AlertDialogFooter className="mt-5 gap-3">
+            <AlertDialogCancel className="rounded-full font-semibold border-slate-200 shadow-sm mt-0 hover:bg-slate-50">Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (deletingId) handleDelete(deletingId); setDeletingId(null); }} className="rounded-full font-semibold bg-red-600 hover:bg-red-700 text-white shadow-sm border-0">Delete Profile</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -528,6 +528,23 @@ export async function GET(req: NextRequest) {
       taskList.filter((t: any) => t._awaitingClient).length
     );
 
+    // A 97% isOfficerStage hit-rate is suspicious enough to check WHERE these tasks are
+    // actually landing before trusting it — if they're all piling onto one specific stage
+    // (rather than spread across the officer-heavy stretch of the pipeline), that points to
+    // a stage-completion data gap for that one stage rather than a genuine backlog.
+    const officerStageNameCounts: Record<string, number> = {};
+    const officerStageStatusCounts: Record<string, number> = {};
+    taskList.forEach((t: any) => {
+      if (!t._isOfficerStage) return;
+      officerStageNameCounts[t.current_stage_name] = (officerStageNameCounts[t.current_stage_name] || 0) + 1;
+      officerStageStatusCounts[t.status] = (officerStageStatusCounts[t.status] || 0) + 1;
+    });
+    console.log(
+      "[tasks-report] isOfficerStage breakdown by current_stage_name=%o by task.status=%o",
+      officerStageNameCounts,
+      officerStageStatusCounts
+    );
+
     const officerMap = new Map<
       string,
       { id: string; name: string; count: number; tasks: any[] }
@@ -610,19 +627,20 @@ export async function GET(req: NextRequest) {
     const clean = (arr: any[]) =>
       arr.map(({ _officerIds, _isOfficerStage, _managerId, _isBCLStage, _awaitingClient, ...rest }: any) => rest);
 
-    // "Tasks Handled" (payroll basis) — mirrors officerFilterMode='history' on the web
-    // Reports module: officers are paid per task, not per stage, so a task only ever
+    // "Tasks Handled" (byOfficerHandled) — mirrors officerFilterMode='history' on the web
+    // Reports module: "handled at any point" — every officer ever attached to any of a
+    // task's officer-follow_up stages, whether or not that stage is actually completed
+    // (deliberately NOT gated on isStageCompleted; that distinction is what 'current'/
+    // byOfficer is for). Officers are paid per task, not per stage, so a task only ever
     // contributes ONE credit to a given officer here even if they owned several of its
     // officer-stages. A single task CAN still generate credit for more than one officer
-    // (e.g. JM owned stages 1-7, T owned 8-11) — each gets their own entry. Only stages that
-    // are actually completed count; an open/pending assignment belongs in byOfficer
-    // ("current basket"), not here. handled_at is the latest completion date among that
-    // officer's completed officer-stages on the task, for sorting/period-filtering by pay run.
+    // (e.g. JM owned stages 1-7, T owned 8-11) — each gets their own entry. handled_at is
+    // the latest available stage date among that officer's stages on the task (null if
+    // none of them have one yet), for sorting/period-filtering by pay run.
     const officerHandledMap = new Map<string, Map<number, { task: any; handledAt: Date | null }>>();
     (tasks || []).forEach((task: any) => {
       stages.forEach((stage: any) => {
         if (stage.follow_up?.toLowerCase() !== "officer") return;
-        if (!isStageCompleted(stage, task)) return;
         const stageData = task.stages?.[stage.id];
         const officerIds: string[] = Array.isArray(stageData?.officer_ids)
           ? stageData.officer_ids.map((id: any) => String(id)).filter(Boolean)

@@ -493,18 +493,17 @@ export default function ReportsPage() {
       const currentOfficerStage = getCurrentOfficerStage(task);
       return normalizeIds(currentOfficerStage ? task?.stages?.[currentOfficerStage.id]?.officer_ids : []);
     }
-    // 'history' = "Tasks Handled" (payroll basis): officers get task-credit for a *completed*
-    // officer stage, not merely having been attached to one at some point regardless of
-    // whether it ever finished — an open/pending assignment isn't billable work yet, that's
-    // what 'current' mode is for.
+    // 'history' = "handled at any point": every officer who was ever attached to any of this
+    // task's officer-follow_up stages, regardless of whether that stage is completed —
+    // deliberately NOT gated on isStageCompleted. 'current' mode is the one scoped to
+    // "in the basket right now"; 'history' means "touched this task, done or not".
     const officerIds = new Set<string>();
     stages.forEach((stage: any) => {
       if (stage.follow_up?.toLowerCase() !== 'officer') return;
-      if (!isStageCompleted(stage, task)) return;
       normalizeIds(task?.stages?.[stage.id]?.officer_ids).forEach(id => officerIds.add(id));
     });
     return Array.from(officerIds);
-  }, [getCurrentOfficerStage, stages, isStageCompleted]);
+  }, [getCurrentOfficerStage, stages]);
 
   const taskHasStageOfficer = useCallback((task: any, officerIds: string[], mode: 'current' | 'history') => {
     if (!officerIds.length) return true;
@@ -1012,7 +1011,7 @@ export default function ReportsPage() {
       if (col.hasOfficer) {
         const officerIds = Array.isArray(stageData?.officer_ids) ? stageData.officer_ids.map(String).filter(Boolean) : [];
         if (!officerIds.length) {
-          officerNode = <span className="text-xs text-gray-400 italic">—</span>;
+          officerNode = <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-50 text-amber-600 border-amber-200">Unallocated</Badge>;
         } else {
           const names = officerIds.map(id => {
             const o = unifiedOfficers.find((u: any) => u.id.toString() === id.toString());

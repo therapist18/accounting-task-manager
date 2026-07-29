@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchableSelect } from '../components/SearchableSelect';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -21,7 +21,7 @@ import {
 import {
   Loader2, PlusCircle, Settings, Trash2, BookText, Star, Briefcase,
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
-  Columns2, FileText, Search, List, Layers, Database,
+  Columns2, FileText, Search, List, Layers,
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
@@ -29,6 +29,7 @@ import { CONTRACT_SECTIONS } from '../utils/contractStructure';
 import { EcClause, fetchClauses, createClause, updateClause, deleteClause } from '../utils/clauseLibraryData';
 import { syncPlaceholdersFromContent } from '../utils/placeholderDetection';
 import { fetchCompanies, Company } from '../../companies/database';
+import { PlaceholderSources } from '../components/PlaceholderSources';
 import { EMPLOYMENT_TYPE_OPTIONS, WORK_ARRANGEMENT_OPTIONS, withCurrentValue } from '../utils/profileOptions';
 
 const EMPTY_DRAFT: Partial<EcClause> = {
@@ -111,6 +112,7 @@ export default function ClauseLibraryPage() {
   const [selectedSectionKey, setSelectedSectionKey] = useState<string>(CONTRACT_SECTIONS[0].key);
   const [selectedClause, setSelectedClause] = useState<EcClause | null>(null);
   const [condition, setCondition] = useState<{ employment_type?: string; job_level?: string; work_arrangement?: string; department?: string }>({});
+  const [highlightPlaceholderKeys, setHighlightPlaceholderKeys] = useState<string[]>([]);
 
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
   const editorPanelRef = useRef<ImperativePanelHandle>(null);
@@ -215,15 +217,13 @@ export default function ClauseLibraryPage() {
       await load();
 
       // Auto-detect any {{tokens}} this clause introduced and register them
-      // as unlinked (fuzzy-auto-matched where possible) Data Sources entries
-      // - same "detect on save" flow as Document Template Manager's
-      // extractPlaceholders, so a new token never silently goes unlinkable.
+      // as unlinked (fuzzy-auto-matched where possible) placeholder entries -
+      // same "detect on save" flow as Document Template Manager's
+      // extractPlaceholders - then surface them right here for linking
+      // instead of sending the author off to a separate admin page.
       const newTokens = await syncPlaceholdersFromContent([payload.content || '']);
       if (newTokens.length > 0) {
-        toast({
-          title: `${newTokens.length} new placeholder${newTokens.length !== 1 ? 's' : ''} detected`,
-          description: `${newTokens.map((k) => `{{${k}}}`).join(', ')} - link a data source on the Data Sources page.`,
-        });
+        setHighlightPlaceholderKeys(newTokens);
       }
     } catch (err: any) {
       toast({ title: 'Error', description: err.message || 'Failed to save clause', variant: 'destructive' });
@@ -248,14 +248,14 @@ export default function ClauseLibraryPage() {
       {/* HEADER */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-base font-bold text-slate-800 dark:text-slate-100">Clause Library</h1>
-          <div className="flex items-center gap-1 border-l border-slate-200 dark:border-slate-800 pl-3">
+          <h1 className="text-xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Clause Library</h1>
+          <div className="hidden md:flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-full border border-slate-200 dark:border-slate-800/80 ml-3">
             <button
               onClick={() => togglePanel('sidebar')}
               title={collapsed.sidebar ? 'Show sections panel' : 'Hide sections panel'}
               className={cn(
-                "p-1.5 rounded-md transition-colors",
-                collapsed.sidebar ? "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" : "text-custom-blue bg-blue-50 dark:bg-blue-900/20"
+                "p-1.5 rounded-full transition-colors",
+                collapsed.sidebar ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm"
               )}
             >
               {collapsed.sidebar ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
@@ -264,8 +264,8 @@ export default function ClauseLibraryPage() {
               onClick={() => togglePanel('editor')}
               title={collapsed.editor ? 'Show clauses panel' : 'Hide clauses panel'}
               className={cn(
-                "p-1.5 rounded-md transition-colors",
-                collapsed.editor ? "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" : "text-custom-blue bg-blue-50 dark:bg-blue-900/20"
+                "p-1.5 rounded-full transition-colors",
+                collapsed.editor ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm"
               )}
             >
               <Columns2 className="w-4 h-4" />
@@ -274,19 +274,17 @@ export default function ClauseLibraryPage() {
               onClick={() => togglePanel('preview')}
               title={collapsed.preview ? 'Show preview panel' : 'Hide preview panel'}
               className={cn(
-                "p-1.5 rounded-md transition-colors",
-                collapsed.preview ? "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" : "text-custom-blue bg-blue-50 dark:bg-blue-900/20"
+                "p-1.5 rounded-full transition-colors",
+                collapsed.preview ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm"
               )}
             >
               {collapsed.preview ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
             </button>
           </div>
         </div>
-        <div className="flex items-center gap-1">
-          <Link href="/dashboard/employment-contracts" className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">Contracts</Link>
-          <Link href="/dashboard/employment-contracts/job-profiles" className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"><Briefcase className="w-4 h-4" /> Job Profiles</Link>
-          <Link href="/dashboard/employment-contracts/templates" className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"><Settings className="w-4 h-4" /> Templates</Link>
-          <Link href="/dashboard/employment-contracts/placeholders" className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"><Database className="w-4 h-4" /> Data Sources</Link>
+        <div className="hidden lg:flex items-center bg-slate-50 dark:bg-slate-900 p-1 rounded-full border border-slate-200 dark:border-slate-800/80 shadow-sm gap-1">
+          <Link href="/dashboard/employment-contracts" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all">Contracts</Link>
+          <Link href="/dashboard/employment-contracts/job-profiles" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"><Briefcase className="w-3.5 h-3.5" /> Job Profiles</Link>
         </div>
       </div>
 
@@ -501,18 +499,7 @@ export default function ClauseLibraryPage() {
                     />
                   </div>
 
-                  {selectedClause.content?.includes('{{') && (
-                    <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-4">
-                      <p className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-2">Placeholders Used</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {Array.from(selectedClause.content.matchAll(/\{\{(\w+)\}\}/g)).map((m, i) => (
-                          <Badge key={i} variant="outline" className="text-xs font-mono bg-slate-50 text-slate-600 border-slate-200 rounded-full px-2 py-0.5">
-                            {'{{' + m[1] + '}}'}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <PlaceholderSources highlightKeys={highlightPlaceholderKeys} />
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center">
@@ -537,14 +524,12 @@ export default function ClauseLibraryPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label className="text-sm">Section</Label>
-                <Select value={draft.section_key} onValueChange={(v) => setDraft({ ...draft, section_key: v })}>
-                  <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {CONTRACT_SECTIONS.map((s) => (
-                      <SelectItem key={s.key} value={s.key}>{s.title}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  value={draft.section_key || null}
+                  onChange={(v) => setDraft({ ...draft, section_key: v })}
+                  searchPlaceholder="Search sections..."
+                  options={CONTRACT_SECTIONS.map((s) => ({ value: s.key, label: s.title }))}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-sm">Clause key</Label>
@@ -591,15 +576,12 @@ export default function ClauseLibraryPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label className="text-sm">Scope</Label>
-                <Select value={draft.company_id || '__global__'} onValueChange={(v) => setDraft({ ...draft, company_id: v === '__global__' ? null : v })}>
-                  <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__global__">Global (any company)</SelectItem>
-                    {companies.map((c) => (
-                      <SelectItem key={String(c.id)} value={String(c.id)}>{c.company_name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  value={draft.company_id || '__global__'}
+                  onChange={(v) => setDraft({ ...draft, company_id: v === '__global__' ? null : v })}
+                  searchPlaceholder="Search companies..."
+                  options={[{ value: '__global__', label: 'Global (any company)' }, ...companies.map((c) => ({ value: String(c.id), label: c.company_name }))]}
+                />
               </div>
               <div className="flex items-center justify-between border border-slate-200 dark:border-slate-800 rounded-lg px-3 h-10 mt-[22px]">
                 <Label className="text-sm">Default for section</Label>
@@ -610,25 +592,21 @@ export default function ClauseLibraryPage() {
             <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-4 space-y-3">
               <Label className="text-sm font-semibold text-slate-600">Suggest this clause when... (optional)</Label>
               <div className="grid grid-cols-2 gap-3">
-                <Select value={condition.employment_type || '__any__'} onValueChange={(v) => setCondition({ ...condition, employment_type: v === '__any__' ? undefined : v })}>
-                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Employment type" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__any__" className="text-slate-400 italic">Any employment type</SelectItem>
-                    {withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, condition.employment_type).map((opt) => (
-                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  value={condition.employment_type || '__any__'}
+                  onChange={(v) => setCondition({ ...condition, employment_type: v === '__any__' ? undefined : v })}
+                  placeholder="Employment type"
+                  searchPlaceholder="Search employment types..."
+                  options={[{ value: '__any__', label: 'Any employment type' }, ...withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, condition.employment_type).map((opt) => ({ value: opt, label: opt }))]}
+                />
                 <Input className="h-9 text-sm" placeholder="Job level" value={condition.job_level || ''} onChange={(e) => setCondition({ ...condition, job_level: e.target.value || undefined })} />
-                <Select value={condition.work_arrangement || '__any__'} onValueChange={(v) => setCondition({ ...condition, work_arrangement: v === '__any__' ? undefined : v })}>
-                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Work arrangement" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__any__" className="text-slate-400 italic">Any work arrangement</SelectItem>
-                    {withCurrentValue(WORK_ARRANGEMENT_OPTIONS, condition.work_arrangement).map((opt) => (
-                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  value={condition.work_arrangement || '__any__'}
+                  onChange={(v) => setCondition({ ...condition, work_arrangement: v === '__any__' ? undefined : v })}
+                  placeholder="Work arrangement"
+                  searchPlaceholder="Search work arrangements..."
+                  options={[{ value: '__any__', label: 'Any work arrangement' }, ...withCurrentValue(WORK_ARRANGEMENT_OPTIONS, condition.work_arrangement).map((opt) => ({ value: opt, label: opt }))]}
+                />
                 <Input className="h-9 text-sm" placeholder="Department" value={condition.department || ''} onChange={(e) => setCondition({ ...condition, department: e.target.value || undefined })} />
               </div>
               <div className="flex items-center gap-2">
@@ -675,6 +653,8 @@ export default function ClauseLibraryPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+
     </div>
   );
 }

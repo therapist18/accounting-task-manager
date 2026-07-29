@@ -40,6 +40,18 @@ interface PlaceholderFormDialogProps {
   onSave: (placeholder: Placeholder) => void;
   onChange: (updates: Partial<Placeholder>) => void;
   isEditing: boolean;
+  // Lets callers whose Placeholder model doesn't use a given concept (e.g.
+  // Employment Contracts, which has no entity-type/job-question/requirement
+  // linking) hide those sections instead of showing controls that do
+  // nothing for them. Undefined/false = shown, i.e. no behavior change for
+  // Document Template Manager's own usage.
+  hiddenSections?: {
+    entityContext?: boolean;
+    uiVisibility?: boolean;
+    aiRefinement?: boolean;
+    jobQuestions?: boolean;
+    requirements?: boolean;
+  };
 }
 
 export function PlaceholderFormDialog({
@@ -55,7 +67,8 @@ export function PlaceholderFormDialog({
   loadingTables,
   onSave,
   onChange,
-  isEditing
+  isEditing,
+  hiddenSections = {}
 }: PlaceholderFormDialogProps) {
   const [directorType, setDirectorType] = useState<DirectorType>('all');
   const [dependantRelationship, setDependantRelationship] = useState<string[]>([]);
@@ -197,7 +210,7 @@ export function PlaceholderFormDialog({
             />
 
             {/* Configuration: Type & Entity Scope */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className={cn("grid gap-4", hiddenSections.entityContext ? "grid-cols-1" : "grid-cols-2")}>
               <div className="space-y-2">
                 <Label className="text-[11px] font-black uppercase text-slate-400">Placeholder Type</Label>
                 <Select
@@ -230,62 +243,64 @@ export function PlaceholderFormDialog({
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-[11px] font-black uppercase text-slate-400">Entity Context</Label>
-                <div className="flex gap-2">
-                  <Popover className="flex-1">
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-between bg-white text-xs">
-                        <span className="truncate pr-2">
-                          {Array.isArray(placeholder.entity_type) && placeholder.entity_type.length > 0
-                            ? placeholder.entity_type.map(et => ENTITY_TYPES.find(t => t.value === et)?.label || et).join(', ')
-                            : 'Select context...'}
-                        </span>
-                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                      <Command>
-                        <CommandInput placeholder="Search entities..." />
-                        <CommandList>
-                          <CommandGroup className="max-h-[250px] overflow-y-auto">
-                            {ENTITY_TYPES.map((type) => {
-                              const isSelected = placeholder.entity_type?.includes(type.value);
-                              return (
-                                <CommandItem
-                                  key={type.value}
-                                  onSelect={() => {
-                                    const currentTypes = Array.isArray(placeholder.entity_type) ? placeholder.entity_type : [];
-                                    onChange({
-                                      entity_type: isSelected
-                                        ? currentTypes.filter(et => et !== type.value)
-                                        : [...currentTypes, type.value]
-                                    });
-                                  }}
-                                >
-                                  <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${isSelected ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
-                                    {isSelected && <Check className="h-3 w-3" />}
-                                  </div>
-                                  <span className="text-sm font-medium">{type.label}</span>
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onChange({ entity_type: [] })}
-                    title="Clear all entity contexts"
-                    className="shrink-0 w-8 h-8 p-0 flex items-center justify-center"
-                  >
-                    <X className="h-3 w-3" />
-                  </Button>
+              {!hiddenSections.entityContext && (
+                <div className="space-y-2">
+                  <Label className="text-[11px] font-black uppercase text-slate-400">Entity Context</Label>
+                  <div className="flex gap-2">
+                    <Popover className="flex-1">
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full justify-between bg-white text-xs">
+                          <span className="truncate pr-2">
+                            {Array.isArray(placeholder.entity_type) && placeholder.entity_type.length > 0
+                              ? placeholder.entity_type.map(et => ENTITY_TYPES.find(t => t.value === et)?.label || et).join(', ')
+                              : 'Select context...'}
+                          </span>
+                          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Search entities..." />
+                          <CommandList>
+                            <CommandGroup className="max-h-[250px] overflow-y-auto">
+                              {ENTITY_TYPES.map((type) => {
+                                const isSelected = placeholder.entity_type?.includes(type.value);
+                                return (
+                                  <CommandItem
+                                    key={type.value}
+                                    onSelect={() => {
+                                      const currentTypes = Array.isArray(placeholder.entity_type) ? placeholder.entity_type : [];
+                                      onChange({
+                                        entity_type: isSelected
+                                          ? currentTypes.filter(et => et !== type.value)
+                                          : [...currentTypes, type.value]
+                                      });
+                                    }}
+                                  >
+                                    <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${isSelected ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
+                                      {isSelected && <Check className="h-3 w-3" />}
+                                    </div>
+                                    <span className="text-sm font-medium">{type.label}</span>
+                                  </CommandItem>
+                                );
+                              })}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onChange({ entity_type: [] })}
+                      title="Clear all entity contexts"
+                      className="shrink-0 w-8 h-8 p-0 flex items-center justify-center"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Director & Dependant Configuration */}
@@ -1157,6 +1172,7 @@ export function PlaceholderFormDialog({
               </div>
 
               {/* UI Visibility & Grouping */}
+              {!hiddenSections.uiVisibility && (
               <div className="space-y-4 border-t pt-4">
                 <div className="bg-amber-50/50 p-5 rounded-2xl border border-amber-100/50 space-y-4">
                   <Label className="text-[11px] font-black uppercase text-amber-700 flex items-center gap-2">
@@ -1244,7 +1260,9 @@ export function PlaceholderFormDialog({
                   )}
                 </div>
               </div>
+              )}
 
+              {!hiddenSections.aiRefinement && (
               <div className="space-y-4 border-t pt-4">
                 <div className="flex items-center space-x-2">
                   <Checkbox id="is_ai" checked={placeholder.is_ai_generated} onCheckedChange={c => onChange({ is_ai_generated: !!c })} />
@@ -1261,6 +1279,7 @@ export function PlaceholderFormDialog({
                   />
                 )}
               </div>
+              )}
             </div>
 
             {/* Linking Tools Card */}
@@ -1284,7 +1303,8 @@ export function PlaceholderFormDialog({
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className={cn("grid gap-4", !hiddenSections.jobQuestions && !hiddenSections.requirements ? "grid-cols-2" : "grid-cols-1")}>
+                  {!hiddenSections.jobQuestions && (
                   <div className="space-y-1.5">
                     <Label className="text-[10px] font-bold text-purple-600 uppercase flex items-center gap-1.5">
                       <HelpCircle className="h-3 w-3" /> Job Questions
@@ -1341,7 +1361,9 @@ export function PlaceholderFormDialog({
                       );
                     })()}
                   </div>
+                  )}
 
+                  {!hiddenSections.requirements && (
                   <div className="space-y-1.5">
                     <Label className="text-[10px] font-bold text-green-600 uppercase flex items-center gap-1.5">
                       <FileText className="h-3 w-3" /> Requirements
@@ -1355,6 +1377,7 @@ export function PlaceholderFormDialog({
                       placeholder="Select requirements..."
                     />
                   </div>
+                  )}
                 </div>
               </div>
             </div>

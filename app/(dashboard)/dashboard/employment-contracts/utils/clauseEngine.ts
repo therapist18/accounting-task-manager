@@ -84,20 +84,24 @@ export function buildDefaultClauseMap(clauses: EcClauseRow[]): Record<string, st
 
 /**
  * Cascade merge for section -> clause selection, same precedence as
- * resolveEffectiveSettings, falling back to each section's default clause
- * when nothing in the cascade picked one.
+ * resolveEffectiveSettings. Deliberately does NOT fall back to each
+ * section's `is_default` clause when nothing in the cascade picked one -
+ * an unconfigured section stays unresolved (assembleContractHtml renders
+ * "[No clause configured]" for it) so a profile/contract with nothing
+ * explicitly linked can never be mistaken for one that's fully configured.
+ * Applying a section's default clause is only ever an explicit user action
+ * (see "Apply Defaults" in job-profiles/page.tsx), never a silent fallback.
  *
  * Falsy entries (e.g. '' from a "Use section default" picker - see
  * JobProfileEditor.tsx) are skipped rather than assigned, so they behave as
- * "no override" instead of clobbering a perfectly valid default from an
- * earlier layer with an empty string that then fails assembleContractHtml's
+ * "no override" instead of clobbering a valid clause id from an earlier
+ * layer with an empty string that then fails assembleContractHtml's
  * `clauseId ? ... : undefined` check and renders as "[No clause configured]".
  */
 export function resolveEffectiveClauses(
-  layers: Array<ClauseLayer | null | undefined>,
-  defaultClauseBySection: Record<string, string>
+  layers: Array<ClauseLayer | null | undefined>
 ): Record<string, string> {
-  const result: Record<string, string> = { ...defaultClauseBySection };
+  const result: Record<string, string> = {};
   for (const layer of layers) {
     if (!layer?.section_clauses) continue;
     for (const [key, value] of Object.entries(layer.section_clauses)) {

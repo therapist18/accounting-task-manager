@@ -14,6 +14,9 @@ export interface EcPlaceholder {
   settings_key: string | null;
   offer_field: string | null;
   editable: boolean;
+  default_value: string | null;
+  description: string | null;
+  required: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -32,19 +35,24 @@ export async function fetchPlaceholders(): Promise<EcPlaceholder[]> {
   return (data || []) as EcPlaceholder[];
 }
 
-// Only master_field_id is ever edited via the Data Sources admin page today -
-// the rest of a placeholder's shape (key, group, source_kind, ...) is fixed
-// by what standardPlaceholders.ts actually computes, not admin-editable.
-export async function linkPlaceholderMasterField(id: string, masterFieldId: string | null): Promise<EcPlaceholder | null> {
+// Persists everything the reused DTM PlaceholderFormDialog can actually map
+// onto an EcPlaceholder (see ecPlaceholderAdapter.ts) - the dialog's many
+// other fields (type, conditions, checklist config, image config, ai_prompt,
+// job question / requirement links, ...) have no EcPlaceholder column and
+// are silently dropped, not persisted.
+export async function updatePlaceholderDetails(
+  id: string,
+  updates: { master_field_id: string | null; default_value: string | null; description: string | null; required: boolean }
+): Promise<EcPlaceholder | null> {
   const { data, error } = await supabase
     .from('ec_placeholders')
-    .update({ master_field_id: masterFieldId, updated_at: new Date().toISOString() })
+    .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', id)
     .select()
     .single();
 
   if (error) {
-    console.error('Error linking placeholder to master field:', error);
+    console.error('Error updating placeholder details:', error);
     throw error;
   }
   return data as EcPlaceholder;

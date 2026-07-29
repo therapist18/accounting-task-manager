@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
-import { Settings, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2, BookText, Briefcase, Database } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2, BookText, Briefcase } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ContractsSidebar } from './components/ContractsSidebar';
 import { ContractEditor } from './components/ContractEditor';
@@ -15,7 +15,6 @@ export default function EmploymentContractsPage() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [contractData, setContractData] = useState<any>({});
   const [selectedJobProfile, setSelectedJobProfile] = useState<EcJobProfile | null>(null);
-  const [previewKey, setPreviewKey] = useState(0);
 
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
   const editorPanelRef = useRef<ImperativePanelHandle>(null);
@@ -38,76 +37,60 @@ export default function EmploymentContractsPage() {
 
   return (
     <div className="max-h-[100vh] w-full overflow-hidden bg-[#f3f4f6] dark:bg-[#0a0a0a] flex flex-col shadow-sm">
-      <div className="flex items-center justify-between px-6 py-3 border-b border-slate-200/80 dark:border-slate-800/80 bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl shrink-0 z-10 shadow-sm relative">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shrink-0 z-10 shadow-sm relative">
         <div className="flex items-center gap-6">
-          <h1 className="text-[16px] font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent dark:from-blue-400 dark:to-indigo-400">
+          <h1 className="text-xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
             Employment Contracts
           </h1>
-          
-          <div className="flex items-center gap-1 border-l border-slate-200 dark:border-slate-800 pl-6">
-            <div className="flex items-center bg-slate-100/80 dark:bg-slate-800/80 rounded-lg p-1 border border-slate-200/50 dark:border-slate-700/50 shadow-inner">
-              <button
-                onClick={() => togglePanel('sidebar')}
-                title={collapsed.sidebar ? 'Show entities panel' : 'Hide entities panel'}
-                className={cn(
-                  "p-1.5 rounded-md transition-all",
-                  collapsed.sidebar ? "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200" : "text-blue-600 bg-white dark:bg-slate-950 dark:text-blue-400 shadow-sm"
-                )}
-              >
-                {collapsed.sidebar ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
-              </button>
-              <button
-                onClick={() => togglePanel('editor')}
-                title={collapsed.editor ? 'Show configuration panel' : 'Hide configuration panel'}
-                className={cn(
-                  "p-1.5 rounded-md transition-all mx-1",
-                  collapsed.editor ? "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200" : "text-blue-600 bg-white dark:bg-slate-950 dark:text-blue-400 shadow-sm"
-                )}
-              >
-                <Columns2 className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => togglePanel('preview')}
-                title={collapsed.preview ? 'Show preview panel' : 'Hide preview panel'}
-                className={cn(
-                  "p-1.5 rounded-md transition-all",
-                  collapsed.preview ? "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200" : "text-blue-600 bg-white dark:bg-slate-950 dark:text-blue-400 shadow-sm"
-                )}
-              >
-                {collapsed.preview ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
-              </button>
-            </div>
+
+          <div className="hidden md:flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-full border border-slate-200 dark:border-slate-800/80">
+            <button
+              onClick={() => togglePanel('sidebar')}
+              title={collapsed.sidebar ? 'Show entities panel' : 'Hide entities panel'}
+              className={cn(
+                "p-1.5 rounded-full transition-all",
+                collapsed.sidebar ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm"
+              )}
+            >
+              {collapsed.sidebar ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={() => togglePanel('editor')}
+              title={collapsed.editor ? 'Show configuration panel' : 'Hide configuration panel'}
+              className={cn(
+                "p-1.5 rounded-full transition-all",
+                collapsed.editor ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm"
+              )}
+            >
+              <Columns2 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => togglePanel('preview')}
+              title={collapsed.preview ? 'Show preview panel' : 'Hide preview panel'}
+              className={cn(
+                "p-1.5 rounded-full transition-all",
+                collapsed.preview ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm"
+              )}
+            >
+              {collapsed.preview ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
+            </button>
           </div>
         </div>
-        
-        <div className="flex items-center gap-2">
+
+        <div className="hidden lg:flex items-center bg-slate-50 dark:bg-slate-900 p-1 rounded-full border border-slate-200 dark:border-slate-800/80 shadow-sm gap-1">
           <Link
             href="/dashboard/employment-contracts/clause-library"
-            className="flex items-center gap-2 px-3 py-1.5 text-[13px] font-medium text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"
           >
-            <BookText className="w-4 h-4" />
+            <BookText className="w-3.5 h-3.5" />
             Clauses
           </Link>
           <Link
             href="/dashboard/employment-contracts/job-profiles"
-            className="flex items-center gap-2 px-3 py-1.5 text-[13px] font-medium text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"
           >
-            <Briefcase className="w-4 h-4" />
+            <Briefcase className="w-3.5 h-3.5" />
             Job Profiles
-          </Link>
-          <Link
-            href="/dashboard/employment-contracts/templates"
-            className="flex items-center gap-2 px-3 py-1.5 text-[13px] font-medium text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
-          >
-            <Settings className="w-4 h-4" />
-            Templates
-          </Link>
-          <Link
-            href="/dashboard/employment-contracts/placeholders"
-            className="flex items-center gap-2 px-3 py-1.5 text-[13px] font-medium text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
-          >
-            <Database className="w-4 h-4" />
-            Data Sources
           </Link>
         </div>
       </div>
@@ -153,7 +136,6 @@ export default function EmploymentContractsPage() {
             setContractData={setContractData}
             selectedJobProfile={selectedJobProfile}
             setSelectedJobProfile={setSelectedJobProfile}
-            onRefreshPreview={() => setPreviewKey(prev => prev + 1)}
           />
         </Panel>
 
@@ -171,7 +153,6 @@ export default function EmploymentContractsPage() {
           className="bg-slate-100/80 dark:bg-slate-900/80 flex flex-col z-10 !overflow-auto"
         >
           <ContractPreview
-            key={previewKey}
             contractData={contractData}
             setContractData={setContractData}
             selectedJobProfile={selectedJobProfile}

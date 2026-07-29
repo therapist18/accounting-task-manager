@@ -64,7 +64,6 @@ const navItems = [
         icon: FileText,
         items: [
             { title: "Generate Contracts", href: "/dashboard/employment-contracts" },
-            { title: "Contract Templates", href: "/dashboard/employment-contracts/templates" },
         ],
     },
     { title: "Master Fields", href: "/dashboard/master-fields", icon: Database, permission: "master_fields.view" },

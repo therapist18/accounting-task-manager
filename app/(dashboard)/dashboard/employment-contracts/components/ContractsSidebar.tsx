@@ -80,7 +80,7 @@ export function ContractsSidebar({
     <div className="flex flex-col h-full bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800">
       <div className="p-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
         <div className="flex items-center justify-between mb-1">
-          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+          <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
             <Building2 className="w-5 h-5 text-custom-blue" />
             Entities
           </h2>
@@ -109,7 +109,7 @@ export function ContractsSidebar({
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
           <Input
             placeholder="Search company..."
-            className="pl-9 h-9 text-sm bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus-visible:ring-custom-blue"
+            className="pl-9 h-9 rounded-full text-sm bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus-visible:ring-custom-blue"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -141,7 +141,7 @@ export function ContractsSidebar({
                   onOpenChange={() => handleToggleCompany(compId)}
                 >
                   <CollapsibleTrigger className={cn(
-                    "flex items-center w-full p-2 text-sm rounded-md transition-colors hover:bg-slate-100 dark:hover:bg-slate-800",
+                    "flex items-center w-full p-2 text-sm rounded-lg transition-colors hover:bg-slate-100 dark:hover:bg-slate-800",
                     selectedCompanyId === compId && !isOpen && "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium"
                   )}>
                     {isOpen ? (
@@ -176,7 +176,7 @@ export function ContractsSidebar({
                             key={emp.id}
                             onClick={() => onSelectEmployee(compId, String(emp.individualId))}
                             className={cn(
-                              "flex items-center p-2 text-xs rounded-md cursor-pointer transition-colors",
+                              "flex items-center p-2 text-xs rounded-lg cursor-pointer transition-colors",
                               isSelected 
                                 ? "bg-custom-blue text-white shadow-sm font-medium" 
                                 : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"

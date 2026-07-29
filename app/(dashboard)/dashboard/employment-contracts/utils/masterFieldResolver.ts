@@ -34,15 +34,22 @@ export async function resolveMasterFieldValues(
       .filter((s) => s.source_type === 'individual' || s.source_type === 'company')
       .filter((s) => {
         const lv = s.linking_variable as string | null | undefined;
-        return lv === 'individual_id' || lv === 'company_id' || !lv;
+        return lv === 'individual_id' || lv === 'company_id' || lv === 'id' || !lv;
       })
       .sort((a, b) => a.priority - b.priority);
 
     for (const source of sources) {
       const linkingVariable = source.linking_variable as string | null | undefined;
-      const usesCompanyId = linkingVariable === 'company_id' || (source.source_type === 'company' && !linkingVariable);
-      const idColumn = usesCompanyId ? 'company_id' : 'individual_id';
-      const idValue = usesCompanyId ? companyId : individualId;
+      // acc_portal_company_duplicate IS the company table - its own primary
+      // key (`id`) is the company id, there's no separate `company_id`
+      // column on it (unlike child/document tables such as
+      // acc_portal_kyc_uploads, which reference a company via a real
+      // company_id FK). Force `id` for it regardless of what linking_variable
+      // says, since 'company_id' against this table 400s at the DB level.
+      const isCompanyTableItself = source.table === 'acc_portal_company_duplicate';
+      const usesCompanyId = !isCompanyTableItself && (linkingVariable === 'company_id' || (source.source_type === 'company' && !linkingVariable));
+      const idColumn = isCompanyTableItself ? 'id' : usesCompanyId ? 'company_id' : 'individual_id';
+      const idValue = isCompanyTableItself || usesCompanyId ? companyId : individualId;
       if (idValue === null || idValue === undefined) continue;
 
       const rootColumn = source.path.split(/->>?/)[0].trim().replace(/['"]/g, '');

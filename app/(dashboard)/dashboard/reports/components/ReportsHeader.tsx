@@ -697,6 +697,7 @@ export function StatusFilterBar({ activeStatus, setActiveStatus, allTasksCount, 
     { id: 'wip', label: 'WIP' },
     { id: 'write_up_completed', label: 'Write-up Completed' },
     { id: 'endorsed', label: 'Endorsed' },
+    { id: 'cancelled', label: 'Cancelled' },
   ];
 
   return (
