@@ -121,7 +121,7 @@ export async function GET(req: NextRequest) {
 
     const { data: department } = await supabase
       .from("tm_departments")
-      .select("id, name, tm_subdepartments(id, name)")
+      .select("id, name, stages, tm_subdepartments(id, name)")
       .eq("id", deptId)
       .single();
 
@@ -191,11 +191,14 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const { data: stages } = await supabase
-      .from("tm_stages")
-      .select("id, name, order_num, follow_up, estimated_time")
-      .eq("department_id", deptId)
-      .order("order_num", { ascending: true });
+    // There is no standalone tm_stages table backing the live app — stagesdb.ts's
+    // createStage/updateStage/deleteStage/updateStageOrder all read and write a `stages`
+    // JSONB column directly on tm_departments. Querying a tm_stages table (as this route
+    // did before) silently returned zero rows for every department, which is why officer
+    // grouping and every named stage date resolved to nothing.
+    const stages = ((department as any)?.stages || [])
+      .slice()
+      .sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
 
     console.log(
       "[tasks-report] deptId=%s stages=%o",

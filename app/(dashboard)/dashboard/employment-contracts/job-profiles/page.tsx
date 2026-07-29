@@ -1154,10 +1154,8 @@ export default function JobProfilesPage() {
                           </div>
                         </TabsContent>
 
-
-
-                        <TabsContent value="clauses" className="m-0 p-8">
-                          <div className="flex border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden bg-white dark:bg-slate-950" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+                        <TabsContent value="clauses" className="">
+                          <div className="flex overflow-hidden dark:bg-slate-950" style={{ maxHeight: 'calc(100vh - 280px)' }}>
                             {/* Col 1: Sections */}
                             <div className="w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col shrink-0">
                               <div className="p-4 border-b border-slate-100 dark:border-slate-800">
