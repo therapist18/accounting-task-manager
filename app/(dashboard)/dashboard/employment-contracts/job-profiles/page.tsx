@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { saveAs } from 'file-saver';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -17,19 +20,29 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import {
   Loader2, PlusCircle, Settings, Trash2, Briefcase, BookText,
   Search, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
-  Columns2, FileText, Database, ChevronDown, Pencil, ShieldCheck, Laptop2,
-  Users, Megaphone, Car, LayoutTemplate, UserCog, FileCheck, Building, Heart, Link as LinkIcon, PlayCircle,
-  Copy, History, Download, Edit2, AlertCircle, CheckCircle2, Clock, DollarSign, HeartPulse, Scale, ShieldAlert,
-  ChevronRight, ArrowRight, X
+  Columns2, FileText, Database, ChevronDown, ShieldCheck, Laptop2,
+  Users, Megaphone, Car, LayoutTemplate, UserCog, FileCheck, Link as LinkIcon, PlayCircle,
+  Copy, Download, AlertCircle, CheckCircle2, ChevronRight, X, FileSignature,
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { fetchCompanies, Company } from '../../companies/database';
-import { EcJobProfile, fetchJobProfiles, deleteJobProfile, JobProfileScope } from '../utils/jobProfileData';
+import {
+  EcJobProfile, fetchJobProfiles, createJobProfile, updateJobProfile, deleteJobProfile,
+  JobProfileScope, findCompanyDefaults, findDepartmentDefaults,
+} from '../utils/jobProfileData';
 import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
-import { JobProfileEditor } from '../components/JobProfileEditor';
+import {
+  resolveEffectiveSettings, resolveEffectiveClauses, buildDefaultClauseMap, assembleContractHtml,
+} from '../utils/clauseEngine';
+import { EcContractTemplate, fetchContractTemplates } from '../utils/contractTemplateData';
+import { applyThemeToHtml, DEFAULT_CONTRACT_THEME } from '../utils/themeEngine';
+import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
+import { replacePlaceholders } from '../../tasks-requirements/utils/templateFormatters';
+import type { ContractEmployeeInfo } from '../utils/data';
 import { CompaniesSidebar } from '../components/CompaniesSidebar';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
+import { EMPLOYMENT_TYPE_OPTIONS, WORK_ARRANGEMENT_OPTIONS, withCurrentValue } from '../utils/profileOptions';
 
 const SETTINGS_GROUPS: { label: string; test: RegExp }[] = [
   { label: 'Compensation & Benefits', test: /allowance|medical|pension|salary|payment/i },
@@ -43,7 +56,7 @@ function groupSettings(settings: Record<string, any>): { label: string; items: [
   for (const group of SETTINGS_GROUPS) buckets.set(group.label, []);
   buckets.set('Other', []);
 
-  for (const entry of Object.entries(settings)) {
+  for (const entry of Object.entries(settings || {})) {
     const group = SETTINGS_GROUPS.find((g) => g.test.test(entry[0]));
     buckets.get(group?.label || 'Other')!.push(entry);
   }
@@ -76,20 +89,150 @@ const SECTION_BADGE_COLORS = [
   'bg-emerald-50 text-emerald-700 border-emerald-200',
 ];
 
+// Which settings keys belong on which editable tab - mirrors SETTINGS_GROUPS
+// above but split across the three thematic tabs instead of one dumping
+// ground, plus "Contract Rules" catches anything that doesn't match any of
+// them so no key is ever silently hidden.
+const EMPLOYMENT_RULES_HINTS = ['notice_period', 'probation_period', 'probation_notice', 'termination_reason'];
+const WORKING_ARRANGEMENT_HINTS = ['working_days', 'working_hours', 'start_time', 'end_time', 'break_duration', 'rest_days', 'work_mode'];
+const BENEFITS_HINTS = [
+  'medical_cover', 'housing_allowance', 'transport_allowance', 'telephone_allowance', 'meal_allowance', 'pension_scheme',
+  'annual_leave_days', 'sick_leave_days', 'maternity_leave_days', 'paternity_leave_days', 'compassionate_leave_days',
+  'payment_frequency', 'payment_day',
+];
+const ALL_KNOWN_SETTINGS_HINTS = [...EMPLOYMENT_RULES_HINTS, ...WORKING_ARRANGEMENT_HINTS, ...BENEFITS_HINTS];
+
+// Bullet-list editor for Requirements / Key Responsibilities - free-form
+// prose lines, distinct from the short keyword chips TagListEditor handles.
+function StringListEditor({ items, onChange, placeholder }: { items: string[]; onChange: (items: string[]) => void; placeholder: string }) {
+  return (
+    <div className="space-y-2">
+      {items.map((item, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <Input
+            className="h-8 text-xs bg-white dark:bg-slate-900"
+            placeholder={placeholder}
+            value={item}
+            onChange={(e) => onChange(items.map((it, ii) => (ii === i ? e.target.value : it)))}
+          />
+          <button type="button" onClick={() => onChange(items.filter((_, ii) => ii !== i))} className="text-slate-400 hover:text-red-600 shrink-0">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ))}
+      <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" onClick={() => onChange([...items, ''])}>
+        <PlusCircle className="h-3 w-3 mr-1.5" /> Add
+      </Button>
+    </div>
+  );
+}
+
+// Chip editor for Skills / Job Tags / Equipment - type + Enter (or comma) to
+// add, click the x to remove. Used for short keyword-style lists.
+function TagListEditor({ items, onChange, placeholder, badgeClassName }: { items: string[]; onChange: (items: string[]) => void; placeholder: string; badgeClassName?: string }) {
+  const [value, setValue] = useState('');
+  const addTag = () => {
+    const v = value.trim();
+    if (!v || items.includes(v)) { setValue(''); return; }
+    onChange([...items, v]);
+    setValue('');
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {items.map((item, i) => (
+        <Badge key={i} variant="secondary" className={cn("font-medium text-[10px] py-0.5 pl-2.5 pr-1.5 h-6 flex items-center gap-1 border-transparent", badgeClassName || "bg-blue-50 text-blue-700 hover:bg-blue-100")}>
+          {item}
+          <button type="button" onClick={() => onChange(items.filter((_, ii) => ii !== i))} className="hover:opacity-70">
+            <X className="h-3 w-3" />
+          </button>
+        </Badge>
+      ))}
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(); } }}
+        onBlur={addTag}
+        placeholder={placeholder}
+        className="text-xs h-6 px-2.5 border border-dashed border-slate-300 dark:border-slate-700 rounded-full outline-none focus:border-blue-400 bg-transparent w-36"
+      />
+    </div>
+  );
+}
+
+// Editable key/value card for a thematic slice of the free-form `settings`
+// bag. `hints` are the keys this card owns; clicking one that isn't set yet
+// adds it, and a custom key/value row covers anything not in the list.
+function SettingsEditorCard({ title, hints, settings, onChange, excludeKnown }: {
+  title: string; hints: string[]; settings: Record<string, any>; onChange: (next: Record<string, any>) => void; excludeKnown?: boolean;
+}) {
+  const [newKey, setNewKey] = useState('');
+  const [newValue, setNewValue] = useState('');
+  const safeSettings = settings || {};
+  const entries = excludeKnown
+    ? Object.entries(safeSettings).filter(([k]) => !ALL_KNOWN_SETTINGS_HINTS.includes(k))
+    : Object.entries(safeSettings).filter(([k]) => hints.includes(k));
+  const remainingHints = hints.filter((h) => safeSettings[h] === undefined);
+
+  const setKey = (key: string, value: string) => onChange({ ...safeSettings, [key]: value });
+  const removeKey = (key: string) => { const next = { ...safeSettings }; delete next[key]; onChange(next); };
+
+  return (
+    <div className="bg-white dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+      <p className="text-sm font-bold text-slate-800 dark:text-slate-300 mb-4">{title}</p>
+      <div className="space-y-2.5">
+        {entries.length === 0 && <p className="text-xs text-slate-400 italic mb-1">Nothing set yet.</p>}
+        {entries.map(([key, value]) => (
+          <div key={key} className="flex items-center gap-2">
+            <span className="text-xs font-mono text-slate-500 w-40 truncate shrink-0" title={key}>{key}</span>
+            <Input className="h-8 text-xs flex-1 bg-white dark:bg-slate-900" value={String(value)} onChange={(e) => setKey(key, e.target.value)} />
+            <button type="button" onClick={() => removeKey(key)} className="text-slate-400 hover:text-red-600 shrink-0"><X className="h-4 w-4" /></button>
+          </div>
+        ))}
+      </div>
+      {remainingHints.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-4">
+          {remainingHints.map((hint) => (
+            <button key={hint} type="button" onClick={() => setKey(hint, '')} className="text-[10px] font-mono text-slate-500 border border-dashed border-slate-300 dark:border-slate-700 rounded-full px-2 py-1 hover:bg-slate-50 dark:hover:bg-slate-900 hover:text-slate-800 dark:hover:text-slate-200">
+              + {hint}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+        <Input className="h-8 text-xs font-mono bg-white dark:bg-slate-900" placeholder="custom_key" value={newKey} onChange={(e) => setNewKey(e.target.value)} />
+        <Input className="h-8 text-xs bg-white dark:bg-slate-900" placeholder="value" value={newValue} onChange={(e) => setNewValue(e.target.value)} />
+        <Button type="button" size="sm" variant="outline" className="h-8 text-xs shrink-0 px-2.5" onClick={() => { if (!newKey.trim()) return; setKey(newKey.trim(), newValue); setNewKey(''); setNewValue(''); }}>
+          <PlusCircle className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function JobProfilesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [profiles, setProfiles] = useState<EcJobProfile[]>([]);
+  const [allProfiles, setAllProfiles] = useState<EcJobProfile[]>([]);
   const [clauses, setClauses] = useState<EcClause[]>([]);
+  const [templates, setTemplates] = useState<EcContractTemplate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [editingProfile, setEditingProfile] = useState<EcJobProfile | null>(null);
-  const [newScope, setNewScope] = useState<JobProfileScope>('position');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [detailTab, setDetailTab] = useState('overview');
   const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [linkSectionKey, setLinkSectionKey] = useState<string>(CONTRACT_SECTIONS[0].key);
+  const [linkSearch, setLinkSearch] = useState('');
+
+  const [draft, setDraft] = useState<EcJobProfile | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createScope, setCreateScope] = useState<JobProfileScope>('position');
+  const [createName, setCreateName] = useState('');
+  const [createDepartment, setCreateDepartment] = useState('');
+  const [creating, setCreating] = useState(false);
 
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
   const editorPanelRef = useRef<ImperativePanelHandle>(null);
@@ -102,8 +245,6 @@ export default function JobProfilesPage() {
     if (!panel) return;
     if (panel.isCollapsed()) panel.expand(); else panel.collapse();
   };
-
-  const [allProfiles, setAllProfiles] = useState<EcJobProfile[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -128,8 +269,14 @@ export default function JobProfilesPage() {
   const loadProfiles = async (id: string) => {
     if (!id) return;
     setIsLoading(true);
-    const data = await fetchJobProfiles(id);
+    const [data, allData, templateData] = await Promise.all([
+      fetchJobProfiles(id),
+      fetchJobProfiles(),
+      fetchContractTemplates(id),
+    ]);
     setProfiles(data);
+    setAllProfiles(allData);
+    setTemplates(templateData);
     setIsLoading(false);
   };
 
@@ -145,14 +292,35 @@ export default function JobProfilesPage() {
     [profiles, selectedProfileId]
   );
 
-  const settingsGroups = useMemo(
-    () => selectedProfile ? groupSettings(selectedProfile.settings || {}) : [],
-    [selectedProfile]
-  );
+  // Local editable copy - every field on the page reads/writes `draft`, and
+  // nothing hits the database until Save Changes. Re-syncs whenever the
+  // selection changes OR the underlying profiles list refreshes (e.g. right
+  // after a successful save), so a save clears the dirty state instead of
+  // leaving stale local edits around.
+  useEffect(() => {
+    setDraft(selectedProfile ? { ...selectedProfile } : null);
+  }, [selectedProfileId, selectedProfile]);
+
+  useEffect(() => { setDetailTab('overview'); }, [selectedProfileId]);
+
+  const isDirty = useMemo(() => {
+    if (!draft || !selectedProfile) return false;
+    return JSON.stringify(draft) !== JSON.stringify(selectedProfile);
+  }, [draft, selectedProfile]);
+
+  const updateDraft = (patch: Partial<EcJobProfile>) => setDraft((prev) => (prev ? { ...prev, ...patch } : prev));
+  const updateDraftSettings = (key: string, value: string) =>
+    setDraft((prev) => (prev ? { ...prev, settings: { ...(prev.settings || {}), [key]: value } } : prev));
+  const updateDraftSettingsObject = (next: Record<string, any>) => updateDraft({ settings: next });
+
+  const settingsGroups = useMemo(() => (draft ? groupSettings(draft.settings || {}) : []), [draft]);
+
+  const clausesById = useMemo(() => Object.fromEntries(clauses.map((c) => [c.id, c])), [clauses]);
+  const defaultClauseMap = useMemo(() => buildDefaultClauseMap(clauses), [clauses]);
 
   const clauseSelections = useMemo(() => {
-    if (!selectedProfile) return [];
-    return Object.entries(selectedProfile.section_clauses || {}).map(([sectionKey, clauseId], i) => {
+    if (!draft) return [];
+    return Object.entries(draft.section_clauses || {}).map(([sectionKey, clauseId], i) => {
       const section = CONTRACT_SECTIONS.find((s) => s.key === sectionKey);
       const clause = clauses.find((c) => c.id === clauseId);
       return {
@@ -163,19 +331,100 @@ export default function JobProfilesPage() {
         color: SECTION_BADGE_COLORS[i % SECTION_BADGE_COLORS.length],
       };
     });
-  }, [selectedProfile, clauses]);
-
-  useEffect(() => { setDetailTab('overview'); }, [selectedProfileId]);
+  }, [draft, clauses]);
 
   const openNew = (scope: JobProfileScope) => {
-    setEditingProfile(null);
-    setNewScope(scope);
-    setEditorOpen(true);
+    setCreateScope(scope);
+    setCreateName('');
+    setCreateDepartment('');
+    setCreateOpen(true);
   };
 
-  const openEdit = (profile: EcJobProfile) => {
-    setEditingProfile(profile);
-    setEditorOpen(true);
+  const handleCreate = async () => {
+    if (!createName.trim()) {
+      toast({ title: 'Name required', variant: 'destructive' });
+      return;
+    }
+    if (createScope === 'department' && !createDepartment.trim()) {
+      toast({ title: 'Department required for a department-scope profile', variant: 'destructive' });
+      return;
+    }
+    setCreating(true);
+    try {
+      const created = await createJobProfile({
+        scope: createScope,
+        company_id: selectedCompanyId,
+        name: createName.trim(),
+        department: createScope === 'company' ? null : (createDepartment.trim() || null),
+        is_active: true,
+        settings: {},
+        section_clauses: {},
+        requirements: [],
+        key_responsibilities: [],
+        skills: [],
+        tags: [],
+        equipment: [],
+      });
+      if (created) {
+        await loadProfiles(selectedCompanyId);
+        setSelectedProfileId(created.id);
+        setCreateOpen(false);
+        toast({ title: 'Profile created' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Failed to create profile', variant: 'destructive' });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!draft) return;
+    if (!draft.name.trim()) {
+      toast({ title: 'Name required', variant: 'destructive' });
+      return;
+    }
+    setSaving(true);
+    try {
+      const { id, created_at, updated_at, company_id, scope, ...rest } = draft;
+      const updated = await updateJobProfile(id, rest);
+      if (updated) {
+        await loadProfiles(selectedCompanyId);
+        toast({ title: 'Profile saved' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Failed to save profile', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancelEdits = () => { if (selectedProfile) setDraft({ ...selectedProfile }); };
+
+  const handleDuplicate = async () => {
+    if (!selectedProfile) return;
+    try {
+      const { id, created_at, updated_at, ...rest } = selectedProfile;
+      const created = await createJobProfile({ ...rest, name: `${selectedProfile.name} (Copy)` });
+      if (created) {
+        await loadProfiles(selectedCompanyId);
+        setSelectedProfileId(created.id);
+        toast({ title: 'Profile duplicated' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Failed to duplicate profile', variant: 'destructive' });
+    }
+  };
+
+  const handleDownloadJobDescription = () => {
+    if (!draft) return;
+    const parts = [`<h1>${draft.name}</h1>`];
+    if (draft.job_title) parts.push(`<p><strong>${draft.job_title}</strong></p>`);
+    if (draft.job_description) parts.push(`<p>${draft.job_description.replace(/\n/g, '<br/>')}</p>`);
+    if (draft.key_responsibilities?.length) parts.push(`<h2>Key Responsibilities</h2><ul>${draft.key_responsibilities.map((r) => `<li>${r}</li>`).join('')}</ul>`);
+    if (draft.requirements?.length) parts.push(`<h2>Requirements</h2><ul>${draft.requirements.map((r) => `<li>${r}</li>`).join('')}</ul>`);
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${draft.name} Job Description</title></head><body>${parts.join('')}</body></html>`;
+    saveAs(new Blob([html], { type: 'application/msword' }), `${draft.name.replace(/\s+/g, '_')}_Job_Description.doc`);
   };
 
   const handleDelete = async (id: string) => {
@@ -191,14 +440,73 @@ export default function JobProfilesPage() {
 
   const scopeLabel = (scope: JobProfileScope) => scope === 'company' ? 'Company Defaults' : scope === 'department' ? 'Department Defaults' : 'Position';
 
+  // ── Preview tab: reuses the same cascade + assembly engine the real
+  // Contract Editor uses, layered as Company Defaults -> Department Defaults
+  // -> this profile (itself, always winning). A Job Profile isn't tied to a
+  // real employee, so identity placeholders come from a clearly-labeled
+  // sample employee - only the profile/company data is real.
+  const companyDefaults = useMemo(() => (selectedCompanyId ? findCompanyDefaults(profiles, selectedCompanyId) : undefined), [profiles, selectedCompanyId]);
+  const departmentDefaults = useMemo(() => (selectedCompanyId ? findDepartmentDefaults(profiles, selectedCompanyId, draft?.department) : undefined), [profiles, selectedCompanyId, draft?.department]);
+
+  const previewEffectiveSettings = useMemo(() => resolveEffectiveSettings([
+    companyDefaults, departmentDefaults, draft ? { settings: draft.settings } : null,
+  ]), [companyDefaults, departmentDefaults, draft]);
+
+  const previewEffectiveClauses = useMemo(() => resolveEffectiveClauses([
+    companyDefaults, departmentDefaults, draft ? { section_clauses: draft.section_clauses } : null,
+  ], defaultClauseMap), [companyDefaults, departmentDefaults, draft, defaultClauseMap]);
+
+  const previewTemplate = useMemo(() => {
+    if (templates.length === 0) return null;
+    if (draft?.default_template_id) {
+      const t = templates.find((t) => t.id === draft.default_template_id);
+      if (t) return t;
+    }
+    const companyDefault = templates.find((t) => t.company_id === selectedCompanyId && t.is_default);
+    if (companyDefault) return companyDefault;
+    const companyAny = templates.find((t) => t.company_id === selectedCompanyId);
+    if (companyAny) return companyAny;
+    return templates.find((t) => !t.company_id && t.is_default) || templates.find((t) => !t.company_id) || templates[0] || null;
+  }, [templates, draft?.default_template_id, selectedCompanyId]);
+
+  const previewCompany = useMemo(() => companies.find((c) => String(c.id) === selectedCompanyId) || null, [companies, selectedCompanyId]);
+
+  const previewEmployeeValues = useMemo(() => {
+    const sampleEmployee: ContractEmployeeInfo = {
+      id: 'sample', individualId: 0, companyId: Number(selectedCompanyId) || 0,
+      fullName: 'Sample Employee', firstName: 'Sample', lastName: 'Employee',
+      employeeNumber: 'EMP-0000', kraPin: '', nationalId: '', nssfNumber: '', nhifNumber: '', shifNumber: '',
+      department: draft?.department || '', jobTitle: draft?.job_title || draft?.name || '',
+      employmentType: draft?.employment_type || '', employmentStatus: 'Active', jobLevel: draft?.job_level || '',
+      reportsTo: String(draft?.settings?.reports_to || ''), workLocation: draft?.work_location || '',
+      workArrangement: draft?.work_arrangement || '', status: 'Active', basicSalary: 0, grossSalary: 0,
+      bankName: '', bankBranch: '', bankAccount: '', contactEmail: '', contactPhone: '', startDate: '',
+    };
+    return buildStandardPlaceholderValues(sampleEmployee, previewCompany, undefined, previewEffectiveSettings);
+  }, [draft, previewCompany, previewEffectiveSettings, selectedCompanyId]);
+
+  const previewHtml = useMemo(() => {
+    if (!previewTemplate || !draft) return '';
+    const body = assembleContractHtml({
+      sectionKeys: previewTemplate.section_keys,
+      clausesById,
+      effectiveClauses: previewEffectiveClauses,
+      effectiveSettings: previewEffectiveSettings,
+      employeePlaceholderValues: previewEmployeeValues,
+      includeToc: false,
+    });
+    const themed = applyThemeToHtml(body, previewTemplate.theme_settings || DEFAULT_CONTRACT_THEME);
+    return replacePlaceholders(themed, { ...previewEffectiveSettings, ...previewEmployeeValues });
+  }, [previewTemplate, draft, clausesById, previewEffectiveClauses, previewEffectiveSettings, previewEmployeeValues]);
+
   const tabs: { value: string; label: string; icon: any }[] = [
     { value: 'overview', label: 'Overview', icon: LayoutTemplate },
     { value: 'responsibilities', label: 'Responsibilities', icon: UserCog },
     { value: 'employment_rules', label: 'Employment Rules', icon: FileCheck },
-    { value: 'working_arrangement', label: 'Working Arrangement', icon: Building },
-    { value: 'benefits', label: 'Benefits & Compensation', icon: Heart },
+    { value: 'working_arrangement', label: 'Working Arrangement', icon: Briefcase },
+    { value: 'benefits', label: 'Benefits & Compensation', icon: CheckCircle2 },
     { value: 'contract_rules', label: 'Contract Rules', icon: FileText },
-    { value: 'clauses', label: `Linked Clauses (${clauseSelections.length || 24})`, icon: LinkIcon },
+    { value: 'clauses', label: `Linked Clauses (${clauseSelections.length})`, icon: LinkIcon },
     { value: 'preview', label: 'Preview', icon: PlayCircle },
   ];
 
@@ -264,7 +572,7 @@ export default function JobProfilesPage() {
       </div>
 
       <PanelGroup direction="horizontal" className="h-full w-full">
-        {/* LEFT PANEL: Profile list */}
+        {/* LEFT PANEL: Companies */}
         <Panel
           ref={sidebarPanelRef}
           defaultSize={18}
@@ -287,7 +595,7 @@ export default function JobProfilesPage() {
 
         <PanelResizeHandle className="w-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-20" />
 
-        {/* CENTER PANEL: Profile list & detail */}
+        {/* CENTER PANEL: Profile list */}
         <Panel
           ref={editorPanelRef}
           defaultSize={22}
@@ -311,13 +619,22 @@ export default function JobProfilesPage() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
                 </div>
-                <Button size="sm" className="h-9 w-full text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-sm" onClick={() => openNew('position')} disabled={!selectedCompanyId}>
-                  <PlusCircle className="h-4 w-4 mr-2" /> Add Job Profile
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" className="h-9 w-full text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-sm" disabled={!selectedCompanyId}>
+                      <PlusCircle className="h-4 w-4 mr-2" /> Add Job Profile
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56">
+                    <DropdownMenuItem onClick={() => openNew('position')}>New Position Profile</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => openNew('department')}>New Department Defaults</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => openNew('company')}>New Company Defaults</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
 
-            <ScrollArea className="flex-1 bg-white">
+            <ScrollArea className="flex-1 bg-white dark:bg-slate-950">
               {isLoading ? (
                 <div className="flex justify-center items-center h-40"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
               ) : filteredProfiles.length === 0 ? (
@@ -342,10 +659,7 @@ export default function JobProfilesPage() {
                         )}
                       >
                         {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600" />}
-                        <div className={cn(
-                          "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm mt-0.5",
-                          visual.classes
-                        )}>
+                        <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm mt-0.5", visual.classes)}>
                           <VisualIcon className="w-5 h-5" />
                         </div>
                         <div className="min-w-0 flex-1">
@@ -353,9 +667,7 @@ export default function JobProfilesPage() {
                           <p className="text-[11px] text-slate-500 truncate mt-1">
                             {profile.department || scopeLabel(profile.scope)}
                           </p>
-                          <p className="text-[11px] text-slate-500 truncate">
-                            {profile.job_level || 'Mid Level'}
-                          </p>
+                          {profile.job_level && <p className="text-[11px] text-slate-500 truncate">{profile.job_level}</p>}
                         </div>
                         <span className={cn(
                           "text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0",
@@ -374,7 +686,7 @@ export default function JobProfilesPage() {
 
         <PanelResizeHandle className="w-1.5 bg-slate-200 dark:border-slate-800 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-20" />
 
-        {/* RIGHT PANEL: Profile detail */}
+        {/* RIGHT PANEL: Live profile editor */}
         <Panel
           ref={previewPanelRef}
           defaultSize={60}
@@ -386,8 +698,8 @@ export default function JobProfilesPage() {
           className="bg-slate-50 dark:bg-slate-900 flex flex-col z-10 !overflow-auto"
         >
           <div className="flex flex-col h-full">
-            {selectedProfile ? (() => {
-              const visual = getProfileVisual(selectedProfile.department);
+            {draft && selectedProfile ? (() => {
+              const visual = getProfileVisual(draft.department);
               const VisualIcon = visual.icon;
               return (
                 <>
@@ -396,42 +708,58 @@ export default function JobProfilesPage() {
                     <div className="flex items-start justify-between gap-6">
                       <div className="flex flex-col gap-4 min-w-0">
                         <div className="flex items-center gap-4">
-                           <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-sm text-white", "bg-indigo-600")}>
+                           <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-sm", visual.classes)}>
                              <VisualIcon className="w-7 h-7" />
                            </div>
                            <div className="min-w-0">
                              <div className="flex items-center gap-3 mb-1">
-                               <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 truncate">{selectedProfile.name}</h2>
-                               <Badge className="bg-emerald-50 text-emerald-600 hover:bg-emerald-50 border-emerald-200 text-xs px-2 py-0 rounded-full h-6 shrink-0">Active</Badge>
+                               <input
+                                 value={draft.name}
+                                 onChange={(e) => updateDraft({ name: e.target.value })}
+                                 className="text-2xl font-bold text-slate-900 dark:text-slate-100 bg-transparent outline-none border-b border-transparent focus:border-blue-300 min-w-0"
+                                 style={{ width: `${Math.max(draft.name.length, 8)}ch` }}
+                               />
+                               <button
+                                 type="button"
+                                 onClick={() => updateDraft({ is_active: !draft.is_active })}
+                                 title="Toggle active status"
+                               >
+                                 <Badge className={cn(
+                                   "text-xs px-2 py-0 rounded-full h-6 shrink-0 cursor-pointer",
+                                   draft.is_active ? "bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-200" : "bg-slate-100 text-slate-500 hover:bg-slate-200 border-slate-200"
+                                 )}>
+                                   {draft.is_active ? 'Active' : 'Inactive'}
+                                 </Badge>
+                               </button>
                              </div>
                              <p className="text-sm text-slate-600 dark:text-slate-400 font-medium truncate">
-                               {selectedProfile.department || scopeLabel(selectedProfile.scope)} • {selectedProfile.job_level || 'Mid Level'} • {selectedProfile.employment_type || 'Permanent'}
+                               {draft.department || scopeLabel(draft.scope)}
+                               {draft.job_level ? ` • ${draft.job_level}` : ''}
+                               {draft.employment_type ? ` • ${draft.employment_type}` : ''}
                              </p>
-                             <p className="text-xs text-slate-500 mt-1">
-                               Reports to: <span className="font-medium text-slate-700">{selectedProfile.settings?.reports_to || 'Finance Manager'}</span>
-                             </p>
+                             {draft.scope === 'position' && (
+                               <p className="text-xs text-slate-500 mt-1">
+                                 Reports to: <span className="font-medium text-slate-700 dark:text-slate-300">{draft.settings?.reports_to || 'Not set'}</span>
+                               </p>
+                             )}
                            </div>
                         </div>
                       </div>
-                      
+
                       <div className="flex flex-col items-end justify-between gap-4 shrink-0 h-full">
                         <div className="flex gap-6 text-[11px] text-slate-500 text-right">
                           <div className="flex flex-col gap-1">
-                             <p>Created: <span className="font-medium text-slate-700">{new Date(selectedProfile.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span></p>
-                             <p>Last Updated: <span className="font-medium text-slate-700">{new Date(selectedProfile.updated_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span></p>
-                          </div>
-                          <div className="flex flex-col gap-1 text-left">
-                             <p>By: <span className="font-medium text-slate-700">Jane Admin</span></p>
-                             <p>By: <span className="font-medium text-slate-700">Jane Admin</span></p>
+                             <p>Created: <span className="font-medium text-slate-700 dark:text-slate-300">{new Date(draft.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span></p>
+                             <p>Last Updated: <span className="font-medium text-slate-700 dark:text-slate-300">{new Date(draft.updated_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span></p>
                           </div>
                         </div>
-                        
+
                         <div className="flex items-center gap-3">
-                          <Button variant="outline" size="sm" className="h-9 px-4 rounded-full font-semibold">Cancel</Button>
-                          <Button variant="outline" size="sm" className="h-9 px-4 rounded-full font-semibold">Save Draft</Button>
+                          <Button variant="outline" size="sm" className="h-9 px-4 rounded-full font-semibold" onClick={handleCancelEdits} disabled={!isDirty || saving}>Cancel</Button>
                           <div className="flex rounded-full shadow-sm bg-blue-600">
-                            <Button size="sm" className="h-9 bg-transparent hover:bg-blue-700 text-white rounded-l-full rounded-r-none border-r border-blue-700 font-semibold px-4">
-                              Save Job Profile
+                            <Button size="sm" className="h-9 bg-transparent hover:bg-blue-700 text-white rounded-l-full rounded-r-none border-r border-blue-700 font-semibold px-4 disabled:opacity-60" onClick={handleSaveProfile} disabled={!isDirty || saving}>
+                              {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                              Save Changes
                             </Button>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
@@ -440,8 +768,8 @@ export default function JobProfilesPage() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="rounded-xl">
-                                <DropdownMenuItem onClick={() => openEdit(selectedProfile)}>
-                                  <Pencil className="h-4 w-4 mr-2" /> Edit Profile
+                                <DropdownMenuItem onClick={handleDuplicate}>
+                                  <Copy className="h-4 w-4 mr-2" /> Duplicate Job Profile
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={() => setDeletingId(selectedProfile.id)}>
@@ -478,276 +806,208 @@ export default function JobProfilesPage() {
                     <ScrollArea className="flex-1">
                         <TabsContent value="overview" className="m-0 focus:outline-none">
                           <div className="p-8 max-w-[1400px] mx-auto space-y-6">
-                            
+
                             {/* Top row */}
                             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                               {/* Left: Basic Info (col-span-7) */}
                               <div className="lg:col-span-7 flex flex-col gap-6">
-                                {/* Basic Information Card */}
                                 <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
                                   <h3 className="text-sm font-bold text-slate-800 mb-5">Basic Information</h3>
                                   <div className="grid grid-cols-2 gap-x-6 gap-y-4">
                                     <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Job Title <span className="text-red-500">*</span></label>
-                                      <Input value={selectedProfile.job_title || selectedProfile.name || ''} readOnly className="h-9 text-xs bg-slate-50/50" />
+                                      <label className="text-[11px] font-semibold text-slate-500">Job Title</label>
+                                      <Input value={draft.job_title || ''} onChange={(e) => updateDraft({ job_title: e.target.value })} className="h-9 text-xs" placeholder="e.g. Accountant" />
                                     </div>
                                     <div className="space-y-1.5">
                                       <label className="text-[11px] font-semibold text-slate-500">Job Code</label>
-                                      <Input value="ACC-001" readOnly className="h-9 text-xs bg-slate-50/50" />
+                                      <Input value={draft.job_code || ''} onChange={(e) => updateDraft({ job_code: e.target.value })} className="h-9 text-xs" placeholder="e.g. ACC-001" />
                                     </div>
                                     <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Department <span className="text-red-500">*</span></label>
-                                      <div className="relative">
-                                        <Input value={selectedProfile.department || 'Finance Department'} readOnly className="h-9 text-xs bg-slate-50/50 pr-8" />
-                                        <ChevronDown className="absolute right-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                                      </div>
+                                      <label className="text-[11px] font-semibold text-slate-500">Department {draft.scope === 'department' && <span className="text-red-500">*</span>}</label>
+                                      <Input value={draft.department || ''} onChange={(e) => updateDraft({ department: e.target.value })} className="h-9 text-xs" placeholder="e.g. Finance Department" />
                                     </div>
                                     <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Job Level <span className="text-red-500">*</span></label>
-                                      <div className="relative">
-                                        <Input value={selectedProfile.job_level || 'Mid Level'} readOnly className="h-9 text-xs bg-slate-50/50 pr-8" />
-                                        <ChevronDown className="absolute right-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                                      </div>
+                                      <label className="text-[11px] font-semibold text-slate-500">Job Level</label>
+                                      <Input value={draft.job_level || ''} onChange={(e) => updateDraft({ job_level: e.target.value })} className="h-9 text-xs" placeholder="e.g. Mid Level" />
                                     </div>
                                     <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Employment Types <span className="text-red-500">*</span></label>
-                                      <div className="flex items-center gap-1.5 p-1 border border-slate-200 rounded-md bg-slate-50/50 min-h-9 flex-wrap relative pr-8">
-                                        <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50 text-[10px] font-medium py-0 h-5">Permanent <X className="h-3 w-3 ml-1 opacity-50" /></Badge>
-                                        <Badge className="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-50 text-[10px] font-medium py-0 h-5">Probation <X className="h-3 w-3 ml-1 opacity-50" /></Badge>
-                                        <ChevronDown className="absolute right-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                                      </div>
+                                      <label className="text-[11px] font-semibold text-slate-500">Employment Type</label>
+                                      <Select value={draft.employment_type || '__unset__'} onValueChange={(v) => updateDraft({ employment_type: v === '__unset__' ? null : v })}>
+                                        <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select type" /></SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>
+                                          {withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, draft.employment_type).map((opt) => (
+                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
                                     </div>
                                     <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Reports To <span className="text-red-500">*</span></label>
-                                      <div className="relative">
-                                        <Input value={selectedProfile.settings?.reports_to || 'Finance Manager'} readOnly className="h-9 text-xs bg-slate-50/50 pr-8" />
-                                        <ChevronDown className="absolute right-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                                      </div>
+                                      <label className="text-[11px] font-semibold text-slate-500">Reports To</label>
+                                      <Input value={draft.settings?.reports_to || ''} onChange={(e) => updateDraftSettings('reports_to', e.target.value)} className="h-9 text-xs" placeholder="e.g. Finance Manager" />
                                     </div>
                                     <div className="space-y-1.5">
                                       <label className="text-[11px] font-semibold text-slate-500">Job Family</label>
-                                      <div className="relative">
-                                        <Input value="Finance & Accounting" readOnly className="h-9 text-xs bg-slate-50/50 pr-8" />
-                                        <ChevronDown className="absolute right-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                                      </div>
+                                      <Input value={draft.job_family || ''} onChange={(e) => updateDraft({ job_family: e.target.value })} className="h-9 text-xs" placeholder="e.g. Finance & Accounting" />
                                     </div>
                                     <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Work Location <span className="text-red-500">*</span></label>
-                                      <div className="relative">
-                                        <Input value="Head Office - Nairobi" readOnly className="h-9 text-xs bg-slate-50/50 pr-8" />
-                                        <ChevronDown className="absolute right-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                                      </div>
+                                      <label className="text-[11px] font-semibold text-slate-500">Work Location</label>
+                                      <Input value={draft.work_location || ''} onChange={(e) => updateDraft({ work_location: e.target.value })} className="h-9 text-xs" placeholder="e.g. Head Office" />
                                     </div>
                                     <div className="space-y-1.5">
-                                      <label className="text-[11px] font-semibold text-slate-500">Contract Theme</label>
-                                      <div className="relative">
-                                        <Input value="Corporate Blue" readOnly className="h-9 text-xs bg-slate-50/50 pr-8" />
-                                        <ChevronDown className="absolute right-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                                      </div>
+                                      <label className="text-[11px] font-semibold text-slate-500">Work Arrangement</label>
+                                      <Select value={draft.work_arrangement || '__unset__'} onValueChange={(v) => updateDraft({ work_arrangement: v === '__unset__' ? null : v })}>
+                                        <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select arrangement" /></SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>
+                                          {withCurrentValue(WORK_ARRANGEMENT_OPTIONS, draft.work_arrangement).map((opt) => (
+                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
                                     </div>
                                     <div className="space-y-1.5 col-span-2">
-                                      <label className="text-[11px] font-semibold text-slate-500">Default Contract Type</label>
-                                      <div className="relative w-[calc(50%-12px)]">
-                                        <Input value="Permanent Employment Contract" readOnly className="h-9 text-xs bg-slate-50/50 pr-8" />
-                                        <ChevronDown className="absolute right-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                                      </div>
+                                      <label className="text-[11px] font-semibold text-slate-500">Default Contract Template</label>
+                                      <Select value={draft.default_template_id || '__none__'} onValueChange={(v) => updateDraft({ default_template_id: v === '__none__' ? null : v })}>
+                                        <SelectTrigger className="h-9 text-xs w-[calc(50%-12px)]"><SelectValue placeholder="Use company default" /></SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="__none__" className="text-slate-400 italic">Use company default</SelectItem>
+                                          {templates.map((t) => (
+                                            <SelectItem key={t.id} value={t.id}>{t.name}{t.is_default ? ' (default)' : ''}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
                                     </div>
                                     <div className="space-y-1.5 col-span-2">
                                       <label className="text-[11px] font-semibold text-slate-500">Job Summary</label>
-                                      <div className="relative">
-                                        <textarea readOnly className="w-full min-h-[80px] p-3 text-xs border border-slate-200 rounded-md bg-slate-50/50 resize-none text-slate-700" value={selectedProfile.job_description || "Responsible for maintaining accurate financial records, preparing financial reports, managing accounts payable and receivable, reconciling bank statements and supporting month-end and year-end close activities."} />
-                                        <span className="absolute bottom-2 right-2 text-[10px] text-slate-400">174/500</span>
-                                      </div>
+                                      <Textarea
+                                        className="min-h-[80px] text-xs"
+                                        placeholder="A short summary of what this role does..."
+                                        value={draft.job_description || ''}
+                                        onChange={(e) => updateDraft({ job_description: e.target.value })}
+                                      />
                                     </div>
                                   </div>
                                 </div>
-                                
-                                {/* Row 2 under Basic Info: Qualifications and Skills */}
+
                                 <div className="grid grid-cols-2 gap-6">
                                   <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
                                     <h3 className="text-sm font-bold text-slate-800 mb-4">Qualifications & Experience</h3>
-                                    {selectedProfile.requirements?.length ? (
-                                      <ul className="space-y-2 text-xs text-slate-600 list-disc pl-4">
-                                        {selectedProfile.requirements.map((item, i) => <li key={i}>{item}</li>)}
-                                      </ul>
-                                    ) : (
-                                      <ul className="space-y-2 text-xs text-slate-600 list-disc pl-4">
-                                        <li>Bachelor's degree in Accounting, Finance or related field.</li>
-                                        <li>CPA Section 4 or equivalent professional qualification.</li>
-                                        <li>Minimum 2 years of relevant accounting experience.</li>
-                                        <li>Strong knowledge of accounting principles and standards.</li>
-                                        <li>Proficiency in ERP and MS Excel.</li>
-                                      </ul>
-                                    )}
+                                    <StringListEditor items={draft.requirements || []} onChange={(v) => updateDraft({ requirements: v })} placeholder="e.g. Bachelor's degree in Accounting" />
                                   </div>
                                   <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
                                     <h3 className="text-sm font-bold text-slate-800 mb-4">Core Skills</h3>
-                                    <div className="flex flex-wrap gap-2">
-                                      <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium text-[10px]">Financial Reporting</Badge>
-                                      <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium text-[10px]">Account Reconciliation</Badge>
-                                      <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium text-[10px]">Tax Compliance</Badge>
-                                      <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium text-[10px]">Budgeting & Forecasting</Badge>
-                                      <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium text-[10px]">Excel (Advanced)</Badge>
-                                      <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium text-[10px]">ERP Systems</Badge>
-                                      <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium text-[10px]">Attention to Detail</Badge>
-                                      <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium text-[10px]">Analytical Thinking</Badge>
-                                      <Button variant="outline" size="sm" className="h-6 text-[10px] rounded-full border-dashed text-blue-600 border-blue-200 hover:bg-blue-50">
-                                        <PlusCircle className="h-3 w-3 mr-1" /> Add Skill
-                                      </Button>
-                                    </div>
+                                    <TagListEditor items={draft.skills || []} onChange={(v) => updateDraft({ skills: v })} placeholder="Type a skill, press Enter" badgeClassName="bg-blue-50 text-blue-700 hover:bg-blue-100" />
                                   </div>
                                 </div>
                               </div>
-                              
-                              {/* Middle: Snapshot & Competencies (col-span-3) */}
+
+                              {/* Middle: Snapshot (col-span-3) */}
                               <div className="lg:col-span-3 flex flex-col gap-6">
                                 <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
                                   <div className="flex items-center gap-2 mb-5">
                                     <FileCheck className="w-4 h-4 text-slate-400" />
                                     <h3 className="text-sm font-bold text-slate-800">Employment Snapshot</h3>
                                   </div>
-                                  <div className="space-y-4 text-xs">
-                                    <div className="flex justify-between items-center"><span className="text-slate-500">Notice Period (Default)</span><span className="font-semibold text-slate-800">2 Months</span></div>
-                                    <div className="flex justify-between items-center"><span className="text-slate-500">Probation Period</span><span className="font-semibold text-slate-800">3 Months</span></div>
-                                    <div className="flex justify-between items-center"><span className="text-slate-500">Annual Leave</span><span className="font-semibold text-slate-800">21 Days</span></div>
-                                    <div className="flex justify-between items-center"><span className="text-slate-500">Sick Leave</span><span className="font-semibold text-slate-800">14 Days</span></div>
-                                    <div className="flex justify-between items-center"><span className="text-slate-500">Overtime Eligible</span><span className="font-semibold text-slate-800">Yes</span></div>
-                                    <div className="flex justify-between items-center"><span className="text-slate-500">Remote Work Allowed</span><span className="font-semibold text-slate-800">No</span></div>
-                                  </div>
-                                </div>
-                                
-                                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                                  <h3 className="text-sm font-bold text-slate-800 mb-5">Key Competencies</h3>
-                                  <div className="space-y-4">
+                                  <div className="space-y-3 text-xs">
                                     {[
-                                      { label: 'Financial Accuracy', val: 90 },
-                                      { label: 'Reporting', val: 85 },
-                                      { label: 'Analysis', val: 80 },
-                                      { label: 'Compliance', val: 85 },
-                                      { label: 'Communication', val: 70 },
-                                    ].map(comp => (
-                                      <div key={comp.label} className="space-y-1.5">
-                                        <div className="flex justify-between text-[11px]">
-                                          <span className="text-slate-600 font-medium flex items-center gap-2">
-                                            <CheckCircle2 className="h-3 w-3 text-blue-500" /> {comp.label}
-                                          </span>
-                                          <span className="text-slate-500 font-bold">{comp.val}%</span>
-                                        </div>
-                                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                          <div className="h-full bg-blue-500 rounded-full" style={{ width: `${comp.val}%` }} />
-                                        </div>
+                                      { key: 'notice_period', label: 'Notice Period' },
+                                      { key: 'probation_period', label: 'Probation Period' },
+                                      { key: 'annual_leave_days', label: 'Annual Leave' },
+                                      { key: 'sick_leave_days', label: 'Sick Leave' },
+                                    ].map((row) => (
+                                      <div key={row.key} className="flex justify-between items-center gap-2">
+                                        <span className="text-slate-500 shrink-0">{row.label}</span>
+                                        <Input
+                                          value={draft.settings?.[row.key] || ''}
+                                          onChange={(e) => updateDraftSettings(row.key, e.target.value)}
+                                          className="h-7 text-xs w-24 text-right"
+                                          placeholder="Not set"
+                                        />
                                       </div>
                                     ))}
+                                    <div className="flex justify-between items-center pt-1">
+                                      <span className="text-slate-500">Remote Work Allowed</span>
+                                      <span className="font-semibold text-slate-800">
+                                        {draft.work_arrangement === 'Remote' || draft.work_arrangement === 'Hybrid' ? 'Yes' : draft.work_arrangement === 'Office' ? 'No' : 'Not set'}
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
-                              
-                              {/* Right: Tags, Quick Actions, Assets (col-span-2) */}
+
+                              {/* Right: Tags, Quick Actions, Equipment (col-span-2) */}
                               <div className="lg:col-span-2 flex flex-col gap-6">
                                 <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                                  <div className="flex items-center justify-between mb-4">
-                                    <h3 className="text-sm font-bold text-slate-800">Job Tags</h3>
-                                    <button className="text-blue-600 hover:text-blue-700 flex items-center gap-1 text-[11px] font-semibold"><Edit2 className="h-3 w-3" /> Edit</button>
-                                  </div>
-                                  <div className="flex flex-wrap gap-2">
-                                    <Badge variant="secondary" className="bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium text-[10px] py-0 border-transparent">Finance</Badge>
-                                    <Badge variant="secondary" className="bg-sky-50 text-sky-700 hover:bg-sky-100 font-medium text-[10px] py-0 border-transparent">Accounting</Badge>
-                                    <Badge variant="secondary" className="bg-purple-50 text-purple-700 hover:bg-purple-100 font-medium text-[10px] py-0 border-transparent">Reports</Badge>
-                                    <Badge variant="secondary" className="bg-fuchsia-50 text-fuchsia-700 hover:bg-fuchsia-100 font-medium text-[10px] py-0 border-transparent">Analysis</Badge>
-                                    <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-medium text-[10px] py-0 border-transparent">Reconciliation</Badge>
-                                  </div>
+                                  <h3 className="text-sm font-bold text-slate-800 mb-4">Job Tags</h3>
+                                  <TagListEditor items={draft.tags || []} onChange={(v) => updateDraft({ tags: v })} placeholder="Add a tag" badgeClassName="bg-indigo-50 text-indigo-700 hover:bg-indigo-100" />
                                 </div>
-                                
+
                                 <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
                                   <h3 className="text-sm font-bold text-slate-800 mb-4">Quick Actions</h3>
                                   <div className="space-y-3">
-                                    <button className="flex items-center gap-3 text-xs text-slate-600 hover:text-blue-600 w-full font-medium">
+                                    <button onClick={handleDuplicate} className="flex items-center gap-3 text-xs text-slate-600 hover:text-blue-600 w-full font-medium">
                                       <Copy className="h-4 w-4 text-slate-400" /> Duplicate Job Profile
                                     </button>
-                                    <button className="flex items-center gap-3 text-xs text-slate-600 hover:text-blue-600 w-full font-medium">
-                                      <History className="h-4 w-4 text-slate-400" /> View Job Profile History
-                                    </button>
-                                    <button className="flex items-center gap-3 text-xs text-slate-600 hover:text-blue-600 w-full font-medium">
+                                    <button onClick={handleDownloadJobDescription} className="flex items-center gap-3 text-xs text-slate-600 hover:text-blue-600 w-full font-medium">
                                       <Download className="h-4 w-4 text-slate-400" /> Download Job Description
                                     </button>
-                                    <button className="flex items-center gap-3 text-xs text-slate-600 hover:text-blue-600 w-full font-medium">
+                                    <button onClick={() => setDetailTab('preview')} className="flex items-center gap-3 text-xs text-slate-600 hover:text-blue-600 w-full font-medium">
                                       <FileText className="h-4 w-4 text-slate-400" /> Generate Contract Preview
                                     </button>
                                   </div>
                                 </div>
-                                
+
                                 <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                                  <div className="flex items-center justify-between mb-4">
-                                    <h3 className="text-sm font-bold text-slate-800">Equipment & Assets</h3>
-                                    <button className="text-blue-600 hover:text-blue-700 flex items-center gap-1 text-[11px] font-semibold"><Edit2 className="h-3 w-3" /> Edit</button>
-                                  </div>
-                                  <ul className="space-y-2.5 text-xs text-slate-600 font-medium">
-                                    <li className="flex items-center gap-2.5"><CheckCircle2 className="h-4 w-4 text-emerald-500" /> Laptop</li>
-                                    <li className="flex items-center gap-2.5"><CheckCircle2 className="h-4 w-4 text-emerald-500" /> Access Card</li>
-                                    <li className="flex items-center gap-2.5"><CheckCircle2 className="h-4 w-4 text-emerald-500" /> Company Email</li>
-                                    <li className="flex items-center gap-2.5"><CheckCircle2 className="h-4 w-4 text-emerald-500" /> Office Stationery</li>
-                                    <li className="flex items-center gap-2.5"><CheckCircle2 className="h-4 w-4 text-emerald-500" /> Calculator</li>
-                                  </ul>
-                                  <Button variant="link" size="sm" className="h-auto p-0 mt-4 text-[11px] font-semibold text-blue-600">
-                                    <PlusCircle className="h-3.5 w-3.5 mr-1" /> Add Equipment
-                                  </Button>
+                                  <h3 className="text-sm font-bold text-slate-800 mb-4">Equipment & Assets</h3>
+                                  <TagListEditor items={draft.equipment || []} onChange={(v) => updateDraft({ equipment: v })} placeholder="Add an item" badgeClassName="bg-emerald-50 text-emerald-700 hover:bg-emerald-100" />
                                 </div>
                               </div>
                             </div>
-                            
-                            {/* Matched Clauses Section */}
+
+                            {/* Linked Clauses Section */}
                             <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
                                <div className="flex items-center gap-2 mb-6">
-                                 <h3 className="text-sm font-bold text-slate-800">Matched Clauses</h3>
-                                 <span className="text-[11px] text-slate-500 font-medium">(Auto-linked by rules based on this job profile)</span>
+                                 <h3 className="text-sm font-bold text-slate-800">Linked Clauses</h3>
+                                 <span className="text-[11px] text-slate-500 font-medium">Sections this profile has a clause selected for</span>
                                </div>
-                               
+
                                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                                  {[
-                                    { icon: Clock, iconColor: 'text-teal-600', iconBg: 'bg-teal-50', title: 'Working Hours', subtitle: 'Standard Office Hours', source: 'Working Arrangement', req: 'Required' },
-                                    { icon: DollarSign, iconColor: 'text-purple-600', iconBg: 'bg-purple-50', title: 'Compensation', subtitle: 'Basic Salary Clause', source: 'Compensation Rules', req: 'Required' },
-                                    { icon: HeartPulse, iconColor: 'text-emerald-600', iconBg: 'bg-emerald-50', title: 'Benefits', subtitle: 'Medical Cover Benefit', source: 'Benefits Rules', req: 'Optional', reqColor: 'text-amber-600', reqBg: 'bg-amber-50' },
-                                    { icon: ShieldAlert, iconColor: 'text-rose-600', iconBg: 'bg-rose-50', title: 'Termination', subtitle: 'Notice Period - Mid Level', source: 'Employment Rules', req: 'Required' },
-                                    { icon: Scale, iconColor: 'text-blue-600', iconBg: 'bg-blue-50', title: 'Obligations', subtitle: 'Confidentiality Clause', source: 'Contract Rules', req: 'Required' },
-                                  ].map((card, i) => (
-                                    <div key={i} className="border border-slate-200 rounded-xl p-4 flex flex-col gap-3 hover:border-blue-300 transition-colors">
-                                      <div className="flex items-start justify-between">
-                                        <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0", card.iconBg, card.iconColor)}>
-                                          <card.icon className="w-4 h-4" />
-                                        </div>
+                                  {clauseSelections.slice(0, 5).map((sel) => (
+                                    <div key={sel.sectionKey} className="border border-slate-200 rounded-xl p-4 flex flex-col gap-3 hover:border-blue-300 transition-colors">
+                                      <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-blue-50 text-blue-600">
+                                        <FileSignature className="w-4 h-4" />
                                       </div>
                                       <div>
-                                        <p className="text-[10px] font-bold text-slate-800 uppercase tracking-wider mb-1">{card.title}</p>
-                                        <p className="text-xs font-semibold text-slate-700">{card.subtitle}</p>
-                                        <p className="text-[10px] text-slate-500 mt-1">Source: {card.source}</p>
-                                        <p className="text-[10px] text-slate-500">Confidence: 100%</p>
+                                        <p className="text-[10px] font-bold text-slate-800 uppercase tracking-wider mb-1">{sel.sectionTitle}</p>
+                                        <p className="text-xs font-semibold text-slate-700 truncate">{sel.clauseLabel}</p>
                                       </div>
                                       <div className="mt-auto flex justify-end">
-                                        <span className={cn("text-[9px] font-bold px-2 py-0.5 rounded-sm", card.req === 'Required' ? "text-emerald-600 bg-emerald-50" : (card.reqColor || "text-amber-600") + " " + (card.reqBg || "bg-amber-50"))}>{card.req}</span>
+                                        <span className={cn("text-[9px] font-bold px-2 py-0.5 rounded-sm", sel.isDefault ? "text-emerald-600 bg-emerald-50" : "text-amber-600 bg-amber-50")}>{sel.isDefault ? 'Default' : 'Custom'}</span>
                                       </div>
                                     </div>
                                   ))}
-                                  
-                                  <div 
+
+                                  <div
                                     className="border border-dashed border-slate-300 rounded-xl p-4 flex flex-col items-center justify-center gap-2 hover:border-blue-400 hover:bg-blue-50/50 transition-colors cursor-pointer"
                                     onClick={() => setLinkModalOpen(true)}
                                   >
                                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-blue-50 text-blue-600 pointer-events-none">
                                        <PlusCircle className="h-5 w-5" />
                                      </Button>
-                                     <p className="text-xs font-semibold text-blue-600 text-center">View all 24<br/>matched clauses</p>
+                                     <p className="text-xs font-semibold text-blue-600 text-center">Manage all {clauseSelections.length}<br/>linked clauses</p>
                                   </div>
                                </div>
-                               
+
                                <div className="mt-6 flex items-center justify-between pt-4 border-t border-slate-100">
                                  <div className="flex items-center gap-2 text-xs text-slate-500">
                                    <AlertCircle className="w-4 h-4 text-blue-500" />
-                                   Clauses are automatically matched based on your configuration. You can review and override them in the Linked Clauses tab.
+                                   Sections without a selection here fall back to the department/company default clause.
                                  </div>
                                  <div className="flex items-center gap-3">
-                                   <Button variant="outline" size="sm" className="h-9 px-4 rounded-full font-semibold">Preview Contract</Button>
-                                   <Button size="sm" className="h-9 px-6 rounded-full font-semibold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2">
-                                     Save Job Profile <ChevronDown className="w-4 h-4" />
+                                   <Button variant="outline" size="sm" className="h-9 px-4 rounded-full font-semibold" onClick={() => setDetailTab('preview')}>Preview Contract</Button>
+                                   <Button size="sm" className="h-9 px-6 rounded-full font-semibold bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setLinkModalOpen(true)}>
+                                     Manage Linked Clauses
                                    </Button>
                                  </div>
                                </div>
@@ -756,37 +1016,52 @@ export default function JobProfilesPage() {
                         </TabsContent>
 
                         <TabsContent value="responsibilities" className="m-0 p-8">
-                          <div className="bg-white dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+                          <div className="bg-white dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 max-w-2xl">
                             <h3 className="text-sm font-bold text-slate-800 mb-4">Key Responsibilities</h3>
-                            {selectedProfile.key_responsibilities?.length ? (
-                              <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300 list-disc pl-4">
-                                {selectedProfile.key_responsibilities.map((item, i) => <li key={i}>{item}</li>)}
-                              </ul>
-                            ) : <p className="text-sm text-slate-400 italic">No responsibilities added yet. Use Edit Profile to add some.</p>}
+                            <StringListEditor items={draft.key_responsibilities || []} onChange={(v) => updateDraft({ key_responsibilities: v })} placeholder="e.g. Maintain accurate financial records" />
                           </div>
                         </TabsContent>
 
-                        <TabsContent value="benefits" className="m-0 p-8 space-y-4">
-                          {settingsGroups.length === 0 ? (
-                            <div className="text-sm text-slate-400 italic border border-dashed rounded-2xl p-6 border-slate-200 dark:border-slate-800 text-center">No settings configured.</div>
-                          ) : (
-                            settingsGroups.map((group) => (
-                              <div key={group.label} className="bg-white dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
-                                <p className="text-sm font-bold text-slate-800 dark:text-slate-300 mb-4">{group.label}</p>
-                                <div className="space-y-2">
-                                  {group.items.map(([key, value]) => (
-                                    <div key={key} className="flex justify-between text-sm gap-2 border-b border-slate-100 pb-2 last:border-0 last:pb-0">
-                                      <span className="text-slate-500 font-mono truncate">{key}</span>
-                                      <span className="text-slate-800 dark:text-slate-200 font-medium text-right">{String(value)}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            ))
-                          )}
+                        <TabsContent value="employment_rules" className="m-0 p-8 space-y-4 max-w-2xl">
+                          <SettingsEditorCard title="Employment Type & Termination" hints={EMPLOYMENT_RULES_HINTS} settings={draft.settings || {}} onChange={updateDraftSettingsObject} />
+                        </TabsContent>
+
+                        <TabsContent value="working_arrangement" className="m-0 p-8 space-y-4 max-w-2xl">
+                          <SettingsEditorCard title="Working Hours" hints={WORKING_ARRANGEMENT_HINTS} settings={draft.settings || {}} onChange={updateDraftSettingsObject} />
+                        </TabsContent>
+
+                        <TabsContent value="benefits" className="m-0 p-8 space-y-4 max-w-2xl">
+                          <SettingsEditorCard title="Compensation, Benefits & Leave" hints={BENEFITS_HINTS} settings={draft.settings || {}} onChange={updateDraftSettingsObject} />
+                        </TabsContent>
+
+                        <TabsContent value="contract_rules" className="m-0 p-8 space-y-4 max-w-2xl">
+                          <div className="bg-white dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+                            <p className="text-sm font-bold text-slate-800 dark:text-slate-300 mb-4">Default Contract Template</p>
+                            <Select value={draft.default_template_id || '__none__'} onValueChange={(v) => updateDraft({ default_template_id: v === '__none__' ? null : v })}>
+                              <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Use company default" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__" className="text-slate-400 italic">Use company default</SelectItem>
+                                {templates.map((t) => (
+                                  <SelectItem key={t.id} value={t.id}>{t.name}{t.is_default ? ' (default)' : ''}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {previewTemplate && (
+                              <p className="text-[11px] text-slate-400 mt-2">
+                                Effective template: <span className="font-medium text-slate-600">{previewTemplate.name}</span> ({previewTemplate.section_keys.length} of {CONTRACT_SECTIONS.length} sections included)
+                              </p>
+                            )}
+                          </div>
+                          <SettingsEditorCard title="Other Contract Variables" hints={[]} excludeKnown settings={draft.settings || {}} onChange={updateDraftSettingsObject} />
                         </TabsContent>
 
                         <TabsContent value="clauses" className="m-0 p-8">
+                          <div className="flex items-center justify-between mb-4">
+                            <p className="text-sm text-slate-500">{clauseSelections.length} of {CONTRACT_SECTIONS.length} sections have a clause selected for this profile.</p>
+                            <Button size="sm" className="h-8 text-xs" onClick={() => setLinkModalOpen(true)}>
+                              <LinkIcon className="h-3.5 w-3.5 mr-1.5" /> Manage Linked Clauses
+                            </Button>
+                          </div>
                           {clauseSelections.length === 0 ? (
                             <div className="text-sm text-slate-400 italic border border-dashed rounded-2xl p-6 border-slate-200 dark:border-slate-800 text-center">
                               No clause overrides - uses section defaults.
@@ -808,14 +1083,23 @@ export default function JobProfilesPage() {
                           )}
                         </TabsContent>
 
-                        {/* Fallback for other tabs */}
-                        {['employment_rules', 'working_arrangement', 'contract_rules', 'preview'].map(v => (
-                           <TabsContent key={v} value={v} className="m-0 p-8">
+                        <TabsContent value="preview" className="m-0 p-8">
+                          <div className="max-w-4xl mx-auto">
+                            <div className="mb-4 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                              <AlertCircle className="w-4 h-4 shrink-0" />
+                              Sample preview using placeholder employee data - this profile isn't tied to a specific employee. Real values resolve once a contract is generated for someone.
+                            </div>
+                            {!previewTemplate ? (
                               <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500">
-                                This section is under construction.
+                                No Contract Template configured for this company yet.
                               </div>
-                           </TabsContent>
-                        ))}
+                            ) : (
+                              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10 text-[13px] leading-relaxed text-black">
+                                <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
+                              </div>
+                            )}
+                          </div>
+                        </TabsContent>
                     </ScrollArea>
                   </Tabs>
                 </>
@@ -830,239 +1114,235 @@ export default function JobProfilesPage() {
         </Panel>
       </PanelGroup>
 
-      {/* Link Clauses Modal */}
+      {/* Link Clauses Modal - real per-section clause picker, no fabricated
+          match-% or usage stats; "used in N job profiles" is a genuine count
+          against allProfiles, and suggestion context comes from the clause's
+          real suggest_conditions instead of an invented scoring algorithm. */}
       <Dialog open={linkModalOpen} onOpenChange={setLinkModalOpen}>
-        <DialogContent className="max-w-[1100px] p-0 gap-0 overflow-hidden rounded-2xl">
-          <div className="p-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex justify-between items-start">
+        <DialogContent className="max-w-[1100px] p-0 gap-0 overflow-hidden rounded-2xl max-h-[85vh] flex flex-col">
+          <div className="p-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex justify-between items-start shrink-0">
             <div className="flex items-start gap-4">
               <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
                 <LinkIcon className="w-5 h-5" />
               </div>
               <div>
                 <DialogTitle className="text-xl font-bold text-slate-900">Link Contract Clauses</DialogTitle>
-                <p className="text-sm text-slate-500 mt-1">Review and manage contract clauses linked to this job profile.</p>
+                <p className="text-sm text-slate-500 mt-1">{draft?.name} - {draft?.department || (draft ? scopeLabel(draft.scope) : '')}{draft?.job_level ? ` • ${draft.job_level}` : ''}</p>
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <p className="text-xs text-slate-500">Total Clauses Linked</p>
+              <p className="text-2xl font-bold text-slate-900">{clauseSelections.length}</p>
+            </div>
+          </div>
+
+          <div className="flex border-t border-slate-200 flex-1 min-h-0">
+            {/* Col 1: Sections */}
+            <div className="w-64 border-r border-slate-200 bg-white flex flex-col shrink-0">
+              <div className="p-4 border-b border-slate-100">
+                <p className="text-sm font-bold text-slate-800">Contract Sections</p>
+                <p className="text-xs text-slate-500 mt-0.5">{CONTRACT_SECTIONS.length} sections</p>
+              </div>
+              <ScrollArea className="flex-1">
+                <div className="p-2 space-y-1">
+                  {CONTRACT_SECTIONS.map((section) => {
+                    const count = clauses.filter((c) => c.section_key === section.key).length;
+                    const hasSelection = !!draft?.section_clauses?.[section.key];
+                    return (
+                      <div
+                        key={section.key}
+                        onClick={() => { setLinkSectionKey(section.key); setLinkSearch(''); }}
+                        className={cn("flex items-center justify-between p-2 rounded-lg text-xs font-medium cursor-pointer transition-colors", section.key === linkSectionKey ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-50")}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="w-3.5 h-3.5 opacity-70 shrink-0" />
+                          <span className="truncate">{section.title}</span>
+                          {hasSelection && <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />}
+                        </div>
+                        <Badge variant="outline" className={cn("text-[10px] h-5 px-1.5 min-w-[20px] flex items-center justify-center border-transparent shrink-0", section.key === linkSectionKey ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-500")}>{count}</Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+            </div>
+
+            {/* Col 2: Clauses in selected section */}
+            <div className="w-80 border-r border-slate-200 bg-slate-50/50 flex flex-col shrink-0">
+              <div className="p-4 border-b border-slate-100 bg-white">
+                <p className="text-sm font-bold text-slate-800 truncate">Clauses in &ldquo;{CONTRACT_SECTIONS.find((s) => s.key === linkSectionKey)?.title}&rdquo;</p>
+                <p className="text-xs text-slate-500 mt-0.5">{clauses.filter((c) => c.section_key === linkSectionKey).length} clauses available</p>
+              </div>
+              <div className="p-3 border-b border-slate-200 bg-slate-50/50">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                  <Input placeholder="Search clauses..." className="h-8 pl-8 text-xs bg-white border-slate-200" value={linkSearch} onChange={(e) => setLinkSearch(e.target.value)} />
+                </div>
+              </div>
+              <ScrollArea className="flex-1 p-4">
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    onClick={() => { if (!draft) return; const next = { ...(draft.section_clauses || {}) }; delete next[linkSectionKey]; updateDraft({ section_clauses: next }); }}
+                    className={cn(
+                      "w-full text-left bg-white border rounded-xl p-3 text-xs font-medium transition-colors",
+                      !draft?.section_clauses?.[linkSectionKey] ? "border-blue-500 text-blue-700" : "border-dashed border-slate-300 text-slate-500 hover:border-slate-400"
+                    )}
+                  >
+                    Use section default {defaultClauseMap[linkSectionKey] && `(${clausesById[defaultClauseMap[linkSectionKey]]?.label || 'none'})`}
+                  </button>
+                  {clauses
+                    .filter((c) => c.section_key === linkSectionKey && c.label.toLowerCase().includes(linkSearch.toLowerCase()))
+                    .sort((a, b) => (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) || a.label.localeCompare(b.label))
+                    .map((clause) => {
+                      const isSelected = draft?.section_clauses?.[linkSectionKey] === clause.id;
+                      const usageCount = allProfiles.filter((p) => p.section_clauses?.[linkSectionKey] === clause.id).length;
+                      return (
+                        <div
+                          key={clause.id}
+                          onClick={() => updateDraft({ section_clauses: { ...(draft?.section_clauses || {}), [linkSectionKey]: clause.id } })}
+                          className={cn(
+                            "bg-white border rounded-xl p-4 shadow-sm relative cursor-pointer transition-colors",
+                            isSelected ? "border-2 border-blue-500" : "border-slate-200 hover:border-slate-300"
+                          )}
+                        >
+                          <div className={cn("absolute top-4 right-4 w-4 h-4 rounded-full border-2 bg-white", isSelected ? "border-blue-500" : "border-slate-300")} />
+                          <p className="text-sm font-bold text-slate-900 pr-6">{clause.label}</p>
+                          <p className="text-[10px] text-slate-500 font-mono mb-3">{clause.clause_key}</p>
+                          <div className="flex items-center gap-2 mb-3 flex-wrap">
+                            {clause.is_default && <Badge variant="secondary" className="bg-amber-50 text-amber-700 hover:bg-amber-100 text-[10px] py-0 border-transparent font-medium">Section Default</Badge>}
+                            {clause.variant_group && <Badge variant="secondary" className="bg-purple-50 text-purple-700 hover:bg-purple-100 text-[10px] py-0 border-transparent font-medium">{clause.variant_group}</Badge>}
+                          </div>
+                          <div className="space-y-1.5 text-[11px]">
+                            <div className="flex justify-between"><span className="text-slate-500">Scope:</span><span className="font-medium text-slate-700">{clause.company_id ? 'Company' : 'Global'}</span></div>
+                            <div className="text-slate-500 pt-2 border-t border-slate-100 mt-2">Used in {usageCount} job profile{usageCount !== 1 ? 's' : ''}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </ScrollArea>
+            </div>
+
+            {/* Col 3: Suggestion rules & preview */}
+            <div className="flex-1 bg-white flex flex-col min-w-0">
+              <div className="p-6 flex gap-8 h-full min-h-0">
+                {(() => {
+                  const selectedClauseId = draft?.section_clauses?.[linkSectionKey];
+                  const selectedClause = selectedClauseId ? clausesById[selectedClauseId] : undefined;
+                  const conditions = (selectedClause as any)?.suggest_conditions as Array<Record<string, string>> | undefined;
+                  const facts = { employment_type: draft?.employment_type, job_level: draft?.job_level, work_arrangement: draft?.work_arrangement, department: draft?.department };
+                  return (
+                    <>
+                      <div className="w-64 space-y-6 flex flex-col shrink-0">
+                        <div>
+                          <p className="text-sm font-bold text-slate-800 mb-1">Suggestion Rules</p>
+                          <p className="text-[11px] text-slate-500 mb-4">Why this clause might apply</p>
+                          {!selectedClause ? (
+                            <p className="text-xs text-slate-400 italic">Select a clause to see details.</p>
+                          ) : !conditions?.length ? (
+                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-500">No suggestion rules defined for this clause - it's a manual pick.</div>
+                          ) : (
+                            <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-4">
+                              <ul className="space-y-2 text-[11px]">
+                                {Object.entries(conditions[0] || {}).filter(([, v]) => v).map(([key, value]) => {
+                                  const matches = facts[key as keyof typeof facts] === value;
+                                  return (
+                                    <li key={key} className="flex justify-between items-center gap-2">
+                                      <span className="text-slate-600">{key.replace(/_/g, ' ')}: {value}</span>
+                                      <span className={cn("font-medium shrink-0", matches ? "text-emerald-600" : "text-slate-400")}>{matches ? 'Matches' : 'No match'}</span>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex-1 flex flex-col min-w-0">
+                        <p className="text-sm font-bold text-slate-800 mb-1">Clause Preview</p>
+                        <p className="text-[11px] text-slate-500 mb-4">Preview how it will appear in the contract</p>
+
+                        {!selectedClause ? (
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex-1 flex items-center justify-center text-sm text-slate-400">
+                            Select a clause on the left to preview it.
+                          </div>
+                        ) : (
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex-1 flex flex-col relative overflow-hidden min-h-0">
+                            <div className="flex justify-between items-start mb-4 shrink-0">
+                              <div>
+                                <p className="text-sm font-bold text-slate-900">{selectedClause.label}</p>
+                                <p className="text-[10px] text-slate-500 font-mono mt-0.5">Key: {selectedClause.clause_key}</p>
+                              </div>
+                              <Badge variant="outline" className="text-[10px] font-semibold bg-white shrink-0">{selectedClause.company_id ? 'Company' : 'Global'}</Badge>
+                            </div>
+                            <p className="text-[10px] font-bold text-slate-600 mb-2 uppercase tracking-wider shrink-0">Content</p>
+                            <div
+                              className="prose prose-xs max-w-none text-[11px] text-slate-700 leading-relaxed flex-1 overflow-auto pr-2 [&_strong]:text-slate-900"
+                              dangerouslySetInnerHTML={{ __html: selectedClause.content }}
+                            />
+                            {selectedClause.content?.includes('{{') && (
+                              <div className="pt-4 border-t border-slate-200 mt-4 shrink-0">
+                                <p className="text-[10px] font-bold text-slate-600 mb-3 uppercase tracking-wider">Placeholders Used</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {Array.from(new Set(Array.from(selectedClause.content.matchAll(/\{\{(\w+)\}\}/g)).map((m) => m[1]))).map((p) => (
+                                    <span key={p} className="text-[10px] font-mono bg-white border border-slate-200 text-slate-600 px-2 py-1 rounded-md">{'{{' + p + '}}'}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </div>
-          
-          <div className="p-6 bg-slate-50/50 flex gap-6">
-             <div className="flex items-center justify-between bg-white border border-slate-200 rounded-xl p-4 flex-1 shadow-sm">
-                <div className="flex items-center gap-3">
-                   <div className="w-10 h-10 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-500"><UserCog className="w-5 h-5" /></div>
-                   <div>
-                     <p className="text-xs text-slate-500">Job Profile</p>
-                     <p className="text-sm font-bold text-slate-900">Accountant</p>
-                     <p className="text-[11px] text-slate-500">Finance Department • Mid Level</p>
-                   </div>
-                </div>
-                <div className="w-px h-10 bg-slate-200"></div>
-                <div>
-                   <p className="text-xs text-slate-500">Employment Type</p>
-                   <p className="text-sm font-medium text-slate-900">Permanent, Probation</p>
-                </div>
-                <div className="w-px h-10 bg-slate-200"></div>
-                <div>
-                   <p className="text-xs text-slate-500">Work Arrangement</p>
-                   <p className="text-sm font-medium text-slate-900">Office Based</p>
-                   <p className="text-[11px] text-slate-500">Mon - Fri, 8:00 AM - 5:00 PM</p>
-                </div>
-                <div className="w-px h-10 bg-slate-200"></div>
-                <div>
-                   <p className="text-xs text-slate-500">Notice Period <span className="text-[10px] text-slate-400">(Default)</span></p>
-                   <p className="text-sm font-medium text-slate-900">2 Months</p>
-                </div>
-             </div>
-             
-             <div className="bg-white border border-slate-200 rounded-xl p-4 w-48 shadow-sm flex flex-col justify-center text-center shrink-0">
-               <p className="text-xs text-slate-500">Total Clauses Linked</p>
-               <p className="text-3xl font-bold text-slate-900 my-1">24</p>
-               <div className="flex justify-center"><p className="text-[11px] font-medium text-blue-600 bg-blue-50 rounded-full py-0.5 px-2 inline-flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Auto-linked by rules</p></div>
-             </div>
-          </div>
-          
-          <div className="flex border-t border-slate-200 h-[480px]">
-             {/* Col 1: Sections */}
-             <div className="w-64 border-r border-slate-200 bg-white flex flex-col">
-               <div className="p-4 border-b border-slate-100">
-                 <p className="text-sm font-bold text-slate-800">Contract Sections</p>
-                 <p className="text-xs text-slate-500 mt-0.5">21 sections</p>
-               </div>
-               <ScrollArea className="flex-1">
-                 <div className="p-2 space-y-1">
-                   {['Contract Heading', 'Parties', 'Appointment', 'Place of Work', 'Duties & Responsibilities', 'Working Hours', 'Remuneration', 'Benefits', 'Statutory Deductions', 'Leave Entitlements', 'Employee Obligations', 'Performance Expectations', 'Termination', 'General Provisions', 'Acceptance'].map((sec, i) => (
-                     <div key={i} className={cn("flex items-center justify-between p-2 rounded-lg text-xs font-medium cursor-pointer transition-colors", sec === 'Parties' ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-50")}>
-                        <div className="flex items-center gap-2">
-                          <FileText className="w-3.5 h-3.5 opacity-70" /> {sec}
-                        </div>
-                        <Badge variant="outline" className={cn("text-[10px] h-5 px-1.5 min-w-[20px] flex items-center justify-center border-transparent", sec === 'Parties' ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-500")}>{sec === 'Parties' ? '2' : '1'}</Badge>
-                     </div>
-                   ))}
-                   <Button variant="link" className="w-full text-xs text-blue-600 mt-2 h-8"><ChevronDown className="w-3 h-3 mr-1" /> View all sections</Button>
-                 </div>
-               </ScrollArea>
-               <div className="p-4 border-t border-slate-200 bg-slate-50/50">
-                 <Button variant="outline" className="w-full text-xs h-10 bg-white border-blue-200 text-blue-600 hover:bg-blue-50 relative">
-                   <LinkIcon className="w-3.5 h-3.5 mr-2 mb-2" /> <span className="mb-2">Auto-Link Clauses</span>
-                   <p className="text-[9px] text-slate-500 absolute bottom-1.5 w-full text-center">Re-run rules to refresh matches</p>
-                 </Button>
-               </div>
-             </div>
-             
-             {/* Col 2: Clauses in "Parties" */}
-             <div className="w-80 border-r border-slate-200 bg-slate-50/50 flex flex-col">
-               <div className="p-4 border-b border-slate-100 bg-white">
-                 <p className="text-sm font-bold text-slate-800">Clauses in "Parties"</p>
-                 <p className="text-xs text-slate-500 mt-0.5">2 clauses available</p>
-               </div>
-               <div className="p-3 border-b border-slate-200 bg-slate-50/50">
-                 <div className="flex gap-2">
-                   <div className="relative flex-1">
-                     <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                     <Input placeholder="Search clauses..." className="h-8 pl-8 text-xs bg-white border-slate-200" />
-                   </div>
-                   <Button variant="outline" size="sm" className="h-8 text-[11px] px-2 bg-white font-medium border-slate-200">All Status <ChevronDown className="w-3 h-3 ml-1" /></Button>
-                 </div>
-               </div>
-               <ScrollArea className="flex-1 p-4">
-                 <div className="space-y-4">
-                   {/* Selected Clause Card */}
-                   <div className="bg-white border-2 border-blue-500 rounded-xl p-4 shadow-sm relative cursor-pointer">
-                     <div className="absolute top-4 right-4 w-4 h-4 rounded-full border-4 border-blue-500 bg-white"></div>
-                     <div className="flex items-center gap-1.5 mb-1">
-                       <div className="w-2.5 h-2.5 bg-amber-400 rounded-sm"></div>
-                       <p className="text-sm font-bold text-slate-900">Standard Parties</p>
-                     </div>
-                     <p className="text-[10px] text-slate-500 font-mono mb-4 pl-4">standard_parties</p>
-                     
-                     <div className="flex items-center gap-2 mb-4">
-                       <Badge variant="secondary" className="bg-amber-50 text-amber-700 hover:bg-amber-100 text-[10px] py-0 border-transparent font-medium">Default</Badge>
-                       <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-[10px] py-0 border-transparent font-medium">Active</Badge>
-                     </div>
-                     
-                     <div className="space-y-2 text-[11px]">
-                       <div className="flex justify-between"><span className="text-slate-500">Scope:</span><span className="font-medium text-slate-700">Global</span></div>
-                       <div className="flex justify-between items-center"><span className="text-slate-500">Matches: 100%</span><div className="w-32 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 w-full"></div></div></div>
-                       <div className="text-slate-500 pt-2 border-t border-slate-100 mt-2">Used in 48 job profiles</div>
-                     </div>
-                   </div>
-                   
-                   {/* Unselected Clause Card */}
-                   <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-slate-300 cursor-pointer transition-colors relative">
-                     <div className="absolute top-4 right-4 w-4 h-4 rounded-full border border-slate-300 bg-white"></div>
-                     <p className="text-sm font-bold text-slate-900 mb-1">Formal Corporate Style</p>
-                     <p className="text-[10px] text-slate-500 font-mono mb-4">formal_corporate_style</p>
-                     
-                     <div className="flex items-center gap-2 mb-4">
-                       <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-[10px] py-0 border-transparent font-medium">Active</Badge>
-                     </div>
-                     
-                     <div className="space-y-2 text-[11px]">
-                       <div className="flex justify-between"><span className="text-slate-500">Scope:</span><span className="font-medium text-slate-700">Global</span></div>
-                       <div className="flex justify-between items-center"><span className="text-slate-500">Matches: 68%</span><div className="w-32 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-blue-500 w-[68%]"></div></div></div>
-                       <div className="text-slate-500 pt-2 border-t border-slate-100 mt-2">Used in 15 job profiles</div>
-                     </div>
-                   </div>
-                 </div>
-                 <p className="text-[11px] text-slate-400 text-center mt-5 mb-2">Showing 1 to 2 of 2 clauses</p>
-               </ScrollArea>
-             </div>
-             
-             {/* Col 3: Match Details & Preview */}
-             <div className="flex-1 bg-white flex flex-col">
-               <div className="p-6 flex gap-8 h-full">
-                 <div className="w-64 space-y-6 flex flex-col">
-                   <div>
-                     <p className="text-sm font-bold text-slate-800 mb-1">Match Details</p>
-                     <p className="text-[11px] text-slate-500 mb-4">Why this clause was selected</p>
-                     <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-4">
-                       <p className="text-xs font-bold text-emerald-700 flex items-center gap-2 mb-2"><CheckCircle2 className="w-4 h-4" /> Best Match</p>
-                       <p className="text-[10px] text-emerald-600 mb-4">This clause best matches the job profile rules.</p>
-                       <ul className="space-y-3 text-[11px]">
-                         <li className="flex justify-between items-center"><span className="flex items-center gap-1.5 text-slate-600"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Employment Type:</span><span className="font-medium text-emerald-600">Matched</span></li>
-                         <li className="flex justify-between items-center"><span className="flex items-center gap-1.5 text-slate-600"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Job Level: Mid Level</span><span className="font-medium text-emerald-600">Matched</span></li>
-                         <li className="flex justify-between items-center"><span className="flex items-center gap-1.5 text-slate-600"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Work Arrangement: Offi...</span><span className="font-medium text-emerald-600">Matched</span></li>
-                         <li className="flex justify-between items-center"><span className="flex items-center gap-1.5 text-slate-600"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Jurisdiction: Kenya</span><span className="font-medium text-emerald-600">Matched</span></li>
-                         <li className="flex justify-between items-center"><span className="flex items-center gap-1.5 text-slate-600"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Company Type: Registe...</span><span className="font-medium text-emerald-600">Matched</span></li>
-                       </ul>
-                     </div>
-                   </div>
-                   
-                   <div className="space-y-6 flex-1">
-                     <div>
-                       <p className="text-xs font-bold text-slate-800 mb-3">Match Score</p>
-                       <div className="flex items-center gap-4">
-                         <div className="w-14 h-14 rounded-full border-4 border-emerald-500 flex items-center justify-center text-sm font-bold text-emerald-700 bg-emerald-50 shrink-0">100%</div>
-                         <div>
-                           <p className="text-xs font-bold text-slate-700">Perfect Match</p>
-                           <p className="text-[10px] text-slate-500 mt-1">All rule conditions are satisfied.</p>
-                         </div>
-                       </div>
-                     </div>
-                     <div>
-                       <p className="text-xs font-bold text-slate-800 mb-3">Rule Source</p>
-                       <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                         <p className="text-[11px] font-semibold text-slate-700 mb-2">Parties Selection Rule</p>
-                         <div className="flex justify-between items-center">
-                           <Badge variant="secondary" className="bg-purple-50 text-purple-700 hover:bg-purple-50 text-[9px] py-0 border-transparent font-medium">Priority: 1 (Highest)</Badge>
-                           <Button variant="link" className="h-auto p-0 text-[10px] text-blue-600 font-semibold">View Rule</Button>
-                         </div>
-                       </div>
-                     </div>
-                   </div>
-                 </div>
-                 
-                 <div className="flex-1 flex flex-col">
-                   <p className="text-sm font-bold text-slate-800 mb-1">Clause Preview</p>
-                   <p className="text-[11px] text-slate-500 mb-4">Preview how it will appear in the contract</p>
-                   
-                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex-1 flex flex-col relative overflow-hidden">
-                     <div className="flex justify-between items-start mb-4">
-                       <div>
-                         <p className="text-sm font-bold text-slate-900">Standard Parties</p>
-                         <p className="text-[10px] text-slate-500 font-mono mt-0.5">Key: standard_parties</p>
-                       </div>
-                       <Badge variant="outline" className="text-[10px] font-semibold bg-white">Global</Badge>
-                     </div>
-                     <p className="text-[10px] font-bold text-slate-600 mb-2 uppercase tracking-wider">Content</p>
-                     <div className="text-[11px] text-slate-700 leading-relaxed space-y-3 flex-1 overflow-auto pr-2">
-                       <p>This Employment Contract ("<strong>Contract</strong>") is entered into on <strong>{"{{contract_date}}"}</strong> between:</p>
-                       <p><strong>{"{{company_name}}"}</strong>, a company incorporated under the laws of the Republic of Kenya (Company No. <strong>{"{{company_registration_number}}"}</strong>), with its registered office at <strong>{"{{company_address}}"}</strong> (hereinafter referred to as "<strong>the Employer</strong>"); and</p>
-                       <p><strong>{"{{employee_name}}"}</strong>, an adult of sound mind, holder of Kenya National Identity Card No. <strong>{"{{national_id}}"}</strong> / Passport No. <strong>{"{{passport_number}}"}</strong>, KRA PIN <strong>{"{{kra_pin}}"}</strong>, of <strong>{"{{employee_address}}"}</strong> (hereinafter referred to as "<strong>the Employee</strong>").</p>
-                       <p>The Employer and the Employee are individually referred to as a "<strong>Party</strong>" and collectively as "<strong>the Parties</strong>".</p>
-                     </div>
-                     
-                     <div className="pt-4 border-t border-slate-200 mt-4">
-                       <p className="text-[10px] font-bold text-slate-600 mb-3 uppercase tracking-wider">Placeholders Used</p>
-                       <div className="flex flex-wrap gap-2">
-                         {['{{contract_date}}', '{{company_name}}', '{{company_registration_number}}', '{{company_address}}', '{{employee_name}}', '{{national_id}}', '{{passport_number}}', '{{kra_pin}}', '{{employee_address}}'].map(p => (
-                           <span key={p} className="text-[10px] font-mono bg-white border border-slate-200 text-slate-600 px-2 py-1 rounded-md">{p}</span>
-                         ))}
-                       </div>
-                     </div>
-                   </div>
-                 </div>
-               </div>
-             </div>
-          </div>
-          
-          <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3 rounded-b-2xl">
-            <Button variant="outline" className="h-9 px-6 rounded-full text-xs font-semibold" onClick={() => setLinkModalOpen(false)}>Cancel</Button>
-            <Button className="h-9 px-6 rounded-full text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setLinkModalOpen(false)}><CheckCircle2 className="w-4 h-4 mr-2" /> Save Links</Button>
+
+          <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3 rounded-b-2xl shrink-0">
+            <p className="text-xs text-slate-400 mr-auto self-center">Changes apply once you Save Changes on the profile.</p>
+            <Button className="h-9 px-6 rounded-full text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setLinkModalOpen(false)}>Done</Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {selectedCompanyId && (
-        <JobProfileEditor
-          open={editorOpen}
-          onClose={() => setEditorOpen(false)}
-          companyId={selectedCompanyId}
-          clauses={clauses}
-          profile={editingProfile}
-          defaultScope={newScope}
-          onSaved={() => loadProfiles(selectedCompanyId)}
-        />
-      )}
+      {/* New Job Profile - minimal creation step; everything else is filled
+          in on the live-editable Overview tab right after creating. */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-w-md rounded-2xl">
+          <DialogTitle className="text-lg font-bold">
+            New {createScope === 'company' ? 'Company Defaults' : createScope === 'department' ? 'Department Defaults' : 'Position'} Profile
+          </DialogTitle>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-600">Name</label>
+              <Input
+                autoFocus
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                placeholder={createScope === 'company' ? 'Company Defaults' : createScope === 'department' ? 'Finance Department Defaults' : 'Senior Accountant'}
+                className="h-10"
+              />
+            </div>
+            {createScope !== 'company' && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-600">Department {createScope === 'department' && <span className="text-red-500">*</span>}</label>
+                <Input value={createDepartment} onChange={(e) => setCreateDepartment(e.target.value)} placeholder="Finance" className="h-10" />
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button variant="ghost" onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button onClick={handleCreate} disabled={creating}>
+              {creating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              Create Profile
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!deletingId} onOpenChange={(open) => !open && setDeletingId(null)}>
         <AlertDialogContent className="rounded-2xl max-w-sm">

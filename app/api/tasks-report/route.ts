@@ -121,9 +121,14 @@ export async function GET(req: NextRequest) {
 
     const { data: department } = await supabase
       .from("tm_departments")
-      .select("id, name")
+      .select("id, name, tm_subdepartments(id, name)")
       .eq("id", deptId)
       .single();
+
+    const subDeptNameMap = new Map<string, string>();
+    ((department as any)?.tm_subdepartments || []).forEach((s: any) =>
+      subDeptNameMap.set(String(s.id), s.name || "")
+    );
 
     let taskQuery = supabase
       .from("tm_tasks")
@@ -316,10 +321,6 @@ export async function GET(req: NextRequest) {
         if (status !== "completed" && status !== "skipped") {
           currentStageName = stage.name;
           currentStageFollowUp = stage.follow_up || "";
-          const officerIds = Array.isArray(stageData.officer_ids)
-            ? stageData.officer_ids
-            : [];
-          if (officerIds.length > 0) currentOfficerId = officerIds[0].toString();
           break;
         }
       }
@@ -328,19 +329,50 @@ export async function GET(req: NextRequest) {
         const last = applicableStages[applicableStages.length - 1];
         currentStageName = last.name;
         currentStageFollowUp = last.follow_up || "";
-        const lastData = task.stages?.[last.id];
-        const officerIds = Array.isArray(lastData?.officer_ids)
-          ? lastData.officer_ids
-          : [];
-        if (officerIds.length > 0) currentOfficerId = officerIds[0].toString();
       }
 
-      const taskManager = usersMap.get(task.task_manager_id) || "";
-      const taskAssistant = usersMap.get(task.task_assistant_id) || "";
+      // Officer grouping mirrors getCurrentOfficerStage/getStageOfficerIds in the web
+      // Reports module: only the stage currently awaiting an "officer" follow_up carries
+      // an officer assignment — not just whichever stage happens to be in progress. A task
+      // sitting on a "client"/"bcl" follow_up stage has no current officer and is correctly
+      // Unallocated, but grouping by "first incomplete stage" (regardless of follow_up)
+      // was picking up stages with no officer_ids at all, dumping nearly everything into
+      // Unallocated.
+      const currentOfficerStage = applicableStages.find((stage: any) => {
+        const stageData = task.stages?.[stage.id];
+        const status = stageData?.status?.toString().toLowerCase();
+        return (
+          stageData &&
+          stage.follow_up?.toLowerCase() === "officer" &&
+          status !== "completed" &&
+          status !== "skipped"
+        );
+      });
+      if (currentOfficerStage) {
+        const officerIds = task.stages?.[currentOfficerStage.id]?.officer_ids;
+        if (Array.isArray(officerIds) && officerIds.length > 0) {
+          currentOfficerId = officerIds[0].toString();
+        }
+      }
+
+      // task_manager_id/task_assistant_id are not reliably populated columns — the real
+      // assignment lives in participants_details, exactly as fetchTasks()/EnquiryDialog
+      // derive it on the web side.
+      const taskManagerParticipant = task.participants_details?.find((p: any) =>
+        p.role?.includes("task_manager")
+      );
+      const taskAssistantParticipant = task.participants_details?.find((p: any) =>
+        p.role?.includes("task_assistant")
+      );
+      const taskManagerId = taskManagerParticipant?.id != null ? String(taskManagerParticipant.id) : "";
+      const taskAssistantId = taskAssistantParticipant?.id != null ? String(taskAssistantParticipant.id) : "";
+      const taskManager = taskManagerParticipant?.name || usersMap.get(taskManagerId) || "";
+      const taskAssistant = taskAssistantParticipant?.name || usersMap.get(taskAssistantId) || "";
       const subDept =
         task.subdepartment_id ||
         task.job_level?.subdepartment_id ||
         "";
+      const subDeptName = subDept ? subDeptNameMap.get(String(subDept)) || "" : "";
       const jl = task.job_level || {};
       const jobLevel = [jl.class_name, jl.subclass_name]
         .filter(Boolean)
@@ -369,6 +401,7 @@ export async function GET(req: NextRequest) {
         applicant_name: task.applicant_name || "Unknown",
         company_name: resolveCompanyName(task) || "",
         sub_department: subDept,
+        sub_department_name: subDeptName,
         status: task.status || "wip",
         job_level: jobLevel,
         r_number: task.r_number || "",
@@ -382,6 +415,7 @@ export async function GET(req: NextRequest) {
         required_documents: resolveRequiredDocuments(task),
         ...namedStageDates,
         _officerId: currentOfficerId,
+        _managerId: taskManagerId,
       };
     });
 
@@ -413,9 +447,8 @@ export async function GET(req: NextRequest) {
       og.count++;
       og.tasks.push(t);
 
-      const rawTask = (tasks || []).find((raw: any) => raw.id === t.id);
-      const managerId = rawTask?.task_manager_id || "";
-      const managerName = usersMap.get(managerId) || "Unallocated";
+      const managerId = t._managerId || "";
+      const managerName = t.task_manager || usersMap.get(managerId) || "Unallocated";
       if (!managerMap.has(managerId)) {
         managerMap.set(managerId, {
           id: managerId,
@@ -438,7 +471,7 @@ export async function GET(req: NextRequest) {
     }
 
     const clean = (arr: any[]) =>
-      arr.map(({ _officerId, ...rest }: any) => rest);
+      arr.map(({ _officerId, _managerId, ...rest }: any) => rest);
 
     return NextResponse.json({
       report: { id: report.id, name: report.name },

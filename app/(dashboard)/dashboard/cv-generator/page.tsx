@@ -1434,12 +1434,12 @@ export default function CVGeneratorPage() {
         };
         const { error: snapshotError } = await supabase
           .from('job_applicant_cvs')
-          .update({
+          .upsert({
+            applicant_id: applicantId,
             bcl_cv_snapshot: snapshotPayload,
             bcl_cv_extracted_details: cvData,
             updated_at: new Date().toISOString()
-          })
-          .eq('applicant_id', applicantId);
+          }, { onConflict: 'applicant_id' });
 
         if (snapshotError) {
           console.error('[CV Builder] Failed to save bcl_cv_snapshot:', snapshotError);
@@ -1458,7 +1458,7 @@ export default function CVGeneratorPage() {
       // Then try to save to storage (backup) - catch errors gracefully
       try {
         const payload = JSON.stringify(newDraft);
-        const blob = new Blob([payload], { type: 'text/plain' });
+        const blob = new Blob([payload], { type: 'application/json' });
 
         if (applicantId) {
           console.log('[CV Builder] Saving draft to storage:', `cv-builder/${applicantId}/draft.json`);
@@ -1466,13 +1466,13 @@ export default function CVGeneratorPage() {
           try {
             await supabase.storage.from('kyc-documents').remove([`cv-builder/${applicantId}/draft.json`]);
           } catch { /* ignore if file doesn't exist */ }
-          await supabase.storage.from('kyc-documents').upload(`cv-builder/${applicantId}/draft.json`, blob, { contentType: 'text/plain' });
+          await supabase.storage.from('kyc-documents').upload(`cv-builder/${applicantId}/draft.json`, blob, { contentType: 'application/json' });
         } else {
           // Fallback to cv-drafts/{id}/draft.json for portal drafts / standalone use
           try {
             await supabase.storage.from('kyc-documents').remove([`cv-drafts/${id}/draft.json`]);
           } catch { /* ignore if file doesn't exist */ }
-          await supabase.storage.from('kyc-documents').upload(`cv-drafts/${id}/draft.json`, blob, { contentType: 'text/plain' });
+          await supabase.storage.from('kyc-documents').upload(`cv-drafts/${id}/draft.json`, blob, { contentType: 'application/json' });
         }
         console.log('[CV Builder] Draft saved to storage successfully');
       } catch (storageErr) {
@@ -2190,7 +2190,7 @@ export default function CVGeneratorPage() {
     try {
       console.log('[CV Builder] saveCVToDb called:', { applicantId, selectedIndividual: selectedIndividual?.id, linkedIndividualId });
       const cvJson = JSON.stringify(cvData, null, 2);
-      const blob = new Blob([cvJson], { type: 'text/plain' });
+      const blob = new Blob([cvJson], { type: 'application/json' });
 
       // Path A: Save to client's acc_portal_directors_documents (if selectedIndividual)
       if (selectedIndividual) {
@@ -2198,7 +2198,7 @@ export default function CVGeneratorPage() {
         const filePath = `individual-documents/${selectedIndividual.id}/${CV_DOCUMENT_ID}/cv_${Date.now()}.json`;
         const { error: uploadError } = await supabase.storage
           .from('kyc-documents')
-          .upload(filePath, blob, { upsert: true, contentType: 'text/plain' });
+          .upload(filePath, blob, { upsert: true, contentType: 'application/json' });
         if (uploadError) throw uploadError;
         await supabase.from('acc_portal_directors_documents').upsert({
           director_id: selectedIndividual.id,
@@ -2989,8 +2989,8 @@ export default function CVGeneratorPage() {
                       if (portalDraftId) {
                         try {
                           const payload = JSON.stringify(submissionPayload);
-                          const blob = new Blob([payload], { type: 'text/plain' });
-                          await supabase.storage.from('kyc-documents').upload(`cv-drafts/${portalDraftId}/client-submission.json`, blob, { upsert: true, contentType: 'text/plain' });
+        const blob = new Blob([payload], { type: 'application/json' });
+                          await supabase.storage.from('kyc-documents').upload(`cv-drafts/${portalDraftId}/client-submission.json`, blob, { upsert: true, contentType: 'application/json' });
                         } catch (e) { console.warn('Storage save failed:', e); }
                       }
                       
