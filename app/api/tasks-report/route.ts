@@ -202,7 +202,21 @@ export async function GET(req: NextRequest) {
       .select("id, name");
 
     const usersMap = new Map<string, string>();
-    (users || []).forEach((u: any) => usersMap.set(u.id, u.name || "Unknown"));
+    (users || []).forEach((u: any) => usersMap.set(String(u.id), u.name || "Unknown"));
+
+    // tm_role_assignments.user_id (the officer/manager roster) and stageData.officer_ids
+    // reference the auth identity in scanner_users, which doesn't always have a matching
+    // tm_users row — without this fallback, roster members resolved names as "Unknown"/
+    // fell through to the "Unallocated" bucket even though they ARE a real, named officer.
+    const { data: scannerUsers } = await supabase
+      .from("scanner_users")
+      .select("id, first_name, last_name, username");
+    (scannerUsers || []).forEach((u: any) => {
+      const key = String(u.id);
+      if (usersMap.has(key)) return;
+      const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || u.username || "";
+      if (name) usersMap.set(key, name);
+    });
 
     // Report Required Documents — the same defaults the web Reports module shows as
     // "report_doc" columns, aggregated across every job level in this department
@@ -355,7 +369,15 @@ export async function GET(req: NextRequest) {
       // Unallocated, but grouping by "first incomplete stage" (regardless of follow_up)
       // was picking up stages with no officer_ids at all, dumping nearly everything into
       // Unallocated.
-      const currentOfficerStage = applicableStages.find((stage: any) => {
+      //
+      // This must search the FULL department stage list (`stages`), not `applicableStages`
+      // (which is narrowed to whichever stages this specific memorized report chose to
+      // display as columns) — getCurrentOfficerStage on the web searches every stage in the
+      // department regardless of report column config, and the "officer" follow_up stage is
+      // frequently NOT one of the report's chosen display columns. Scoping to
+      // applicableStages meant the officer stage was essentially never found, so nearly
+      // every task fell into Unallocated.
+      const currentOfficerStage = (stages || []).find((stage: any) => {
         const stageData = task.stages?.[stage.id];
         const status = stageData?.status?.toString().toLowerCase();
         return (
@@ -451,7 +473,11 @@ export async function GET(req: NextRequest) {
 
     for (const t of taskList) {
       const officerId = t._officerId;
-      const officerName = usersMap.get(officerId) || "Unallocated";
+      // "Unallocated" means no officer id at all (truly unassigned) — an id that just
+      // failed to resolve to a name is a data gap, not "unallocated", so it must not be
+      // labeled the same way (that conflation was rendering as duplicate "Unallocated"
+      // cards for two actually-different groups).
+      const officerName = officerId ? (usersMap.get(officerId) || "Unknown") : "Unallocated";
       if (!officerMap.has(officerId)) {
         officerMap.set(officerId, {
           id: officerId,
@@ -465,7 +491,7 @@ export async function GET(req: NextRequest) {
       og.tasks.push(t);
 
       const managerId = t._managerId || "";
-      const managerName = t.task_manager || usersMap.get(managerId) || "Unallocated";
+      const managerName = managerId ? (t.task_manager || usersMap.get(managerId) || "Unknown") : "Unallocated";
       if (!managerMap.has(managerId)) {
         managerMap.set(managerId, {
           id: managerId,
