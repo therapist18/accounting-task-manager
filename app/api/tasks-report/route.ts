@@ -423,34 +423,34 @@ export async function GET(req: NextRequest) {
       const currentStageName = canonicalCurrentStage?.name || "";
       const currentStageFollowUp = canonicalCurrentStage?.follow_up || "";
 
-      const currentOfficerStage = canonicalCurrentStage?.follow_up?.toLowerCase() === "officer" ? canonicalCurrentStage : null;
-      // Prefer the stage-level officer_ids (matches getStageOfficerIds on the web Reports
-      // module exactly, including counting a task once per officer when a stage carries
-      // multiple ids — see the grouping loop below). But in production, some tasks have no
-      // officer_ids recorded on their current officer stage at all, which made stage-only
-      // resolution under-report officer ownership — useless for a report whose entire
-      // purpose is "which officer owns this". Falling back to tm_tasks.officer_id (the
-      // persisted "case officer" set at task creation, read directly by
-      // DepartmentTasksManager's own officer filters) recovers real ownership for those
-      // tasks instead of dumping them all into Unallocated.
-      const stageOfficerIds: string[] = currentOfficerStage
-        ? (Array.isArray(task.stages?.[currentOfficerStage.id]?.officer_ids)
-            ? task.stages[currentOfficerStage.id].officer_ids.map((id: any) => String(id)).filter(Boolean)
-            : [])
+      // Scoped to tasks actually AT an officer stage right now — matches the web Reports
+      // module exactly (isOfficerStage gate). A task currently on a BCL/Client stage is NOT
+      // "Officer Unallocated" — it simply isn't part of the Officers breakdown at all right
+      // now, same as byManager below is scoped to BCL. This replaces an earlier fallback to
+      // tm_tasks.officer_id (the persisted "case officer" column) that recovered ownership
+      // for tasks with no current officer stage — that fallback conflated "case owner on
+      // file" with "who owns this right now", which is exactly what caused the mobile app to
+      // show tasks under an officer AND a manager AND awaiting-client simultaneously, while
+      // the web dashboard (which has no such fallback) only ever puts a task in one bucket.
+      const isOfficerStage = canonicalCurrentStage?.follow_up?.toLowerCase() === "officer";
+      const currentOfficerIds: string[] = isOfficerStage && Array.isArray(task.stages?.[canonicalCurrentStage.id]?.officer_ids)
+        ? task.stages[canonicalCurrentStage.id].officer_ids.map((id: any) => String(id)).filter(Boolean)
         : [];
-      const currentOfficerIds: string[] = stageOfficerIds.length > 0
-        ? stageOfficerIds
-        : (task.officer_id != null ? [String(task.officer_id)] : []);
 
       // Mirrors isTaskWithClient in the web Reports module: a task is "awaiting client
       // response" when its canonical current stage's follow_up is 'client'.
       const awaitingClient = canonicalCurrentStage?.follow_up?.toString().toLowerCase() === "client";
 
+      // Scoped to tasks AT a BCL stage right now — the manager's court, matching the web
+      // Reports module's Managers perspective exactly.
+      const isBCLStage = canonicalCurrentStage?.follow_up?.toLowerCase() === "bcl";
+
       // participants_details is the richer source when populated (fetchTasks()/EnquiryDialog
       // derive task_manager the same way on the web side), but for this department it's
-      // sparse in practice — same gap as officer_id above. Fall back to the persisted
-      // tm_tasks.task_manager_id column (read directly by DepartmentTasksManager's own
-      // manager filters) rather than reporting real assignments as Unallocated.
+      // sparse in practice. Fall back to the persisted tm_tasks.task_manager_id column (read
+      // directly by DepartmentTasksManager's own manager filters) to resolve WHO the manager
+      // is — this fallback is about identity resolution, not about whether the task is
+      // currently in the manager's court (that's isBCLStage, used in the grouping loop below).
       const taskManagerParticipant = task.participants_details?.find((p: any) =>
         p.role?.includes("task_manager")
       );
@@ -510,15 +510,19 @@ export async function GET(req: NextRequest) {
         required_documents: resolveRequiredDocuments(task),
         ...namedStageDates,
         _officerIds: currentOfficerIds,
+        _isOfficerStage: isOfficerStage,
         _managerId: taskManagerId,
+        _isBCLStage: isBCLStage,
         _awaitingClient: awaitingClient,
       };
     });
 
     console.log(
-      "[tasks-report] tasks=%d withOfficerId=%d withManagerId=%d withAnyNamedDate=%d awaitingClient=%d",
+      "[tasks-report] tasks=%d isOfficerStage=%d withOfficerId=%d isBCLStage=%d withManagerId=%d withAnyNamedDate=%d awaitingClient=%d",
       taskList.length,
+      taskList.filter((t: any) => t._isOfficerStage).length,
       taskList.filter((t: any) => t._officerIds.length > 0).length,
+      taskList.filter((t: any) => t._isBCLStage).length,
       taskList.filter((t: any) => t._managerId).length,
       taskList.filter((t: any) => NAMED_STAGE_DATES.some(({ key }) => t[key])).length,
       taskList.filter((t: any) => t._awaitingClient).length
@@ -536,47 +540,52 @@ export async function GET(req: NextRequest) {
     for (const t of taskList) {
       // Mirrors handleSendReport's officer grouping on the web: a task with multiple
       // officer_ids on its current officer-follow_up stage is counted once per matching
-      // officer, not just the first. "Unallocated" means no current officer stage at all —
-      // an id that just failed to resolve to a name is a data gap, not "unallocated", so it
-      // must not be labeled the same way (that conflation was rendering as duplicate
-      // "Unallocated" cards for two actually-different groups).
-      const officerIds: string[] = t._officerIds;
-      if (officerIds.length === 0) {
-        if (!officerMap.has("")) {
-          officerMap.set("", { id: "", name: "Unallocated", count: 0, tasks: [] });
-        }
-        const og = officerMap.get("")!;
-        og.count++;
-        og.tasks.push(t);
-      } else {
-        for (const officerId of officerIds) {
-          if (!officerMap.has(officerId)) {
-            officerMap.set(officerId, {
-              id: officerId,
-              name: usersMap.get(officerId) || "Unknown",
-              count: 0,
-              tasks: [],
-            });
+      // officer, not just the first. A task not currently AT an officer stage (_isOfficerStage
+      // false) doesn't appear in byOfficer at all — "Unallocated" is reserved for tasks that
+      // ARE at an officer stage right now with nobody assigned, not for tasks that are simply
+      // elsewhere (BCL/Client) at the moment.
+      if (t._isOfficerStage) {
+        const officerIds: string[] = t._officerIds;
+        if (officerIds.length === 0) {
+          if (!officerMap.has("")) {
+            officerMap.set("", { id: "", name: "Unallocated", count: 0, tasks: [] });
           }
-          const og = officerMap.get(officerId)!;
+          const og = officerMap.get("")!;
           og.count++;
           og.tasks.push(t);
+        } else {
+          for (const officerId of officerIds) {
+            if (!officerMap.has(officerId)) {
+              officerMap.set(officerId, {
+                id: officerId,
+                name: usersMap.get(officerId) || "Unknown",
+                count: 0,
+                tasks: [],
+              });
+            }
+            const og = officerMap.get(officerId)!;
+            og.count++;
+            og.tasks.push(t);
+          }
         }
       }
 
-      const managerId = t._managerId || "";
-      const managerName = managerId ? (t.task_manager || usersMap.get(managerId) || "Unknown") : "Unallocated";
-      if (!managerMap.has(managerId)) {
-        managerMap.set(managerId, {
-          id: managerId,
-          name: managerName,
-          count: 0,
-          tasks: [],
-        });
+      // Same gate for managers: only tasks AT a BCL stage right now appear in byManager.
+      if (t._isBCLStage) {
+        const managerId = t._managerId || "";
+        const managerName = managerId ? (t.task_manager || usersMap.get(managerId) || "Unknown") : "Unallocated";
+        if (!managerMap.has(managerId)) {
+          managerMap.set(managerId, {
+            id: managerId,
+            name: managerName,
+            count: 0,
+            tasks: [],
+          });
+        }
+        const mg = managerMap.get(managerId)!;
+        mg.count++;
+        mg.tasks.push(t);
       }
-      const mg = managerMap.get(managerId)!;
-      mg.count++;
-      mg.tasks.push(t);
     }
 
     // Mirrors the web Reports module's Client Follow-Up Report exactly: not grouped by
@@ -599,7 +608,7 @@ export async function GET(req: NextRequest) {
     });
 
     const clean = (arr: any[]) =>
-      arr.map(({ _officerIds, _managerId, _awaitingClient, ...rest }: any) => rest);
+      arr.map(({ _officerIds, _isOfficerStage, _managerId, _isBCLStage, _awaitingClient, ...rest }: any) => rest);
 
     // "Tasks Handled" (payroll basis) — mirrors officerFilterMode='history' on the web
     // Reports module: officers are paid per task, not per stage, so a task only ever
