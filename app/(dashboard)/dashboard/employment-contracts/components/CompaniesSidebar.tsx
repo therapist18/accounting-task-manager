@@ -57,20 +57,20 @@ export function CompaniesSidebar({
 
   return (
     <div className="flex flex-col h-full border-r border-slate-200 dark:border-slate-800">
-      <div className="p-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-            <Building2 className="w-4 h-4 text-custom-blue" />
+      <div className="p-5 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-900/50">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+            <Building2 className="w-5 h-5 text-custom-blue" />
             Entities
           </h2>
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-slate-400 hover:text-slate-700"
+            className="h-8 w-8 text-slate-400 hover:text-slate-700"
             onClick={() => setCategoryFilterOpen(true)}
             title="Filter by client category"
           >
-            <Filter className="h-3.5 w-3.5" />
+            <Filter className="h-4 w-4" />
           </Button>
           <ClientCategoryFilter
             open={categoryFilterOpen}
@@ -82,39 +82,39 @@ export function CompaniesSidebar({
             hideCategoryFilterButton
           />
         </div>
-        <p className="text-xs text-slate-500 mb-3">{subtitle}</p>
+        <p className="text-sm text-slate-500 mb-3">{subtitle}</p>
         <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+          <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
           <Input
             placeholder={searchPlaceholder}
-            className="pl-9 h-8 text-xs bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+            className="pl-9 h-10 text-sm bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 rounded-lg"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
       </div>
       <ScrollArea className="flex-1">
-        <div className="p-2 space-y-0.5">
+        <div className="p-3 space-y-1">
           {topItems.map((item) => (
             <button
               key={item.id}
               onClick={() => onSelectCompany(item.id)}
               className={cn(
-                "flex items-center w-full p-2 text-xs rounded-md transition-colors",
+                "flex items-center w-full p-2.5 text-sm rounded-lg transition-colors font-medium",
                 selectedCompanyId === item.id
-                  ? "bg-custom-blue text-white font-medium shadow-sm"
-                  : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  ? "bg-custom-blue text-white shadow-md"
+                  : "bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700"
               )}
             >
-              <Building2 className="w-3.5 h-3.5 mr-2 shrink-0" />
+              <Building2 className="w-4 h-4 mr-2.5 shrink-0" />
               <span className="truncate flex-1 text-left">{item.label}</span>
-              <Badge variant="outline" className="text-[9px] font-semibold rounded-full px-1.5 py-0 ml-1 tabular-nums">
+              <Badge variant="outline" className="text-[10px] font-semibold rounded-full px-2 py-0.5 ml-1 tabular-nums">
                 {item.count}
               </Badge>
             </button>
           ))}
           {topItems.length > 0 && filteredCompanies.length > 0 && (
-            <div className="h-px bg-slate-100 dark:bg-slate-800 my-1" />
+            <div className="h-px bg-slate-200 dark:bg-slate-700 my-2" />
           )}
           {filteredCompanies.map((company) => {
             const compId = String(company.id);
@@ -125,15 +125,15 @@ export function CompaniesSidebar({
                 key={compId}
                 onClick={() => onSelectCompany(compId)}
                 className={cn(
-                  "flex items-center w-full p-2 text-xs rounded-md transition-colors",
+                  "flex items-center w-full p-2.5 text-sm rounded-lg transition-colors",
                   isSelected
                     ? "bg-custom-blue text-white font-medium shadow-sm"
                     : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                 )}
               >
-                <Building2 className="w-3.5 h-3.5 mr-2 shrink-0" />
+                <Building2 className="w-4 h-4 mr-2.5 shrink-0" />
                 <span className="truncate flex-1 text-left">{company.company_name}</span>
-                <Badge variant="outline" className="text-[9px] font-semibold rounded-full px-1.5 py-0 ml-1 tabular-nums">
+                <Badge variant="outline" className="text-[10px] font-semibold rounded-full px-2 py-0.5 ml-1 tabular-nums">
                   {count}
                 </Badge>
               </button>

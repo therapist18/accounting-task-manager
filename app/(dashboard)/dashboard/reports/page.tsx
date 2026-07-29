@@ -819,6 +819,28 @@ export default function ReportsPage() {
     if (col.type === 'task') {
       const val = getRawCellValue(departments, task, col.field, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper);
 
+      // current_stage_follow_up: resolve officer names when follow_up is 'officer'
+      if (col.field === 'current_stage_follow_up') {
+        const followUp = val?.toLowerCase();
+        if (followUp === 'officer') {
+          const officerStage = getCurrentOfficerStage(task);
+          if (officerStage) {
+            const stageData = task.stages?.[officerStage.id];
+            const officerIds = Array.isArray(stageData?.officer_ids) ? stageData.officer_ids.map(String).filter(Boolean) : [];
+            if (officerIds.length > 0) {
+              const names = officerIds.map((id: string) => {
+                const o = unifiedOfficers.find((u: any) => u.id.toString() === id.toString());
+                return o ? getOfficerDisplayName(o) : 'Unknown';
+              }).filter(Boolean);
+              if (names.length > 0) {
+                return <span className="text-sm font-medium text-violet-700">Officer {names.join(', ')}</span>;
+              }
+            }
+          }
+          return <span className="text-sm font-medium text-amber-600">Officer — Unallocated</span>;
+        }
+      }
+
       const isEmpty = !val || val === 'N/A' || val === '—' || val === 'null';
       if (isEmpty) {
         return (
@@ -1168,7 +1190,8 @@ export default function ReportsPage() {
   }, [
     stages, departments, kycDocuments, companies, enhancedTasksData, taskDependants,
     showTime, activeDeptId, unifiedOfficers, allDocuments, expectedTimeByJobLevel,
-    allIndividualDocuments, allCompanyDocuments, computeStageDateInfo // Ensure these were added to dependencies!
+    allIndividualDocuments, allCompanyDocuments, computeStageDateInfo,
+    getCurrentOfficerStage // Ensure these were added to dependencies!
   ]);
 
   const handleSaveStageDate = useCallback(async (taskId: string, stageId: string, date: string) => {
@@ -1236,6 +1259,27 @@ export default function ReportsPage() {
     }
     if (col.type === 'task') {
       const val = getRawCellValue(departments, task, col.field, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper);
+
+      // current_stage_follow_up: resolve officer names when follow_up is 'officer'
+      if (col.field === 'current_stage_follow_up') {
+        const followUp = (val || '').toLowerCase();
+        if (followUp === 'officer') {
+          const officerStage = getCurrentOfficerStage(task);
+          if (officerStage) {
+            const stageData = task.stages?.[officerStage.id];
+            const officerIds = Array.isArray(stageData?.officer_ids) ? stageData.officer_ids.map(String).filter(Boolean) : [];
+            if (officerIds.length > 0) {
+              const names = officerIds.map((id: string) => {
+                const o = unifiedOfficers.find((u: any) => u.id.toString() === id.toString());
+                return o ? getOfficerDisplayName(o) : 'Unknown';
+              }).filter(Boolean);
+              if (names.length > 0) return `Officer ${names.join(', ')}`;
+            }
+          }
+          return 'Officer - Unallocated';
+        }
+      }
+
       const isEmpty = val === null || val === undefined || val === '' || val === 'N/A' || val === '—' || val === 'null' || val === 'undefined';
       return isEmpty ? 'Missing' : String(val ?? '');
     }
@@ -1249,7 +1293,7 @@ export default function ReportsPage() {
       const { docsForStage, dateValue } = computeStageDateInfo(task, stage, col);
 
       if (col.hasDate) {
-        parts.push(`Date: ${dateValue ? formatDate(dateValue, !!exportOpts.showTime) : 'Pending'}`);
+        parts.push(dateValue ? formatDate(dateValue, !!exportOpts.showTime) : 'Pending');
       }
 
       if (col.fields && col.fields.length > 0) {
@@ -1283,7 +1327,7 @@ export default function ReportsPage() {
               }
             }
           }
-          if (docParts.length > 0) parts.push(`Docs: ${docParts.join(', ')}`);
+          if (docParts.length > 0) parts.push(docParts.join(', '));
         }
       }
 
@@ -1295,7 +1339,7 @@ export default function ReportsPage() {
             const o = unifiedOfficers.find((u: any) => u.id.toString() === id.toString());
             return o ? getOfficerDisplayName(o) : 'Unknown';
           }).join(', ');
-          parts.push(`Officers: ${officerNames}`);
+          parts.push(officerNames);
         }
       }
 
@@ -1363,7 +1407,7 @@ export default function ReportsPage() {
         }
       }
 
-      return dateString ? `Uploaded (${dateString})` : 'Uploaded';
+      return dateString ? dateString : 'Uploaded';
     }
 
     return '';
@@ -1371,7 +1415,7 @@ export default function ReportsPage() {
     departments, stages, enhancedTasksData, companies, getStaffName,
     getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper,
     unifiedOfficers, allDocuments, kycDocuments, renderCellValue, computeStageDateInfo,
-    allIndividualDocuments, allCompanyDocuments // Ensure these were added to dependencies!
+    allIndividualDocuments, allCompanyDocuments, getCurrentOfficerStage
   ]);
 
   const sortedTasks = useMemo(() => {
@@ -1523,12 +1567,19 @@ export default function ReportsPage() {
           dRow.height = 16;
           const bg = idx % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC';
           dRow.eachCell((cell, colNum) => {
-            const v = String(cell.value ?? '');
+            const v = String(cell.value ?? '').trim().toLowerCase();
+            let colorArgb = 'FF334155';
+            let isBold = false;
+            if (!v || v === '—' || v === 'n/a' || v === 'missing') { colorArgb = 'FFEF4444'; isBold = true; }
+            else if (v === 'pending') { colorArgb = 'FF3B82F6'; isBold = true; }
+            else if (v === 'unallocated' || v.includes('unallocated')) { colorArgb = 'FFF59E0B'; isBold = true; }
+            else if (v.includes('skipped')) { colorArgb = 'FFD97706'; }
+            else if (v.includes('late') || v.includes('overdue')) { colorArgb = 'FFDC2626'; isBold = true; }
+            else if (v.includes('completed') || v.includes('on time')) { colorArgb = 'FF16A34A'; }
+            else if (v.startsWith('+') || v.startsWith('-')) { colorArgb = 'FF6366F1'; } // delta values
+            else if (v.startsWith('officer')) { colorArgb = 'FF7C3AED'; isBold = true; }
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
-            cell.font = {
-              name: 'Calibri', size: 9, bold: v === 'Unallocated',
-              color: { argb: v === 'N/A' ? 'FFEF4444' : v === 'Unallocated' ? 'FFF59E0B' : 'FF334155' }
-            };
+            cell.font = { name: 'Calibri', size: 9, bold: isBold, color: { argb: colorArgb } };
             cell.alignment = { horizontal: colNum === 1 ? 'center' : 'left', vertical: 'middle' };
             cell.border = { bottom: { style: 'hair', color: { argb: 'FFE2E8F0' } }, right: { style: 'hair', color: { argb: 'FFE2E8F0' } } };
           });

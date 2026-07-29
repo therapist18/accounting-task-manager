@@ -36,8 +36,8 @@ import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
 import {
   resolveEffectiveSettings, resolveEffectiveClauses, buildDefaultClauseMap, assembleContractHtml,
 } from '../utils/clauseEngine';
-import { EcContractTemplate, fetchContractTemplates } from '../utils/contractTemplateData';
-import { applyThemeToHtml, DEFAULT_CONTRACT_THEME } from '../utils/themeEngine';
+
+
 import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
 import { replacePlaceholders } from '../../tasks-requirements/utils/templateFormatters';
 import type { ContractEmployeeInfo } from '../utils/data';
@@ -303,13 +303,12 @@ export default function JobProfilesPage() {
   const [profiles, setProfiles] = useState<EcJobProfile[]>([]);
   const [allProfiles, setAllProfiles] = useState<EcJobProfile[]>([]);
   const [clauses, setClauses] = useState<EcClause[]>([]);
-  const [templates, setTemplates] = useState<EcContractTemplate[]>([]);
+
   const [isLoading, setIsLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [detailTab, setDetailTab] = useState('overview');
-  const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linkSectionKey, setLinkSectionKey] = useState<string>(CONTRACT_SECTIONS[0].key);
   const [linkSearch, setLinkSearch] = useState('');
 
@@ -324,11 +323,12 @@ export default function JobProfilesPage() {
 
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
   const editorPanelRef = useRef<ImperativePanelHandle>(null);
+  const detailPanelRef = useRef<ImperativePanelHandle>(null);
   const previewPanelRef = useRef<ImperativePanelHandle>(null);
-  const [collapsed, setCollapsed] = useState({ sidebar: false, editor: false, preview: false });
+  const [collapsed, setCollapsed] = useState({ sidebar: false, editor: false, detail: false, preview: false });
 
   const togglePanel = (key: keyof typeof collapsed) => {
-    const ref = key === 'sidebar' ? sidebarPanelRef : key === 'editor' ? editorPanelRef : previewPanelRef;
+    const ref = key === 'sidebar' ? sidebarPanelRef : key === 'editor' ? editorPanelRef : key === 'detail' ? detailPanelRef : previewPanelRef;
     const panel = ref.current;
     if (!panel) return;
     if (panel.isCollapsed()) panel.expand(); else panel.collapse();
@@ -357,14 +357,18 @@ export default function JobProfilesPage() {
   const loadProfiles = async (id: string) => {
     if (!id) return;
     setIsLoading(true);
-    const [data, allData, templateData] = await Promise.all([
-      fetchJobProfiles(id),
-      fetchJobProfiles(),
-      fetchContractTemplates(id),
-    ]);
-    setProfiles(data);
-    setAllProfiles(allData);
-    setTemplates(templateData);
+    if (id === '__general__') {
+      const allData = await fetchJobProfiles();
+      setProfiles(allData);
+      setAllProfiles(allData);
+    } else {
+      const [data, allData] = await Promise.all([
+        fetchJobProfiles(id),
+        fetchJobProfiles(),
+      ]);
+      setProfiles(data);
+      setAllProfiles(allData);
+    }
     setIsLoading(false);
   };
 
@@ -544,19 +548,6 @@ export default function JobProfilesPage() {
     companyDefaults, departmentDefaults, draft ? { section_clauses: draft.section_clauses } : null,
   ], defaultClauseMap), [companyDefaults, departmentDefaults, draft, defaultClauseMap]);
 
-  const previewTemplate = useMemo(() => {
-    if (templates.length === 0) return null;
-    if (draft?.default_template_id) {
-      const t = templates.find((t) => t.id === draft.default_template_id);
-      if (t) return t;
-    }
-    const companyDefault = templates.find((t) => t.company_id === selectedCompanyId && t.is_default);
-    if (companyDefault) return companyDefault;
-    const companyAny = templates.find((t) => t.company_id === selectedCompanyId);
-    if (companyAny) return companyAny;
-    return templates.find((t) => !t.company_id && t.is_default) || templates.find((t) => !t.company_id) || templates[0] || null;
-  }, [templates, draft?.default_template_id, selectedCompanyId]);
-
   const previewCompany = useMemo(() => companies.find((c) => String(c.id) === selectedCompanyId) || null, [companies, selectedCompanyId]);
 
   const previewEmployeeValues = useMemo(() => {
@@ -574,18 +565,19 @@ export default function JobProfilesPage() {
   }, [draft, previewCompany, previewEffectiveSettings, selectedCompanyId]);
 
   const previewHtml = useMemo(() => {
-    if (!previewTemplate || !draft) return '';
+    if (!draft) return '';
+    const linkedKeys = Object.keys(draft.section_clauses || {});
+    if (linkedKeys.length === 0) return '';
     const body = assembleContractHtml({
-      sectionKeys: previewTemplate.section_keys,
+      sectionKeys: linkedKeys,
       clausesById,
       effectiveClauses: previewEffectiveClauses,
       effectiveSettings: previewEffectiveSettings,
       employeePlaceholderValues: previewEmployeeValues,
       includeToc: false,
     });
-    const themed = applyThemeToHtml(body, previewTemplate.theme_settings || DEFAULT_CONTRACT_THEME);
-    return replacePlaceholders(themed, { ...previewEffectiveSettings, ...previewEmployeeValues });
-  }, [previewTemplate, draft, clausesById, previewEffectiveClauses, previewEffectiveSettings, previewEmployeeValues]);
+    return replacePlaceholders(body, { ...previewEffectiveSettings, ...previewEmployeeValues });
+  }, [draft, clausesById, previewEffectiveClauses, previewEffectiveSettings, previewEmployeeValues]);
 
   const tabs: { value: string; label: string; icon: any }[] = [
     { value: 'overview', label: 'Overview', icon: LayoutTemplate },
@@ -594,9 +586,7 @@ export default function JobProfilesPage() {
     { value: 'employment_rules', label: 'Employment Rules', icon: FileCheck },
     { value: 'working_arrangement', label: 'Working Arrangement', icon: Briefcase },
     { value: 'benefits', label: 'Benefits & Compensation', icon: CheckCircle2 },
-    { value: 'contract_rules', label: 'Contract Rules', icon: FileText },
     { value: 'clauses', label: `Linked Clauses (${clauseSelections.length})`, icon: LinkIcon },
-    { value: 'preview', label: 'Preview', icon: PlayCircle },
   ];
 
   return (
@@ -642,7 +632,7 @@ export default function JobProfilesPage() {
             </button>
             <button
               onClick={() => togglePanel('preview')}
-              title={collapsed.preview ? 'Show summary panel' : 'Hide summary panel'}
+              title={collapsed.preview ? 'Show preview panel' : 'Hide preview panel'}
               className={cn(
                 "p-1.5 rounded-md transition-all",
                 collapsed.preview ? "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" : "bg-white dark:bg-slate-700 text-blue-600 shadow-sm"
@@ -679,6 +669,7 @@ export default function JobProfilesPage() {
             onSelectCompany={(id) => { setSelectedCompanyId(id || ''); setSelectedProfileId(null); }}
             companyCounts={companyCounts}
             subtitle="Manage job profiles"
+            topItems={[{ id: '__general__', label: 'General', count: allProfiles.filter(p => !p.company_id).length }]}
           />
         </Panel>
 
@@ -775,15 +766,15 @@ export default function JobProfilesPage() {
 
         <PanelResizeHandle className="w-1.5 bg-slate-200 dark:border-slate-800 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-20" />
 
-        {/* RIGHT PANEL: Live profile editor */}
+        {/* DETAIL PANEL: Profile editor */}
         <Panel
-          ref={previewPanelRef}
-          defaultSize={60}
-          minSize={40}
+          ref={detailPanelRef}
+          defaultSize={42}
+          minSize={30}
           collapsible
           collapsedSize={0}
-          onCollapse={() => setCollapsed(prev => ({ ...prev, preview: true }))}
-          onExpand={() => setCollapsed(prev => ({ ...prev, preview: false }))}
+          onCollapse={() => setCollapsed(prev => ({ ...prev, detail: true }))}
+          onExpand={() => setCollapsed(prev => ({ ...prev, detail: false }))}
           className="bg-slate-50 dark:bg-slate-900 flex flex-col z-10 !overflow-auto"
         >
           <div className="flex flex-col h-full">
@@ -902,9 +893,6 @@ export default function JobProfilesPage() {
                                     <FormField label="Job Title">
                                       <Input value={draft.job_title || ''} onChange={(e) => updateDraft({ job_title: e.target.value })} className="h-9 text-xs" placeholder="e.g. Software Developer" />
                                     </FormField>
-                                    <FormField label="Job Code">
-                                      <Input value={draft.job_code || ''} onChange={(e) => updateDraft({ job_code: e.target.value })} className="h-9 text-xs" placeholder="e.g. ICT-SD-001" />
-                                    </FormField>
                                     <FormField label={`Department${draft.scope === 'department' ? ' *' : ''}`}>
                                       <Input value={draft.department || ''} onChange={(e) => updateDraft({ department: e.target.value })} className="h-9 text-xs" placeholder="e.g. ICT" />
                                     </FormField>
@@ -933,9 +921,6 @@ export default function JobProfilesPage() {
                                     <FormField label="Reports To">
                                       <Input value={draft.settings?.reports_to || ''} onChange={(e) => updateDraftSettings('reports_to', e.target.value)} className="h-9 text-xs" placeholder="e.g. Head of ICT" />
                                     </FormField>
-                                    <FormField label="Job Family">
-                                      <Input value={draft.job_family || ''} onChange={(e) => updateDraft({ job_family: e.target.value })} className="h-9 text-xs" placeholder="e.g. Technology" />
-                                    </FormField>
                                     <FormField label="Work Location">
                                       <Input value={draft.work_location || ''} onChange={(e) => updateDraft({ work_location: e.target.value })} className="h-9 text-xs" placeholder="e.g. Head Office" />
                                     </FormField>
@@ -950,17 +935,7 @@ export default function JobProfilesPage() {
                                         </SelectContent>
                                       </Select>
                                     </FormField>
-                                    <FormField label="Default Contract Template">
-                                      <Select value={draft.default_template_id || '__none__'} onValueChange={(v) => updateDraft({ default_template_id: v === '__none__' ? null : v })}>
-                                        <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Use company default" /></SelectTrigger>
-                                        <SelectContent>
-                                          <SelectItem value="__none__" className="text-slate-400 italic">Use company default</SelectItem>
-                                          {templates.map((t) => (
-                                            <SelectItem key={t.id} value={t.id}>{t.name}{t.is_default ? ' (default)' : ''}</SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
-                                    </FormField>
+
                                   </div>
                                 </SectionPanel>
 
@@ -982,7 +957,6 @@ export default function JobProfilesPage() {
                                       { label: 'Employment rules', done: !!(draft.employment_type && draft.settings?.notice_period) },
                                       { label: 'Working arrangement', done: !!(draft.work_arrangement && draft.settings?.working_days) },
                                       { label: 'Clauses', done: clauseSelections.length > 0 },
-                                      { label: 'Template', done: !!previewTemplate },
                                     ].map((item) => (
                                       <div key={item.label} className="flex items-center justify-between gap-3">
                                         <span className="text-slate-600">{item.label}</span>
@@ -993,8 +967,8 @@ export default function JobProfilesPage() {
                                     ))}
                                   </div>
                                   <div className="mt-4 flex gap-2">
-                                    <Button variant="outline" size="sm" className="h-8 flex-1 text-xs" onClick={() => setDetailTab('preview')}>Preview</Button>
-                                    <Button size="sm" className="h-8 flex-1 text-xs bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setLinkModalOpen(true)}>Clauses</Button>
+                                    <Button variant="outline" size="sm" className="h-8 flex-1 text-xs" onClick={() => togglePanel('preview')}>Preview</Button>
+                                    <Button size="sm" className="h-8 flex-1 text-xs bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setDetailTab('clauses')}>Clauses</Button>
                                   </div>
                                 </SectionPanel>
 
@@ -1044,34 +1018,38 @@ export default function JobProfilesPage() {
                         <TabsContent value="employment_rules" className="m-0 p-8">
                           <div className="max-w-[980px] mx-auto space-y-6">
                             <SectionPanel title="Employment & Termination" description="These fields should influence probation, notice and termination clauses.">
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <FormField label="Employment Type">
-                                  <Select value={draft.employment_type || '__unset__'} onValueChange={(v) => updateDraft({ employment_type: v === '__unset__' ? null : v })}>
-                                    <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select type" /></SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>
-                                      {withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, draft.employment_type).map((opt) => (
-                                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </FormField>
-                                <SettingSelect label="Probation Period" settingKey="probation_period" options={PROBATION_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Notice Period" settingKey="notice_period" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Probation Notice" settingKey="probation_notice" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Confirmation Required" settingKey="confirmation_required" options={['Yes', 'No']} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingInput label="Termination Reason Rule" settingKey="termination_reason" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. According to contract and applicable law" />
+                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {[
+                                  { label: 'Employment Type', node: <Select value={draft.employment_type || '__unset__'} onValueChange={(v) => updateDraft({ employment_type: v === '__unset__' ? null : v })}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select type" /></SelectTrigger><SelectContent><SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>{withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, draft.employment_type).map((opt) => (<SelectItem key={opt} value={opt}>{opt}</SelectItem>))}</SelectContent></Select> },
+                                  { label: 'Probation Period', node: <SettingSelect label="" settingKey="probation_period" options={PROBATION_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Notice Period', node: <SettingSelect label="" settingKey="notice_period" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Probation Notice', node: <SettingSelect label="" settingKey="probation_notice" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Confirmation Required', node: <SettingSelect label="" settingKey="confirmation_required" options={['Yes', 'No']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Termination Reason Rule', node: <SettingInput label="" settingKey="termination_reason" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. According to contract and applicable law" /> },
+                                ].map(({ label, node }) => (
+                                  <div key={label} className="grid grid-cols-[180px_1fr] gap-4 py-3 items-center">
+                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>
+                                    <div>{node}</div>
+                                  </div>
+                                ))}
                               </div>
                             </SectionPanel>
 
                             <SectionPanel title="Contractual Policies" description="Use these as clause-selection signals; the clause wording still lives in the Clause Library.">
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <SettingSwitch label="Confidentiality" settingKey="confidentiality_policy" settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSwitch label="Intellectual Property" settingKey="intellectual_property_policy" settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSwitch label="Data Protection" settingKey="data_protection_policy" settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSwitch label="Code of Conduct" settingKey="code_of_conduct_policy" settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSwitch label="Disciplinary Policy" settingKey="disciplinary_policy" settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSwitch label="Company Property" settingKey="company_property_policy" settings={draft.settings || {}} onChange={updateDraftSettings} />
+                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {[
+                                  { label: 'Confidentiality', node: <SettingSwitch label="" settingKey="confidentiality_policy" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Intellectual Property', node: <SettingSwitch label="" settingKey="intellectual_property_policy" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Data Protection', node: <SettingSwitch label="" settingKey="data_protection_policy" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Code of Conduct', node: <SettingSwitch label="" settingKey="code_of_conduct_policy" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Disciplinary Policy', node: <SettingSwitch label="" settingKey="disciplinary_policy" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Company Property', node: <SettingSwitch label="" settingKey="company_property_policy" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                ].map(({ label, node }) => (
+                                  <div key={label} className="grid grid-cols-[180px_1fr] gap-4 py-3 items-center">
+                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>
+                                    <div>{node}</div>
+                                  </div>
+                                ))}
                               </div>
                             </SectionPanel>
                           </div>
@@ -1080,35 +1058,39 @@ export default function JobProfilesPage() {
                         <TabsContent value="working_arrangement" className="m-0 p-8">
                           <div className="max-w-[980px] mx-auto space-y-6">
                             <SectionPanel title="Normal Schedule" description="The basic working pattern that feeds working-hours and remote-work clauses.">
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <FormField label="Work Mode">
-                                  <Select value={draft.work_arrangement || '__unset__'} onValueChange={(v) => updateDraft({ work_arrangement: v === '__unset__' ? null : v })}>
-                                    <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select arrangement" /></SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>
-                                      {withCurrentValue(WORK_ARRANGEMENT_OPTIONS, draft.work_arrangement).map((opt) => (
-                                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </FormField>
-                                <SettingSelect label="Working Days" settingKey="working_days" options={['Monday-Friday', 'Monday-Saturday', 'Shift Based', 'Flexible']} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Rest Days" settingKey="rest_days" options={['Saturday & Sunday', 'Sunday', 'As rostered', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingInput label="Start Time" settingKey="start_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="08:00" type="time" />
-                                <SettingInput label="End Time" settingKey="end_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="17:00" type="time" />
-                                <SettingSelect label="Break" settingKey="break_duration" options={['30 Minutes', '45 Minutes', '1 Hour', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {[
+                                  { label: 'Work Mode', node: <Select value={draft.work_arrangement || '__unset__'} onValueChange={(v) => updateDraft({ work_arrangement: v === '__unset__' ? null : v })}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select arrangement" /></SelectTrigger><SelectContent><SelectItem value="__unset__" className="text-slate-400 italic">Not set</SelectItem>{withCurrentValue(WORK_ARRANGEMENT_OPTIONS, draft.work_arrangement).map((opt) => (<SelectItem key={opt} value={opt}>{opt}</SelectItem>))}</SelectContent></Select> },
+                                  { label: 'Working Days', node: <SettingSelect label="" settingKey="working_days" options={['Monday-Friday', 'Monday-Saturday', 'Shift Based', 'Flexible']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Rest Days', node: <SettingSelect label="" settingKey="rest_days" options={['Saturday & Sunday', 'Sunday', 'As rostered', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Start Time', node: <SettingInput label="" settingKey="start_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="08:00" type="time" /> },
+                                  { label: 'End Time', node: <SettingInput label="" settingKey="end_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="17:00" type="time" /> },
+                                  { label: 'Break', node: <SettingSelect label="" settingKey="break_duration" options={['30 Minutes', '45 Minutes', '1 Hour', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                ].map(({ label, node }) => (
+                                  <div key={label} className="grid grid-cols-[180px_1fr] gap-4 py-3 items-center">
+                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>
+                                    <div>{node}</div>
+                                  </div>
+                                ))}
                               </div>
                             </SectionPanel>
 
                             <SectionPanel title="Remote, Weekend & Overtime Rules">
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <SettingSwitch label="Remote Work Allowed" settingKey="remote_work_allowed" settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Remote Days" settingKey="remote_days" options={['Up to 1 day per week', 'Up to 2 days per week', 'Up to 3 days per week', 'As approved']} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Weekend Work" settingKey="weekend_work" options={['No', 'Occasional', 'Shift Based', 'As required']} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSwitch label="Weekend Approval Required" settingKey="weekend_approval_required" settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSwitch label="Overtime Eligible" settingKey="overtime_eligible" settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSwitch label="Overtime Approval Required" settingKey="overtime_approval_required" settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Overtime Compensation" settingKey="overtime_compensation" options={['According to Company Policy', 'Paid', 'Time off in lieu', 'Not applicable']} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {[
+                                  { label: 'Remote Work Allowed', node: <SettingSwitch label="" settingKey="remote_work_allowed" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Remote Days', node: <SettingSelect label="" settingKey="remote_days" options={['Up to 1 day per week', 'Up to 2 days per week', 'Up to 3 days per week', 'As approved']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Weekend Work', node: <SettingSelect label="" settingKey="weekend_work" options={['No', 'Occasional', 'Shift Based', 'As required']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Weekend Approval Required', node: <SettingSwitch label="" settingKey="weekend_approval_required" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Overtime Eligible', node: <SettingSwitch label="" settingKey="overtime_eligible" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Overtime Approval Required', node: <SettingSwitch label="" settingKey="overtime_approval_required" settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Overtime Compensation', node: <SettingSelect label="" settingKey="overtime_compensation" options={['According to Company Policy', 'Paid', 'Time off in lieu', 'Not applicable']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                ].map(({ label, node }) => (
+                                  <div key={label} className="grid grid-cols-[180px_1fr] gap-4 py-3 items-center">
+                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>
+                                    <div>{node}</div>
+                                  </div>
+                                ))}
                               </div>
                             </SectionPanel>
                           </div>
@@ -1117,106 +1099,231 @@ export default function JobProfilesPage() {
                         <TabsContent value="benefits" className="m-0 p-8">
                           <div className="max-w-[980px] mx-auto space-y-6">
                             <SectionPanel title="Salary Structure" description="Set a role range here; the actual employee salary can still be entered on the offer/contract.">
-                              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                <SettingSelect label="Currency" settingKey="salary_currency" options={['KES', 'USD', 'GBP', 'EUR']} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingInput label="Minimum" settingKey="salary_min" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="100000" />
-                                <SettingInput label="Maximum" settingKey="salary_max" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="180000" />
-                                <SettingSelect label="Pay Frequency" settingKey="payment_frequency" options={PAYMENT_FREQUENCY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {[
+                                  { label: 'Currency', node: <SettingSelect label="" settingKey="salary_currency" options={['KES', 'USD', 'GBP', 'EUR']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Minimum', node: <SettingInput label="" settingKey="salary_min" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="100000" /> },
+                                  { label: 'Maximum', node: <SettingInput label="" settingKey="salary_max" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="180000" /> },
+                                  { label: 'Pay Frequency', node: <SettingSelect label="" settingKey="payment_frequency" options={PAYMENT_FREQUENCY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                ].map(({ label, node }) => (
+                                  <div key={label} className="grid grid-cols-[180px_1fr] gap-4 py-3 items-center">
+                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>
+                                    <div>{node}</div>
+                                  </div>
+                                ))}
                               </div>
                             </SectionPanel>
 
                             <SectionPanel title="Allowances & Benefits">
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <SettingSelect label="Medical Cover" settingKey="medical_cover" options={['No', 'Standard Company Scheme', 'Enhanced Scheme', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Housing Allowance" settingKey="housing_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Transport Allowance" settingKey="transport_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Telephone Allowance" settingKey="telephone_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Internet Allowance" settingKey="internet_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Meal Allowance" settingKey="meal_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Pension" settingKey="pension_scheme" options={['No', 'Applicable', 'After Confirmation', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Bonus" settingKey="bonus_scheme" options={['No', 'Performance-Based', 'Discretionary', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} />
+                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {[
+                                  { label: 'Medical Cover', node: <SettingSelect label="" settingKey="medical_cover" options={['No', 'Standard Company Scheme', 'Enhanced Scheme', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Housing Allowance', node: <SettingSelect label="" settingKey="housing_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Transport Allowance', node: <SettingSelect label="" settingKey="transport_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Telephone Allowance', node: <SettingSelect label="" settingKey="telephone_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Internet Allowance', node: <SettingSelect label="" settingKey="internet_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Meal Allowance', node: <SettingSelect label="" settingKey="meal_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Pension', node: <SettingSelect label="" settingKey="pension_scheme" options={['No', 'Applicable', 'After Confirmation', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Bonus', node: <SettingSelect label="" settingKey="bonus_scheme" options={['No', 'Performance-Based', 'Discretionary', 'According to Company Policy']} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                ].map(({ label, node }) => (
+                                  <div key={label} className="grid grid-cols-[180px_1fr] gap-4 py-3 items-center">
+                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>
+                                    <div>{node}</div>
+                                  </div>
+                                ))}
                               </div>
                             </SectionPanel>
 
                             <SectionPanel title="Leave">
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <SettingSelect label="Annual Leave" settingKey="annual_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Sick Leave" settingKey="sick_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Maternity Leave" settingKey="maternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Paternity Leave" settingKey="paternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingSelect label="Compassionate Leave" settingKey="compassionate_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} />
-                                <SettingInput label="Payment Day" settingKey="payment_day" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Last working day" />
+                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {[
+                                  { label: 'Annual Leave', node: <SettingSelect label="" settingKey="annual_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Sick Leave', node: <SettingSelect label="" settingKey="sick_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Maternity Leave', node: <SettingSelect label="" settingKey="maternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Paternity Leave', node: <SettingSelect label="" settingKey="paternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Compassionate Leave', node: <SettingSelect label="" settingKey="compassionate_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /> },
+                                  { label: 'Payment Day', node: <SettingInput label="" settingKey="payment_day" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Last working day" /> },
+                                ].map(({ label, node }) => (
+                                  <div key={label} className="grid grid-cols-[180px_1fr] gap-4 py-3 items-center">
+                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>
+                                    <div>{node}</div>
+                                  </div>
+                                ))}
                               </div>
                             </SectionPanel>
                           </div>
                         </TabsContent>
 
-                        <TabsContent value="contract_rules" className="m-0 p-8 space-y-4 max-w-2xl">
-                          <div className="bg-white dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
-                            <p className="text-sm font-bold text-slate-800 dark:text-slate-300 mb-4">Default Contract Template</p>
-                            <Select value={draft.default_template_id || '__none__'} onValueChange={(v) => updateDraft({ default_template_id: v === '__none__' ? null : v })}>
-                              <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Use company default" /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__none__" className="text-slate-400 italic">Use company default</SelectItem>
-                                {templates.map((t) => (
-                                  <SelectItem key={t.id} value={t.id}>{t.name}{t.is_default ? ' (default)' : ''}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            {previewTemplate && (
-                              <p className="text-[11px] text-slate-400 mt-2">
-                                Effective template: <span className="font-medium text-slate-600">{previewTemplate.name}</span> ({previewTemplate.section_keys.length} of {CONTRACT_SECTIONS.length} sections included)
-                              </p>
-                            )}
-                          </div>
-                          <SettingsEditorCard title="Other Contract Variables" hints={[]} excludeKnown settings={draft.settings || {}} onChange={updateDraftSettingsObject} />
-                        </TabsContent>
+
 
                         <TabsContent value="clauses" className="m-0 p-8">
-                          <div className="flex items-center justify-between mb-4">
-                            <p className="text-sm text-slate-500">{clauseSelections.length} of {CONTRACT_SECTIONS.length} sections have a clause selected for this profile.</p>
-                            <Button size="sm" className="h-8 text-xs" onClick={() => setLinkModalOpen(true)}>
-                              <LinkIcon className="h-3.5 w-3.5 mr-1.5" /> Manage Linked Clauses
-                            </Button>
-                          </div>
-                          {clauseSelections.length === 0 ? (
-                            <div className="text-sm text-slate-400 italic border border-dashed rounded-2xl p-6 border-slate-200 dark:border-slate-800 text-center">
-                              No clause overrides - uses section defaults.
+                          <div className="flex border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden bg-white dark:bg-slate-950" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+                            {/* Col 1: Sections */}
+                            <div className="w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col shrink-0">
+                              <div className="p-4 border-b border-slate-100 dark:border-slate-800">
+                                <p className="text-sm font-bold text-slate-800 dark:text-slate-200">Contract Sections</p>
+                                <p className="text-xs text-slate-500 mt-0.5">{CONTRACT_SECTIONS.length} sections</p>
+                              </div>
+                              <ScrollArea className="flex-1">
+                                <div className="p-2 space-y-1">
+                                  {CONTRACT_SECTIONS.map((section) => {
+                                    const count = clauses.filter((c) => c.section_key === section.key).length;
+                                    const hasSelection = !!draft?.section_clauses?.[section.key];
+                                    return (
+                                      <div
+                                        key={section.key}
+                                        onClick={() => { setLinkSectionKey(section.key); setLinkSearch(''); }}
+                                        className={cn("flex items-center justify-between p-2 rounded-lg text-xs font-medium cursor-pointer transition-colors", section.key === linkSectionKey ? "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400" : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800")}
+                                      >
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <FileText className="w-3.5 h-3.5 opacity-70 shrink-0" />
+                                          <span className="truncate">{section.title}</span>
+                                          {hasSelection && <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />}
+                                        </div>
+                                        <Badge variant="outline" className={cn("text-[10px] h-5 px-1.5 min-w-[20px] flex items-center justify-center border-transparent shrink-0", section.key === linkSectionKey ? "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400" : "bg-slate-100 dark:bg-slate-800 text-slate-500")}>{count}</Badge>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </ScrollArea>
                             </div>
-                          ) : (
-                            <div className="bg-white dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
-                              <div className="space-y-3">
-                                {clauseSelections.map(({ sectionKey, sectionTitle, clauseLabel, isDefault, color }) => (
-                                  <div key={sectionKey} className="flex items-center justify-between gap-4 text-sm py-2 border-b border-slate-100 dark:border-slate-800 last:border-0">
-                                    <Badge variant="outline" className={cn("text-xs font-semibold rounded-full px-3 py-0.5 shrink-0 border-transparent", color)}>{sectionTitle}</Badge>
-                                    <span className="text-slate-700 dark:text-slate-300 truncate flex-1">{clauseLabel}</span>
-                                    <Badge variant="outline" className={cn("text-xs font-semibold rounded-full px-3 py-0.5 shrink-0", isDefault ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200")}>
-                                      {isDefault ? 'Default' : 'Custom'}
-                                    </Badge>
-                                  </div>
-                                ))}
+
+                            {/* Col 2: Clauses in selected section */}
+                            <div className="w-80 border-r border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex flex-col shrink-0">
+                              <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900">
+                                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">Clauses in &ldquo;{CONTRACT_SECTIONS.find((s) => s.key === linkSectionKey)?.title}&rdquo;</p>
+                                <p className="text-xs text-slate-500 mt-0.5">{clauses.filter((c) => c.section_key === linkSectionKey).length} clauses available</p>
+                              </div>
+                              <div className="p-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+                                <div className="relative">
+                                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                                  <Input placeholder="Search clauses..." className="h-8 pl-8 text-xs bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800" value={linkSearch} onChange={(e) => setLinkSearch(e.target.value)} />
+                                </div>
+                              </div>
+                              <ScrollArea className="flex-1 p-4">
+                                <div className="space-y-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => { if (!draft) return; const next = { ...(draft.section_clauses || {}) }; delete next[linkSectionKey]; updateDraft({ section_clauses: next }); }}
+                                    className={cn(
+                                      "w-full text-left bg-white dark:bg-slate-950 border rounded-xl p-3 text-xs font-medium transition-colors",
+                                      !draft?.section_clauses?.[linkSectionKey] ? "border-blue-500 text-blue-700" : "border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:border-slate-400"
+                                    )}
+                                  >
+                                    Use section default {defaultClauseMap[linkSectionKey] && `(${clausesById[defaultClauseMap[linkSectionKey]]?.label || 'none'})`}
+                                  </button>
+                                  {clauses
+                                    .filter((c) => c.section_key === linkSectionKey && c.label.toLowerCase().includes(linkSearch.toLowerCase()))
+                                    .sort((a, b) => (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) || a.label.localeCompare(b.label))
+                                    .map((clause) => {
+                                      const isSelected = draft?.section_clauses?.[linkSectionKey] === clause.id;
+                                      const usageCount = allProfiles.filter((p) => p.section_clauses?.[linkSectionKey] === clause.id).length;
+                                      return (
+                                        <div
+                                          key={clause.id}
+                                          onClick={() => updateDraft({ section_clauses: { ...(draft?.section_clauses || {}), [linkSectionKey]: clause.id } })}
+                                          className={cn(
+                                            "bg-white dark:bg-slate-950 border rounded-xl p-4 shadow-sm relative cursor-pointer transition-colors",
+                                            isSelected ? "border-2 border-blue-500" : "border-slate-200 dark:border-slate-700 hover:border-slate-300"
+                                          )}
+                                        >
+                                          <div className={cn("absolute top-4 right-4 w-4 h-4 rounded-full border-2 bg-white dark:bg-slate-950", isSelected ? "border-blue-500" : "border-slate-300")} />
+                                          <p className="text-sm font-bold text-slate-900 dark:text-slate-100 pr-6">{clause.label}</p>
+                                          <p className="text-[10px] text-slate-500 font-mono mb-3">{clause.clause_key}</p>
+                                          <div className="flex items-center gap-2 mb-3 flex-wrap">
+                                            {clause.is_default && <Badge variant="secondary" className="bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400 hover:bg-amber-100 text-[10px] py-0 border-transparent font-medium">Section Default</Badge>}
+                                            {clause.variant_group && <Badge variant="secondary" className="bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400 hover:bg-purple-100 text-[10px] py-0 border-transparent font-medium">{clause.variant_group}</Badge>}
+                                          </div>
+                                          <div className="space-y-1.5 text-[11px]">
+                                            <div className="flex justify-between"><span className="text-slate-500">Scope:</span><span className="font-medium text-slate-700 dark:text-slate-300">{clause.company_id ? 'Company' : 'Global'}</span></div>
+                                            <div className="text-slate-500 pt-2 border-t border-slate-100 dark:border-slate-800 mt-2">Used in {usageCount} job profile{usageCount !== 1 ? 's' : ''}</div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                </div>
+                              </ScrollArea>
+                            </div>
+
+                            {/* Col 3: Suggestion rules & preview */}
+                            <div className="flex-1 bg-white dark:bg-slate-950 flex flex-col min-w-0">
+                              <div className="p-6 flex gap-8 h-full min-h-0">
+                                {(() => {
+                                  const selectedClauseId = draft?.section_clauses?.[linkSectionKey];
+                                  const selectedClause = selectedClauseId ? clausesById[selectedClauseId] : undefined;
+                                  const conditions = (selectedClause as any)?.suggest_conditions as Array<Record<string, string>> | undefined;
+                                  const facts = { employment_type: draft?.employment_type, job_level: draft?.job_level, work_arrangement: draft?.work_arrangement, department: draft?.department };
+                                  return (
+                                    <>
+                                      <div className="w-64 space-y-6 flex flex-col shrink-0">
+                                        <div>
+                                          <p className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-1">Suggestion Rules</p>
+                                          <p className="text-[11px] text-slate-500 mb-4">Why this clause might apply</p>
+                                          {!selectedClause ? (
+                                            <p className="text-xs text-slate-400 italic">Select a clause to see details.</p>
+                                          ) : !conditions?.length ? (
+                                            <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-4 text-xs text-slate-500">No suggestion rules defined for this clause - it's a manual pick.</div>
+                                          ) : (
+                                            <div className="bg-emerald-50/50 dark:bg-emerald-500/5 border border-emerald-100 dark:border-emerald-500/20 rounded-xl p-4">
+                                              <ul className="space-y-2 text-[11px]">
+                                                {Object.entries(conditions[0] || {}).filter(([, v]) => v).map(([key, value]) => {
+                                                  const matches = facts[key as keyof typeof facts] === value;
+                                                  return (
+                                                    <li key={key} className="flex justify-between items-center gap-2">
+                                                      <span className="text-slate-600 dark:text-slate-400">{key.replace(/_/g, ' ')}: {value}</span>
+                                                      <span className={cn("font-medium shrink-0", matches ? "text-emerald-600" : "text-slate-400")}>{matches ? 'Matches' : 'No match'}</span>
+                                                    </li>
+                                                  );
+                                                })}
+                                              </ul>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      <div className="flex-1 flex flex-col min-w-0">
+                                        <p className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-1">Clause Preview</p>
+                                        <p className="text-[11px] text-slate-500 mb-4">Preview how it will appear in the contract</p>
+                                        {!selectedClause ? (
+                                          <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-5 flex-1 flex items-center justify-center text-sm text-slate-400">
+                                            Select a clause on the left to preview it.
+                                          </div>
+                                        ) : (
+                                          <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-5 flex-1 flex flex-col relative overflow-hidden min-h-0">
+                                            <div className="flex justify-between items-start mb-4 shrink-0">
+                                              <div>
+                                                <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{selectedClause.label}</p>
+                                                <p className="text-[10px] text-slate-500 font-mono mt-0.5">Key: {selectedClause.clause_key}</p>
+                                              </div>
+                                              <Badge variant="outline" className="text-[10px] font-semibold bg-white dark:bg-slate-950 shrink-0">{selectedClause.company_id ? 'Company' : 'Global'}</Badge>
+                                            </div>
+                                            <p className="text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-2 uppercase tracking-wider shrink-0">Content</p>
+                                            <div
+                                              className="prose prose-xs max-w-none text-[11px] text-slate-700 dark:text-slate-300 leading-relaxed flex-1 overflow-auto pr-2 [&_strong]:text-slate-900 dark:[&_strong]:text-slate-100"
+                                              dangerouslySetInnerHTML={{ __html: selectedClause.content }}
+                                            />
+                                            {selectedClause.content?.includes('{{') && (
+                                              <div className="pt-4 border-t border-slate-200 dark:border-slate-700 mt-4 shrink-0">
+                                                <p className="text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-3 uppercase tracking-wider">Placeholders Used</p>
+                                                <div className="flex flex-wrap gap-2">
+                                                  {Array.from(new Set(Array.from(selectedClause.content.matchAll(/\{\{(\w+)\}\}/g)).map((m) => m[1]))).map((p) => (
+                                                    <span key={p} className="text-[10px] font-mono bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-600 px-2 py-1 rounded-md">{'{{' + p + '}}'}</span>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </>
+                                  );
+                                })()}
                               </div>
                             </div>
-                          )}
+                          </div>
                         </TabsContent>
 
-                        <TabsContent value="preview" className="m-0 p-8">
-                          <div className="max-w-4xl mx-auto">
-                            <div className="mb-4 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                              <AlertCircle className="w-4 h-4 shrink-0" />
-                              Sample preview using placeholder employee data - this profile isn't tied to a specific employee. Real values resolve once a contract is generated for someone.
-                            </div>
-                            {!previewTemplate ? (
-                              <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500">
-                                No Contract Template configured for this company yet.
-                              </div>
-                            ) : (
-                              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10 text-[13px] leading-relaxed text-black">
-                                <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
-                              </div>
-                            )}
-                          </div>
-                        </TabsContent>
+
                     </ScrollArea>
                   </Tabs>
                 </>
@@ -1229,202 +1336,67 @@ export default function JobProfilesPage() {
             )}
           </div>
         </Panel>
-      </PanelGroup>
 
-      {/* Link Clauses Modal - real per-section clause picker, no fabricated
-          match-% or usage stats; "used in N job profiles" is a genuine count
-          against allProfiles, and suggestion context comes from the clause's
-          real suggest_conditions instead of an invented scoring algorithm. */}
-      <Dialog open={linkModalOpen} onOpenChange={setLinkModalOpen}>
-        <DialogContent className="max-w-[1100px] p-0 gap-0 overflow-hidden rounded-2xl max-h-[85vh] flex flex-col">
-          <div className="p-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex justify-between items-start shrink-0">
-            <div className="flex items-start gap-4">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-                <LinkIcon className="w-5 h-5" />
-              </div>
-              <div>
-                <DialogTitle className="text-xl font-bold text-slate-900">Link Contract Clauses</DialogTitle>
-                <p className="text-sm text-slate-500 mt-1">{draft?.name} - {draft?.department || (draft ? scopeLabel(draft.scope) : '')}{draft?.job_level ? ` • ${draft.job_level}` : ''}</p>
-              </div>
-            </div>
-            <div className="text-right shrink-0">
-              <p className="text-xs text-slate-500">Total Clauses Linked</p>
-              <p className="text-2xl font-bold text-slate-900">{clauseSelections.length}</p>
-            </div>
-          </div>
+        <PanelResizeHandle className="w-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-20" />
 
-          <div className="flex border-t border-slate-200 flex-1 min-h-0">
-            {/* Col 1: Sections */}
-            <div className="w-64 border-r border-slate-200 bg-white flex flex-col shrink-0">
-              <div className="p-4 border-b border-slate-100">
-                <p className="text-sm font-bold text-slate-800">Contract Sections</p>
-                <p className="text-xs text-slate-500 mt-0.5">{CONTRACT_SECTIONS.length} sections</p>
-              </div>
-              <ScrollArea className="flex-1">
-                <div className="p-2 space-y-1">
-                  {CONTRACT_SECTIONS.map((section) => {
-                    const count = clauses.filter((c) => c.section_key === section.key).length;
-                    const hasSelection = !!draft?.section_clauses?.[section.key];
-                    return (
-                      <div
-                        key={section.key}
-                        onClick={() => { setLinkSectionKey(section.key); setLinkSearch(''); }}
-                        className={cn("flex items-center justify-between p-2 rounded-lg text-xs font-medium cursor-pointer transition-colors", section.key === linkSectionKey ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-50")}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <FileText className="w-3.5 h-3.5 opacity-70 shrink-0" />
-                          <span className="truncate">{section.title}</span>
-                          {hasSelection && <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />}
-                        </div>
-                        <Badge variant="outline" className={cn("text-[10px] h-5 px-1.5 min-w-[20px] flex items-center justify-center border-transparent shrink-0", section.key === linkSectionKey ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-500")}>{count}</Badge>
-                      </div>
-                    );
-                  })}
+        {/* PREVIEW PANEL: Sticky right */}
+        <Panel
+          ref={previewPanelRef}
+          defaultSize={25}
+          minSize={18}
+          maxSize={45}
+          collapsible
+          collapsedSize={0}
+          onCollapse={() => setCollapsed(prev => ({ ...prev, preview: true }))}
+          onExpand={() => setCollapsed(prev => ({ ...prev, preview: false }))}
+          className="bg-white dark:bg-slate-950 flex flex-col z-10 !overflow-auto"
+        >
+          <div className="flex flex-col h-full">
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-bold text-slate-800 dark:text-slate-200">Contract Preview</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Based on linked clauses</p>
                 </div>
-              </ScrollArea>
-            </div>
-
-            {/* Col 2: Clauses in selected section */}
-            <div className="w-80 border-r border-slate-200 bg-slate-50/50 flex flex-col shrink-0">
-              <div className="p-4 border-b border-slate-100 bg-white">
-                <p className="text-sm font-bold text-slate-800 truncate">Clauses in &ldquo;{CONTRACT_SECTIONS.find((s) => s.key === linkSectionKey)?.title}&rdquo;</p>
-                <p className="text-xs text-slate-500 mt-0.5">{clauses.filter((c) => c.section_key === linkSectionKey).length} clauses available</p>
-              </div>
-              <div className="p-3 border-b border-slate-200 bg-slate-50/50">
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                  <Input placeholder="Search clauses..." className="h-8 pl-8 text-xs bg-white border-slate-200" value={linkSearch} onChange={(e) => setLinkSearch(e.target.value)} />
-                </div>
-              </div>
-              <ScrollArea className="flex-1 p-4">
-                <div className="space-y-3">
+                <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    onClick={() => { if (!draft) return; const next = { ...(draft.section_clauses || {}) }; delete next[linkSectionKey]; updateDraft({ section_clauses: next }); }}
-                    className={cn(
-                      "w-full text-left bg-white border rounded-xl p-3 text-xs font-medium transition-colors",
-                      !draft?.section_clauses?.[linkSectionKey] ? "border-blue-500 text-blue-700" : "border-dashed border-slate-300 text-slate-500 hover:border-slate-400"
-                    )}
+                    onClick={() => setDetailTab('clauses')}
+                    title="Manage linked clauses"
+                    className="p-1.5 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors"
                   >
-                    Use section default {defaultClauseMap[linkSectionKey] && `(${clausesById[defaultClauseMap[linkSectionKey]]?.label || 'none'})`}
+                    <LinkIcon className="w-4 h-4" />
                   </button>
-                  {clauses
-                    .filter((c) => c.section_key === linkSectionKey && c.label.toLowerCase().includes(linkSearch.toLowerCase()))
-                    .sort((a, b) => (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) || a.label.localeCompare(b.label))
-                    .map((clause) => {
-                      const isSelected = draft?.section_clauses?.[linkSectionKey] === clause.id;
-                      const usageCount = allProfiles.filter((p) => p.section_clauses?.[linkSectionKey] === clause.id).length;
-                      return (
-                        <div
-                          key={clause.id}
-                          onClick={() => updateDraft({ section_clauses: { ...(draft?.section_clauses || {}), [linkSectionKey]: clause.id } })}
-                          className={cn(
-                            "bg-white border rounded-xl p-4 shadow-sm relative cursor-pointer transition-colors",
-                            isSelected ? "border-2 border-blue-500" : "border-slate-200 hover:border-slate-300"
-                          )}
-                        >
-                          <div className={cn("absolute top-4 right-4 w-4 h-4 rounded-full border-2 bg-white", isSelected ? "border-blue-500" : "border-slate-300")} />
-                          <p className="text-sm font-bold text-slate-900 pr-6">{clause.label}</p>
-                          <p className="text-[10px] text-slate-500 font-mono mb-3">{clause.clause_key}</p>
-                          <div className="flex items-center gap-2 mb-3 flex-wrap">
-                            {clause.is_default && <Badge variant="secondary" className="bg-amber-50 text-amber-700 hover:bg-amber-100 text-[10px] py-0 border-transparent font-medium">Section Default</Badge>}
-                            {clause.variant_group && <Badge variant="secondary" className="bg-purple-50 text-purple-700 hover:bg-purple-100 text-[10px] py-0 border-transparent font-medium">{clause.variant_group}</Badge>}
-                          </div>
-                          <div className="space-y-1.5 text-[11px]">
-                            <div className="flex justify-between"><span className="text-slate-500">Scope:</span><span className="font-medium text-slate-700">{clause.company_id ? 'Company' : 'Global'}</span></div>
-                            <div className="text-slate-500 pt-2 border-t border-slate-100 mt-2">Used in {usageCount} job profile{usageCount !== 1 ? 's' : ''}</div>
-                          </div>
-                        </div>
-                      );
-                    })}
                 </div>
-              </ScrollArea>
-            </div>
-
-            {/* Col 3: Suggestion rules & preview */}
-            <div className="flex-1 bg-white flex flex-col min-w-0">
-              <div className="p-6 flex gap-8 h-full min-h-0">
-                {(() => {
-                  const selectedClauseId = draft?.section_clauses?.[linkSectionKey];
-                  const selectedClause = selectedClauseId ? clausesById[selectedClauseId] : undefined;
-                  const conditions = (selectedClause as any)?.suggest_conditions as Array<Record<string, string>> | undefined;
-                  const facts = { employment_type: draft?.employment_type, job_level: draft?.job_level, work_arrangement: draft?.work_arrangement, department: draft?.department };
-                  return (
-                    <>
-                      <div className="w-64 space-y-6 flex flex-col shrink-0">
-                        <div>
-                          <p className="text-sm font-bold text-slate-800 mb-1">Suggestion Rules</p>
-                          <p className="text-[11px] text-slate-500 mb-4">Why this clause might apply</p>
-                          {!selectedClause ? (
-                            <p className="text-xs text-slate-400 italic">Select a clause to see details.</p>
-                          ) : !conditions?.length ? (
-                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-500">No suggestion rules defined for this clause - it's a manual pick.</div>
-                          ) : (
-                            <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-4">
-                              <ul className="space-y-2 text-[11px]">
-                                {Object.entries(conditions[0] || {}).filter(([, v]) => v).map(([key, value]) => {
-                                  const matches = facts[key as keyof typeof facts] === value;
-                                  return (
-                                    <li key={key} className="flex justify-between items-center gap-2">
-                                      <span className="text-slate-600">{key.replace(/_/g, ' ')}: {value}</span>
-                                      <span className={cn("font-medium shrink-0", matches ? "text-emerald-600" : "text-slate-400")}>{matches ? 'Matches' : 'No match'}</span>
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex-1 flex flex-col min-w-0">
-                        <p className="text-sm font-bold text-slate-800 mb-1">Clause Preview</p>
-                        <p className="text-[11px] text-slate-500 mb-4">Preview how it will appear in the contract</p>
-
-                        {!selectedClause ? (
-                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex-1 flex items-center justify-center text-sm text-slate-400">
-                            Select a clause on the left to preview it.
-                          </div>
-                        ) : (
-                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex-1 flex flex-col relative overflow-hidden min-h-0">
-                            <div className="flex justify-between items-start mb-4 shrink-0">
-                              <div>
-                                <p className="text-sm font-bold text-slate-900">{selectedClause.label}</p>
-                                <p className="text-[10px] text-slate-500 font-mono mt-0.5">Key: {selectedClause.clause_key}</p>
-                              </div>
-                              <Badge variant="outline" className="text-[10px] font-semibold bg-white shrink-0">{selectedClause.company_id ? 'Company' : 'Global'}</Badge>
-                            </div>
-                            <p className="text-[10px] font-bold text-slate-600 mb-2 uppercase tracking-wider shrink-0">Content</p>
-                            <div
-                              className="prose prose-xs max-w-none text-[11px] text-slate-700 leading-relaxed flex-1 overflow-auto pr-2 [&_strong]:text-slate-900"
-                              dangerouslySetInnerHTML={{ __html: selectedClause.content }}
-                            />
-                            {selectedClause.content?.includes('{{') && (
-                              <div className="pt-4 border-t border-slate-200 mt-4 shrink-0">
-                                <p className="text-[10px] font-bold text-slate-600 mb-3 uppercase tracking-wider">Placeholders Used</p>
-                                <div className="flex flex-wrap gap-2">
-                                  {Array.from(new Set(Array.from(selectedClause.content.matchAll(/\{\{(\w+)\}\}/g)).map((m) => m[1]))).map((p) => (
-                                    <span key={p} className="text-[10px] font-mono bg-white border border-slate-200 text-slate-600 px-2 py-1 rounded-md">{'{{' + p + '}}'}</span>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  );
-                })()}
               </div>
             </div>
+            <div className="flex-1 overflow-auto">
+              {draft ? (
+                <div className="p-4">
+                  {previewHtml ? (
+                    <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-5 text-xs leading-relaxed text-black">
+                      <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-40 text-center border-2 border-dashed rounded-lg border-slate-200 dark:border-slate-800">
+                      <LinkIcon className="w-8 h-8 text-slate-300 mb-2" />
+                      <p className="text-sm font-medium text-slate-500">No clauses linked</p>
+                      <p className="text-xs text-slate-400 mt-1">Link clauses in the Clauses tab to build a preview.</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-center p-6">
+                  <FileText className="w-8 h-8 text-slate-300 mb-2" />
+                  <p className="text-sm text-slate-500">Select a profile to preview</p>
+                </div>
+              )}
+            </div>
           </div>
+        </Panel>
+      </PanelGroup>
 
-          <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3 rounded-b-2xl shrink-0">
-            <p className="text-xs text-slate-400 mr-auto self-center">Changes apply once you Save Changes on the profile.</p>
-            <Button className="h-9 px-6 rounded-full text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setLinkModalOpen(false)}>Done</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+
 
       {/* New Job Profile - minimal creation step; everything else is filled
           in on the live-editable Overview tab right after creating. */}

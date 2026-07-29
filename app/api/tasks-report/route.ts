@@ -197,6 +197,20 @@ export async function GET(req: NextRequest) {
       .eq("department_id", deptId)
       .order("order_num", { ascending: true });
 
+    console.log(
+      "[tasks-report] deptId=%s stages=%o",
+      deptId,
+      (stages || []).map((s: any) => ({ id: s.id, name: s.name, follow_up: s.follow_up }))
+    );
+    console.log(
+      "[tasks-report] NAMED_STAGE_DATES lookup:",
+      NAMED_STAGE_DATES.map(({ id, key }) => ({
+        key,
+        id,
+        found: (stages || []).some((s: any) => s.id === id),
+      }))
+    );
+
     const { data: users } = await supabase
       .from("tm_users")
       .select("id, name");
@@ -340,10 +354,21 @@ export async function GET(req: NextRequest) {
       .filter((s: any) => activeStageIds.includes(s.id))
       .sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
 
+    let loggedSample = false;
+
     const taskList = (tasks || []).map((task: any) => {
       let currentStageName = "";
       let currentStageFollowUp = "";
       let currentOfficerId = "";
+
+      if (!loggedSample) {
+        loggedSample = true;
+        console.log(
+          "[tasks-report] sample task.stages for task id=%s: %s",
+          task.id,
+          JSON.stringify(task.stages).slice(0, 2000)
+        );
+      }
 
       for (const stage of applicableStages) {
         const stageData = task.stages?.[stage.id];
@@ -458,6 +483,14 @@ export async function GET(req: NextRequest) {
       };
     });
 
+    console.log(
+      "[tasks-report] tasks=%d withOfficerId=%d withManagerId=%d withAnyNamedDate=%d",
+      taskList.length,
+      taskList.filter((t: any) => t._officerId).length,
+      taskList.filter((t: any) => t._managerId).length,
+      taskList.filter((t: any) => NAMED_STAGE_DATES.some(({ key }) => t[key])).length
+    );
+
     const officerMap = new Map<
       string,
       { id: string; name: string; count: number; tasks: any[] }
@@ -526,6 +559,14 @@ export async function GET(req: NextRequest) {
         managerMap.set(id, { id, name: usersMap.get(id) || "Unknown", count: 0, tasks: [] });
       }
     });
+
+    console.log(
+      "[tasks-report] officerRoster=%d managerRoster=%d byOfficer=%o byManager=%o",
+      officerRosterIds.size,
+      managerRosterIds.size,
+      Array.from(officerMap.values()).map((g) => ({ id: g.id, name: g.name, count: g.count })),
+      Array.from(managerMap.values()).map((g) => ({ id: g.id, name: g.name, count: g.count }))
+    );
 
     const clean = (arr: any[]) =>
       arr.map(({ _officerId, _managerId, ...rest }: any) => rest);

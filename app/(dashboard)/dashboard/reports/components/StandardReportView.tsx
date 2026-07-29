@@ -7,10 +7,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Plus, Minus, ArrowUpDown, ArrowLeftRight, SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Clock, FileText } from "lucide-react";
+import { Plus, Minus, ArrowUpDown, ArrowLeftRight, SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Clock, FileText, Layers } from "lucide-react";
 import { differenceInDays, isValid } from "date-fns";
 import { cn } from "@/lib/utils";
 import { formatDateCell, formatEstimatedMins, renderReportCellContent } from "./reportCellRenderers";
+import { getSubDepartmentDisplay } from "../../tasks/overall-view/tableUtils";
 
 const DEFAULT_COL_WIDTH = 180;
 const INDEX_COL_WIDTH = 56;
@@ -39,7 +40,7 @@ export function StandardReportView({
   renderCellValue, safeRender, handleSort, toggleStageColumns,
   initialRowsPerPage = 25, showDelta = false, showOfficers = false,
   showTime = false, activeDeptId = '', onSaveStageDate, stages,
-  reportDocDefaults = [],
+  reportDocDefaults = [], departments = [],
 }: any) {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(initialRowsPerPage);
@@ -147,6 +148,36 @@ export function StandardReportView({
 
   const totalPages = Math.max(1, Math.ceil(allTasks.length / rowsPerPage));
 
+  // Group paginated tasks by sub_department for section separators
+  const subDeptGroups = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const task of paginatedTasks) {
+      const name = getSubDepartmentDisplay(task, departments);
+      if (!map.has(name)) map.set(name, []);
+      map.get(name)!.push(task);
+    }
+    return Array.from(map.entries())
+      .sort(([a], [b]) => {
+        if (a === 'N/A') return 1;
+        if (b === 'N/A') return -1;
+        return a.localeCompare(b);
+      })
+      .map(([name, tasks]) => ({ name, tasks }));
+  }, [paginatedTasks, departments]);
+
+  const sectionedRows = useMemo(() => {
+    const rows: ({ type: 'section'; name: string } | { type: 'task'; task: any; globalIdx: number })[] = [];
+    let globalIdx = 0;
+    for (const group of subDeptGroups) {
+      rows.push({ type: 'section', name: group.name });
+      for (const task of group.tasks) {
+        rows.push({ type: 'task', task, globalIdx });
+        globalIdx++;
+      }
+    }
+    return rows;
+  }, [subDeptGroups]);
+
   // A refresh (or filter/sort change) can shrink the result set out from under
   // whatever page the user was sitting on — snap back into range instead of
   // rendering a blank "page 5 of 2" table.
@@ -177,7 +208,18 @@ export function StandardReportView({
                   if (col.isDelta) {
                     return (
                       <TableHead key={col.id} className="border-r border-b border-white/30 text-center px-1 py-2.5 bg-custom-blue" style={{ width: 62 }}>
-                        <span className="text-[9px] font-bold text-blue-300/60 uppercase">Δ</span>
+                        <TooltipProvider delayDuration={300}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="text-[10px] font-black text-amber-300/90 uppercase tracking-wide cursor-default bg-white/10 px-1.5 py-0.5 rounded">
+                                Δ
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" className="bg-slate-900 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[9999] max-w-[200px]">
+                              Days between stages
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       </TableHead>
                     );
                   }
@@ -326,27 +368,51 @@ export function StandardReportView({
 
             {/* ═══ BODY ═══ */}
             <TableBody>
-              {paginatedTasks.length > 0 ? (
-                paginatedTasks.map((task: any, idx: number) => (
-                  <TableRow
-                    key={task.id}
-                    className={cn(
-                      "group border-0 transition-colors",
-                      idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
-                      "hover:bg-blue-50/50"
-                    )}
-                  >
-                    <TableCell className={cn(
-                      "sticky left-0 z-20 border-r border-b border-slate-200 text-center py-1.5",
-                      idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
-                      "group-hover:bg-blue-50/50",
-                    )}>
-                      <span className="text-sm font-semibold text-slate-400 group-hover:text-slate-600 transition-colors">
-                        {((currentPage - 1) * rowsPerPage) + idx + 1}
-                      </span>
-                    </TableCell>
+              {sectionedRows.length > 0 ? (
+                sectionedRows.map((item: any) => {
+                  if (item.type === 'section') {
+                    return (
+                      <TableRow key={`section-${item.name}`} className="border-0 hover:bg-transparent">
+                        <TableCell
+                          colSpan={interleavedColumns.length + 1}
+                          className="px-4 py-2 border-b-2 border-t border-slate-300 bg-slate-100/80"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Layers className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                            <span className="text-[11px] font-bold uppercase tracking-widest text-slate-600">
+                              {item.name === 'N/A' ? 'Unassigned' : item.name}
+                            </span>
+                            <span className="text-[10px] font-medium text-slate-400 ml-1">
+                              ({(() => { const g = subDeptGroups.find(g => g.name === item.name); return g ? g.tasks.length : 0; })()})
+                            </span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  }
 
-                    {interleavedColumns.map((col: any) => {
+                  const task = item.task;
+                  const idx = item.globalIdx;
+                  return (
+                    <TableRow
+                      key={task.id}
+                      className={cn(
+                        "group border-0 transition-colors",
+                        idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
+                        "hover:bg-blue-50/50"
+                      )}
+                    >
+                      <TableCell className={cn(
+                        "sticky left-0 z-20 border-r border-b border-slate-200 text-center py-1.5",
+                        idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
+                        "group-hover:bg-blue-50/50",
+                      )}>
+                        <span className="text-sm font-semibold text-slate-400 group-hover:text-slate-600 transition-colors">
+                          {((currentPage - 1) * rowsPerPage) + idx + 1}
+                        </span>
+                      </TableCell>
+
+                      {interleavedColumns.map((col: any) => {
                       // ── Delta column ──
                       if (col.isDelta) {
                         const nextDate = parseDateSafeReport(getStageDisplayDateStr(task, col.nextCol));
@@ -370,7 +436,7 @@ export function StandardReportView({
                           <TableCell
                             key={col.id}
                             className={cn(
-                              "px-1 py-1.5 border-r border-b border-slate-100 text-center",
+                              "px-1 py-1.5 border-r border-b border-slate-100 text-center border-l-[3px] border-l-amber-300/40",
                               idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
                               "group-hover:bg-blue-50/50"
                             )}
@@ -428,7 +494,8 @@ export function StandardReportView({
                       );
                     })}
                   </TableRow>
-                ))
+                  );
+                })
               ) : (
                 <TableRow>
                   <TableCell colSpan={interleavedColumns.length + 1} className="h-64 bg-slate-50">
