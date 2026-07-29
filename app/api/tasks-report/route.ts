@@ -128,7 +128,7 @@ export async function GET(req: NextRequest) {
     let taskQuery = supabase
       .from("tm_tasks")
       .select(`
-        id, applicant_name, company_name, status, r_number, passport_number,
+        id, applicant_name, status, r_number, passport_number,
         date_initiated, department_id, subdepartment_id, class_id, subclass_id,
         job_level, stages, task_manager_id, task_assistant_id,
         participants_details, renewal_status, individual_id, company_id,
@@ -144,6 +144,30 @@ export async function GET(req: NextRequest) {
 
     const { data: tasks, error: tasksErr } = await taskQuery;
     if (tasksErr) throw tasksErr;
+
+    // company_name is not a real tm_tasks column — it's join-computed everywhere else in
+    // the web app (DepartmentTasksManager/reports fetchTasks) from the task's "sponsor"/
+    // "company" participant, falling back to a company lookup table by id. Mirror that
+    // here rather than trusting a column that doesn't exist in production.
+    const { data: companyRows } = await supabase
+      .from("acc_portal_company_duplicate")
+      .select("id, company_name, company_prefix");
+    const companiesMap = new Map<number, { name: string; prefix: string }>();
+    (companyRows || []).forEach((c: any) =>
+      companiesMap.set(Number(c.id), { name: c.company_name || "", prefix: c.company_prefix || "" })
+    );
+
+    function resolveCompanyName(task: any): string {
+      const companyParticipant = task.participants_details?.find(
+        (p: any) => p.role?.includes("sponsor") || p.role?.includes("company")
+      );
+      return (
+        companyParticipant?.name ||
+        (companyParticipant?.id ? companiesMap.get(Number(companyParticipant.id))?.name : "") ||
+        (task.company_id ? companiesMap.get(Number(task.company_id))?.name : "") ||
+        ""
+      );
+    }
 
     const { data: stages } = await supabase
       .from("tm_stages")
@@ -343,7 +367,7 @@ export async function GET(req: NextRequest) {
       return {
         id: task.id,
         applicant_name: task.applicant_name || "Unknown",
-        company_name: task.company_name || "",
+        company_name: resolveCompanyName(task) || "",
         sub_department: subDept,
         status: task.status || "wip",
         job_level: jobLevel,
