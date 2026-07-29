@@ -98,13 +98,23 @@ function parseDateSafe(s: string | null | undefined): Date | null {
 // stage list rather than filtering by per-task applicability (isStageApplicableToTask) — same
 // simplification already used for officer-stage resolution below, since this route doesn't
 // fetch the nested subdepartment/class/subclass applicability overrides that function needs.
+//
+// Deliberately checks `updatedAt` in addition to the web module's original field list
+// (completedAt/skippedAt/date_completed/date/lastUpdated). Without it, a stage that's
+// actively in progress but only carries `updatedAt` (e.g. an officer was just assigned, no
+// formal completion yet) is invisible to this function, which then falls back to whichever
+// earlier stage WAS formally completed — misreporting tasks currently sitting with an
+// officer as "awaiting client" simply because their last completed stage happened to be a
+// client follow_up. Confirmed against production data (task 1429): current stage is an
+// incomplete 'Officer' stage with only `updatedAt` set, but the last completed stage before
+// it was 'Client', so this function returned the Client stage as "current" until this fix.
 function getCurrentStageTracking(task: any, stages: any[]): { stage: any; handledAt: Date } | null {
   let latest: { stage: any; handledAt: Date } | null = null;
   for (const stage of stages) {
     const stageData = task?.stages?.[stage?.id];
     if (!stageData) continue;
     const directDate = parseDateSafe(
-      stageData.completedAt || stageData.skippedAt || stageData.date_completed || stageData.date || stageData.lastUpdated || null
+      stageData.completedAt || stageData.skippedAt || stageData.date_completed || stageData.date || stageData.updatedAt || stageData.lastUpdated || null
     );
     if (directDate && (!latest || directDate.getTime() > latest.handledAt.getTime())) {
       latest = { stage, handledAt: directDate };
