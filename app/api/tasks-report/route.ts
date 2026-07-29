@@ -152,7 +152,7 @@ export async function GET(req: NextRequest) {
       .select(`
         id, applicant_name, status, r_number, passport_number,
         date_initiated, department_id, subdepartment_id, class_id, subclass_id,
-        job_level, stages, task_manager_id, task_assistant_id,
+        job_level, stages, task_manager_id, task_assistant_id, officer_id,
         participants_details, renewal_status, individual_id, company_id,
         applicant_details, processing_requirements_documents, issuance_requirements_documents,
         source_document_id
@@ -421,6 +421,15 @@ export async function GET(req: NextRequest) {
           currentOfficerId = officerIds[0].toString();
         }
       }
+      // Fall back to tm_tasks.officer_id — a simpler, persisted "case officer" column that
+      // new-task-dialog.tsx writes directly (a numeric tm_users id, NOT the UUID scanner_users
+      // id used by tm_role_assignments/stage officer_ids). DepartmentTasksManager's own
+      // officer tabs/filters (task.officer_ids / task.officer_id) read this same column, so
+      // when no stage is currently sitting on an "officer" follow_up, this is what that
+      // module falls back to as well rather than showing Unallocated.
+      if (!currentOfficerId && task.officer_id != null) {
+        currentOfficerId = String(task.officer_id);
+      }
 
       // task_manager_id/task_assistant_id are not reliably populated columns — the real
       // assignment lives in participants_details, exactly as fetchTasks()/EnquiryDialog
@@ -487,11 +496,12 @@ export async function GET(req: NextRequest) {
     });
 
     console.log(
-      "[tasks-report] tasks=%d withOfficerId=%d withManagerId=%d withAnyNamedDate=%d",
+      "[tasks-report] tasks=%d withOfficerId=%d withManagerId=%d withAnyNamedDate=%d withRawOfficerIdColumn=%d",
       taskList.length,
       taskList.filter((t: any) => t._officerId).length,
       taskList.filter((t: any) => t._managerId).length,
-      taskList.filter((t: any) => NAMED_STAGE_DATES.some(({ key }) => t[key])).length
+      taskList.filter((t: any) => NAMED_STAGE_DATES.some(({ key }) => t[key])).length,
+      (tasks || []).filter((t: any) => t.officer_id != null).length
     );
 
     const officerMap = new Map<
