@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Loader2, Sliders, FileStack, Pencil, Database, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Loader2, Sliders, FileStack, Pencil, Database, Search, ArrowUpDown, ArrowUp, ArrowDown, Shuffle, ListOrdered } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { EcPlaceholder, fetchPlaceholders, updatePlaceholderDetails } from '../utils/ecPlaceholders';
@@ -14,24 +14,30 @@ import { ecPlaceholderToDtmPlaceholder, dtmPlaceholderToEcUpdates } from '../uti
 import { PlaceholderFormDialog } from '../../templates/document-template-manager/components/PlaceholderFormDialog';
 import { useTemplateData } from '../../templates/document-template-manager/hooks/useTemplateData';
 import { useTableData } from '@/lib/tableUtils';
+import { ENTITY_TYPES } from '@/lib/constants/entity-types';
 import type { Placeholder } from '../../templates/document-template-manager/types';
 
 interface PlaceholderSourcesProps {
   highlightKeys?: string[];
+  filterByKeys?: string[];
 }
 
-type SortColumn = '#' | 'token' | 'group' | 'source' | 'linked' | 'default';
+type SortColumn = '#' | 'token' | 'group' | 'source' | 'entity' | 'linked' | 'default';
 type SortDir = 'asc' | 'desc';
 
 const EC_HIDDEN_SECTIONS = {
-  entityContext: true,
   uiVisibility: true,
   aiRefinement: true,
   jobQuestions: true,
   requirements: true,
 };
 
-export function PlaceholderSources({ highlightKeys }: PlaceholderSourcesProps) {
+const entityTypeLabel = (type: string) => ENTITY_TYPES.find((t) => t.value === type)?.label || type;
+const strategyLabel = (s: string) => s === 'merge' ? 'Merge' : 'Fallback';
+const StrategyIcon = ({ strategy }: { strategy: string }) =>
+  strategy === 'merge' ? <Shuffle className="w-3 h-3" /> : <ListOrdered className="w-3 h-3" />;
+
+export function PlaceholderSources({ highlightKeys, filterByKeys }: PlaceholderSourcesProps) {
   const [placeholders, setPlaceholders] = useState<EcPlaceholder[]>([]);
   const [masterFields, setMasterFields] = useState<MasterFieldOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -78,25 +84,44 @@ export function PlaceholderSources({ highlightKeys }: PlaceholderSourcesProps) {
       : <ArrowDown className="w-3 h-3 ml-1 text-custom-blue" />;
   };
 
-  const getLinkedLabel = (p: EcPlaceholder) => {
-    if (p.source_kind === 'master_field' && p.master_field_id) {
-      return masterFieldMap.get(p.master_field_id) || '';
+  const getLinkedLabels = (p: EcPlaceholder) => {
+    if (p.source_kind !== 'master_field') return [];
+    const ids: Array<{ label: string; priority: number; strategy: string }> = [];
+    if (p.master_field_links && p.master_field_links.length > 0) {
+      for (const link of p.master_field_links.sort((a, b) => a.display_priority - b.display_priority)) {
+        const label = masterFieldMap.get(link.master_field_id);
+        if (label) ids.push({ label, priority: link.display_priority, strategy: link.strategy || 'fallback' });
+      }
+    } else if (p.master_field_id) {
+      const label = masterFieldMap.get(p.master_field_id);
+      if (label) ids.push({ label, priority: 1, strategy: 'fallback' });
     }
-    return '';
+    return ids;
   };
 
+  const getEntityLabels = (p: EcPlaceholder): string[] =>
+    (p.entity_type || []).map((t) => entityTypeLabel(t));
+
   const sortedPlaceholders = useMemo(() => {
-    const list = search
+    let list = search
       ? placeholders.filter((p) => {
           const q = search.toLowerCase();
+          const linkedLabels = getLinkedLabels(p);
+          const entityLabels = getEntityLabels(p);
           return (
             p.key.toLowerCase().includes(q) ||
             p.label.toLowerCase().includes(q) ||
             p.group_label.toLowerCase().includes(q) ||
-            (p.master_field_id && masterFieldMap.get(p.master_field_id)?.toLowerCase().includes(q))
+            linkedLabels.some((l) => l.label.toLowerCase().includes(q)) ||
+            entityLabels.some((l) => l.toLowerCase().includes(q))
           );
         })
       : [...placeholders];
+
+    // Filter by keys when filterByKeys is provided
+    if (filterByKeys && filterByKeys.length > 0) {
+      list = list.filter((p) => filterByKeys.includes(p.key));
+    }
 
     list.sort((a, b) => {
       let cmp = 0;
@@ -113,8 +138,11 @@ export function PlaceholderSources({ highlightKeys }: PlaceholderSourcesProps) {
         case 'source':
           cmp = a.source_kind.localeCompare(b.source_kind);
           break;
+        case 'entity':
+          cmp = getEntityLabels(a).join(', ').localeCompare(getEntityLabels(b).join(', '));
+          break;
         case 'linked':
-          cmp = getLinkedLabel(a).localeCompare(getLinkedLabel(b));
+          cmp = getLinkedLabels(a).map((l) => l.label).join(', ').localeCompare(getLinkedLabels(b).map((l) => l.label).join(', '));
           break;
         case 'default':
           cmp = (a.default_value || '').localeCompare(b.default_value || '');
@@ -124,7 +152,7 @@ export function PlaceholderSources({ highlightKeys }: PlaceholderSourcesProps) {
     });
 
     return list;
-  }, [placeholders, search, masterFieldMap, sortColumn, sortDir]);
+  }, [placeholders, search, masterFieldMap, sortColumn, sortDir, filterByKeys]);
 
   const openEdit = (placeholder: EcPlaceholder) => {
     setEditingEc(placeholder);
@@ -155,7 +183,11 @@ export function PlaceholderSources({ highlightKeys }: PlaceholderSourcesProps) {
     <div ref={sectionRef} className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-4">
       <div className="flex items-center justify-between mb-3">
         <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Placeholders Used</p>
-        <p className="text-xs text-slate-400">{placeholders.length} total</p>
+        <p className="text-xs text-slate-400">
+          {filterByKeys && filterByKeys.length > 0
+            ? `${sortedPlaceholders.length} / ${placeholders.length} total`
+            : `${placeholders.length} total`}
+        </p>
       </div>
 
       <div className="relative mb-3">
@@ -178,9 +210,9 @@ export function PlaceholderSources({ highlightKeys }: PlaceholderSourcesProps) {
           {placeholders.length === 0 ? 'No placeholders detected yet.' : 'No placeholders match your search.'}
         </p>
       ) : (
-        <div className="overflow-auto max-h-80">
+        <div className="overflow-auto max-h-[560px] rounded-lg border border-slate-200 dark:border-slate-800">
           <Table>
-            <TableHeader>
+            <TableHeader className="bg-slate-50 dark:bg-slate-900">
               <TableRow>
                 <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2 w-10">
                   <button onClick={() => toggleSort('#')} className="flex items-center gap-0">
@@ -203,6 +235,11 @@ export function PlaceholderSources({ highlightKeys }: PlaceholderSourcesProps) {
                   </button>
                 </TableHead>
                 <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
+                  <button onClick={() => toggleSort('entity')} className="flex items-center gap-0">
+                    Entity Type <SortIcon col="entity" />
+                  </button>
+                </TableHead>
+                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
                   <button onClick={() => toggleSort('linked')} className="flex items-center gap-0">
                     Linked Master Field <SortIcon col="linked" />
                   </button>
@@ -216,7 +253,10 @@ export function PlaceholderSources({ highlightKeys }: PlaceholderSourcesProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedPlaceholders.map((p, idx) => (
+              {sortedPlaceholders.map((p, idx) => {
+                const linkedLabels = getLinkedLabels(p);
+                const entityLabels = getEntityLabels(p);
+                return (
                 <TableRow
                   key={p.id}
                   className={cn(highlightKeys?.includes(p.key) && "bg-amber-50/60 dark:bg-amber-900/10")}
@@ -245,11 +285,32 @@ export function PlaceholderSources({ highlightKeys }: PlaceholderSourcesProps) {
                     )}
                   </TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
+                    {entityLabels.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {entityLabels.map((label) => (
+                          <Badge key={label} variant="secondary" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200">
+                            {label}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-300">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
                     {p.source_kind === 'master_field' ? (
-                      p.master_field_id && masterFieldMap.get(p.master_field_id) ? (
-                        <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200">
-                          {masterFieldMap.get(p.master_field_id)}
-                        </Badge>
+                      linkedLabels.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {linkedLabels.map((item, li) => (
+                            <Badge key={item.label} variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 flex items-center gap-1">
+                              <StrategyIcon strategy={item.strategy} />
+                              <span>{item.label}</span>
+                              {linkedLabels.length > 1 && (
+                                <span className="text-[10px] text-emerald-400 font-bold">#{item.priority}</span>
+                              )}
+                            </Badge>
+                          ))}
+                        </div>
                       ) : (
                         <span className="text-xs text-red-500 italic">Not linked</span>
                       )
@@ -274,7 +335,8 @@ export function PlaceholderSources({ highlightKeys }: PlaceholderSourcesProps) {
                     )}
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         </div>

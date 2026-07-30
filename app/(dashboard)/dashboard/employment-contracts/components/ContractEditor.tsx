@@ -1,27 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { fetchCompanyEmployees, ContractEmployeeInfo } from '../utils/data';
 import { EcJobProfile, fetchJobProfiles, matchJobProfile } from '../utils/jobProfileData';
 import { EmploymentOffer, fetchLatestOffer } from '../utils/employmentOfferData';
-import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
-import { resolveEffectiveClauses, resolveEffectiveSettings } from '../utils/clauseEngine';
+import { resolveEffectiveSettings } from '../utils/clauseEngine';
 import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
 import type { EcPlaceholder } from '../utils/ecPlaceholders';
-import { CONTRACT_SECTIONS } from '../utils/contractStructure';
 import { fetchCompanies, Company } from '../../companies/database';
+import { fetchClauses, EcClause } from '../utils/clauseLibraryData';
+import { detectTokens } from '../utils/placeholderDetection';
 import { SearchableSelect } from './SearchableSelect';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Loader2, Settings2, UserRound, Briefcase,
-  ChevronDown, MapPin, ClipboardList, Clock, Banknote, Heart,
-  ShieldCheck, Umbrella, CheckSquare, BarChart, FileText, CheckCircle, FileSignature, Folder,
-  ExternalLink, Star, RotateCcw,
-} from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Loader2, Settings2, UserRound, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ENTITY_TYPES } from '@/lib/constants/entity-types';
 
 interface ContractEditorProps {
   companyId: string | null;
@@ -31,30 +26,6 @@ interface ContractEditorProps {
   selectedJobProfile: EcJobProfile | null;
   setSelectedJobProfile: (profile: EcJobProfile | null) => void;
 }
-
-// Helper to map section keys to the corresponding icons shown in the design
-const getSectionIcon = (key: string) => {
-  const iconProps = { className: "w-[18px] h-[18px] text-slate-400" };
-  switch (key) {
-    case 'parties': return <UserRound {...iconProps} className="w-[18px] h-[18px] text-blue-500" />;
-    case 'appointment': return <Briefcase {...iconProps} className="w-[18px] h-[18px] text-emerald-500" />;
-    case 'place_of_work': return <MapPin {...iconProps} className="w-[18px] h-[18px] text-indigo-500" />;
-    case 'duties': return <ClipboardList {...iconProps} className="w-[18px] h-[18px] text-rose-400" />;
-    case 'working_hours': return <Clock {...iconProps} className="w-[18px] h-[18px] text-amber-500" />;
-    case 'remuneration': return <Banknote {...iconProps} className="w-[18px] h-[18px] text-emerald-500" />;
-    case 'benefits': return <Heart {...iconProps} className="w-[18px] h-[18px] text-orange-400" />;
-    case 'deductions': return <ShieldCheck {...iconProps} className="w-[18px] h-[18px] text-emerald-500" />;
-    case 'leave': return <Umbrella {...iconProps} className="w-[18px] h-[18px] text-teal-500" />;
-    case 'obligations': return <CheckSquare {...iconProps} className="w-[18px] h-[18px] text-emerald-500" />;
-    case 'performance': return <BarChart {...iconProps} className="w-[18px] h-[18px] text-blue-400" />;
-    case 'termination': return <FileText {...iconProps} className="w-[18px] h-[18px] text-blue-400" />;
-    case 'general': return <CheckSquare {...iconProps} className="w-[18px] h-[18px] text-emerald-500" />;
-    case 'acceptance': return <CheckCircle {...iconProps} className="w-[18px] h-[18px] text-emerald-500" />;
-    case 'signatures': return <FileSignature {...iconProps} className="w-[18px] h-[18px] text-emerald-500" />;
-    case 'appendix': return <Folder {...iconProps} className="w-[18px] h-[18px] text-blue-400" />;
-    default: return <FileText {...iconProps} />;
-  }
-};
 
 export function ContractEditor({
   companyId,
@@ -66,10 +37,8 @@ export function ContractEditor({
 }: ContractEditorProps) {
   const [employee, setEmployee] = useState<ContractEmployeeInfo | null>(null);
   const [profiles, setProfiles] = useState<EcJobProfile[]>([]);
-  const [clauses, setClauses] = useState<EcClause[]>([]);
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(false);
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
 
   const offer: Partial<EmploymentOffer> = contractData.offer || {};
   const updateOffer = (patch: Partial<EmploymentOffer>) => {
@@ -84,16 +53,14 @@ export function ContractEditor({
       }
       setLoading(true);
 
-      const [emps, jobProfiles, allClauses, companies] = await Promise.all([
+      const [emps, jobProfiles, companies] = await Promise.all([
         fetchCompanyEmployees(companyId),
         fetchJobProfiles(companyId),
-        fetchClauses(),
         fetchCompanies(),
       ]);
       const target = emps.find(e => String(e.individualId) === employeeId) || null;
       setEmployee(target);
       setProfiles(jobProfiles);
-      setClauses(allClauses);
       setCompany(companies.find((c) => String(c.id) === String(companyId)) || null);
 
       const matched = target ? matchJobProfile(jobProfiles, target) : null;
@@ -112,7 +79,6 @@ export function ContractEditor({
         start_date: target?.startDate || new Date().toISOString().split('T')[0],
         end_date: null,
         settings_overrides: {},
-        section_clauses_overrides: {},
         placeholder_overrides: {},
         status: 'draft',
       };
@@ -134,37 +100,6 @@ export function ContractEditor({
     updateOffer({ job_profile_id: profile?.id });
   };
 
-  const toggleSection = (key: string) => {
-    setExpandedSections((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  };
-
-  const toggleAllSections = () => {
-    setExpandedSections((prev) =>
-      prev.size === CONTRACT_SECTIONS.length ? new Set() : new Set(CONTRACT_SECTIONS.map((s) => s.key))
-    );
-  };
-
-  // Overrides the clause used for a section on THIS contract only (stored on
-  // the employment offer) - distinct from the Job Profile's own section
-  // clause picks, which stay untouched. '__none__' clears the override so
-  // resolution falls back to the Job Profile's own pick and, if that has
-  // none either, the section stays unresolved (no Company/Department
-  // inheritance, no silent default-clause fallback; see
-  // resolveEffectiveClauses in utils/clauseEngine.ts).
-  const handleSectionClauseOverride = (sectionKey: string, value: string) => {
-    const next = { ...(offer.section_clauses_overrides || {}) };
-    if (value === '__none__') {
-      delete next[sectionKey];
-    } else {
-      next[sectionKey] = value;
-    }
-    updateOffer({ section_clauses_overrides: next });
-  };
-
   // Overrides a single {{token}} value for THIS contract only. Passing
   // `value === undefined` clears the override (falls back to the computed
   // default from buildStandardPlaceholderValues) - an explicit empty string
@@ -182,26 +117,9 @@ export function ContractEditor({
 
   const positionProfiles = profiles.filter(p => p.scope === 'position');
 
-  const clausesById = useMemo(() => Object.fromEntries(clauses.map(c => [c.id, c])), [clauses]);
-
   const effectiveSettings = useMemo(() => resolveEffectiveSettings([
     selectedJobProfile, offer.settings_overrides ? { settings: offer.settings_overrides } : null,
   ]), [selectedJobProfile, offer]);
-
-  const effectiveClauses = useMemo(() => resolveEffectiveClauses([
-    selectedJobProfile, offer.section_clauses_overrides ? { section_clauses: offer.section_clauses_overrides } : null,
-  ]), [selectedJobProfile, offer]);
-
-  // Temporary diagnostic logging for the clause-resolution cascade - remove
-  // once the no-inheritance behavior is confirmed working end to end.
-  useEffect(() => {
-    console.log('[ContractEditor] clause resolution', {
-      selectedJobProfile_section_clauses: selectedJobProfile?.section_clauses,
-      offer_section_clauses_overrides: offer.section_clauses_overrides,
-      effectiveClauses,
-      unresolvedSections: CONTRACT_SECTIONS.map((s) => s.key).filter((k) => !effectiveClauses[k]),
-    });
-  }, [selectedJobProfile, offer, effectiveClauses]);
 
   const { ecPlaceholders, masterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
 
@@ -213,18 +131,35 @@ export function ContractEditor({
     [employee, company, offer, effectiveSettings, ecPlaceholders, masterFieldValues]
   );
 
-  const sectionRows = useMemo(() => {
-    return CONTRACT_SECTIONS.map((section) => {
-      const clauseId = effectiveClauses[section.key];
-      const clauseLabel = clauseId ? clausesById[clauseId]?.label : undefined;
-      return {
-        section,
-        status: clauseId ? 'Configured' : 'Not Configured',
-        clauseLabel,
-        clauseId,
-      };
-    });
-  }, [effectiveClauses, clausesById]);
+  // Fetch clauses for profile-scoped placeholder filtering
+  const [allClauses, setAllClauses] = useState<EcClause[]>([]);
+  useEffect(() => {
+    fetchClauses().then(setAllClauses);
+  }, []);
+
+  // Extract placeholder keys referenced by the selected job profile's clauses
+  const profilePlaceholderKeys = useMemo(() => {
+    if (!selectedJobProfile) return [];
+    const clauseIds = new Set(Object.values(selectedJobProfile.section_clauses || {}));
+    const profileClauses = allClauses.filter((c) => clauseIds.has(c.id));
+    const keys = new Set<string>();
+    for (const clause of profileClauses) {
+      for (const token of detectTokens(clause.content)) keys.add(token);
+    }
+    return Array.from(keys);
+  }, [selectedJobProfile, allClauses]);
+
+  // Filter ecPlaceholders to only those referenced by the profile's linked
+  // clauses. Placeholders are derived FROM clause content (detectTokens
+  // above), so no profile selected, or a profile with zero clauses linked,
+  // both correctly mean zero placeholders apply - there's nothing to fall
+  // back to showing, since the whole point is "what does THIS profile
+  // actually use." profilePlaceholderKeys is already [] in both cases, so
+  // filtering against it naturally yields [] without a separate branch.
+  const profileScopedPlaceholders = useMemo(() => {
+    if (!selectedJobProfile) return [];
+    return ecPlaceholders.filter((p) => profilePlaceholderKeys.includes(p.key));
+  }, [ecPlaceholders, selectedJobProfile, profilePlaceholderKeys]);
 
   if (!companyId || !employeeId) {
     return (
@@ -271,234 +206,145 @@ export function ContractEditor({
       <ScrollArea className="flex-1 overflow-auto">
         <div className="max-w-4xl mx-auto p-6 space-y-6 pb-24">
           
-          <Tabs defaultValue="setup-clauses" className="w-full">
-            <TabsList className="w-full h-12 grid grid-cols-2 p-1 bg-slate-100/80 dark:bg-slate-800/80 rounded-xl mb-6 shadow-inner">
-              <TabsTrigger value="setup-clauses" className="rounded-lg text-sm font-medium transition-all data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Setup & Clauses</TabsTrigger>
-              <TabsTrigger value="placeholders" className="rounded-lg text-sm font-medium transition-all data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Data & Values</TabsTrigger>
-            </TabsList>
-
-            {/* SETUP & CLAUSES TAB */}
-            <TabsContent value="setup-clauses" className="space-y-6 mt-0">
-              {/* Contract Configuration */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-sm overflow-hidden transition-all hover:shadow-md">
-                <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
-                  <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                    <Settings2 className="w-4 h-4 text-blue-500" /> Contract Configuration
-                  </h3>
-                </div>
-                <div className="p-6">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium text-slate-500">Job Profile Base</Label>
-                    <SearchableSelect
-                      value={selectedJobProfile?.id || null}
-                      onChange={handleProfileChange}
-                      placeholder="Select a job profile..."
-                      searchPlaceholder="Search job profiles..."
-                      options={positionProfiles.map((p) => ({ value: p.id, label: p.name }))}
-                    />
-                  </div>
-                </div>
+          {/* Contract Configuration */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-sm overflow-hidden transition-all hover:shadow-md">
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <Settings2 className="w-4 h-4 text-blue-500" /> Contract Configuration
+              </h3>
+            </div>
+            <div className="p-6">
+              <div className="space-y-2">
+                <Label className="text-xs font-medium text-slate-500">Job Profile Base</Label>
+                <SearchableSelect
+                  value={selectedJobProfile?.id || null}
+                  onChange={handleProfileChange}
+                  placeholder="Select a job profile..."
+                  searchPlaceholder="Search job profiles..."
+                  options={positionProfiles.map((p) => ({ value: p.id, label: p.name }))}
+                />
               </div>
-              <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-sm overflow-hidden">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
-                  <div className="min-w-0">
-                    <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">Sections & Clauses</h3>
-                    <p className="text-xs text-slate-500 mt-1">Review and customize clauses for this specific contract</p>
-                  </div>
-                  <button
-                    onClick={toggleAllSections}
-                    className="h-8 text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
-                  >
-                    {expandedSections.size === CONTRACT_SECTIONS.length ? 'Collapse All' : 'Expand All'}
-                  </button>
-                </div>
-                <div className="p-2">
-                  <div className="divide-y divide-slate-100/50 dark:divide-slate-800/30">
-                    {sectionRows.map(({ section, status, clauseLabel, clauseId }, index) => {
-                      let badgeStyles = "";
-                      switch(status) {
-                        case 'Configured': badgeStyles = "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30"; break;
-                        case 'Not Configured': badgeStyles = "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400 border-red-200 dark:border-red-500/30"; break;
-                      }
-                      const isExpanded = expandedSections.has(section.key);
-                      const resolvedClause = clauseId ? clausesById[clauseId] : undefined;
-                      const options = clauses.filter((c) => c.section_key === section.key);
-                      const ungrouped = options.filter((c) => !c.variant_group);
-                      const optionGroups = new Map<string, EcClause[]>();
-                      for (const c of options) {
-                        if (c.variant_group) {
-                          if (!optionGroups.has(c.variant_group)) optionGroups.set(c.variant_group, []);
-                          optionGroups.get(c.variant_group)!.push(c);
-                        }
-                      }
-                      const overrideValue = offer.section_clauses_overrides?.[section.key] || '__none__';
+            </div>
+          </div>
 
-                      return (
-                        <div key={section.key} className={cn("rounded-xl my-1 overflow-hidden transition-colors", isExpanded && "bg-slate-50 dark:bg-slate-900/50")}>
-                          <div
-                            onClick={() => toggleSection(section.key)}
-                            className="flex items-center justify-between px-4 py-3 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors group"
-                            title={clauseLabel}
-                          >
-                            <div className="flex items-center gap-4">
-                              <div className="w-8 h-8 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
-                                {getSectionIcon(section.key)}
-                              </div>
-                              <span className="text-sm font-medium text-slate-700 dark:text-slate-200 group-hover:text-slate-900 dark:group-hover:text-white transition-colors">
-                                {index + 1}. {section.title}
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-4">
-                              <span className={cn("text-xs font-semibold px-2.5 py-0.5 rounded-full border", badgeStyles)}>
-                                {status}
-                              </span>
-                              <ChevronDown className={cn("w-4 h-4 text-slate-400 group-hover:text-slate-600 transition-transform", isExpanded && "rotate-180")} />
-                            </div>
-                          </div>
-
-                          {isExpanded && (
-                            <div className="px-4 pb-4 pt-2 space-y-4 ml-[52px]">
-                              <div className="flex flex-col gap-2">
-                                <div className="flex items-center justify-between">
-                                  <Label className="text-xs font-medium text-slate-500">Clause Override</Label>
-                                  <Link
-                                    href="/dashboard/employment-contracts/clause-library"
-                                    target="_blank"
-                                    className="text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                                  >
-                                    <ExternalLink className="w-3 h-3" /> Edit Library
-                                  </Link>
-                                </div>
-                                <SearchableSelect
-                                  value={overrideValue}
-                                  onChange={(v) => handleSectionClauseOverride(section.key, v)}
-                                  placeholder="No override"
-                                  searchPlaceholder="Search clauses..."
-                                  options={[
-                                    { value: '__none__', label: "No override (use Job Profile / Department / Company's pick, if any)" },
-                                    ...ungrouped.map((c) => ({ value: c.id, label: `${c.label}${c.is_default ? ' (default)' : ''}` })),
-                                    ...Array.from(optionGroups.entries()).flatMap(([group, items]) =>
-                                      items.map((c) => ({ value: c.id, label: `${c.label}${c.is_default ? ' (default)' : ''}`, group }))
-                                    ),
-                                  ]}
-                                />
-                              </div>
-
-                              {resolvedClause ? (
-                                <div className="border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 p-4 shadow-sm space-y-3">
-                                  <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
-                                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
-                                      {resolvedClause.is_default && <Star className="w-3.5 h-3.5 text-amber-500" fill="currentColor" />}
-                                      {resolvedClause.label}
-                                    </p>
-                                    <span className="text-xs font-mono text-slate-400 px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded-full">{resolvedClause.clause_key}</span>
-                                  </div>
-                                  <div
-                                    className="prose prose-sm max-w-none text-slate-600 dark:text-slate-300 max-h-60 overflow-auto scrollbar-thin scrollbar-thumb-slate-200 [&_strong]:text-slate-800 [&_strong]:dark:text-slate-100"
-                                    dangerouslySetInnerHTML={{ __html: resolvedClause.content }}
-                                  />
-                                </div>
-                              ) : (
-                                <p className="text-xs text-amber-600 italic bg-amber-50 p-3 rounded-lg border border-amber-100">No clause resolved for this section.</p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+          {/* Data & Values */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">Data & Values</h3>
+                <p className="text-xs text-slate-500 mt-1">Placeholder tokens resolved for this contract, scoped to the selected job profile.</p>
               </div>
-            </TabsContent>
+              <span className="text-xs text-slate-400">{profileScopedPlaceholders.length} / {ecPlaceholders.length} placeholders</span>
+            </div>
+            <div className={cn("p-6", profileScopedPlaceholders.length > 0 && "max-h-[600px] overflow-y-auto")}>
+              {profileScopedPlaceholders.length === 0 ? (
+                <p className="text-sm text-slate-500 text-center py-8">
+                  {selectedJobProfile
+                    ? 'No placeholders are referenced by this profile\'s clauses.'
+                    : 'Select a job profile to see available placeholders.'}
+                </p>
+              ) : (() => {
+                // Group by entity_type (first type listed)
+                const entityGroups = new Map<string, { placeholders: EcPlaceholder[]; label: string }>();
+                for (const p of profileScopedPlaceholders) {
+                  const entity = (p.entity_type && p.entity_type.length > 0) ? p.entity_type[0] : 'none';
+                  if (!entityGroups.has(entity)) {
+                    const label = entity === 'none'
+                      ? 'General'
+                      : ENTITY_TYPES.find((t) => t.value === entity)?.label || entity;
+                    entityGroups.set(entity, { placeholders: [], label });
+                  }
+                  entityGroups.get(entity)!.placeholders.push(p);
+                }
+                const sortedEntities = Array.from(entityGroups.entries()).sort(([a], [b]) =>
+                  a === 'none' ? 1 : b === 'none' ? -1 : a.localeCompare(b)
+                );
 
-            {/* PLACEHOLDERS TAB */}
-            <TabsContent value="placeholders" className="mt-0">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-sm overflow-hidden">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">Data & Values</h3>
-                    <p className="text-xs text-slate-500 mt-1">Placeholder tokens and their resolved values for this contract.</p>
-                  </div>
-                  <span className="text-xs text-slate-400">{ecPlaceholders.length} placeholders</span>
-                </div>
-                <div className="p-6 space-y-8">
-                  {ecPlaceholders.length === 0 ? (
-                    <p className="text-sm text-slate-500 text-center py-8">No placeholders registered yet. Save a clause with {'{{tokens}}'} to create them.</p>
-                  ) : (() => {
-                    const groups = new Map<string, EcPlaceholder[]>();
-                    for (const p of ecPlaceholders) {
-                      if (!groups.has(p.group_label)) groups.set(p.group_label, []);
-                      groups.get(p.group_label)!.push(p);
-                    }
-                    return Array.from(groups.entries()).map(([groupLabel, items]) => (
-                      <div key={groupLabel} className="space-y-3">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-                          {groupLabel}
+                return (
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {sortedEntities.map(([entityKey, group]) => (
+                      <div key={entityKey} className="py-5 first:pt-0 last:pb-0">
+                        <h4 className="sticky top-0 z-20 -mx-6 px-6 py-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                          {group.label}
+                          <Badge variant="secondary" className="text-[10px] h-4 px-1.5 rounded-full">{group.placeholders.length}</Badge>
                           <div className="h-px flex-1 bg-slate-100 dark:bg-slate-800"></div>
                         </h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-                          {items.map((p) => {
-                            const val = placeholderValues[p.key] ?? '';
-                            const overrideVal = offer.placeholder_overrides?.[p.key];
-                            const isOverridden = overrideVal !== undefined;
-                            return (
-                              <div key={p.id} className="flex flex-col gap-1.5 p-2.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group/field border border-transparent hover:border-slate-100 dark:hover:border-slate-800">
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <span className="text-xs font-medium text-slate-600 dark:text-slate-400 truncate" title={`{{${p.key}}}`}>
-                                      {p.label}
-                                    </span>
-                                    <span className="text-[10px] font-mono text-slate-400 shrink-0">{'{{' + p.key + '}}'}</span>
-                                    {isOverridden && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" title="Overridden"></span>}
-                                  </div>
-                                  <div className="flex items-center gap-1.5 shrink-0">
-                                    <span className={cn(
-                                      "text-[10px] font-medium px-1.5 py-0.5 rounded-full border",
-                                      p.source_kind === 'master_field' && "bg-slate-50 text-slate-500 border-slate-200",
-                                      p.source_kind === 'settings_cascade' && "bg-blue-50 text-blue-600 border-blue-200",
-                                      p.source_kind === 'offer' && "bg-purple-50 text-purple-600 border-purple-200",
-                                    )}>{p.source_kind === 'master_field' ? 'Master field' : p.source_kind === 'settings_cascade' ? 'Settings' : 'Offer'}</span>
-                                    {p.editable && isOverridden && (
-                                      <button
-                                        type="button"
-                                        title="Reset to default"
-                                        onClick={() => handlePlaceholderOverride(p.key, undefined)}
-                                        className="text-slate-400 hover:text-red-500 opacity-0 group-hover/field:opacity-100 transition-opacity"
-                                      >
-                                        <RotateCcw className="w-3 h-3" />
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                                {p.editable ? (
-                                  <Input
-                                    className={cn(
-                                      "h-8 text-sm transition-colors rounded-lg",
-                                      isOverridden
-                                        ? "border-amber-200 bg-amber-50/30 dark:border-amber-900/50 dark:bg-amber-900/10 focus-visible:ring-amber-500/20"
-                                        : "border-slate-200 bg-white shadow-sm focus-visible:ring-blue-500/20"
-                                    )}
-                                    value={overrideVal ?? val}
-                                    onChange={(e) => handlePlaceholderOverride(p.key, e.target.value)}
-                                    placeholder="Leave blank for default"
-                                  />
-                                ) : (
-                                  <div className="h-8 flex items-center px-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-800">
-                                    <span className="text-sm text-slate-700 dark:text-slate-300 truncate w-full">{val || '—'}</span>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
+                        <div className="mt-3 overflow-auto max-h-72 rounded-xl border border-slate-200 dark:border-slate-800">
+                          <table className="w-full">
+                            <thead className="sticky top-0 z-10">
+                              <tr className="bg-slate-50 dark:bg-slate-900/50">
+                                <th className="text-left text-xs font-bold text-slate-500 px-4 py-2.5 w-1/2 border-b border-slate-200 dark:border-slate-800">Field</th>
+                                <th className="text-left text-xs font-bold text-slate-500 px-4 py-2.5 w-1/2 border-b border-slate-200 dark:border-slate-800">Value</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {group.placeholders.map((p) => {
+                                const val = placeholderValues[p.key] ?? '';
+                                const overrideVal = offer.placeholder_overrides?.[p.key];
+                                const isOverridden = overrideVal !== undefined;
+                                return (
+                                  <tr key={p.id} className="group/field border-b border-slate-100 dark:border-slate-800 last:border-b-0 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
+                                    <td className="px-4 py-3 align-top">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{p.label}</span>
+                                        <span className="text-[10px] font-mono text-slate-400 shrink-0">{'{{' + p.key + '}}'}</span>
+                                        {isOverridden && (
+                                          <Badge variant="outline" className="text-[10px] h-4 px-1 rounded-full bg-amber-50 text-amber-700 border-amber-200">
+                                            Override
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      <span className={cn(
+                                        "inline-block text-[10px] font-medium px-1.5 py-0.5 rounded-full border mt-1",
+                                        p.source_kind === 'master_field' && "bg-slate-50 text-slate-500 border-slate-200",
+                                        p.source_kind === 'settings_cascade' && "bg-blue-50 text-blue-600 border-blue-200",
+                                        p.source_kind === 'offer' && "bg-purple-50 text-purple-600 border-purple-200",
+                                      )}>{p.source_kind === 'master_field' ? 'Master field' : p.source_kind === 'settings_cascade' ? 'Settings' : 'Offer'}</span>
+                                    </td>
+                                    <td className="px-4 py-3">
+                                      <div className="flex items-center gap-1.5">
+                                        {p.editable ? (
+                                          <Input
+                                            className={cn(
+                                              "h-8 text-sm transition-colors rounded-lg flex-1",
+                                              isOverridden
+                                                ? "border-amber-200 bg-amber-50/30 dark:border-amber-900/50 dark:bg-amber-900/10 focus-visible:ring-amber-500/20"
+                                                : "border-slate-200 bg-white shadow-sm focus-visible:ring-blue-500/20"
+                                            )}
+                                            value={overrideVal ?? val}
+                                            onChange={(e) => handlePlaceholderOverride(p.key, e.target.value)}
+                                            placeholder="Leave blank for default"
+                                          />
+                                        ) : (
+                                          <div className="flex-1 h-8 flex items-center px-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-800">
+                                            <span className="text-sm text-slate-700 dark:text-slate-300 truncate">{val || '—'}</span>
+                                          </div>
+                                        )}
+                                        {p.editable && isOverridden && (
+                                          <button
+                                            type="button"
+                                            title="Reset to default"
+                                            onClick={() => handlePlaceholderOverride(p.key, undefined)}
+                                            className="text-slate-400 hover:text-red-500 shrink-0"
+                                          >
+                                            <RotateCcw className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
                       </div>
-                    ));
-                  })()}
-                </div>
-              </div>
-            </TabsContent>
-          </Tabs>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
 
         </div>
       </ScrollArea>

@@ -1025,7 +1025,7 @@ export default function JobProfilesPage() {
             ref={previewPanelRef}
             defaultSize={25}
             minSize={20}
-            maxSize={45}
+            maxSize={80}
             collapsible
             onCollapse={() => setCollapsed(prev => ({ ...prev, preview: true }))}
             onExpand={() => setCollapsed(prev => ({ ...prev, preview: false }))}

@@ -7,27 +7,18 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from '@/components/ui/dialog';
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import {
-  Loader2, PlusCircle, Settings, Trash2, BookText, Star, Briefcase,
-  PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
-  Columns2, FileText, Search, List, Layers,
-} from 'lucide-react';
+import TemplateEditor from '@/components/TemplateEditor';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Loader2, PlusCircle, Settings, Trash2, BookText, Star, Briefcase, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2, FileText, Search, List, Layers, } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
 import { EcClause, fetchClauses, createClause, updateClause, deleteClause } from '../utils/clauseLibraryData';
-import { syncPlaceholdersFromContent } from '../utils/placeholderDetection';
+import { detectTokens, syncPlaceholdersFromContent } from '../utils/placeholderDetection';
 import { fetchCompanies, Company } from '../../companies/database';
 import { PlaceholderSources } from '../components/PlaceholderSources';
 import { EMPLOYMENT_TYPE_OPTIONS, WORK_ARRANGEMENT_OPTIONS, withCurrentValue } from '../utils/profileOptions';
@@ -136,6 +127,14 @@ export default function ClauseLibraryPage() {
 
   useEffect(() => { load(); }, []);
 
+  useEffect(() => {
+    if (selectedClause) {
+      setHighlightPlaceholderKeys(detectTokens(selectedClause.content));
+    } else {
+      setHighlightPlaceholderKeys([]);
+    }
+  }, [selectedClause]);
+
   const grouped = useMemo(() => {
     const map = new Map<string, EcClause[]>();
     for (const c of clauses) {
@@ -149,10 +148,6 @@ export default function ClauseLibraryPage() {
     return grouped.find(g => g.section.key === selectedSectionKey)?.items || [];
   }, [grouped, selectedSectionKey]);
 
-  // Clusters sectionClauses into standalone cards vs. variant groups (clauses
-  // sharing a variant_group are alternatives of one component, e.g. "Office
-  // Hours" vs "Shift Hours" under Working Hours) - display only, doesn't
-  // affect which clause a section actually resolves to.
   type ClauseEntry = { kind: 'single'; clause: EcClause } | { kind: 'group'; key: string; clauses: EcClause[] };
   const sectionEntries = useMemo<ClauseEntry[]>(() => {
     const seenGroups = new Set<string>();
@@ -169,8 +164,6 @@ export default function ClauseLibraryPage() {
     return entries;
   }, [sectionClauses]);
 
-  // Existing group names in the currently-edited section, offered as a
-  // datalist so authors reuse a group instead of typo-ing new ones.
   const groupNamesForSection = useMemo(() => {
     const set = new Set<string>();
     for (const c of clauses) {
@@ -216,11 +209,6 @@ export default function ClauseLibraryPage() {
       setDialogOpen(false);
       await load();
 
-      // Auto-detect any {{tokens}} this clause introduced and register them
-      // as unlinked (fuzzy-auto-matched where possible) placeholder entries -
-      // same "detect on save" flow as Document Template Manager's
-      // extractPlaceholders - then surface them right here for linking
-      // instead of sending the author off to a separate admin page.
       const newTokens = await syncPlaceholdersFromContent([payload.content || '']);
       if (newTokens.length > 0) {
         setHighlightPlaceholderKeys(newTokens);
@@ -499,7 +487,7 @@ export default function ClauseLibraryPage() {
                     />
                   </div>
 
-                  <PlaceholderSources highlightKeys={highlightPlaceholderKeys} />
+                  <PlaceholderSources highlightKeys={highlightPlaceholderKeys} filterByKeys={highlightPlaceholderKeys} />
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center">
@@ -521,104 +509,107 @@ export default function ClauseLibraryPage() {
 
           <ScrollArea className="flex-1 overflow-auto px-6 py-4">
             <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-sm">Section</Label>
-                <SearchableSelect
-                  value={draft.section_key || null}
-                  onChange={(v) => setDraft({ ...draft, section_key: v })}
-                  searchPlaceholder="Search sections..."
-                  options={CONTRACT_SECTIONS.map((s) => ({ value: s.key, label: s.title }))}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-sm">Section</Label>
+                  <SearchableSelect
+                    value={draft.section_key || null}
+                    onChange={(v) => setDraft({ ...draft, section_key: v })}
+                    searchPlaceholder="Search sections..."
+                    options={CONTRACT_SECTIONS.map((s) => ({ value: s.key, label: s.title }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-sm">Clause key</Label>
+                  <Input
+                    className="h-10"
+                    placeholder="e.g. standard_office"
+                    value={draft.clause_key || ''}
+                    onChange={(e) => setDraft({ ...draft, clause_key: e.target.value.trim().toLowerCase().replace(/\s+/g, '_') })}
+                  />
+                </div>
               </div>
+
               <div className="space-y-1.5">
-                <Label className="text-sm">Clause key</Label>
+                <Label className="text-sm">Label</Label>
+                <Input className="h-10" placeholder="e.g. Standard Office Hours" value={draft.label || ''} onChange={(e) => setDraft({ ...draft, label: e.target.value })} />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-sm">Variant group (optional)</Label>
                 <Input
                   className="h-10"
-                  placeholder="e.g. standard_office"
-                  value={draft.clause_key || ''}
-                  onChange={(e) => setDraft({ ...draft, clause_key: e.target.value.trim().toLowerCase().replace(/\s+/g, '_') })}
+                  list="variant-group-options"
+                  placeholder="e.g. Working Hours — leave blank if this clause stands alone"
+                  value={draft.variant_group || ''}
+                  onChange={(e) => setDraft({ ...draft, variant_group: e.target.value || null })}
                 />
+                <datalist id="variant-group-options">
+                  {groupNamesForSection.map((g) => <option key={g} value={g} />)}
+                </datalist>
+                <p className="text-xs text-slate-400">Clauses sharing a group name show up together as alternatives of one component (e.g. Office Hours vs Shift Hours).</p>
               </div>
-            </div>
 
-            <div className="space-y-1.5">
-              <Label className="text-sm">Label</Label>
-              <Input className="h-10" placeholder="e.g. Standard Office Hours" value={draft.label || ''} onChange={(e) => setDraft({ ...draft, label: e.target.value })} />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-sm">Variant group (optional)</Label>
-              <Input
-                className="h-10"
-                list="variant-group-options"
-                placeholder="e.g. Working Hours — leave blank if this clause stands alone"
-                value={draft.variant_group || ''}
-                onChange={(e) => setDraft({ ...draft, variant_group: e.target.value || null })}
-              />
-              <datalist id="variant-group-options">
-                {groupNamesForSection.map((g) => <option key={g} value={g} />)}
-              </datalist>
-              <p className="text-xs text-slate-400">Clauses sharing a group name show up together as alternatives of one component (e.g. Office Hours vs Shift Hours).</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-sm">Content</Label>
-              <Textarea
-                className="min-h-[160px] font-mono text-sm"
-                placeholder="<p>The Employee shall work {{working_days}}, {{working_hours}}.</p>"
-                value={draft.content || ''}
-                onChange={(e) => setDraft({ ...draft, content: e.target.value })}
-              />
-              <p className="text-xs text-slate-400">HTML with {'{{tokens}}'} - employee/company fields (employee_name, kra_pin, ...) and settings keys (working_hours, notice_period, benefits, ...) both resolve here.</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label className="text-sm">Scope</Label>
-                <SearchableSelect
-                  value={draft.company_id || '__global__'}
-                  onChange={(v) => setDraft({ ...draft, company_id: v === '__global__' ? null : v })}
-                  searchPlaceholder="Search companies..."
-                  options={[{ value: '__global__', label: 'Global (any company)' }, ...companies.map((c) => ({ value: String(c.id), label: c.company_name }))]}
-                />
+                <Label className="text-sm">Content</Label>
+                <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
+                  <TemplateEditor
+                    key={editingId || 'new'}
+                    initialContent={draft.content || ''}
+                    onChange={(content) => setDraft({ ...draft, content: content.html })}
+                    showHeaderFooterControls={false}
+                    className="min-h-[200px]"
+                  />
+                </div>
+                <p className="text-xs text-slate-400">HTML with {'{{tokens}}'} - employee/company fields (employee_name, kra_pin, ...) and settings keys (working_hours, notice_period, benefits, ...) both resolve here.</p>
               </div>
-              <div className="flex items-center justify-between border border-slate-200 dark:border-slate-800 rounded-lg px-3 h-10 mt-[22px]">
-                <Label className="text-sm">Default for section</Label>
-                <Switch checked={!!draft.is_default} onCheckedChange={(v) => setDraft({ ...draft, is_default: v })} />
-              </div>
-            </div>
 
-            <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-4 space-y-3">
-              <Label className="text-sm font-semibold text-slate-600">Suggest this clause when... (optional)</Label>
-              <div className="grid grid-cols-2 gap-3">
-                <SearchableSelect
-                  value={condition.employment_type || '__any__'}
-                  onChange={(v) => setCondition({ ...condition, employment_type: v === '__any__' ? undefined : v })}
-                  placeholder="Employment type"
-                  searchPlaceholder="Search employment types..."
-                  options={[{ value: '__any__', label: 'Any employment type' }, ...withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, condition.employment_type).map((opt) => ({ value: opt, label: opt }))]}
-                />
-                <Input className="h-9 text-sm" placeholder="Job level" value={condition.job_level || ''} onChange={(e) => setCondition({ ...condition, job_level: e.target.value || undefined })} />
-                <SearchableSelect
-                  value={condition.work_arrangement || '__any__'}
-                  onChange={(v) => setCondition({ ...condition, work_arrangement: v === '__any__' ? undefined : v })}
-                  placeholder="Work arrangement"
-                  searchPlaceholder="Search work arrangements..."
-                  options={[{ value: '__any__', label: 'Any work arrangement' }, ...withCurrentValue(WORK_ARRANGEMENT_OPTIONS, condition.work_arrangement).map((opt) => ({ value: opt, label: opt }))]}
-                />
-                <Input className="h-9 text-sm" placeholder="Department" value={condition.department || ''} onChange={(e) => setCondition({ ...condition, department: e.target.value || undefined })} />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-sm">Scope</Label>
+                  <SearchableSelect
+                    value={draft.company_id || '__global__'}
+                    onChange={(v) => setDraft({ ...draft, company_id: v === '__global__' ? null : v })}
+                    searchPlaceholder="Search companies..."
+                    options={[{ value: '__global__', label: 'Global (any company)' }, ...companies.map((c) => ({ value: String(c.id), label: c.company_name }))]}
+                  />
+                </div>
+                <div className="flex items-center justify-between border border-slate-200 dark:border-slate-800 rounded-lg px-3 h-10 mt-[22px]">
+                  <Label className="text-sm">Default for section</Label>
+                  <Switch checked={!!draft.is_default} onCheckedChange={(v) => setDraft({ ...draft, is_default: v })} />
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Label className="text-sm text-slate-500 shrink-0">Priority (ties broken by highest)</Label>
-                <Input
-                  type="number"
-                  className="h-9 text-sm w-20"
-                  value={draft.suggest_priority ?? 0}
-                  onChange={(e) => setDraft({ ...draft, suggest_priority: Number(e.target.value) || 0 })}
-                />
+
+              <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-4 space-y-3">
+                <Label className="text-sm font-semibold text-slate-600">Suggest this clause when... (optional)</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <SearchableSelect
+                    value={condition.employment_type || '__any__'}
+                    onChange={(v) => setCondition({ ...condition, employment_type: v === '__any__' ? undefined : v })}
+                    placeholder="Employment type"
+                    searchPlaceholder="Search employment types..."
+                    options={[{ value: '__any__', label: 'Any employment type' }, ...withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, condition.employment_type).map((opt) => ({ value: opt, label: opt }))]}
+                  />
+                  <Input className="h-9 text-sm" placeholder="Job level" value={condition.job_level || ''} onChange={(e) => setCondition({ ...condition, job_level: e.target.value || undefined })} />
+                  <SearchableSelect
+                    value={condition.work_arrangement || '__any__'}
+                    onChange={(v) => setCondition({ ...condition, work_arrangement: v === '__any__' ? undefined : v })}
+                    placeholder="Work arrangement"
+                    searchPlaceholder="Search work arrangements..."
+                    options={[{ value: '__any__', label: 'Any work arrangement' }, ...withCurrentValue(WORK_ARRANGEMENT_OPTIONS, condition.work_arrangement).map((opt) => ({ value: opt, label: opt }))]}
+                  />
+                  <Input className="h-9 text-sm" placeholder="Department" value={condition.department || ''} onChange={(e) => setCondition({ ...condition, department: e.target.value || undefined })} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm text-slate-500 shrink-0">Priority (ties broken by highest)</Label>
+                  <Input
+                    type="number"
+                    className="h-9 text-sm w-20"
+                    value={draft.suggest_priority ?? 0}
+                    onChange={(e) => setDraft({ ...draft, suggest_priority: Number(e.target.value) || 0 })}
+                  />
+                </div>
               </div>
-            </div>
             </div>
           </ScrollArea>
 
@@ -653,8 +644,6 @@ export default function ClauseLibraryPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-
     </div>
   );
 }

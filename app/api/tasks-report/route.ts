@@ -289,6 +289,17 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    function resolveCompanyPrefix(task: any): string {
+      const companyParticipant = task.participants_details?.find(
+        (p: any) => p.role?.includes("sponsor") || p.role?.includes("company")
+      );
+      return (
+        (companyParticipant?.id ? companiesMap.get(Number(companyParticipant.id))?.prefix : "") ||
+        (task.company_id ? companiesMap.get(Number(task.company_id))?.prefix : "") ||
+        ""
+      );
+    }
+
     // There is no standalone tm_stages table backing the live app — stagesdb.ts's
     // createStage/updateStage/deleteStage/updateStageOrder all read and write a `stages`
     // JSONB column directly on tm_departments. Querying a tm_stages table (as this route
@@ -530,9 +541,20 @@ export async function GET(req: NextRequest) {
         "";
       const subDeptName = subDept ? subDeptNameMap.get(String(subDept)) || "" : "";
       const jl = task.job_level || {};
-      const jobLevel = [jl.class_name, jl.subclass_name]
-        .filter(Boolean)
-        .join(" / ");
+      // job_level on tm_tasks only ever carries *_id fields (department_id, subdepartment_id,
+      // class_id, subclass_id, level) — there is no class_name/subclass_name in the raw data,
+      // so reading jl.class_name here always resolved to "" (confirmed against real rows).
+      // The name has to be looked up from the department tree, the same subDeptsById map
+      // isStageApplicableToTask uses, keyed by class_id inside that subdepartment's classes[].
+      const subDeptForClass = subDeptsById.get(String(subDept));
+      const classDef = jl.class_id
+        ? subDeptForClass?.classes?.find((c: any) => String(c.id) === String(jl.class_id))
+        : null;
+      const subClassDef = jl.subclass_id
+        ? classDef?.subClasses?.find((sc: any) => String(sc.id) === String(jl.subclass_id))
+        : null;
+      const className = classDef?.name || "";
+      const jobLevel = [className, subClassDef?.name].filter(Boolean).join(" / ");
 
       const duration = task.date_initiated
         ? (() => {
@@ -591,10 +613,12 @@ export async function GET(req: NextRequest) {
         // known applicant.
         applicant_name: task.applicant_details?.name || task.applicant_name || "Unknown",
         company_name: resolveCompanyName(task) || "",
+        company_prefix: resolveCompanyPrefix(task) || "",
         sub_department: subDept,
         sub_department_name: subDeptName,
         status: task.status || "wip",
         job_level: jobLevel,
+        class_name: className,
         r_number: task.r_number || "",
         passport_number: task.passport_number || "",
         duration,
