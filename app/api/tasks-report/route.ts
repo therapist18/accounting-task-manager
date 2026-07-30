@@ -112,21 +112,59 @@ function isStageCompleted(stage: any, task: any): boolean {
   return false;
 }
 
+// Mirrors isStageApplicableToTask in the web Reports module exactly: a stage can be marked
+// not-applicable for a given job level at the subclass, class, or subdepartment level (most
+// specific override wins), via the `stages` (StageAllocation[]) column carried on
+// tm_subdepartments and on each entry of its `classes`/`subClasses` JSONB. Skipping this (as
+// this route previously did) let a job-level-inapplicable stage still count toward "highest
+// completed index", which could point getCanonicalCurrentStage at a different stage — and
+// therefore a different officer/manager/client bucket — than the web dashboard for the same
+// task.
+function isStageApplicableToTask(task: any, stage: any, subDeptsById: Map<string, any>): boolean {
+  try {
+    const subdeptId = String(task.job_level?.subdepartment_id || task.subdepartment_id || "");
+    const classId = task.job_level?.class_id ?? task.class_id;
+    const subclassId = task.job_level?.subclass_id ?? task.subclass_id;
+
+    const subdept = subDeptsById.get(subdeptId);
+    if (!subdept) return true;
+
+    if (subclassId) {
+      const cls = (subdept.classes || []).find((c: any) => String(c.id) === String(classId));
+      const subCls = cls?.subClasses?.find((sc: any) => String(sc.id) === String(subclassId));
+      const subClassStage = subCls?.stages?.find((s: any) => s.stage_id === stage.id);
+      if (subClassStage && typeof subClassStage.applicable === "boolean") return subClassStage.applicable;
+    }
+
+    if (classId) {
+      const cls = (subdept.classes || []).find((c: any) => String(c.id) === String(classId));
+      const classStage = cls?.stages?.find((s: any) => s.stage_id === stage.id);
+      if (classStage && typeof classStage.applicable === "boolean") return classStage.applicable;
+    }
+
+    const subdeptStage = (subdept.stages || []).find((s: any) => s.stage_id === stage.id);
+    if (subdeptStage && typeof subdeptStage.applicable === "boolean") return subdeptStage.applicable;
+
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 // The task's single, real current stage — same "highest completed index, then next stage"
 // algorithm as getCurrentStageStatus/the web Reports module's getCanonicalCurrentStage, so
 // "current" means the same thing here as the visible Current Stage Follow-Up column. This
 // is the one source of truth every "who does this task belong to right now" check (officer/
 // manager/client) is derived from below, instead of three separate ad-hoc stage scans that
-// could (and did) disagree with each other and with the displayed column. Uses the full
-// department stage list rather than filtering by per-task applicability
-// (isStageApplicableToTask) — this route doesn't fetch the nested subdepartment/class/
-// subclass applicability overrides that function needs.
-function getCanonicalCurrentStage(task: any, stages: any[]): any | null {
-  if (!stages.length) return null;
+// could (and did) disagree with each other and with the displayed column. Filtered by
+// isStageApplicableToTask first, same as the web Reports module's applicableStages.
+function getCanonicalCurrentStage(task: any, stages: any[], subDeptsById: Map<string, any>): any | null {
+  const applicableStages = stages.filter((stage: any) => isStageApplicableToTask(task, stage, subDeptsById));
+  if (!applicableStages.length) return null;
   let highestCompletedIndex = -1;
-  stages.forEach((stage: any, i: number) => { if (isStageCompleted(stage, task)) highestCompletedIndex = i; });
-  if (highestCompletedIndex === -1) return stages[0];
-  return stages[highestCompletedIndex + 1] || stages[highestCompletedIndex];
+  applicableStages.forEach((stage: any, i: number) => { if (isStageCompleted(stage, task)) highestCompletedIndex = i; });
+  if (highestCompletedIndex === -1) return applicableStages[0];
+  return applicableStages[highestCompletedIndex + 1] || applicableStages[highestCompletedIndex];
 }
 
 // This route is listed in PUBLIC_PATHS (middleware.ts) so it's reachable without the
@@ -171,14 +209,16 @@ export async function GET(req: NextRequest) {
 
     const { data: department } = await supabase
       .from("tm_departments")
-      .select("id, name, stages, tm_subdepartments(id, name)")
+      .select("id, name, stages, tm_subdepartments(id, name, stages, classes)")
       .eq("id", deptId)
       .single();
 
     const subDeptNameMap = new Map<string, string>();
-    ((department as any)?.tm_subdepartments || []).forEach((s: any) =>
-      subDeptNameMap.set(String(s.id), s.name || "")
-    );
+    const subDeptsById = new Map<string, any>();
+    ((department as any)?.tm_subdepartments || []).forEach((s: any) => {
+      subDeptNameMap.set(String(s.id), s.name || "");
+      subDeptsById.set(String(s.id), s);
+    });
 
     // Officer/Manager tabs on the web Reports module aren't built from whoever happens to
     // have a task right now — they're the department's actual roster, sourced from
@@ -197,6 +237,14 @@ export async function GET(req: NextRequest) {
       if (a.role === "manager") managerRosterIds.add(String(a.user_id));
     });
 
+    // Filtered by job_level->>department_id, NOT the raw department_id column — mirrors
+    // fetchTasks() in taskManagerData.ts, which overwrites task.department_id from
+    // task.job_level.department_id with no fallback to the raw column before the web Reports
+    // module's deptScopedTasks filter ever runs. Some tasks have a NULL raw department_id
+    // column but a populated job_level.department_id (77 department-mismatches found across
+    // 1362 tasks, 63 of them flipping "is this task in department 1" specifically) — filtering
+    // on the raw column here silently dropped all of them from the mobile report even though
+    // the web dashboard counts them.
     let taskQuery = supabase
       .from("tm_tasks")
       .select(`
@@ -207,11 +255,11 @@ export async function GET(req: NextRequest) {
         applicant_details, processing_requirements_documents, issuance_requirements_documents,
         source_document_id
       `)
-      .eq("department_id", deptId)
+      .eq("job_level->>department_id", deptId)
       .order("created_at", { ascending: false });
 
     if (subDeptId) {
-      taskQuery = taskQuery.eq("subdepartment_id", subDeptId);
+      taskQuery = taskQuery.eq("job_level->>subdepartment_id", subDeptId);
     }
 
     const { data: tasks, error: tasksErr } = await taskQuery;
@@ -290,16 +338,30 @@ export async function GET(req: NextRequest) {
     // (tm_class_requirements.report_doc_defaults), deduped by documentId.
     const { data: classRequirementRows } = await supabase
       .from("tm_class_requirements")
-      .select("report_doc_defaults")
+      .select("job_level, report_doc_defaults, expected_total_time_minutes")
       .eq("job_level->>department_id", deptId);
 
     const reportDocDefaultsMap = new Map<string, any>();
+    // Mirrors expectedTimeByJobLevel in the web Reports module: expected_total_time_minutes
+    // keyed by the exact same {department_id, subdepartment_id, class_id, subclass_id} shape
+    // a task's own job_level is canonicalized into below, so a task's key always looks up its
+    // own class requirements row.
+    const expectedMinutesByJobLevelKey = new Map<string, number>();
+    const jobLevelKey = (jl: any) => JSON.stringify({
+      department_id: Number(jl?.department_id ?? deptId),
+      subdepartment_id: jl?.subdepartment_id || null,
+      class_id: jl?.class_id || null,
+      subclass_id: jl?.subclass_id || null,
+    });
     (classRequirementRows || []).forEach((row: any) => {
       (row.report_doc_defaults || []).forEach((d: any) => {
         if (d.isVisible === false) return;
         const key = String(d.documentId || d.id);
         if (!reportDocDefaultsMap.has(key)) reportDocDefaultsMap.set(key, d);
       });
+      if (typeof row.expected_total_time_minutes === "number") {
+        expectedMinutesByJobLevelKey.set(jobLevelKey(row.job_level), row.expected_total_time_minutes);
+      }
     });
     const reportDocDefaults = Array.from(reportDocDefaultsMap.values())
       .sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
@@ -419,7 +481,7 @@ export async function GET(req: NextRequest) {
       // from this ONE pointer rather than three separate scans, so they can't disagree with
       // each other (or with what the web Reports module's own Current Stage Follow-Up
       // column would show for the same task).
-      const canonicalCurrentStage = getCanonicalCurrentStage(task, stages || []);
+      const canonicalCurrentStage = getCanonicalCurrentStage(task, stages || [], subDeptsById);
       const currentStageName = canonicalCurrentStage?.name || "";
       const currentStageFollowUp = canonicalCurrentStage?.follow_up || "";
 
@@ -445,27 +507,26 @@ export async function GET(req: NextRequest) {
       // Reports module's Managers perspective exactly.
       const isBCLStage = canonicalCurrentStage?.follow_up?.toLowerCase() === "bcl";
 
-      // participants_details is the richer source when populated (fetchTasks()/EnquiryDialog
-      // derive task_manager the same way on the web side), but for this department it's
-      // sparse in practice. Fall back to the persisted tm_tasks.task_manager_id column (read
-      // directly by DepartmentTasksManager's own manager filters) to resolve WHO the manager
-      // is — this fallback is about identity resolution, not about whether the task is
-      // currently in the manager's court (that's isBCLStage, used in the grouping loop below).
+      // participants_details only — deliberately no fallback to the raw tm_tasks.task_manager_id
+      // column, matching the web Reports module exactly (its task.task_manager is likewise
+      // derived from participants_details alone; see fetchTasks() in taskManagerData.ts). A task
+      // with task_manager_id set but no matching participants_details entry is "Unallocated"
+      // here, same as it would be on the web dashboard.
       const taskManagerParticipant = task.participants_details?.find((p: any) =>
         p.role?.includes("task_manager")
       );
       const taskAssistantParticipant = task.participants_details?.find((p: any) =>
         p.role?.includes("task_assistant")
       );
-      const taskManagerId = taskManagerParticipant?.id != null
-        ? String(taskManagerParticipant.id)
-        : (task.task_manager_id != null ? String(task.task_manager_id) : "");
+      const taskManagerId = taskManagerParticipant?.id != null ? String(taskManagerParticipant.id) : "";
       const taskAssistantId = taskAssistantParticipant?.id != null ? String(taskAssistantParticipant.id) : "";
       const taskManager = taskManagerParticipant?.name || usersMap.get(taskManagerId) || "";
       const taskAssistant = taskAssistantParticipant?.name || usersMap.get(taskAssistantId) || "";
+      // job_level first — matches fetchTasks()'s field priority on the web side (raw
+      // subdepartment_id is only a fallback for tasks with no job_level.subdepartment_id).
       const subDept =
-        task.subdepartment_id ||
         task.job_level?.subdepartment_id ||
+        task.subdepartment_id ||
         "";
       const subDeptName = subDept ? subDeptNameMap.get(String(subDept)) || "" : "";
       const jl = task.job_level || {};
@@ -483,6 +544,36 @@ export async function GET(req: NextRequest) {
           })()
         : "";
 
+      // Mirrors total_time_actual/total_time_expected in the web Reports module: "actual"
+      // is days elapsed since the task's first applicable stage (not date_initiated — the
+      // first stage's own resolved date, same as computeStageDateInfo would show for it),
+      // "expected" is tm_class_requirements.expected_total_time_minutes for the task's job
+      // level, falling back to the sum of estimated_time across every applicable stage if
+      // that class requirements row hasn't been set. Overdue when actual minutes exceed it.
+      let actualDays: number | null = null;
+      let expectedMinutes: number | null = null;
+      let isOverdue = false;
+      let exceededMinutes: number | null = null;
+      const applicableStages = (stages || []).filter((s: any) => isStageApplicableToTask(task, s, subDeptsById));
+      const firstStage = applicableStages[0];
+      if (firstStage) {
+        const firstStageDisplay = resolveStageDisplayDate(task, firstStage, allDocumentsById, kycFieldsMap);
+        const firstStageDate = parseDateSafe(firstStageDisplay);
+        if (firstStageDate) {
+          actualDays = Math.floor((Date.now() - firstStageDate.getTime()) / (1000 * 60 * 60 * 24));
+          const storedExpected = expectedMinutesByJobLevelKey.get(jobLevelKey(task.job_level));
+          const resolvedExpectedMinutes: number = typeof storedExpected === "number"
+            ? storedExpected
+            : applicableStages.reduce((sum: number, s: any) => sum + (typeof s.estimated_time === "number" ? s.estimated_time : 0), 0);
+          expectedMinutes = resolvedExpectedMinutes;
+          const actualMinutes = actualDays * 24 * 60;
+          if (resolvedExpectedMinutes > 0 && actualMinutes > resolvedExpectedMinutes) {
+            isOverdue = true;
+            exceededMinutes = actualMinutes - resolvedExpectedMinutes;
+          }
+        }
+      }
+
       const namedStageDates: Record<string, string | null> = {};
       NAMED_STAGE_DATES.forEach(({ id, key }) => {
         const stageDef = (stages || []).find((s: any) => s.id === id);
@@ -493,7 +584,12 @@ export async function GET(req: NextRequest) {
 
       return {
         id: task.id,
-        applicant_name: task.applicant_name || "Unknown",
+        // applicant_details.name first, matching fetchTasks()'s priority on the web side —
+        // every task with a blank raw applicant_name column found so far has its real name in
+        // applicant_details.name instead (same NULL-raw-column-but-JSON-has-it pattern as the
+        // department_id fix above), so this was surfacing "Unknown" for tasks that do have a
+        // known applicant.
+        applicant_name: task.applicant_details?.name || task.applicant_name || "Unknown",
         company_name: resolveCompanyName(task) || "",
         sub_department: subDept,
         sub_department_name: subDeptName,
@@ -502,6 +598,10 @@ export async function GET(req: NextRequest) {
         r_number: task.r_number || "",
         passport_number: task.passport_number || "",
         duration,
+        actual_days: actualDays,
+        expected_minutes: expectedMinutes,
+        is_overdue: isOverdue,
+        exceeded_minutes: exceededMinutes,
         renewal_status: task.renewal_status || "New",
         current_stage_name: currentStageName,
         current_stage_follow_up: currentStageFollowUp,
@@ -657,6 +757,25 @@ export async function GET(req: NextRequest) {
         });
       });
     });
+
+    // Targeted diagnostic: independent of the officerHandledMap aggregation above, scan every
+    // task's raw stages JSONB for this literal id string via JSON.stringify — a crude but
+    // aggregation-logic-independent check for "does this id appear ANYWHERE in officer_ids
+    // data at all, on any stage, completed or not, officer-follow_up or not". If this comes
+    // back empty, the "0" is real data, not a bug in officerHandledMap. If it finds hits,
+    // the bug is in how those hits get filtered/aggregated above.
+    const DIAG_OFFICER_ID = "bc0bc88d-733a-4bf7-9910-85cb12e64231"; // Officer JM
+    const rawHits: { taskId: number; stageId: string; stageName: string; stageFollowUp: any; officerIds: any }[] = [];
+    (tasks || []).forEach((task: any) => {
+      Object.entries(task.stages || {}).forEach(([stageId, stageData]: [string, any]) => {
+        const ids = Array.isArray(stageData?.officer_ids) ? stageData.officer_ids.map((x: any) => String(x)) : [];
+        if (ids.includes(DIAG_OFFICER_ID)) {
+          const stageDef = stages.find((s: any) => s.id === stageId);
+          rawHits.push({ taskId: task.id, stageId, stageName: stageDef?.name || "(unknown stage)", stageFollowUp: stageDef?.follow_up, officerIds: stageData.officer_ids });
+        }
+      });
+    });
+    console.log("[tasks-report] DIAG raw officer_ids hits for %s: count=%d %o", DIAG_OFFICER_ID, rawHits.length, rawHits);
 
     const taskListById = new Map<number, any>(taskList.map((t: any) => [t.id, t]));
     const officerHandledGroups = new Map<string, { id: string; name: string; count: number; tasks: any[] }>();

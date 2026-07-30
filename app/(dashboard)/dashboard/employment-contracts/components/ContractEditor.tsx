@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { fetchCompanyEmployees, ContractEmployeeInfo } from '../utils/data';
-import { EcJobProfile, fetchJobProfiles, matchJobProfile, findCompanyDefaults, findDepartmentDefaults } from '../utils/jobProfileData';
+import { EcJobProfile, fetchJobProfiles, matchJobProfile } from '../utils/jobProfileData';
 import { EmploymentOffer, fetchLatestOffer } from '../utils/employmentOfferData';
 import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
 import { resolveEffectiveClauses, resolveEffectiveSettings } from '../utils/clauseEngine';
@@ -151,10 +151,10 @@ export function ContractEditor({
   // Overrides the clause used for a section on THIS contract only (stored on
   // the employment offer) - distinct from the Job Profile's own section
   // clause picks, which stay untouched. '__none__' clears the override so
-  // resolution falls back through Job Profile -> Department -> Company -
-  // and, if none of those have a pick either, the section stays unresolved
-  // (no silent default-clause fallback; see resolveEffectiveClauses in
-  // utils/clauseEngine.ts).
+  // resolution falls back to the Job Profile's own pick and, if that has
+  // none either, the section stays unresolved (no Company/Department
+  // inheritance, no silent default-clause fallback; see
+  // resolveEffectiveClauses in utils/clauseEngine.ts).
   const handleSectionClauseOverride = (sectionKey: string, value: string) => {
     const next = { ...(offer.section_clauses_overrides || {}) };
     if (value === '__none__') {
@@ -183,29 +183,25 @@ export function ContractEditor({
   const positionProfiles = profiles.filter(p => p.scope === 'position');
 
   const clausesById = useMemo(() => Object.fromEntries(clauses.map(c => [c.id, c])), [clauses]);
-  const companyDefaults = useMemo(() => companyId ? findCompanyDefaults(profiles, companyId) : undefined, [profiles, companyId]);
-  const departmentDefaults = useMemo(() => companyId ? findDepartmentDefaults(profiles, companyId, employee?.department) : undefined, [profiles, companyId, employee]);
 
   const effectiveSettings = useMemo(() => resolveEffectiveSettings([
-    companyDefaults, departmentDefaults, selectedJobProfile, offer.settings_overrides ? { settings: offer.settings_overrides } : null,
-  ]), [companyDefaults, departmentDefaults, selectedJobProfile, offer]);
+    selectedJobProfile, offer.settings_overrides ? { settings: offer.settings_overrides } : null,
+  ]), [selectedJobProfile, offer]);
 
   const effectiveClauses = useMemo(() => resolveEffectiveClauses([
-    companyDefaults, departmentDefaults, selectedJobProfile, offer.section_clauses_overrides ? { section_clauses: offer.section_clauses_overrides } : null,
-  ]), [companyDefaults, departmentDefaults, selectedJobProfile, offer]);
+    selectedJobProfile, offer.section_clauses_overrides ? { section_clauses: offer.section_clauses_overrides } : null,
+  ]), [selectedJobProfile, offer]);
 
   // Temporary diagnostic logging for the clause-resolution cascade - remove
-  // once the no-default-fallback behavior is confirmed working end to end.
+  // once the no-inheritance behavior is confirmed working end to end.
   useEffect(() => {
     console.log('[ContractEditor] clause resolution', {
-      companyDefaults_section_clauses: companyDefaults?.section_clauses,
-      departmentDefaults_section_clauses: departmentDefaults?.section_clauses,
       selectedJobProfile_section_clauses: selectedJobProfile?.section_clauses,
       offer_section_clauses_overrides: offer.section_clauses_overrides,
       effectiveClauses,
       unresolvedSections: CONTRACT_SECTIONS.map((s) => s.key).filter((k) => !effectiveClauses[k]),
     });
-  }, [companyDefaults, departmentDefaults, selectedJobProfile, offer, effectiveClauses]);
+  }, [selectedJobProfile, offer, effectiveClauses]);
 
   const { ecPlaceholders, masterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
 

@@ -19,7 +19,7 @@ import {
   resolveEffectiveSettings, resolveEffectiveClauses, assembleContractHtml,
 } from '../utils/clauseEngine';
 import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
-import { EcJobProfile, fetchJobProfiles, findCompanyDefaults, findDepartmentDefaults } from '../utils/jobProfileData';
+import { EcJobProfile } from '../utils/jobProfileData';
 import { EmploymentOffer, createEmploymentOffer, updateEmploymentOffer } from '../utils/employmentOfferData';
 import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
@@ -45,7 +45,6 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const companyId = employee?.companyId;
 
   const [clauses, setClauses] = useState<EcClause[]>([]);
-  const [orgProfiles, setOrgProfiles] = useState<EcJobProfile[]>([]);
   const [company, setCompany] = useState<Company | null>(null);
   const [loadingContext, setLoadingContext] = useState(false);
 
@@ -88,19 +87,19 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const pageCanvasHeightPx = totalPages * PAGE_HEIGHT_PX;
 
   // Load base context - companyId is optional (job profiles can be scoped
-  // "General / No Company"), in which case orgProfiles/company just stay
-  // empty/null but clauses (global) still resolve, so the preview keeps
-  // working instead of getting stuck on a fetch that never runs.
+  // "General / No Company"), in which case company just stays null but
+  // clauses (global) still resolve, so the preview keeps working instead of
+  // getting stuck on a fetch that never runs. No job-profiles fetch here -
+  // settings/clauses resolve only from selectedJobProfile itself (no
+  // Company/Department inheritance, see resolveEffectiveClauses).
   useEffect(() => {
     async function loadContext() {
       setLoadingContext(true);
-      const [allClauses, profiles, companies] = await Promise.all([
+      const [allClauses, companies] = await Promise.all([
         fetchClauses(),
-        fetchJobProfiles(companyId || undefined),
         fetchCompanies(),
       ]);
       setClauses(allClauses);
-      setOrgProfiles(profiles);
       setCompany(companyId ? companies.find((c) => String(c.id) === String(companyId)) || null : null);
       setLoadingContext(false);
     }
@@ -200,29 +199,25 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   }, [employee?.individualId, showToc]);
 
   const clausesById = useMemo(() => Object.fromEntries(clauses.map((c) => [c.id, c])), [clauses]);
-  const companyDefaults = useMemo(() => (companyId ? findCompanyDefaults(orgProfiles, companyId) : undefined), [orgProfiles, companyId]);
-  const departmentDefaults = useMemo(() => (companyId ? findDepartmentDefaults(orgProfiles, companyId, employee?.department) : undefined), [orgProfiles, companyId, employee]);
 
   const effectiveSettings = useMemo(() => resolveEffectiveSettings([
-    companyDefaults, departmentDefaults, selectedJobProfile, offer ? { settings: offer.settings_overrides } : null,
-  ]), [companyDefaults, departmentDefaults, selectedJobProfile, offer]);
+    selectedJobProfile, offer ? { settings: offer.settings_overrides } : null,
+  ]), [selectedJobProfile, offer]);
 
   const effectiveClauses = useMemo(() => resolveEffectiveClauses([
-    companyDefaults, departmentDefaults, selectedJobProfile, offer ? { section_clauses: offer.section_clauses_overrides } : null,
-  ]), [companyDefaults, departmentDefaults, selectedJobProfile, offer]);
+    selectedJobProfile, offer ? { section_clauses: offer.section_clauses_overrides } : null,
+  ]), [selectedJobProfile, offer]);
 
   // Temporary diagnostic logging for the clause-resolution cascade - remove
-  // once the no-default-fallback behavior is confirmed working end to end.
+  // once the no-inheritance behavior is confirmed working end to end.
   useEffect(() => {
     console.log('[ContractPreview] clause resolution', {
-      companyDefaults_section_clauses: companyDefaults?.section_clauses,
-      departmentDefaults_section_clauses: departmentDefaults?.section_clauses,
       selectedJobProfile_section_clauses: selectedJobProfile?.section_clauses,
       offer_section_clauses_overrides: offer?.section_clauses_overrides,
       effectiveClauses,
       unresolvedSections: CONTRACT_SECTIONS.map((s) => s.key).filter((k) => !effectiveClauses[k]),
     });
-  }, [companyDefaults, departmentDefaults, selectedJobProfile, offer, effectiveClauses]);
+  }, [selectedJobProfile, offer, effectiveClauses]);
 
   const { ecPlaceholders, masterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
 

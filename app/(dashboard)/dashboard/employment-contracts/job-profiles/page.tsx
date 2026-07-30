@@ -183,7 +183,6 @@ export default function JobProfilesPage() {
   const [saving, setSaving] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [createScope, setCreateScope] = useState<JobProfileScope>('position');
   const [createName, setCreateName] = useState('');
   const [createDepartment, setCreateDepartment] = useState('');
   const [creating, setCreating] = useState(false);
@@ -290,8 +289,7 @@ export default function JobProfilesPage() {
     });
   }, [draft, clauses]);
 
-  const openNew = (scope: JobProfileScope) => {
-    setCreateScope(scope);
+  const openNew = () => {
     setCreateName('');
     setCreateDepartment('');
     setCreateOpen(true);
@@ -302,17 +300,17 @@ export default function JobProfilesPage() {
       toast({ title: 'Name required', variant: 'destructive' });
       return;
     }
-    if (createScope === 'department' && !createDepartment.trim()) {
-      toast({ title: 'Department required for a department-scope profile', variant: 'destructive' });
-      return;
-    }
     setCreating(true);
     try {
       const created = await createJobProfile({
-        scope: createScope,
+        // Company/Department Defaults scopes are retired for now - nothing
+        // in the resolution cascade reads them (see resolveEffectiveClauses
+        // in utils/clauseEngine.ts). Every profile created here is a
+        // self-contained Position profile.
+        scope: 'position',
         company_id: selectedCompanyId,
         name: createName.trim(),
-        department: createScope === 'company' ? null : (createDepartment.trim() || null),
+        department: createDepartment.trim() || null,
         is_active: true,
         settings: {},
         section_clauses: {},
@@ -542,18 +540,9 @@ export default function JobProfilesPage() {
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   <Input placeholder="Search profiles..." className="pl-9 h-9 rounded-full text-sm bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus-visible:ring-1 focus-visible:ring-blue-500/50 transition-all" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="sm" className="h-9 w-full rounded-full text-sm bg-custom-blue hover:bg-[#2d5a94] dark:bg-blue-600 dark:hover:bg-blue-700 text-white shadow-sm transition-all" disabled={!selectedCompanyId && selectedCompanyId !== '__general__'}>
-                      <PlusCircle className="h-4 w-4 mr-2" /> Add Profile
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-56 rounded-xl shadow-lg border-slate-200">
-                    <DropdownMenuItem className="rounded-lg cursor-pointer" onClick={() => openNew('position')}>New Position Profile</DropdownMenuItem>
-                    <DropdownMenuItem className="rounded-lg cursor-pointer" onClick={() => openNew('department')}>New Department Defaults</DropdownMenuItem>
-                    <DropdownMenuItem className="rounded-lg cursor-pointer" onClick={() => openNew('company')}>New Company Defaults</DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <Button size="sm" className="h-9 w-full rounded-full text-sm bg-custom-blue hover:bg-[#2d5a94] dark:bg-blue-600 dark:hover:bg-blue-700 text-white shadow-sm transition-all" disabled={!selectedCompanyId && selectedCompanyId !== '__general__'} onClick={openNew}>
+                  <PlusCircle className="h-4 w-4 mr-2" /> Add Profile
+                </Button>
               </div>
 
               <ScrollArea className="flex-1 bg-transparent">
@@ -1072,19 +1061,17 @@ export default function JobProfilesPage() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-md rounded-2xl p-6 shadow-xl border-slate-200">
           <DialogTitle className="text-lg font-bold text-slate-900 dark:text-slate-100">
-            New {createScope === 'company' ? 'Company Defaults' : createScope === 'department' ? 'Department Defaults' : 'Position'} Profile
+            New Position Profile
           </DialogTitle>
           <div className="space-y-5 pt-5">
             <div className="space-y-2">
               <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Profile Name</label>
               <Input autoFocus value={createName} onChange={(e) => setCreateName(e.target.value)} placeholder="e.g. Senior Accountant" className="h-10 rounded-xl text-sm shadow-sm border-slate-200" />
             </div>
-            {createScope !== 'company' && (
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Department {createScope === 'department' && <span className="text-red-500">*</span>}</label>
-                <Input value={createDepartment} onChange={(e) => setCreateDepartment(e.target.value)} placeholder="e.g. Finance" className="h-10 rounded-xl text-sm shadow-sm border-slate-200" />
-              </div>
-            )}
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Department</label>
+              <Input value={createDepartment} onChange={(e) => setCreateDepartment(e.target.value)} placeholder="e.g. Finance" className="h-10 rounded-xl text-sm shadow-sm border-slate-200" />
+            </div>
           </div>
           <div className="flex justify-end gap-3 pt-8">
             <Button variant="ghost" onClick={() => setCreateOpen(false)} className="rounded-full font-semibold text-slate-600 hover:bg-slate-100">Cancel</Button>

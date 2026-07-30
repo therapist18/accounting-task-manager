@@ -498,8 +498,11 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
 
           <div className="h-6 w-px bg-slate-200 mx-2 shrink-0" />
 
-          {/* Mode Selector for Person Perspective */}
-          {isPersonView && (
+          {/* Mode Selector — officers only. Managers have no working history mode (the
+              manager filtering logic is always gated to "at a BCL stage right now"), and
+              clients never had this toggle, so showing it for either would offer a choice
+              that doesn't actually change anything. */}
+          {isOfficer && (
             <Select value={mode} onValueChange={setMode}>
               <SelectTrigger className="w-44 h-10 bg-white border-slate-300 rounded-full text-sm font-bold shadow-sm">
                 <div className="flex items-center gap-2">
@@ -603,7 +606,7 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
               ? "Showing tasks filtered by officer assignment. Select a specific officer below to view only their assigned tasks, or click All to see tasks across all officers."
               : "Showing tasks filtered by task manager assignment. Select a specific manager below to view only the tasks they manage, or click All to see tasks across all managers."
             }
-            {mode === 'current' ? " Currently showing 'current assignment' data." : " Currently showing 'historical activity' data."}
+            {isOfficer && (mode === 'current' ? " Currently showing 'current assignment' data." : " Currently showing 'historical activity' data.")}
           </p>
         </div>
       )}

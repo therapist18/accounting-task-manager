@@ -125,12 +125,3 @@ export function matchJobProfile(
 
   return best;
 }
-
-export function findCompanyDefaults(profiles: EcJobProfile[], companyId: string | number): EcJobProfile | undefined {
-  return profiles.find((p) => p.scope === 'company' && p.company_id === String(companyId));
-}
-
-export function findDepartmentDefaults(profiles: EcJobProfile[], companyId: string | number, department?: string | null): EcJobProfile | undefined {
-  if (!department) return undefined;
-  return profiles.find((p) => p.scope === 'department' && p.company_id === String(companyId) && p.department?.toLowerCase() === department.toLowerCase());
-}

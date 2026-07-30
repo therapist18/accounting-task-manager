@@ -145,12 +145,24 @@ export function assembleContractHtml({
     .filter((s): s is ContractSectionDef => !!s)
     .sort((a, b) => a.order - b.order);
 
-  // Build sequential numbering: heading gets none, appendices get letters, rest get 1, 2, 3…
+  // A section only counts as "in" the document if it actually resolved a
+  // clause - an unconfigured section renders as a [No clause configured]
+  // placeholder (see the `!clause` branch below) but shouldn't occupy a
+  // number or a Table of Contents entry, since neither should imply content
+  // that was never actually selected.
+  const hasClause = (key: string) => {
+    const id = effectiveClauses[key];
+    return !!(id && clausesById[id]);
+  };
+
+  // Build sequential numbering: heading and unconfigured sections get none,
+  // appendices get letters, rest get 1, 2, 3… - skipping unconfigured
+  // sections so numbers stay consecutive over only what's actually resolved.
   let clauseNum = 0;
   let appendixIdx = 0;
   const numMap: Record<string, string> = {};
   for (const s of orderedSections) {
-    if (s.key === 'heading') {
+    if (s.key === 'heading' || !hasClause(s.key)) {
       numMap[s.key] = '';
     } else if (s.key.startsWith('appendix_')) {
       appendixIdx++;
@@ -165,7 +177,7 @@ export function assembleContractHtml({
   let toc = '';
   if (includeToc) {
     const items = orderedSections
-      .filter((s) => s.key !== 'heading')
+      .filter((s) => s.key !== 'heading' && hasClause(s.key))
       .map((s) => {
         const n = numMap[s.key];
         const isAppendix = s.key.startsWith('appendix_');
