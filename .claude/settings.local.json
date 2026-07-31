@@ -111,7 +111,10 @@
       "Bash(sleep 5; cat /tmp/next-dev.log 2>&1 | tail -60)",
       "Bash(curl -s -o /tmp/resp1.html -w \"employment-contracts -> %{http_code}\\\\n\" \"http://localhost:3411/dashboard/employment-contracts\")",
       "Bash(curl -s -o /tmp/resp2.html -w \"tasks-requirements -> %{http_code}\\\\n\" \"http://localhost:3411/dashboard/tasks-requirements\")",
-      "Bash(curl -s -o /tmp/login.html -w \"login -> %{http_code}\\\\n\" \"http://localhost:3411/login\")"
+      "Bash(curl -s -o /tmp/login.html -w \"login -> %{http_code}\\\\n\" \"http://localhost:3411/login\")",
+      "WebSearch",
+      "WebFetch(domain:supabase.com)",
+      "WebFetch(domain:github.com)"
     ],
     "additionalDirectories": [
       "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals"
