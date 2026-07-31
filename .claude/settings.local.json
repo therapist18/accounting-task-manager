@@ -98,7 +98,20 @@
       "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"E:\\\\Bclmeetingsapp\\\\app\\\\src\\\\main\\\\res\\\\drawable\\\\header_bg.png\"\\); $header = $bytes[0..7] | ForEach-Object { $_.ToString\\(\"X2\"\\) }; Write-Output \"Header bytes: $\\($header -join ' '\\)\"; Write-Output \"File size: $\\($bytes.Length\\) bytes\")",
       "PowerShell(Add-Type -AssemblyName System.Drawing; $src = \"E:\\\\Bclmeetingsapp\\\\app\\\\src\\\\main\\\\res\\\\drawable\\\\header_bg.png\"; $img = [System.Drawing.Image]::FromFile\\($src\\); $img.Save\\($src, [System.Drawing.Imaging.ImageFormat]::Png\\); $img.Dispose\\(\\); Write-Output \"Converted successfully. New size: $\\(\\(Get-Item $src\\).Length\\) bytes\")",
       "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"E:\\\\Bclmeetingsapp\\\\app\\\\src\\\\main\\\\res\\\\drawable\\\\header_bg.png\"\\); $header = $bytes[0..3] | ForEach-Object { $_.ToString\\(\"X2\"\\) }; Write-Output \"Header: $\\($header -join ' '\\)\")",
-      "Bash(sleep 10; tail -n 60 /tmp/bcl-dev.log)"
+      "Bash(sleep 10; tail -n 60 /tmp/bcl-dev.log)",
+      "Bash(keytool -list -v -keystore \"/c/Users/user/bcl-meetings-release.jks\" -storepass bcladmin)",
+      "Bash(python3 -c ' *)",
+      "Bash(powershell -NoProfile -Command '[System.IO.File]::ReadAllBytes\\('\\\\''app/\\(dashboard\\)/dashboard/cv-generator/components/cv-designs.tsx'\\\\''\\) | Select-Object -Skip 6500 -First 400 | ForEach-Object { '\\\\''{0:X2}'\\\\'' -f $_ }')",
+      "Bash(grep -iE \"^map-pin\\\\.js$|^phone\\\\.js$|^mail\\\\.js$|^github\\\\.js$|^linkedin\\\\.js$\")",
+      "Bash(node verify-pagination.js)",
+      "Bash(node inspect-pdfs.js)",
+      "Bash(node debug-move.js)",
+      "Bash(node scroll-page3.js)",
+      "Bash(node click-page3.js)",
+      "Bash(sleep 5; cat /tmp/next-dev.log 2>&1 | tail -60)",
+      "Bash(curl -s -o /tmp/resp1.html -w \"employment-contracts -> %{http_code}\\\\n\" \"http://localhost:3411/dashboard/employment-contracts\")",
+      "Bash(curl -s -o /tmp/resp2.html -w \"tasks-requirements -> %{http_code}\\\\n\" \"http://localhost:3411/dashboard/tasks-requirements\")",
+      "Bash(curl -s -o /tmp/login.html -w \"login -> %{http_code}\\\\n\" \"http://localhost:3411/login\")"
     ],
     "additionalDirectories": [
       "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals"

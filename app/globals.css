@@ -193,31 +193,42 @@ body {
   }
 }
 
-/* ── PDF Mode Overrides ── */
-body.pdf-mode {
-  padding: 0 !important;
-  background: white !important;
+/* ── Native browser print-to-PDF (CV generator) ──
+   @page pins paper size/margins so Chrome's print dialog opens pre-filled
+   with our values instead of the user's last-used settings. */
+@page {
+  size: A4;
+  margin: 0;
 }
 
-body.pdf-mode .no-print,
-body.pdf-mode .toolbar,
-body.pdf-mode button,
-body.pdf-mode .fixed {
-  display: none !important;
-}
+@media print {
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
 
-body.pdf-mode #cv-preview-container {
-  transform: none !important;
-  width: 210mm !important;
-  overflow: visible !important;
-}
+  /* Fixed/absolutely-positioned elements — and anything nested inside an
+     ancestor with a height cap or overflow clip (the app shell is
+     h-screen/overflow-hidden) — only paginate their first page in Chrome's
+     print engine; the rest of the content is silently dropped. So rather
+     than isolating #cv-preview-container in place, the JS moves it to be a
+     direct child of <body> before printing, in normal static flow, where
+     multi-page content paginates correctly. This just hides its former
+     siblings and lets it lay out normally. */
+  body.pdf-mode > *:not(#cv-preview-container) {
+    display: none !important;
+  }
 
-body.pdf-mode #cv-preview-container > div {
-  margin: 0 !important;
-  box-shadow: none !important;
-  transform: none !important;
-  width: 210mm !important;
-  min-height: auto !important;
+  body.pdf-mode #cv-preview-container {
+    display: block !important;
+    position: static !important;
+    margin: 0 !important;
+    width: 210mm !important;
+    box-shadow: none !important;
+  }
 }
 
 .html2pdf__page-break {

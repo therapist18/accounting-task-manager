@@ -1,6 +1,7 @@
-"use client";
+﻿"use client";
 
 import React from "react";
+import { MapPin, Phone, Mail, Github, Linkedin } from "lucide-react";
 
 // Color presets for CV design
 export const COLOR_PRESETS = [
@@ -156,11 +157,11 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
           <div>
             <div style={{ color: acc, borderColor: `${acc}55` }} className="text-sm font-extrabold uppercase tracking-[1.5px] border-b pb-1.5 mb-3">Contact Information</div>
             <div className="space-y-2 text-sm">
-              <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold">📍</span> <span className={!personalInfo.location ? "italic opacity-50" : ""}>{personalInfo.location || "Location"}</span></div>
-              <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold">📞</span> <span className={!personalInfo.phone ? "italic opacity-50" : ""}>{personalInfo.phone || "Phone"}</span></div>
-              <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold">✉️</span> <span className={!personalInfo.email ? "italic opacity-50" : ""}>{personalInfo.email || "Email"}</span></div>
-              <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold">🐙</span> <span className={`break-all ${!personalInfo.github ? "italic opacity-50" : ""}`}>{personalInfo.github || "GitHub"}</span></div>
-              <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold">🔗</span> <span className={`break-all ${!personalInfo.linkedin ? "italic opacity-50" : ""}`}>{personalInfo.linkedin || "LinkedIn"}</span></div>
+              <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold"><MapPin className="inline h-[1em] w-[1em] shrink-0" /></span> <span className={!personalInfo.location ? "italic opacity-50" : ""}>{personalInfo.location || "Location"}</span></div>
+              <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold"><Phone className="inline h-[1em] w-[1em] shrink-0" /></span> <span className={!personalInfo.phone ? "italic opacity-50" : ""}>{personalInfo.phone || "Phone"}</span></div>
+              <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold"><Mail className="inline h-[1em] w-[1em] shrink-0" /></span> <span className={!personalInfo.email ? "italic opacity-50" : ""}>{personalInfo.email || "Email"}</span></div>
+              <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold"><Github className="inline h-[1em] w-[1em] shrink-0" /></span> <span className={`break-all ${!personalInfo.github ? "italic opacity-50" : ""}`}>{personalInfo.github || "GitHub"}</span></div>
+              <div className="flex items-center gap-2"><span style={{ color: acc }} className="font-bold"><Linkedin className="inline h-[1em] w-[1em] shrink-0" /></span> <span className={`break-all ${!personalInfo.linkedin ? "italic opacity-50" : ""}`}>{personalInfo.linkedin || "LinkedIn"}</span></div>
             </div>
           </div>
 
@@ -226,7 +227,7 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
           </div>
 
           <div>
-            <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Professional Profile</div>
+            <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3 break-after-avoid">Professional Profile</div>
             {summary ? (
               <p className="text-sm leading-relaxed text-justify">{summary}</p>
             ) : (
@@ -235,11 +236,11 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
           </div>
 
           <div>
-            <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-4">Professional Experience</div>
+            <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-4 break-after-avoid">Professional Experience</div>
             {experience.length > 0 ? (
               <div className="space-y-5">
                 {experience.map((exp: any, idx: number) => (
-                  <div key={idx}>
+                  <div key={idx} className="break-inside-avoid">
                     <div className="flex justify-between font-extrabold text-sm text-black">
                       <span>{exp.company}</span>
                       <span>{exp.startDate} – {exp.endDate}</span>
@@ -260,11 +261,11 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
           </div>
 
           <div>
-            <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-4">Internships</div>
+            <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-4 break-after-avoid">Internships</div>
             {internships.length > 0 ? (
               <div className="space-y-4">
                 {internships.map((intern: any, idx: number) => (
-                  <div key={idx}>
+                  <div key={idx} className="break-inside-avoid">
                     <div className="flex justify-between font-extrabold text-sm text-black">
                       <span>{intern.company}</span>
                       <span>{intern.startDate} – {intern.endDate}</span>
@@ -285,11 +286,11 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
           </div>
 
           <div>
-            <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Key Projects</div>
+            <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3 break-after-avoid">Key Projects</div>
             {projects.length > 0 ? (
               <div className="grid grid-cols-2 gap-3.5">
                 {projects.map((proj: any, idx: number) => (
-                  <div key={idx} className="border border-gray-100 p-3 rounded shadow-sm bg-white">
+                  <div key={idx} className="border border-gray-100 p-3 rounded shadow-sm bg-white break-inside-avoid">
                     <strong style={{ color: pri }} className="text-sm block mb-1">{proj.title} {proj.year ? `(${proj.year})` : ""}</strong>
                     <p className="text-[10.5px] text-gray-600 leading-normal">{proj.description}</p>
                   </div>
@@ -301,11 +302,11 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
           </div>
 
           <div>
-            <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Education</div>
+            <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3 break-after-avoid">Education</div>
             {education.length > 0 ? (
               <div className="space-y-2">
                 {education.map((edu: any, idx: number) => (
-                  <div key={idx} className="text-[11.5px]">
+                  <div key={idx} className="text-[11.5px] break-inside-avoid">
                     <strong>{edu.degree}</strong> – {edu.institution} ({edu.year})
                     {edu.details && <p className="text-[10.5px] text-gray-500 mt-0.5">{edu.details}</p>}
                   </div>
@@ -318,10 +319,10 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
 
           {certifications.length > 0 && (
             <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Certifications</div>
+              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3 break-after-avoid">Certifications</div>
               <div className="space-y-2">
                 {certifications.map((cert: any, idx: number) => (
-                  <div key={idx} className="text-[11.5px]">
+                  <div key={idx} className="text-[11.5px] break-inside-avoid">
                     <strong>{cert.name}</strong> – {cert.issuer} {cert.date ? `(${cert.date})` : ""}
                   </div>
                 ))}
@@ -331,10 +332,10 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
 
           {achievements.length > 0 && (
             <div>
-              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">Achievements</div>
+              <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3 break-after-avoid">Achievements</div>
               <div className="space-y-2">
                 {achievements.map((ach: any, idx: number) => (
-                  <div key={idx} className="text-[11.5px]">
+                  <div key={idx} className="text-[11.5px] break-inside-avoid">
                     <strong>{ach.title}</strong> {ach.date ? `(${ach.date})` : ""}
                     {ach.description && <p className="text-[10.5px] text-gray-500 mt-0.5">{ach.description}</p>}
                   </div>
@@ -344,11 +345,11 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
           )}
 
           <div>
-            <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3">References</div>
+            <div style={{ borderLeftColor: acc, color: pri, backgroundColor: `${acc}18` }} className="border-l-[5px] p-2 px-4 text-sm font-extrabold uppercase mb-3 break-after-avoid">References</div>
             {references.length > 0 ? (
               <div className="grid grid-cols-2 gap-4">
                 {references.map((ref: any, idx: number) => (
-                  <div key={idx} className="text-sm text-gray-700 leading-relaxed">
+                  <div key={idx} className="text-sm text-gray-700 leading-relaxed break-inside-avoid">
                     <strong className="text-black text-sm block">{ref.name}</strong>
                     {ref.title} | {ref.company}<br />
                     {ref.address && <span>{ref.address}<br /></span>}
@@ -387,9 +388,9 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
             <div style={{ color: acc2 }} className="text-lg font-bold uppercase tracking-wider mt-1">{personalInfo.title || "Professional Title"}</div>
           </div>
           <div className="text-right text-xs space-y-1 text-slate-300">
-            <div>✉️ <span className={!personalInfo.email ? "italic opacity-50" : ""}>{personalInfo.email || "Email"}</span></div>
-            <div>📞 <span className={!personalInfo.phone ? "italic opacity-50" : ""}>{personalInfo.phone || "Phone"}</span></div>
-            <div>📍 <span className={!personalInfo.location ? "italic opacity-50" : ""}>{personalInfo.location || "Location"}</span></div>
+            <div><Mail className="inline h-[1em] w-[1em] shrink-0" /> <span className={!personalInfo.email ? "italic opacity-50" : ""}>{personalInfo.email || "Email"}</span></div>
+            <div><Phone className="inline h-[1em] w-[1em] shrink-0" /> <span className={!personalInfo.phone ? "italic opacity-50" : ""}>{personalInfo.phone || "Phone"}</span></div>
+            <div><MapPin className="inline h-[1em] w-[1em] shrink-0" /> <span className={!personalInfo.location ? "italic opacity-50" : ""}>{personalInfo.location || "Location"}</span></div>
             <div style={{ color: acc2 }} className="flex gap-2 justify-end mt-1">
               <span className={`underline break-all ${!personalInfo.linkedin ? "italic opacity-50" : ""}`}>{personalInfo.linkedin || "LinkedIn"}</span>
               <span className={`underline break-all ${!personalInfo.github ? "italic opacity-50" : ""}`}>{personalInfo.github || "GitHub"}</span>
@@ -620,10 +621,10 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
             
             <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', fontSize: '10px', color: '#666', marginBottom: '6px', flexWrap: 'wrap' }}>
               {personalInfo.email && <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ color: acc }}>✉</span> {personalInfo.email}</span>}
-              {personalInfo.phone && <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ color: acc }}>📞</span> {personalInfo.phone}</span>}
-              {personalInfo.location && <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ color: acc }}>📍</span> {personalInfo.location}</span>}
-              {personalInfo.linkedin && <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ color: acc }}>🔗</span> {personalInfo.linkedin}</span>}
-              {personalInfo.github && <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ color: acc }}>🐙</span> {personalInfo.github}</span>}
+              {personalInfo.phone && <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ color: acc }}><Phone className="inline h-[1em] w-[1em] shrink-0" /></span> {personalInfo.phone}</span>}
+              {personalInfo.location && <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ color: acc }}><MapPin className="inline h-[1em] w-[1em] shrink-0" /></span> {personalInfo.location}</span>}
+              {personalInfo.linkedin && <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ color: acc }}><Linkedin className="inline h-[1em] w-[1em] shrink-0" /></span> {personalInfo.linkedin}</span>}
+              {personalInfo.github && <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ color: acc }}><Github className="inline h-[1em] w-[1em] shrink-0" /></span> {personalInfo.github}</span>}
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', fontSize: '9px', color: '#555', textTransform: 'uppercase', fontWeight: 600, flexWrap: 'wrap' }}>
@@ -798,7 +799,7 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
                     <div key={idx} style={{ fontSize: '10px', lineHeight: '1.5', color: '#333' }}>
                       <strong>{ref.name}</strong><br />
                       {ref.title}, {ref.company}<br />
-                      📞 {ref.contact}
+                      <Phone className="inline h-[1em] w-[1em] shrink-0" /> {ref.contact}
                     </div>
                   ))}
                 </div>
@@ -840,11 +841,11 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
           <div>
             <p style={{ color: acc }} className="text-xs font-black uppercase tracking-widest mb-2">Contact</p>
             <div className="space-y-1.5 text-xs opacity-90">
-              {personalInfo.location && <div>📍 {personalInfo.location}</div>}
-              {personalInfo.phone && <div>📞 {personalInfo.phone}</div>}
-              {personalInfo.email && <div className="break-all">✉️ {personalInfo.email}</div>}
-              {personalInfo.linkedin && <div className="break-all">🔗 {personalInfo.linkedin}</div>}
-              {personalInfo.github && <div className="break-all">🐙 {personalInfo.github}</div>}
+              {personalInfo.location && <div><MapPin className="inline h-[1em] w-[1em] shrink-0" /> {personalInfo.location}</div>}
+              {personalInfo.phone && <div><Phone className="inline h-[1em] w-[1em] shrink-0" /> {personalInfo.phone}</div>}
+              {personalInfo.email && <div className="break-all"><Mail className="inline h-[1em] w-[1em] shrink-0" /> {personalInfo.email}</div>}
+              {personalInfo.linkedin && <div className="break-all"><Linkedin className="inline h-[1em] w-[1em] shrink-0" /> {personalInfo.linkedin}</div>}
+              {personalInfo.github && <div className="break-all"><Github className="inline h-[1em] w-[1em] shrink-0" /> {personalInfo.github}</div>}
             </div>
           </div>
           <div>
@@ -954,7 +955,7 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
               {personalInfo.email && <span>✉ {personalInfo.email}</span>}
               {personalInfo.phone && <span>☏ {personalInfo.phone}</span>}
               {personalInfo.location && <span>⌖ {personalInfo.location}</span>}
-              {personalInfo.linkedin && <span>🔗 {personalInfo.linkedin}</span>}
+              {personalInfo.linkedin && <span><Linkedin className="inline h-[1em] w-[1em] shrink-0" /> {personalInfo.linkedin}</span>}
             </div>
           </div>
         </header>
@@ -1067,8 +1068,8 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
               <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-2 text-xs opacity-80">
                 {personalInfo.email && <span>✉ {personalInfo.email}</span>}
                 {personalInfo.phone && <span>☏ {personalInfo.phone}</span>}
-                {personalInfo.location && <span>📍 {personalInfo.location}</span>}
-                {personalInfo.linkedin && <span>🔗 {personalInfo.linkedin}</span>}
+                {personalInfo.location && <span><MapPin className="inline h-[1em] w-[1em] shrink-0" /> {personalInfo.location}</span>}
+                {personalInfo.linkedin && <span><Linkedin className="inline h-[1em] w-[1em] shrink-0" /> {personalInfo.linkedin}</span>}
               </div>
             </div>
           </div>
@@ -1177,10 +1178,10 @@ export function CVLayout({ cvData, cvSettings, selectedLayout }: CVLayoutProps) 
           </div>
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs px-8 pb-4 text-slate-300" style={{ backgroundColor: `${pri}dd` }}>
             {personalInfo.email && <span>✉ {personalInfo.email}</span>}
-            {personalInfo.phone && <span>📞 {personalInfo.phone}</span>}
-            {personalInfo.location && <span>📍 {personalInfo.location}</span>}
-            {personalInfo.linkedin && <span>🔗 {personalInfo.linkedin}</span>}
-            {personalInfo.github && <span>🐙 {personalInfo.github}</span>}
+            {personalInfo.phone && <span><Phone className="inline h-[1em] w-[1em] shrink-0" /> {personalInfo.phone}</span>}
+            {personalInfo.location && <span><MapPin className="inline h-[1em] w-[1em] shrink-0" /> {personalInfo.location}</span>}
+            {personalInfo.linkedin && <span><Linkedin className="inline h-[1em] w-[1em] shrink-0" /> {personalInfo.linkedin}</span>}
+            {personalInfo.github && <span><Github className="inline h-[1em] w-[1em] shrink-0" /> {personalInfo.github}</span>}
           </div>
         </header>
 

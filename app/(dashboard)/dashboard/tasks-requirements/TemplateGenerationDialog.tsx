@@ -25,6 +25,7 @@ import { EntityType, ENTITY_TYPES, DEPENDANT_RELATIONSHIPS } from "@/lib/constan
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { executeComputedField } from '../tasks/utils/automationComputedFunctions';
+import { parseJsonValue, processTextField, formatDate, processCurrentDateField } from '../master-fields/utils/masterFieldValueResolver';
 import { PreviewPanel } from './components/PreviewPanel';
 import { UploadModal } from '@/app/generic-components/UploadModal';
 import { SearchableSelect } from '@/components/ui/searchable-select';
@@ -85,22 +86,6 @@ const processDigitSplit = (value, digitCount = 8) => {
         result.push(chars[i - 1] || '');
     }
     return result;
-};
-
-const formatDate = (date, formatStr) => {
-    if (!date) return '';
-    const d = new Date(date);
-    if (isNaN(d.getTime())) return '';
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-
-    if (!formatStr) return `${year}-${month}-${day}`;
-
-    return formatStr
-        .replace('YYYY', year)
-        .replace('MM', month)
-        .replace('DD', day);
 };
 
 const base64Parser = async (dataURL) => {
@@ -386,49 +371,6 @@ const renderLetterheadDocxBuffer = async (letterheadBuffer, htmlContent, renderD
     return zip.generate({ type: 'arraybuffer', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
 };
 
-const parseJsonValue = (data, path) => {
-    if (!path || !data) return '';
-    try {
-        let currentValue = data;
-        const normalizedPath = path.replace(/->>/g, '->').replace(/'/g, '');
-
-        const parts = normalizedPath.split(/->|\./);
-
-        for (let i = 0; i < parts.length; i++) {
-            const key = parts[i].trim();
-            if (!key) continue;
-            if (currentValue && currentValue.current !== undefined && key === 'current') {
-                currentValue = currentValue.current;
-            }
-
-            if (Array.isArray(currentValue)) {
-                currentValue = currentValue[0];
-            }
-
-            if (currentValue && typeof currentValue === 'object') {
-                if (currentValue[key] !== undefined) {
-                    currentValue = currentValue[key];
-                } else {
-                    const lowerKey = key.toLowerCase();
-                    const foundKey = Object.keys(currentValue).find(k => k.toLowerCase() === lowerKey);
-                    if (foundKey) {
-                        currentValue = currentValue[foundKey];
-                    } else {
-                        currentValue = undefined;
-                    }
-                }
-            } else if (i < parts.length - 1) {
-                return '';
-            }
-        }
-
-        const finalValue = currentValue !== undefined && currentValue !== null ? String(currentValue) : '';
-        return finalValue;
-    } catch (error) {
-        return '';
-    }
-};
-
 const normalizeString = (str) => !str ? '' : str.toLowerCase().replace(/[_\s-]/g, '');
 
 const findPrimaryDirector = (relationshipData) => {
@@ -691,23 +633,6 @@ const processOrdinalField = (placeholder, arrayIndex) => {
     }
 };
 
-const processCurrentDateField = (placeholder, masterFields) => {
-    if (!placeholder.master_field_ids?.length || !masterFields) {
-        return { value: '', source: null };
-    }
-
-    for (const id of placeholder.master_field_ids) {
-        const mf = masterFields.get(parseInt(id, 10));
-        if (mf?.date_config?.useCurrentDate) {
-            return {
-                value: formatDate(new Date(), mf.date_config.format || 'DD/MM/YYYY'),
-                source: 'System Date'
-            };
-        }
-    }
-
-    return { value: '', source: null };
-};
 
 // Resolves one comparison clause's field value and checks it against clause.value/operator.
 // Shared by the primary `comparison` and any AND-ed `additional_comparisons` on a condition.
@@ -1089,161 +1014,6 @@ const processImageField = (placeholder, targetEntity, combinedCache, masterField
     return { value: '', source: null };
 };
 
-const processTextField = (
-    placeholder: any,
-    targetEntity: any,
-    combinedCache: Record<string, any>,
-    masterFields: Map<number, any>,
-    computedFieldCache: Record<string, any> | null,
-) => {
-    if (!placeholder.master_field_ids?.length) {
-        return { value: '', source: null };
-    }
-
-    const candidateIds = [
-        targetEntity?.id,
-        targetEntity?.director_id,
-        targetEntity?.individual_id,
-        targetEntity?.company_id,
-    ]
-        .filter(Boolean)
-        .map(String)
-        .filter((v, i, arr) => arr.indexOf(v) === i);
-
-    if (candidateIds.length === 0) {
-        return { value: '', source: null };
-    }
-
-    const allValues: string[] = [];
-    const allSources: string[] = [];
-
-    for (const id of placeholder.master_field_ids) {
-        const mf = masterFields.get(parseInt(id, 10));
-        if (!mf?.sources) continue;
-
-        // Sort by priority ascending so lower number = higher priority
-        const sortedSources = [...mf.sources].sort(
-            (a, b) => (a.priority ?? 999) - (b.priority ?? 999)
-        );
-
-        for (const source of sortedSources) {
-
-            // ── COMPUTED SOURCE ──────────────────────────────────────────────
-            if (source.is_computed) {
-                if (!computedFieldCache) continue;
-
-                const extractionMode = 'latest';
-                let computedVal: any;
-
-                for (const candidateId of candidateIds) {
-                    const ck = `${mf.id}_${candidateId}_${extractionMode}`;
-                    if (computedFieldCache[ck] !== undefined) {
-                        computedVal = computedFieldCache[ck];
-                        break;
-                    }
-                }
-
-                if (computedVal === undefined) continue; // still loading
-
-                const errorStrings = [
-                    'Document Not Found', 'Missing Document', 'No Document Specified',
-                    'Field Not Found', 'Number Not Found', 'Missing', 'No Source',
-                ];
-
-                if (computedVal !== null && !errorStrings.includes(computedVal)) {
-                    let finalVal = computedVal;
-
-                    if (typeof computedVal === 'object' && computedVal !== null && source.path) {
-                        const pathMatch = source.path.match(/['"]([\w_]+)['"]$/);
-                        const fieldName = pathMatch ? pathMatch[1] : null;
-                        if (fieldName && computedVal[fieldName]) {
-                            finalVal = String(computedVal[fieldName]);
-                        } else {
-                            finalVal = computedVal.en || computedVal.name || computedVal.title ||
-                                String(Object.values(computedVal)[0] || '');
-                        }
-                    }
-
-                    if (finalVal && String(finalVal).trim() !== '') {
-                        allValues.push(String(finalVal));
-                        allSources.push(`Computed: ${mf.label || source.table}`);
-                        break; // found for this master field — stop trying sources
-                    }
-                }
-                continue; // computed error → try next priority source
-            }
-
-            // ── STANDARD DB SOURCE ───────────────────────────────────────────
-            const tableData = combinedCache[source.table];
-            if (!tableData) continue;
-
-            const linkingVar = source.linking_variable || 'id';
-
-            // Document-scoped sources (source_type === 'document' or has document_id[])
-            // are cached under a composite key: doc_<docId>_<entityId>
-            const docIds: string[] = Array.isArray(source.document_id)
-                ? source.document_id
-                : (source.document_id ? [source.document_id] : []);
-
-            let record: any = null;
-
-            if (docIds.length > 0) {
-                // Try composite key first: doc_<documentId>_<entityId>
-                for (const docId of docIds) {
-                    for (const candidateId of candidateIds) {
-                        const compositeKey = `doc_${docId}_${candidateId}`;
-                        if (tableData[compositeKey]) {
-                            record = tableData[compositeKey];
-                            break;
-                        }
-                    }
-                    if (record) break;
-                }
-
-                // Fallback: scan table rows matching both entity ID and document_id
-                if (!record) {
-                    const allRows = Object.values(tableData);
-                    for (const candidateId of candidateIds) {
-                        record = allRows.find((r: any) =>
-                            String(r[linkingVar]) === candidateId &&
-                            docIds.includes(r.document_id)
-                        ) || null;
-                        if (record) break;
-                    }
-                }
-            } else {
-                // Standard entity-ID lookup
-                for (const candidateId of candidateIds) {
-                    record = Object.values(tableData).find((r: any) =>
-                        String((r as any)[linkingVar]) === candidateId
-                    ) || null;
-                    if (record) break;
-                }
-            }
-
-            if (record) {
-                let val = source.path
-                    ? parseJsonValue(record, source.path)
-                    : ((record as any)[mf.field_key] || (record as any)[placeholder.name]);
-
-                if (val && String(val).trim() !== '') {
-                    allValues.push(String(val));
-                    allSources.push(`DB(p${source.priority ?? '?'}): ${source.table}`);
-                    break; // found a value at this priority — stop trying lower priorities
-                }
-                // value was empty → fall through to next priority source
-            }
-            // record not found → fall through to next priority source
-        }
-    }
-
-    if (allValues.length > 0) {
-        return { value: allValues.join(' '), source: allSources[0] };
-    }
-
-    return { value: '', source: null };
-};
-
 const isValidValue = (val: any, placeholderType?: string): boolean => {
     if (val === null || val === undefined) return false;
 
@@ -1278,7 +1048,7 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
         for (const mid of placeholder.master_field_ids) {
             const mf = masterFields.get(parseInt(mid, 10));
             if (mf?.date_config?.useCurrentDate) {
-                const result = processCurrentDateField({ ...placeholder, master_field_ids: [mid] }, masterFields);
+                const result = processCurrentDateField([mid], masterFields);
                 if (isValidValue(result.value, placeholder.type)) {
                     if (logic === 'priority') {
                         return result;
@@ -1304,7 +1074,7 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
                 } else if (placeholder.type === 'boolean') {
                     result = processBooleanField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields);
                 } else {
-                    result = processTextField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields, computedFieldCache);
+                    result = processTextField([mid], targetEntity, combinedCache, masterFields, computedFieldCache);
                 }
             }
             if (isValidValue(result.value, placeholder.type)) {
@@ -2286,8 +2056,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         if (type === 'db' && targetEntity) {
             const mf = masterFields.get(parseInt(id));
             if (!mf) return '';
-            const tempPlaceholder = { ...placeholder, master_field_ids: [id] };
-            const result = processTextField(tempPlaceholder, targetEntity, combinedCacheWithAdditional, masterFields, computedFieldCache);
+            const result = processTextField([id], targetEntity, combinedCacheWithAdditional, masterFields, computedFieldCache);
             return result.value || '';
         }
 

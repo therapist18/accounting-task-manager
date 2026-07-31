@@ -1,72 +1,149 @@
 import supabase from '@/lib/supabase/client';
-import { parseJsonValue } from '../../tasks/utils/AutomationMappingDialog';
-import type { JobField } from '../../master-fields/components/types/database';
+import { processTextField, processCurrentDateField } from '../../master-fields/utils/masterFieldValueResolver';
+import { ecPlaceholderToDtmPlaceholder } from './ecPlaceholderAdapter';
+import type { EcPlaceholder } from './ecPlaceholders';
+import type { JobField, JobFieldSource } from '../../master-fields/components/types/database';
 
-// Resolves tm_job_fields ("master field") values for one employee/company
-// pair - the same source_type/table/path/priority/linking_variable shape
-// Document Template Manager already uses (see JobFieldSource), reused here
-// instead of a second source-mapping format.
+// Resolves every ec_placeholders row linked to a master field
+// (source_kind === 'master_field') for one employee/company pair, using the
+// same core table/path/priority resolver Document Template Manager uses
+// (see master-fields/utils/masterFieldValueResolver.ts) instead of a second,
+// EC-only re-implementation of that walk. Only entity_type 'individual' and
+// 'company' sources are meaningful here - EC has no task, no document
+// uploads, no director/dependant graph, so those DTM-only source shapes are
+// simply never in a linked field's sources for this module.
 //
-// Deliberately NOT reusing tasks/utils/fieldResolution.ts's
-// fetchSourceDataImpl - that resolver is built for the automations/webdata
-// engine and expects a task/relationshipData/automation shape that doesn't
-// exist in the contract wizard (one employee, one company, no task). This
-// is the small, purpose-built equivalent: only handles the 'individual' and
-// 'company' source types EC actually needs (not 'document').
-//
-// Returns values keyed by tm_job_fields.id (NOT field_key) - the caller
-// (standardPlaceholders.ts) maps id -> ec_placeholders.key via each
-// placeholder's own master_field_id link.
-export async function resolveMasterFieldValues(
-  fields: JobField[],
+// Unlike the old per-field-per-source Supabase query this replaces, this
+// bulk-fetches each distinct table referenced by the linked master fields
+// once (matching DTM's own fetch-the-table-then-resolve-in-memory shape),
+// then hands the resulting cache to processTextField per placeholder.
+export async function resolveEcPlaceholderValues(
+  ecPlaceholders: EcPlaceholder[],
   individualId: number | null | undefined,
   companyId: number | string | null | undefined
 ): Promise<Record<string, string>> {
-  const result: Record<string, string> = {};
+  const linked = ecPlaceholders.filter(
+    (p) => p.source_kind === 'master_field' && (p.master_field_id || (p.master_field_links?.length ?? 0) > 0)
+  );
+  if (linked.length === 0) return {};
 
-  await Promise.all(fields.map(async (field) => {
-    // JobFieldSource['linking_variable'] is typed as 'id' | 'director_id' |
-    // null in master-fields/components/types/database.ts, but the Master
-    // Fields admin UI (link-sources-dialog.tsx) actually also writes
-    // 'individual_id' / 'company_id' - that type is stale, not this code, so
-    // read it as a plain string here rather than fight the narrower type.
-    const sources = (field.sources || [])
-      .filter((s) => s.source_type === 'individual' || s.source_type === 'company')
-      .filter((s) => {
-        const lv = s.linking_variable as string | null | undefined;
-        return lv === 'individual_id' || lv === 'company_id' || lv === 'id' || !lv;
-      })
-      .sort((a, b) => a.priority - b.priority);
+  // Gather every referenced master field id up front so the table-fetch pass
+  // below can run once for the whole batch - final per-placeholder
+  // resolution (which respects each link's own strategy) happens later.
+  const allFieldIds = new Set<number>();
+  for (const p of linked) {
+    (ecPlaceholderToDtmPlaceholder(p).master_field_ids || []).forEach((id) => allFieldIds.add(id));
+  }
+  if (allFieldIds.size === 0) return {};
 
-    for (const source of sources) {
-      const linkingVariable = source.linking_variable as string | null | undefined;
-      // acc_portal_company_duplicate IS the company table - its own primary
-      // key (`id`) is the company id, there's no separate `company_id`
-      // column on it (unlike child/document tables such as
-      // acc_portal_kyc_uploads, which reference a company via a real
-      // company_id FK). Force `id` for it regardless of what linking_variable
-      // says, since 'company_id' against this table 400s at the DB level.
-      const isCompanyTableItself = source.table === 'acc_portal_company_duplicate';
-      const usesCompanyId = !isCompanyTableItself && (linkingVariable === 'company_id' || (source.source_type === 'company' && !linkingVariable));
-      const idColumn = isCompanyTableItself ? 'id' : usesCompanyId ? 'company_id' : 'individual_id';
-      const idValue = isCompanyTableItself || usesCompanyId ? companyId : individualId;
-      if (idValue === null || idValue === undefined) continue;
+  const { data: fieldRows, error: fieldsError } = await supabase
+    .from('tm_job_fields')
+    .select('*')
+    .in('id', Array.from(allFieldIds));
+  if (fieldsError || !fieldRows) return {};
 
-      const rootColumn = source.path.split(/->>?/)[0].trim().replace(/['"]/g, '');
-      const { data, error } = await supabase
-        .from(source.table)
-        .select(rootColumn)
-        .eq(idColumn, idValue)
-        .maybeSingle();
+  const masterFields = new Map<number, JobField>(fieldRows.map((f: any) => [f.id, f as JobField]));
 
-      if (error || !data) continue;
-      const value = parseJsonValue(data, source.path);
-      if (value !== undefined && value !== null && value !== '') {
-        result[field.id] = String(value);
-        return;
-      }
+  // Group by each source's OWN linking_variable (defaulting to 'id', same
+  // default processTextField itself uses) - NOT a hardcoded individual_id/
+  // company_id guess. Tables vary: some have a real individual_id/company_id
+  // foreign key column, others (e.g. registry_individuals) are keyed by
+  // their own `id` column directly, so blindly filtering both columns 400s
+  // with "column ... does not exist" on whichever one isn't real. When
+  // linking_variable is 'id' (or unset), the source's own source_type says
+  // which id value that primary key actually holds.
+  const tableConfigs = new Map<string, Map<string, Set<string | number>>>();
+  for (const mf of masterFields.values()) {
+    for (const source of (mf.sources || []) as JobFieldSource[]) {
+      if (source.source_type !== 'individual' && source.source_type !== 'company') continue;
+      if (!source.table) continue;
+
+      // JobFieldSource['linking_variable'] is typed 'id' | 'director_id' | null
+      // in master-fields/components/types/database.ts, but the Master Fields
+      // admin UI actually also writes 'individual_id' / 'company_id' - that
+      // type is stale (same staleness masterFieldResolver.ts always worked
+      // around before this rewrite), so read it as a plain string here.
+      const linkingVar = (source.linking_variable as string | null | undefined) || 'id';
+      const candidateId = linkingVar === 'individual_id'
+        ? individualId
+        : linkingVar === 'company_id'
+        ? companyId
+        : (source.source_type === 'company' ? companyId : individualId);
+      if (candidateId == null) continue;
+
+      if (!tableConfigs.has(source.table)) tableConfigs.set(source.table, new Map());
+      const byLinkingVar = tableConfigs.get(source.table)!;
+      if (!byLinkingVar.has(linkingVar)) byLinkingVar.set(linkingVar, new Set());
+      byLinkingVar.get(linkingVar)!.add(candidateId);
     }
+  }
+
+  const combinedCache: Record<string, Record<string, any>> = {};
+  await Promise.all(Array.from(tableConfigs.entries()).map(async ([table, byLinkingVar]) => {
+    const linkingVars = Array.from(byLinkingVar.keys());
+    let query = supabase.from(table).select('*');
+
+    if (linkingVars.length === 1) {
+      const ids = Array.from(byLinkingVar.get(linkingVars[0])!);
+      query = ids.length === 1 ? query.eq(linkingVars[0], ids[0]) : query.in(linkingVars[0], ids);
+    } else {
+      // Different sources on the same table need different linking columns
+      // (rare, but DTM's own fetchMissingDataSources handles it the same way).
+      const orExpr = linkingVars
+        .map((lv) => {
+          const ids = Array.from(byLinkingVar.get(lv)!);
+          return ids.length === 1 ? `${lv}.eq.${ids[0]}` : `${lv}.in.(${ids.join(',')})`;
+        })
+        .join(',');
+      query = query.or(orExpr);
+    }
+
+    const { data, error } = await query;
+    if (error || !data) return;
+
+    // processTextField scans Object.values(tableData) and matches on the
+    // source's own linking_variable column, so the cache key itself is
+    // never read - row.id (or the array index as a last resort) is only
+    // there to keep entries distinct.
+    const rowsByKey: Record<string, any> = {};
+    data.forEach((row: any, idx: number) => { rowsByKey[row.id ?? idx] = row; });
+    combinedCache[table] = rowsByKey;
   }));
 
+  const targetEntity = { individual_id: individualId ?? undefined, company_id: companyId ?? undefined };
+
+  // Resolve one master field id at a time (not the whole list at once) so
+  // each link's own strategy can be honored: 'fallback' stops at the first
+  // link that resolves a non-empty value (the common case - e.g. try the
+  // Employee record, only fall back to a secondary source if blank);
+  // 'merge' keeps going and concatenates every non-empty link's value.
+  // processTextField itself has no concept of strategy (it always merges
+  // whatever ids it's given), so that per-link decision has to live here.
+  const result: Record<string, string> = {};
+  for (const p of linked) {
+    const links = p.master_field_links && p.master_field_links.length > 0
+      ? [...p.master_field_links].sort((a, b) => a.display_priority - b.display_priority)
+      : p.master_field_id
+      ? [{ master_field_id: p.master_field_id, display_priority: 1, strategy: 'fallback' as const }]
+      : [];
+
+    const collected: string[] = [];
+    for (const link of links) {
+      const id = Number(link.master_field_id);
+      // System-date fields (tm_job_fields.date_config.useCurrentDate) resolve
+      // to today's date directly, no table lookup or target entity needed -
+      // checked before the normal DB-source path, same as DTM does.
+      // date_config is a real tm_job_fields column (see field-dialog.tsx) but
+      // missing from the JobField type, same staleness as linking_variable above.
+      const mf = masterFields.get(id) as (JobField & { date_config?: { useCurrentDate?: boolean } }) | undefined;
+      const { value } = mf?.date_config?.useCurrentDate
+        ? processCurrentDateField([id], masterFields)
+        : processTextField([id], targetEntity, combinedCache, masterFields, null);
+      if (!value) continue;
+      collected.push(value);
+      if (link.strategy !== 'merge') break;
+    }
+    if (collected.length > 0) result[p.key] = collected.join(' ');
+  }
   return result;
 }

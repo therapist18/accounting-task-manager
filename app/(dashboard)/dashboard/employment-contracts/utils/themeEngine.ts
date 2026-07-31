@@ -72,10 +72,6 @@ const BASE_SECTION_STYLES = `
   .cs-section th, .cs-section td { padding: 8px 12px; }
   .cs-section .signature-block { margin-top: 28px; }
   [data-section="appendix_job_description"] { page-break-before: always; }
-  [data-section="appendix_salary_breakdown"] { page-break-before: always; }
-  [data-section="appendix_benefits_schedule"] { page-break-before: always; }
-  [data-section="appendix_company_policies"] { page-break-before: always; }
-  [data-section="appendix_equipment_issued"] { page-break-before: always; }
   [data-section="signatures"] { page-break-inside: avoid; }
 
   .cs-toc { margin-bottom: 28px; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; }

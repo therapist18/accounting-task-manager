@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import {
   Download, Loader2, Save, FileText, FileWarning, Palette, FileDown,
   ZoomIn, ZoomOut, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  ChevronDown, List,
+  ChevronDown, List, RefreshCw,
 } from 'lucide-react';
 import { saveAs } from 'file-saver';
 import { toast } from 'sonner';
@@ -219,11 +219,11 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     });
   }, [selectedJobProfile, offer, effectiveClauses]);
 
-  const { ecPlaceholders, masterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
+  const { masterFieldValues, isResolving: isResolvingMasterFields, refresh: refreshMasterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
 
   const employeeValues = useMemo(
-    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer?.placeholder_overrides, ecPlaceholders, masterFieldValues) : {}),
-    [employee, company, offer, effectiveSettings, ecPlaceholders, masterFieldValues]
+    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer?.placeholder_overrides, masterFieldValues) : {}),
+    [employee, company, offer, effectiveSettings, masterFieldValues]
   );
 
   const bodyHtml = useMemo(() => {
@@ -438,6 +438,14 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
             className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
           >
             <Palette className="w-4 h-4" />
+          </button>
+          <button
+            onClick={refreshMasterFieldValues}
+            disabled={isResolvingMasterFields}
+            title="Re-resolve master field values (e.g. after linking a placeholder on the Data Sources page)"
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={cn("w-4 h-4", isResolvingMasterFields && "animate-spin")} />
           </button>
         </div>
 

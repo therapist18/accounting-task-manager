@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Settings2, UserRound, RotateCcw } from 'lucide-react';
+import { Loader2, Settings2, UserRound, RotateCcw, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ENTITY_TYPES } from '@/lib/constants/entity-types';
 
@@ -121,14 +121,14 @@ export function ContractEditor({
     selectedJobProfile, offer.settings_overrides ? { settings: offer.settings_overrides } : null,
   ]), [selectedJobProfile, offer]);
 
-  const { ecPlaceholders, masterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
+  const { ecPlaceholders, masterFieldValues, isResolving, refresh: refreshMasterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
 
   // Full resolved {{token}} -> value map for the Placeholders & Values tab -
   // same computation ContractPreview.tsx uses to render the document, so
   // what's shown here always matches what will actually be generated.
   const placeholderValues = useMemo(
-    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer.placeholder_overrides, ecPlaceholders, masterFieldValues) : {}),
-    [employee, company, offer, effectiveSettings, ecPlaceholders, masterFieldValues]
+    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer.placeholder_overrides, masterFieldValues) : {}),
+    [employee, company, offer, effectiveSettings, masterFieldValues]
   );
 
   // Fetch clauses for profile-scoped placeholder filtering
@@ -204,7 +204,7 @@ export function ContractEditor({
       </div>
 
       <ScrollArea className="flex-1 overflow-auto">
-        <div className="max-w-4xl mx-auto p-6 space-y-6 pb-24">
+        <div className="max-w-6xl mx-auto p-6 space-y-6 pb-24">
           
           {/* Contract Configuration */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-sm overflow-hidden transition-all hover:shadow-md">
@@ -234,9 +234,19 @@ export function ContractEditor({
                 <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">Data & Values</h3>
                 <p className="text-xs text-slate-500 mt-1">Placeholder tokens resolved for this contract, scoped to the selected job profile.</p>
               </div>
-              <span className="text-xs text-slate-400">{profileScopedPlaceholders.length} / {ecPlaceholders.length} placeholders</span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-400">{profileScopedPlaceholders.length} / {ecPlaceholders.length} placeholders</span>
+                <button
+                  onClick={refreshMasterFieldValues}
+                  disabled={isResolving}
+                  title="Re-resolve master field values (e.g. after linking a placeholder on the Data Sources page)"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-200 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={cn("w-3.5 h-3.5", isResolving && "animate-spin")} />
+                </button>
+              </div>
             </div>
-            <div className={cn("p-6", profileScopedPlaceholders.length > 0 && "max-h-[600px] overflow-y-auto")}>
+            <div className="p-6">
               {profileScopedPlaceholders.length === 0 ? (
                 <p className="text-sm text-slate-500 text-center py-8">
                   {selectedJobProfile
@@ -261,82 +271,70 @@ export function ContractEditor({
                 );
 
                 return (
-                  <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  <div className="space-y-5">
                     {sortedEntities.map(([entityKey, group]) => (
-                      <div key={entityKey} className="py-5 first:pt-0 last:pb-0">
-                        <h4 className="sticky top-0 z-20 -mx-6 px-6 py-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                      <div key={entityKey}>
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2 mb-2.5">
                           {group.label}
                           <Badge variant="secondary" className="text-[10px] h-4 px-1.5 rounded-full">{group.placeholders.length}</Badge>
                           <div className="h-px flex-1 bg-slate-100 dark:bg-slate-800"></div>
                         </h4>
-                        <div className="mt-3 overflow-auto max-h-72 rounded-xl border border-slate-200 dark:border-slate-800">
-                          <table className="w-full">
-                            <thead className="sticky top-0 z-10">
-                              <tr className="bg-slate-50 dark:bg-slate-900/50">
-                                <th className="text-left text-xs font-bold text-slate-500 px-4 py-2.5 w-1/2 border-b border-slate-200 dark:border-slate-800">Field</th>
-                                <th className="text-left text-xs font-bold text-slate-500 px-4 py-2.5 w-1/2 border-b border-slate-200 dark:border-slate-800">Value</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {group.placeholders.map((p) => {
-                                const val = placeholderValues[p.key] ?? '';
-                                const overrideVal = offer.placeholder_overrides?.[p.key];
-                                const isOverridden = overrideVal !== undefined;
-                                return (
-                                  <tr key={p.id} className="group/field border-b border-slate-100 dark:border-slate-800 last:border-b-0 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
-                                    <td className="px-4 py-3 align-top">
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{p.label}</span>
-                                        <span className="text-[10px] font-mono text-slate-400 shrink-0">{'{{' + p.key + '}}'}</span>
-                                        {isOverridden && (
-                                          <Badge variant="outline" className="text-[10px] h-4 px-1 rounded-full bg-amber-50 text-amber-700 border-amber-200">
-                                            Override
-                                          </Badge>
-                                        )}
-                                      </div>
-                                      <span className={cn(
-                                        "inline-block text-[10px] font-medium px-1.5 py-0.5 rounded-full border mt-1",
-                                        p.source_kind === 'master_field' && "bg-slate-50 text-slate-500 border-slate-200",
-                                        p.source_kind === 'settings_cascade' && "bg-blue-50 text-blue-600 border-blue-200",
-                                        p.source_kind === 'offer' && "bg-purple-50 text-purple-600 border-purple-200",
-                                      )}>{p.source_kind === 'master_field' ? 'Master field' : p.source_kind === 'settings_cascade' ? 'Settings' : 'Offer'}</span>
-                                    </td>
-                                    <td className="px-4 py-3">
-                                      <div className="flex items-center gap-1.5">
-                                        {p.editable ? (
-                                          <Input
-                                            className={cn(
-                                              "h-8 text-sm transition-colors rounded-lg flex-1",
-                                              isOverridden
-                                                ? "border-amber-200 bg-amber-50/30 dark:border-amber-900/50 dark:bg-amber-900/10 focus-visible:ring-amber-500/20"
-                                                : "border-slate-200 bg-white shadow-sm focus-visible:ring-blue-500/20"
-                                            )}
-                                            value={overrideVal ?? val}
-                                            onChange={(e) => handlePlaceholderOverride(p.key, e.target.value)}
-                                            placeholder="Leave blank for default"
-                                          />
-                                        ) : (
-                                          <div className="flex-1 h-8 flex items-center px-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-800">
-                                            <span className="text-sm text-slate-700 dark:text-slate-300 truncate">{val || '—'}</span>
-                                          </div>
-                                        )}
-                                        {p.editable && isOverridden && (
-                                          <button
-                                            type="button"
-                                            title="Reset to default"
-                                            onClick={() => handlePlaceholderOverride(p.key, undefined)}
-                                            className="text-slate-400 hover:text-red-500 shrink-0"
-                                          >
-                                            <RotateCcw className="w-3.5 h-3.5" />
-                                          </button>
-                                        )}
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                          {group.placeholders.map((p) => {
+                            const val = placeholderValues[p.key] ?? '';
+                            const overrideVal = offer.placeholder_overrides?.[p.key];
+                            const isOverridden = overrideVal !== undefined;
+                            return (
+                              <div
+                                key={p.id}
+                                className={cn(
+                                  "rounded-lg border-l-[3px] border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40 px-3 py-2 transition-colors hover:border-slate-300 dark:hover:border-slate-700",
+                                  p.source_kind === 'master_field' && "border-l-slate-300 dark:border-l-slate-600",
+                                  p.source_kind === 'settings_cascade' && "border-l-blue-300 dark:border-l-blue-700",
+                                  p.source_kind === 'offer' && "border-l-purple-300 dark:border-l-purple-700",
+                                )}
+                              >
+                                <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
+                                  <span className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">{p.label}</span>
+                                  <span className="text-[9px] font-mono text-slate-400 shrink-0">{'{{' + p.key + '}}'}</span>
+                                  {isOverridden && (
+                                    <Badge variant="outline" className="text-[9px] h-4 px-1 rounded-full bg-amber-50 text-amber-700 border-amber-200 shrink-0">
+                                      Override
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  {p.editable ? (
+                                    <Input
+                                      className={cn(
+                                        "h-7 text-xs transition-colors rounded-md flex-1",
+                                        isOverridden
+                                          ? "border-amber-200 bg-amber-50/30 dark:border-amber-900/50 dark:bg-amber-900/10 focus-visible:ring-amber-500/20"
+                                          : "border-slate-200 bg-white shadow-sm focus-visible:ring-blue-500/20"
+                                      )}
+                                      value={overrideVal ?? val}
+                                      onChange={(e) => handlePlaceholderOverride(p.key, e.target.value)}
+                                      placeholder="Leave blank for default"
+                                    />
+                                  ) : (
+                                    <div className="flex-1 h-7 flex items-center px-2.5 bg-slate-50 dark:bg-slate-900 rounded-md border border-slate-100 dark:border-slate-800">
+                                      <span className="text-xs text-slate-700 dark:text-slate-300 truncate">{val || '—'}</span>
+                                    </div>
+                                  )}
+                                  {p.editable && isOverridden && (
+                                    <button
+                                      type="button"
+                                      title="Reset to default"
+                                      onClick={() => handlePlaceholderOverride(p.key, undefined)}
+                                      className="text-slate-400 hover:text-red-500 shrink-0"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     ))}

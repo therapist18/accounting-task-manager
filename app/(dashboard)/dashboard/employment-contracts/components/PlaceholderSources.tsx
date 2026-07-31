@@ -119,8 +119,10 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
         })
       : [...placeholders];
 
-    // Filter by keys when filterByKeys is provided
-    if (filterByKeys && filterByKeys.length > 0) {
+    // Filter by keys when filterByKeys is provided - an empty array is a
+    // real filter (the selected clause has zero detected tokens), not "no
+    // filter", so it must still narrow the list down to nothing.
+    if (filterByKeys) {
       list = list.filter((p) => filterByKeys.includes(p.key));
     }
 
@@ -185,7 +187,7 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
       <div className="flex items-center justify-between mb-3">
         <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Placeholders Used</p>
         <p className="text-xs text-slate-400">
-          {filterByKeys && filterByKeys.length > 0
+          {filterByKeys
             ? `${sortedPlaceholders.length} / ${placeholders.length} total`
             : `${placeholders.length} total`}
         </p>
@@ -208,7 +210,11 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
         </div>
       ) : sortedPlaceholders.length === 0 ? (
         <p className="text-sm text-slate-500 text-center py-6">
-          {placeholders.length === 0 ? 'No placeholders detected yet.' : 'No placeholders match your search.'}
+          {filterByKeys && filterByKeys.length === 0
+            ? 'No placeholders specified for this item.'
+            : placeholders.length === 0
+            ? 'No placeholders detected yet.'
+            : 'No placeholders match your search.'}
         </p>
       ) : (
         <div className="overflow-auto max-h-[560px] rounded-lg border border-slate-200 dark:border-slate-800">

@@ -2272,36 +2272,32 @@ export default function CVGeneratorPage() {
     if (!element) return;
 
     setIsDownloadingPdf(true);
-    toast.info("Generating professional PDF...");
+    toast.info("Opening print dialog — choose \"Save as PDF\" as the destination.");
+
+    // The preview lives inside a scaled zoom wrapper, several flex/grid panels,
+    // and an app shell that's h-screen + overflow-hidden. None of that supports
+    // print pagination — a fixed/absolutely-positioned element, or one nested
+    // inside an overflow-clipped ancestor, only prints its first page's worth
+    // of content in Chrome. So instead of isolating it in place, we detach it
+    // and re-append it as a direct child of <body> (see @media print in
+    // globals.css) where it's in normal static flow and paginates correctly.
+    const originalParent = element.parentElement;
+    const originalNextSibling = element.nextSibling;
+    const originalTitle = document.title;
+
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      document.body.classList.remove("pdf-mode");
+      if (originalParent) originalParent.insertBefore(element, originalNextSibling);
+      document.title = originalTitle;
+      window.removeEventListener("afterprint", cleanup);
+      if (fallbackTimer) clearTimeout(fallbackTimer);
+      setIsDownloadingPdf(false);
+    };
 
     try {
-      const html2canvas = (await import("html2canvas")).default;
-      const { jsPDF } = await import("jspdf");
-
-      // The preview is wrapped in a zoom container (`transform: scale(zoomLevel)`).
-      // That transform doesn't affect layout metrics (scrollWidth/scrollHeight), so if it's
-      // left in place html2canvas paints at the zoomed-out size while we force it to render
-      // into the full unscaled dimensions below — the mismatch is what squishes/overlaps the text.
-      const zoomWrapper = element.parentElement;
-      const originalWrapperTransform = zoomWrapper?.style.transform;
-
-      // Store original styles
-      const originalTransform = element.style.transform;
-      const originalWidth = element.style.width;
-      const originalMinHeight = element.style.minHeight;
-      const originalOverflow = element.style.overflow;
-
-      // Reset transform for accurate capture
-      if (zoomWrapper) zoomWrapper.style.transform = "none";
-      element.style.transform = "none";
-      element.style.width = "210mm";
-      element.style.overflow = "visible";
-      
-      // Add pdf-mode class to hide UI elements
-      document.body.classList.add("pdf-mode");
-
       // Wait for the chosen theme font (and any images already in the DOM) to finish
-      // loading - otherwise html2canvas can paint with the fallback font, producing a
+      // loading - otherwise Chrome can print with the fallback font, producing a
       // PDF that visibly doesn't match the on-screen preview.
       if (typeof document !== "undefined" && (document as any).fonts?.ready) {
         try { await (document as any).fonts.ready; } catch { /* ignore */ }
@@ -2317,109 +2313,30 @@ export default function CVGeneratorPage() {
         )
       );
 
-      // Wait for layout to settle
-      await new Promise(resolve => setTimeout(resolve, 200));
-
-      // Get actual content dimensions
-      const contentWidth = element.scrollWidth;
-      const contentHeight = element.scrollHeight;
-      
-      // Calculate A4 dimensions at 96dpi
-      const A4_WIDTH_MM = 210;
-      const A4_HEIGHT_MM = 297;
-      const MM_TO_PX = 96 / 25.4; // 96dpi / 25.4mm per inch
-      const A4_HEIGHT_PX = Math.floor(A4_HEIGHT_MM * MM_TO_PX);
-      
-      // Set minimum height for proper capture
-      const pages = Math.ceil(contentHeight / A4_HEIGHT_PX);
-      element.style.minHeight = `${pages * A4_HEIGHT_PX}px`;
-      
-      // Wait for resize
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Capture with high quality settings
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: "#ffffff",
-        scrollX: 0,
-        scrollY: 0,
-        width: contentWidth,
-        height: Math.max(contentHeight, A4_HEIGHT_PX),
-        windowWidth: contentWidth,
-        windowHeight: Math.max(contentHeight, A4_HEIGHT_PX),
-        onclone: (clonedDoc) => {
-          // Ensure the cloned element has proper dimensions
-          const clonedElement = clonedDoc.getElementById('cv-preview-container');
-          if (clonedElement) {
-            clonedElement.style.width = '210mm';
-            clonedElement.style.minHeight = `${pages * A4_HEIGHT_PX}px`;
-            clonedElement.style.overflow = 'visible';
-            clonedElement.style.transform = 'none';
-          }
-        }
-      });
-      
-      // Restore original styles
-      if (zoomWrapper) zoomWrapper.style.transform = originalWrapperTransform ?? "";
-      element.style.transform = originalTransform;
-      element.style.width = originalWidth;
-      element.style.minHeight = originalMinHeight;
-      element.style.overflow = originalOverflow;
-      document.body.classList.remove("pdf-mode");
-
-      // Create PDF
-      const imgData = canvas.toDataURL("image/jpeg", 0.95);
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      
-      // Calculate image dimensions to fit A4 width
-      const canvasWidth = canvas.width;
-      const canvasHeight = canvas.height;
-      const imgWidth = pageWidth;
-      const imgHeight = (canvasHeight * pageWidth) / canvasWidth;
-      
-      // Calculate number of pages needed
-      const totalPages = Math.ceil(imgHeight / pageHeight);
-      
-      // Add pages with proper slicing
-      for (let i = 0; i < totalPages; i++) {
-        if (i > 0) {
-          pdf.addPage();
-        }
-        
-        // Calculate position for this page slice
-        const position = -(i * pageHeight);
-        
-        // Add the image slice for this page
-        pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
-      }
-
-      // Generate filename
+      // Chrome's "Save as PDF" suggests document.title as the filename.
       const age = cvData.personalDetails?.dateOfBirth
         ? (() => { const dob = cvData.personalDetails.dateOfBirth; const [d, m, y] = dob.includes('/') ? dob.split('/').map(Number) : [0, 0, Number(dob.split('-')[0])]; const birth = new Date(y, m ? m - 1 : 0, d || 1); return `${Math.floor((Date.now() - birth.getTime()) / (365.25 * 24 * 3600 * 1000))}`; })()
         : '';
       const rec = 'BCL';
       const prof = (cvData.personalInfo?.title || '').replace(/\s+/g, '_').slice(0, 30);
       const applicantName = (cvData.personalInfo.fullName || 'CV').replace(/\s+/g, '_');
-      const fileName = [applicantName, age, 'REF', rec, prof].filter(Boolean).join('_') + '.pdf';
-      
-      pdf.save(fileName);
-      toast.success("PDF downloaded successfully!");
+      document.title = [applicantName, age, 'REF', rec, prof].filter(Boolean).join('_');
+
+      document.body.appendChild(element);
+      document.body.classList.add("pdf-mode");
+      window.addEventListener("afterprint", cleanup, { once: true });
+      // Safety net: some browsers don't reliably fire afterprint for
+      // programmatic print() calls — don't leave the button stuck spinning.
+      fallbackTimer = setTimeout(cleanup, 3 * 60 * 1000);
+
+      // Give the browser a frame to apply the layout/style changes before printing.
+      await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 50)));
+
+      window.print();
     } catch (error: any) {
       console.error("PDF generation failed", error);
-      // Ensure pdf-mode and inline capture styles are removed on error
-      document.body.classList.remove("pdf-mode");
-      if (element.parentElement) element.parentElement.style.transform = `scale(${zoomLevel})`;
-      element.style.transform = "";
-      element.style.width = "";
-      element.style.minHeight = "";
-      element.style.overflow = "";
+      cleanup();
       toast.error("PDF generation failed. Please try again.");
-    } finally {
-      setIsDownloadingPdf(false);
     }
   };
 
