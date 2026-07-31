@@ -597,14 +597,14 @@ export default function JobProfilesPage() {
           </Panel>
 
           {!collapsed.editor && (
-            <PanelResizeHandle className="relative w-1.5 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-10" />
+            <PanelResizeHandle className="relative w-2 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-10" />
           )}
 
           {/* PANEL 2: MAIN EDITOR */}
           <Panel
             ref={detailPanelRef}
-            defaultSize={53}
-            minSize={40}
+            defaultSize={48}
+            minSize={25}
             collapsible
             onCollapse={() => setCollapsed(prev => ({ ...prev, detail: true }))}
             onExpand={() => setCollapsed(prev => ({ ...prev, detail: false }))}
@@ -1017,14 +1017,14 @@ export default function JobProfilesPage() {
           </Panel>
 
           {!collapsed.preview && (
-            <PanelResizeHandle className="relative w-1.5 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-10" />
+            <PanelResizeHandle className="relative w-2 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-10" />
           )}
 
           {/* PANEL 3: PREVIEW (Document Style) */}
           <Panel
             ref={previewPanelRef}
-            defaultSize={25}
-            minSize={20}
+            defaultSize={30}
+            minSize={15}
             maxSize={80}
             collapsible
             onCollapse={() => setCollapsed(prev => ({ ...prev, preview: true }))}

@@ -20,6 +20,7 @@ import type { Placeholder } from '../../templates/document-template-manager/type
 interface PlaceholderSourcesProps {
   highlightKeys?: string[];
   filterByKeys?: string[];
+  refreshKey?: number;
 }
 
 type SortColumn = '#' | 'token' | 'group' | 'source' | 'entity' | 'linked' | 'default';
@@ -37,7 +38,7 @@ const strategyLabel = (s: string) => s === 'merge' ? 'Merge' : 'Fallback';
 const StrategyIcon = ({ strategy }: { strategy: string }) =>
   strategy === 'merge' ? <Shuffle className="w-3 h-3" /> : <ListOrdered className="w-3 h-3" />;
 
-export function PlaceholderSources({ highlightKeys, filterByKeys }: PlaceholderSourcesProps) {
+export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0 }: PlaceholderSourcesProps) {
   const [placeholders, setPlaceholders] = useState<EcPlaceholder[]>([]);
   const [masterFields, setMasterFields] = useState<MasterFieldOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -52,11 +53,8 @@ export function PlaceholderSources({ highlightKeys, filterByKeys }: PlaceholderS
   const { tables, loadingTables } = useTableData();
 
   const sectionRef = useRef<HTMLDivElement>(null);
-  const hasFetched = useRef(false);
 
   useEffect(() => {
-    if (hasFetched.current) return;
-    hasFetched.current = true;
     (async () => {
       setIsLoading(true);
       const [fields, ecPlaceholders] = await Promise.all([fetchMasterFieldOptions(), fetchPlaceholders()]);
@@ -64,9 +62,12 @@ export function PlaceholderSources({ highlightKeys, filterByKeys }: PlaceholderS
       setPlaceholders(ecPlaceholders);
       setIsLoading(false);
     })();
-  }, []);
+  }, [refreshKey]);
 
-  const masterFieldMap = useMemo(() => new Map(masterFields.map((f) => [f.id, f.label])), [masterFields]);
+  // tm_job_fields ids arrive as numbers, while ec_placeholders stores
+  // master_field_id as a number but master_field_links[].master_field_id as a
+  // string - normalize every lookup to String() so all linked fields resolve.
+  const masterFieldMap = useMemo(() => new Map(masterFields.map((f) => [String(f.id), f.label])), [masterFields]);
 
   const toggleSort = (col: SortColumn) => {
     if (sortColumn === col) {
@@ -89,11 +90,11 @@ export function PlaceholderSources({ highlightKeys, filterByKeys }: PlaceholderS
     const ids: Array<{ label: string; priority: number; strategy: string }> = [];
     if (p.master_field_links && p.master_field_links.length > 0) {
       for (const link of p.master_field_links.sort((a, b) => a.display_priority - b.display_priority)) {
-        const label = masterFieldMap.get(link.master_field_id);
+        const label = masterFieldMap.get(String(link.master_field_id));
         if (label) ids.push({ label, priority: link.display_priority, strategy: link.strategy || 'fallback' });
       }
     } else if (p.master_field_id) {
-      const label = masterFieldMap.get(p.master_field_id);
+      const label = masterFieldMap.get(String(p.master_field_id));
       if (label) ids.push({ label, priority: 1, strategy: 'fallback' });
     }
     return ids;

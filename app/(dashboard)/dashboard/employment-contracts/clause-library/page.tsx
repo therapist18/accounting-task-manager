@@ -5,14 +5,11 @@ import Link from 'next/link';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { SearchableSelect } from '../components/SearchableSelect';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import TemplateEditor from '@/components/TemplateEditor';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Loader2, PlusCircle, Settings, Trash2, BookText, Star, Briefcase, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2, FileText, Search, List, Layers, } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
@@ -21,7 +18,7 @@ import { EcClause, fetchClauses, createClause, updateClause, deleteClause } from
 import { detectTokens, syncPlaceholdersFromContent } from '../utils/placeholderDetection';
 import { fetchCompanies, Company } from '../../companies/database';
 import { PlaceholderSources } from '../components/PlaceholderSources';
-import { EMPLOYMENT_TYPE_OPTIONS, WORK_ARRANGEMENT_OPTIONS, withCurrentValue } from '../utils/profileOptions';
+import { ClauseDialog } from '../components/ClauseDialog';
 
 const EMPTY_DRAFT: Partial<EcClause> = {
   section_key: CONTRACT_SECTIONS[0].key,
@@ -104,6 +101,7 @@ export default function ClauseLibraryPage() {
   const [selectedClause, setSelectedClause] = useState<EcClause | null>(null);
   const [condition, setCondition] = useState<{ employment_type?: string; job_level?: string; work_arrangement?: string; department?: string }>({});
   const [highlightPlaceholderKeys, setHighlightPlaceholderKeys] = useState<string[]>([]);
+  const [placeholderRefreshKey, setPlaceholderRefreshKey] = useState(0);
 
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
   const editorPanelRef = useRef<ImperativePanelHandle>(null);
@@ -199,19 +197,22 @@ export default function ClauseLibraryPage() {
       suggest_conditions: hasCondition ? [condition] : [],
     };
     try {
+      let saved: EcClause | null = null;
       if (editingId) {
-        await updateClause(editingId, payload);
-        toast({ title: 'Clause updated' });
+        saved = await updateClause(editingId, payload);
+        toast({ title: 'Clause updated', description: `"${saved?.label || draft.label}" saved.` });
       } else {
-        await createClause(payload);
-        toast({ title: 'Clause created' });
+        saved = await createClause(payload);
+        toast({ title: 'Clause created', description: `"${saved?.label || draft.label}" is now available to Job Profiles.` });
       }
       setDialogOpen(false);
       await load();
-
-      const newTokens = await syncPlaceholdersFromContent([payload.content || '']);
-      if (newTokens.length > 0) {
-        setHighlightPlaceholderKeys(newTokens);
+      await syncPlaceholdersFromContent([payload.content || '']);
+      setPlaceholderRefreshKey((k) => k + 1);
+      if (saved) {
+        // Keep the preview in sync: refresh the selected clause (editing) or
+        // select the newly created one (creating).
+        setSelectedClause((prev) => (editingId && prev?.id !== saved.id ? prev : saved));
       }
     } catch (err: any) {
       toast({ title: 'Error', description: err.message || 'Failed to save clause', variant: 'destructive' });
@@ -487,7 +488,7 @@ export default function ClauseLibraryPage() {
                     />
                   </div>
 
-                  <PlaceholderSources highlightKeys={highlightPlaceholderKeys} filterByKeys={highlightPlaceholderKeys} />
+                  <PlaceholderSources highlightKeys={highlightPlaceholderKeys} filterByKeys={highlightPlaceholderKeys} refreshKey={placeholderRefreshKey} />
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center">
@@ -501,129 +502,20 @@ export default function ClauseLibraryPage() {
       </PanelGroup>
 
       {/* Clause Editor Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col rounded-2xl p-0 overflow-hidden">
-          <DialogHeader className="sticky top-0 z-10 bg-white dark:bg-slate-900 px-6 pt-6 pb-4 border-b border-slate-200 dark:border-slate-800 rounded-t-2xl">
-            <DialogTitle className="text-lg font-bold">{editingId ? 'Edit Clause' : 'New Clause'}</DialogTitle>
-          </DialogHeader>
-
-          <ScrollArea className="flex-1 overflow-auto px-6 py-4">
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label className="text-sm">Section</Label>
-                  <SearchableSelect
-                    value={draft.section_key || null}
-                    onChange={(v) => setDraft({ ...draft, section_key: v })}
-                    searchPlaceholder="Search sections..."
-                    options={CONTRACT_SECTIONS.map((s) => ({ value: s.key, label: s.title }))}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-sm">Clause key</Label>
-                  <Input
-                    className="h-10"
-                    placeholder="e.g. standard_office"
-                    value={draft.clause_key || ''}
-                    onChange={(e) => setDraft({ ...draft, clause_key: e.target.value.trim().toLowerCase().replace(/\s+/g, '_') })}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-sm">Label</Label>
-                <Input className="h-10" placeholder="e.g. Standard Office Hours" value={draft.label || ''} onChange={(e) => setDraft({ ...draft, label: e.target.value })} />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-sm">Variant group (optional)</Label>
-                <Input
-                  className="h-10"
-                  list="variant-group-options"
-                  placeholder="e.g. Working Hours — leave blank if this clause stands alone"
-                  value={draft.variant_group || ''}
-                  onChange={(e) => setDraft({ ...draft, variant_group: e.target.value || null })}
-                />
-                <datalist id="variant-group-options">
-                  {groupNamesForSection.map((g) => <option key={g} value={g} />)}
-                </datalist>
-                <p className="text-xs text-slate-400">Clauses sharing a group name show up together as alternatives of one component (e.g. Office Hours vs Shift Hours).</p>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-sm">Content</Label>
-                <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
-                  <TemplateEditor
-                    key={editingId || 'new'}
-                    initialContent={draft.content || ''}
-                    onChange={(content) => setDraft({ ...draft, content: content.html })}
-                    showHeaderFooterControls={false}
-                    className="min-h-[200px]"
-                  />
-                </div>
-                <p className="text-xs text-slate-400">HTML with {'{{tokens}}'} - employee/company fields (employee_name, kra_pin, ...) and settings keys (working_hours, notice_period, benefits, ...) both resolve here.</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label className="text-sm">Scope</Label>
-                  <SearchableSelect
-                    value={draft.company_id || '__global__'}
-                    onChange={(v) => setDraft({ ...draft, company_id: v === '__global__' ? null : v })}
-                    searchPlaceholder="Search companies..."
-                    options={[{ value: '__global__', label: 'Global (any company)' }, ...companies.map((c) => ({ value: String(c.id), label: c.company_name }))]}
-                  />
-                </div>
-                <div className="flex items-center justify-between border border-slate-200 dark:border-slate-800 rounded-lg px-3 h-10 mt-[22px]">
-                  <Label className="text-sm">Default for section</Label>
-                  <Switch checked={!!draft.is_default} onCheckedChange={(v) => setDraft({ ...draft, is_default: v })} />
-                </div>
-              </div>
-
-              <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-4 space-y-3">
-                <Label className="text-sm font-semibold text-slate-600">Suggest this clause when... (optional)</Label>
-                <div className="grid grid-cols-2 gap-3">
-                  <SearchableSelect
-                    value={condition.employment_type || '__any__'}
-                    onChange={(v) => setCondition({ ...condition, employment_type: v === '__any__' ? undefined : v })}
-                    placeholder="Employment type"
-                    searchPlaceholder="Search employment types..."
-                    options={[{ value: '__any__', label: 'Any employment type' }, ...withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, condition.employment_type).map((opt) => ({ value: opt, label: opt }))]}
-                  />
-                  <Input className="h-9 text-sm" placeholder="Job level" value={condition.job_level || ''} onChange={(e) => setCondition({ ...condition, job_level: e.target.value || undefined })} />
-                  <SearchableSelect
-                    value={condition.work_arrangement || '__any__'}
-                    onChange={(v) => setCondition({ ...condition, work_arrangement: v === '__any__' ? undefined : v })}
-                    placeholder="Work arrangement"
-                    searchPlaceholder="Search work arrangements..."
-                    options={[{ value: '__any__', label: 'Any work arrangement' }, ...withCurrentValue(WORK_ARRANGEMENT_OPTIONS, condition.work_arrangement).map((opt) => ({ value: opt, label: opt }))]}
-                  />
-                  <Input className="h-9 text-sm" placeholder="Department" value={condition.department || ''} onChange={(e) => setCondition({ ...condition, department: e.target.value || undefined })} />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Label className="text-sm text-slate-500 shrink-0">Priority (ties broken by highest)</Label>
-                  <Input
-                    type="number"
-                    className="h-9 text-sm w-20"
-                    value={draft.suggest_priority ?? 0}
-                    onChange={(e) => setDraft({ ...draft, suggest_priority: Number(e.target.value) || 0 })}
-                  />
-                </div>
-              </div>
-            </div>
-          </ScrollArea>
-
-          <div className="px-6 pb-6 pt-2 border-t border-slate-200 dark:border-slate-800">
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleSave} disabled={saving}>
-                {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                {editingId ? 'Save changes' : 'Create clause'}
-              </Button>
-            </DialogFooter>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ClauseDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        draft={draft}
+        onDraftChange={setDraft}
+        editingId={editingId}
+        saving={saving}
+        onSave={handleSave}
+        condition={condition}
+        onConditionChange={setCondition}
+        companies={companies}
+        groupNamesForSection={groupNamesForSection}
+        clauses={clauses}
+      />
 
       <AlertDialog open={!!deletingId} onOpenChange={(open) => !open && setDeletingId(null)}>
         <AlertDialogContent className="rounded-2xl max-w-sm">
