@@ -62,7 +62,15 @@ export function buildStandardPlaceholderValues(
   placeholderOverrides?: Record<string, string>,
   masterFieldValues?: Record<string, string>,
   jobProfile?: EcJobProfile | null,
-  ecPlaceholders?: EcPlaceholder[]
+  ecPlaceholders?: EcPlaceholder[],
+  // The designated signatory director's name (resolved off
+  // company.signatory_individual_id via companySignatory.ts's
+  // fetchSignatoryName - the caller fetches it since it needs its own async
+  // registry_individuals lookup, not something derivable from the args
+  // already passed here). Title is fixed to 'Director' since that's the only
+  // role this designation can point at (see companySignatory.ts /
+  // fetchCompanyDirectors, which only lists current Directors).
+  signatoryName?: string
 ): Record<string, string> {
   // Format allowances from the offer into a readable list.
   const allowances = offer?.allowances || [];
@@ -84,6 +92,11 @@ export function buildStandardPlaceholderValues(
     shif_number: employee.shifNumber,
     nhif_number: employee.nhifNumber,
     company_kra_pin: company?.kra_pin || '',
+    // Already referenced in the original seed clause content (the
+    // Signatures section) but never resolved by anything until this - see
+    // companySignatory.ts for how the designated director is chosen/fetched.
+    signatory_name: signatoryName || '',
+    signatory_title: signatoryName ? 'Director' : '',
 
     // Multi-source fallback chains - Offer wins, Employee/settings record is
     // the fallback. Not expressible as a single settings_key/offer_field read.

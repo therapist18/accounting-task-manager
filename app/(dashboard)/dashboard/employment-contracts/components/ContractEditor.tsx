@@ -7,6 +7,7 @@ import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
 import type { EcPlaceholder } from '../utils/ecPlaceholders';
 import { fetchCompanies, Company } from '../../companies/database';
+import { fetchSignatoryName } from '../utils/companySignatory';
 import { fetchClauses, EcClause } from '../utils/clauseLibraryData';
 import { detectTokens } from '../utils/placeholderDetection';
 import { SearchableSelect } from './SearchableSelect';
@@ -63,6 +64,13 @@ export function ContractEditor({
   const [profiles, setProfiles] = useState<EcJobProfile[]>([]);
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(false);
+  const [signatoryName, setSignatoryName] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSignatoryName(company?.signatory_individual_id).then((name) => { if (!cancelled) setSignatoryName(name); });
+    return () => { cancelled = true; };
+  }, [company?.signatory_individual_id]);
 
   const offer: Partial<EmploymentOffer> = contractData.offer || {};
   const updateOffer = (patch: Partial<EmploymentOffer>) => {
@@ -143,8 +151,8 @@ export function ContractEditor({
   const { ecPlaceholders, masterFieldValues, masterFields, isResolving, refresh: refreshMasterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
 
   const placeholderValues = useMemo(
-    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer.placeholder_overrides, masterFieldValues, selectedJobProfile, ecPlaceholders) : {}),
-    [employee, company, offer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders]
+    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer.placeholder_overrides, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName) : {}),
+    [employee, company, offer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName]
   );
 
   const [allClauses, setAllClauses] = useState<EcClause[]>([]);

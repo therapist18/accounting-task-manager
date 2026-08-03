@@ -63,8 +63,12 @@ const BASE_SECTION_STYLES = `
   .cs-section:last-child { margin-bottom: 0; }
   .cs-missing-clause { color: #b91c1c; font-style: italic; border: 1px dashed #b91c1c; padding: 10px 14px; border-radius: 4px; }
   .cs-section p { margin-bottom: 8px; }
-  .cs-section ul, .cs-section ol { margin-bottom: 8px; padding-left: 20px; }
-  .cs-section li { margin-bottom: 4px; }
+  /* Tailwind's Preflight base reset strips list-style/margin/padding from
+     every ul/ol globally - restore real bullets/numbers here since this is
+     contract prose, not app UI chrome. */
+  .cs-section ul { list-style-type: disc; margin-bottom: 8px; padding-left: 20px; }
+  .cs-section ol { list-style-type: decimal; margin-bottom: 8px; padding-left: 20px; }
+  .cs-section li { display: list-item; margin-bottom: 4px; }
   .cs-section h1 { margin-bottom: 16px; }
   .cs-section h2 { margin-top: 4px; margin-bottom: 8px; }
   .cs-section h3 { margin-top: 10px; margin-bottom: 6px; }

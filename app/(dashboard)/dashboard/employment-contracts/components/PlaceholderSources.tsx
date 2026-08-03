@@ -193,9 +193,22 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
     if (nextKind === placeholder.source_kind) return;
     setChangingKindId(placeholder.id);
     try {
+      // Auto-default settings_key/offer_field to the placeholder's own key
+      // when switching into a kind that needs one and it's still empty -
+      // matches the seed data's own convention (settings_key === the token
+      // key for virtually every row) and avoids a silent resolution gap:
+      // without this, switching kind here alone leaves the underlying
+      // column null, so standardPlaceholders.ts's generic resolver reads
+      // effectiveSettings[undefined]/offer[undefined] and always renders
+      // blank until someone separately opens the Edit dialog to type it in.
+      const needsSettingsKey = (nextKind === 'settings_cascade' || nextKind === 'job_profile') && !placeholder.settings_key;
+      const needsOfferField = nextKind === 'offer' && !placeholder.offer_field;
+
       const persisted = await updatePlaceholderDetails(placeholder.id, {
         source_kind: nextKind,
         ...(nextKind !== 'master_field' ? { master_field_id: null, master_field_links: [] } : {}),
+        ...(needsSettingsKey ? { settings_key: placeholder.key } : {}),
+        ...(needsOfferField ? { offer_field: placeholder.key } : {}),
       });
       if (persisted) {
         setPlaceholders((prev) => prev.map((p) => (p.id === persisted.id ? persisted : p)));

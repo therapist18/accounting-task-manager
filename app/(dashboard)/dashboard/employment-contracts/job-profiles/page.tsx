@@ -43,6 +43,7 @@ import { EMPLOYMENT_TYPE_OPTIONS, WORK_ARRANGEMENT_OPTIONS, withCurrentValue } f
 import { ContractPreview } from '../components/ContractPreview';
 import { MasterFieldEditControl } from '../components/MasterFieldEditControl';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
+import { fetchCompanyDirectors, updateCompanySignatory, type CompanyDirectorOption } from '../utils/companySignatory';
 
 const SETTINGS_GROUPS: { label: string; test: RegExp }[] = [
   { label: 'Compensation & Benefits', test: /allowance|medical|pension|salary|payment/i },
@@ -461,6 +462,32 @@ export default function JobProfilesPage() {
     [previewPlaceholders]
   );
 
+  // Signatory director - a company-wide fact (there's exactly one company
+  // record no matter how many Job Profiles reference it), so only shown on
+  // the Company Defaults profile, not per Department/Position profile.
+  const selectedCompanyObj = companies.find((c) => String(c.id) === selectedCompanyId);
+  const [directors, setDirectors] = useState<CompanyDirectorOption[]>([]);
+  const [savingSignatory, setSavingSignatory] = useState(false);
+
+  useEffect(() => {
+    if (realCompanyId == null) { setDirectors([]); return; }
+    fetchCompanyDirectors(realCompanyId).then(setDirectors);
+  }, [realCompanyId]);
+
+  const handleChangeSignatory = async (directorId: string) => {
+    if (realCompanyId == null) return;
+    const nextId = directorId === '__unset__' ? null : Number(directorId);
+    setSavingSignatory(true);
+    const success = await updateCompanySignatory(realCompanyId, nextId);
+    setSavingSignatory(false);
+    if (success) {
+      setCompanies((prev) => prev.map((c) => (String(c.id) === selectedCompanyId ? { ...c, signatory_individual_id: nextId } : c)));
+      toast({ title: 'Signatory updated' });
+    } else {
+      toast({ title: 'Error', description: 'Failed to update signatory', variant: 'destructive' });
+    }
+  };
+
   const tabs: { value: string; label: string; icon: any }[] = [
     { value: 'overview', label: 'Overview', icon: LayoutTemplate },
     { value: 'responsibilities', label: 'Responsibilities', icon: UserCog },
@@ -800,6 +827,22 @@ export default function JobProfilesPage() {
                                 <SectionPanel title="Job Summary" description="This is the role purpose that can feed the job description appendix.">
                                   <Textarea className="min-h-[160px] text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm p-4 leading-relaxed" placeholder="A short summary of what this role does..." value={draft.job_description || ''} onChange={(e) => updateDraft({ job_description: e.target.value })} />
                                 </SectionPanel>
+
+                                {draft.scope === 'company' && (
+                                  <SectionPanel title="Signatory" description="Who signs on the Company's behalf in the contract's Signatures section - a company-wide setting, not per Job Profile.">
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-2 items-center">
+                                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Signatory Director</span>
+                                      <SearchableSelect
+                                        value={selectedCompanyObj?.signatory_individual_id != null ? String(selectedCompanyObj.signatory_individual_id) : '__unset__'}
+                                        onChange={handleChangeSignatory}
+                                        placeholder={directors.length === 0 ? 'No directors found for this company' : 'Select a director'}
+                                        searchPlaceholder="Search directors..."
+                                        disabled={savingSignatory || directors.length === 0}
+                                        options={[{ value: '__unset__', label: 'Not set' }, ...directors.map((d) => ({ value: String(d.id), label: d.full_name }))]}
+                                      />
+                                    </div>
+                                  </SectionPanel>
+                                )}
 
                                 {companyFieldPlaceholders.length > 0 && (
                                   <SectionPanel title="Company Fields" description="Master-field-linked company facts used by this profile's clauses - editing one here saves it to the actual Company record, not just this profile.">

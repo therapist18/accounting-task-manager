@@ -25,6 +25,7 @@ import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
 import { fetchCompanies, Company } from '../../companies/database';
+import { fetchSignatoryName } from '../utils/companySignatory';
 import type { EcPlaceholder } from '../utils/ecPlaceholders';
 
 // Placeholders whose value is HTML list markup (<li>...</li> fragments, not
@@ -55,14 +56,24 @@ function buildHighlightedPreviewValues(
   effectiveSettings: Record<string, any>,
   masterFieldValues: Record<string, string>,
   selectedJobProfile: EcJobProfile | null,
-  ecPlaceholders: EcPlaceholder[]
+  ecPlaceholders: EcPlaceholder[],
+  signatoryName: string
 ): Record<string, string> {
   const raw = employee
-    ? buildStandardPlaceholderValues(employee, company, offer, effectiveSettings, offer?.placeholder_overrides, masterFieldValues, selectedJobProfile, ecPlaceholders)
+    ? buildStandardPlaceholderValues(employee, company, offer, effectiveSettings, offer?.placeholder_overrides, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName)
     : {};
 
   const wrap = (key: string, value: string, entity: string | undefined): string => {
-    const isMissing = !value && !LIST_MARKUP_KEYS.has(key);
+    // HTML list markup (<li>...</li> fragments) must never get wrapped in a
+    // <span> - a <span> around <li> elements is invalid nesting (they're
+    // only valid as a direct child of <ul>/<ol>), so the browser hoists the
+    // <li>s back out, silently breaking bullet rendering and leaving a
+    // stray empty <span> artifact behind. Entity-color-coding and the
+    // missing-value placeholder both only make sense for a scalar value
+    // anyway, so these keys always render raw and unwrapped.
+    if (LIST_MARKUP_KEYS.has(key)) return value;
+
+    const isMissing = !value;
     const display = isMissing ? MISSING_VALUE_PLACEHOLDER : value;
     const missingClass = isMissing ? ' ph-entity-missing' : '';
     if (entity === 'company') return `<span class="ph-entity-company${missingClass}">${display}</span>`;
@@ -97,6 +108,13 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const [clauses, setClauses] = useState<EcClause[]>([]);
   const [company, setCompany] = useState<Company | null>(null);
   const [loadingContext, setLoadingContext] = useState(false);
+  const [signatoryName, setSignatoryName] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSignatoryName(company?.signatory_individual_id).then((name) => { if (!cancelled) setSignatoryName(name); });
+    return () => { cancelled = true; };
+  }, [company?.signatory_individual_id]);
 
   const [themeOverride, setThemeOverride] = useState<ContractThemeSettings | null>(contractData?.metadata?.themeSettings || null);
   const [themePanelOpen, setThemePanelOpen] = useState(false);
@@ -272,8 +290,8 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const { ecPlaceholders, masterFieldValues, isResolving: isResolvingMasterFields, refresh: refreshMasterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
 
   const employeeValues = useMemo(
-    () => buildHighlightedPreviewValues(employee, company, offer as EmploymentOffer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders),
-    [employee, company, offer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders]
+    () => buildHighlightedPreviewValues(employee, company, offer as EmploymentOffer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName),
+    [employee, company, offer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName]
   );
 
   const bodyHtml = useMemo(() => {
