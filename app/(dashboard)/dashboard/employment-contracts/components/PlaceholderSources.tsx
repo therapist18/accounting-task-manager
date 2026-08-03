@@ -5,12 +5,13 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Loader2, Sliders, FileStack, Pencil, Database, Search, ArrowUpDown, ArrowUp, ArrowDown, Shuffle, ListOrdered } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Loader2, Sliders, FileStack, Pencil, Database, Search, ArrowUpDown, ArrowUp, ArrowDown, Shuffle, ListOrdered, ClipboardList } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
-import { EcPlaceholder, fetchPlaceholders, updatePlaceholderDetails } from '../utils/ecPlaceholders';
+import { EcPlaceholder, PlaceholderSourceKind, fetchPlaceholders, updatePlaceholderDetails } from '../utils/ecPlaceholders';
 import { MasterFieldOption, fetchMasterFieldOptions } from '../utils/placeholderDetection';
-import { ecPlaceholderToDtmPlaceholder, dtmPlaceholderToEcUpdates } from '../utils/ecPlaceholderAdapter';
+import { ecPlaceholderToDtmPlaceholder, dtmPlaceholderToEcUpdates, getPlaceholderSourceText } from '../utils/ecPlaceholderAdapter';
 import { PlaceholderFormDialog } from '../../templates/document-template-manager/components/PlaceholderFormDialog';
 import { useTemplateData } from '../../templates/document-template-manager/hooks/useTemplateData';
 import { useTableData } from '@/lib/tableUtils';
@@ -51,6 +52,7 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
   const [draft, setDraft] = useState<Placeholder | null>(null);
   const { masterFields: dtmMasterFields, jobQuestions, requirements, kycDocuments, documentTypes } = useTemplateData(!!editingEc, null);
   const { tables, loadingTables } = useTableData();
+  const [changingKindId, setChangingKindId] = useState<string | null>(null);
 
   const sectionRef = useRef<HTMLDivElement>(null);
 
@@ -170,7 +172,7 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
   const handleSaveEdit = async (updated: Placeholder) => {
     if (!editingEc) return;
     try {
-      const persisted = await updatePlaceholderDetails(editingEc.id, dtmPlaceholderToEcUpdates(updated));
+      const persisted = await updatePlaceholderDetails(editingEc.id, dtmPlaceholderToEcUpdates(updated, editingEc));
       if (persisted) {
         setPlaceholders((prev) => prev.map((p) => (p.id === persisted.id ? persisted : p)));
         toast({ title: 'Placeholder updated' });
@@ -179,6 +181,29 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
       toast({ title: 'Error', description: err.message || 'Failed to save placeholder', variant: 'destructive' });
     } finally {
       closeEdit();
+    }
+  };
+
+  // Quick inline kind switch, right in the Source column - the actual
+  // settings_key/offer_field text is edited via the Source field in the main
+  // add/edit dialog (openEdit above), not here. Switching away from
+  // 'master_field' clears its links rather than leaving stale ones that
+  // would silently keep winning inside resolveEcPlaceholderValues.
+  const handleChangeSourceKind = async (placeholder: EcPlaceholder, nextKind: PlaceholderSourceKind) => {
+    if (nextKind === placeholder.source_kind) return;
+    setChangingKindId(placeholder.id);
+    try {
+      const persisted = await updatePlaceholderDetails(placeholder.id, {
+        source_kind: nextKind,
+        ...(nextKind !== 'master_field' ? { master_field_id: null, master_field_links: [] } : {}),
+      });
+      if (persisted) {
+        setPlaceholders((prev) => prev.map((p) => (p.id === persisted.id ? persisted : p)));
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Failed to change source kind', variant: 'destructive' });
+    } finally {
+      setChangingKindId(null);
     }
   };
 
@@ -277,19 +302,30 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
                     <Badge variant="secondary" className="text-[10px]">{p.group_label}</Badge>
                   </TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
-                    {p.source_kind === 'master_field' ? (
-                      <Badge variant="outline" className="text-xs font-medium bg-slate-50 text-slate-600 border-slate-200 rounded-full px-2.5 py-0.5 gap-1.5">
-                        <Database className="w-3 h-3" /> Master field
-                      </Badge>
-                    ) : p.source_kind === 'settings_cascade' ? (
-                      <Badge variant="outline" className="text-xs font-medium bg-blue-50 text-blue-700 border-blue-200 rounded-full px-2.5 py-0.5 gap-1.5">
-                        <Sliders className="w-3 h-3" /> Settings cascade
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-xs font-medium bg-purple-50 text-purple-700 border-purple-200 rounded-full px-2.5 py-0.5 gap-1.5">
-                        <FileStack className="w-3 h-3" /> Offer field
-                      </Badge>
-                    )}
+                    <Select
+                      value={p.source_kind}
+                      onValueChange={(v) => handleChangeSourceKind(p, v as PlaceholderSourceKind)}
+                      disabled={changingKindId === p.id}
+                    >
+                      <SelectTrigger className={cn(
+                        "h-7 text-xs font-medium rounded-full border px-2.5 gap-1.5 w-auto",
+                        p.source_kind === 'master_field' && "bg-slate-50 text-slate-600 border-slate-200",
+                        p.source_kind === 'settings_cascade' && "bg-blue-50 text-blue-700 border-blue-200",
+                        p.source_kind === 'job_profile' && "bg-emerald-50 text-emerald-700 border-emerald-200",
+                        p.source_kind === 'offer' && "bg-purple-50 text-purple-700 border-purple-200",
+                      )}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="master_field"><Database className="w-3 h-3 inline mr-1.5" />Master field</SelectItem>
+                        <SelectItem value="settings_cascade"><Sliders className="w-3 h-3 inline mr-1.5" />Settings cascade</SelectItem>
+                        <SelectItem value="job_profile"><ClipboardList className="w-3 h-3 inline mr-1.5" />Job profile field</SelectItem>
+                        <SelectItem value="offer"><FileStack className="w-3 h-3 inline mr-1.5" />Offer field</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[10px] font-mono text-slate-400 mt-1">
+                      {getPlaceholderSourceText(p) || <span className="italic text-red-400">not set - edit to set</span>}
+                    </p>
                   </TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
                     {entityLabels.length > 0 ? (
@@ -329,17 +365,15 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
                     <span className="text-xs text-slate-500">{p.default_value || '—'}</span>
                   </TableCell>
                   <TableCell className="text-right border border-slate-200 dark:border-slate-700 px-2 py-2">
-                    {p.source_kind === 'master_field' && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-slate-400 hover:text-custom-blue"
-                        onClick={() => openEdit(p)}
-                        title="Edit placeholder"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </Button>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-slate-400 hover:text-custom-blue"
+                      onClick={() => openEdit(p)}
+                      title="Edit placeholder"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </Button>
                   </TableCell>
                 </TableRow>
                 );
@@ -365,6 +399,7 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
           onChange={(updates) => setDraft((prev) => (prev ? { ...prev, ...updates } : prev))}
           isEditing
           hiddenSections={EC_HIDDEN_SECTIONS}
+          showSourceField
         />
       )}
     </div>

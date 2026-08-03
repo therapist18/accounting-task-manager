@@ -52,6 +52,11 @@ interface PlaceholderFormDialogProps {
     jobQuestions?: boolean;
     requirements?: boolean;
   };
+  // Opt-in (default off) rather than a hiddenSections entry, since this
+  // field only has meaning for Employment Contracts' placeholder.source -
+  // showing it by default would add a meaningless input to every other
+  // Placeholder consumer of this dialog.
+  showSourceField?: boolean;
 }
 
 export function PlaceholderFormDialog({
@@ -68,7 +73,8 @@ export function PlaceholderFormDialog({
   onSave,
   onChange,
   isEditing,
-  hiddenSections = {}
+  hiddenSections = {},
+  showSourceField = false
 }: PlaceholderFormDialogProps) {
   const [directorType, setDirectorType] = useState<DirectorType>('all');
   const [dependantRelationship, setDependantRelationship] = useState<string[]>([]);
@@ -183,6 +189,18 @@ export function PlaceholderFormDialog({
                   className="bg-slate-50"
                 />
               </div>
+              {showSourceField && (
+                <div className="space-y-2">
+                  <Label htmlFor="source" className="text-[11px] font-black uppercase text-slate-400">Source</Label>
+                  <Input
+                    id="source"
+                    placeholder="e.g. medical_cover, basic_salary..."
+                    value={placeholder.source || ''}
+                    onChange={(e) => onChange({ source: e.target.value })}
+                    className="bg-slate-50 font-mono text-sm"
+                  />
+                </div>
+              )}
               <div className="col-span-2 space-y-2">
                 <Label htmlFor="description" className="text-[11px] font-black uppercase text-slate-400">Description</Label>
                 <Textarea

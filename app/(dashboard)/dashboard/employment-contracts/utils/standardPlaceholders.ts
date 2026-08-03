@@ -1,6 +1,7 @@
 import type { ContractEmployeeInfo } from './data';
 import type { Company } from '../../companies/database';
 import type { EmploymentOffer } from './employmentOfferData';
+import type { EcJobProfile } from './jobProfileData';
 
 // Builds the full set of well-known placeholder tokens that clause content
 // may reference as {{token_name}}. Values come from four sources, merged
@@ -27,7 +28,16 @@ import type { EmploymentOffer } from './employmentOfferData';
 //      keys anymore: until a placeholder is actually linked via the Data
 //      Sources admin page, it renders blank rather than silently reusing an
 //      old direct-read value that masked the missing link.
-//   4. placeholderOverrides - explicit per-contract overrides from
+//   4. jobProfile - the selected EcJobProfile's own key_responsibilities
+//      array column, rendered as an <li> list for {{key_responsibilities}}
+//      (Appendix A) - what the Employee has actually agreed to do, not
+//      requirements (recruitment/candidate criteria, deliberately NOT
+//      rendered into the contract - see 20260731000001's migration comment).
+//      Isn't part of the settings cascade (not JSONB, only ever the single
+//      matched position-scope profile, no company/department merge) and
+//      isn't master-field-able (no tm_job_fields source for a job profile's
+//      own array columns).
+//   5. placeholderOverrides - explicit per-contract overrides from
 //      offer.placeholder_overrides (see ContractEditor.tsx's Placeholders &
 //      Values tab). Always wins, even over a linked master field - this is
 //      the one place a user can deliberately diverge a single contract from
@@ -42,7 +52,8 @@ export function buildStandardPlaceholderValues(
   offer: EmploymentOffer | null | undefined,
   effectiveSettings?: Record<string, any>,
   placeholderOverrides?: Record<string, string>,
-  masterFieldValues?: Record<string, string>
+  masterFieldValues?: Record<string, string>,
+  jobProfile?: EcJobProfile | null
 ): Record<string, string> {
   // Format allowances from the offer into a readable list.
   const allowances = offer?.allowances || [];
@@ -56,6 +67,7 @@ export function buildStandardPlaceholderValues(
   const s = effectiveSettings || {};
 
   const applicableBenefits = buildApplicableBenefitsList(s);
+  const responsibilitiesList = (jobProfile?.key_responsibilities || []).map((r) => `<li>${r}</li>`).join('');
 
   const defaults: Record<string, string> = {
     // ── Employee identity ──────────────────────────────────────────────
@@ -92,7 +104,12 @@ export function buildStandardPlaceholderValues(
     // ── Salary / compensation ──────────────────────────────────────────
     basic_salary: offer?.basic_salary != null ? String(offer.basic_salary) : String(employee.basicSalary || ''),
     gross_salary: offer?.basic_salary != null ? String(offer.basic_salary) : String(employee.grossSalary || ''),
-    currency: offer?.currency || 'KES',
+    // Offer.currency (the "Offer Adjustments" card in ContractEditor.tsx)
+    // wins when set; the Job Profile's Currency setting (Benefits &
+    // Compensation tab -> settings.salary_currency) is the cascade-level
+    // default otherwise. Previously salary_currency was configurable but
+    // never actually read here, so it silently did nothing.
+    currency: offer?.currency || String(s.salary_currency || '') || 'KES',
     payment_frequency: String(s.payment_frequency || 'Monthly'),
     payment_day: String(s.payment_day || ''),
     allowances: allowancesList,
@@ -122,6 +139,9 @@ export function buildStandardPlaceholderValues(
     // inside a <ul> instead of listing every possible benefit field and
     // leaving unused ones blank. See buildApplicableBenefitsList below.
     applicable_benefits: applicableBenefits,
+
+    // ── Appendix A (from the selected Job Profile's own columns) ────────
+    key_responsibilities: responsibilitiesList,
 
     // ── Termination / probation (from settings cascade) ────────────────
     notice_period: String(s.notice_period || ''),
@@ -161,7 +181,10 @@ const BENEFIT_TRUE_FLAGS = new Set(['yes', 'true', 'y', '1']);
 
 function formatBenefitLine(label: string, rawValue: string, kind: 'amount' | 'scheme'): string | null {
   const value = rawValue.trim();
-  if (!value) return null;
+  // 'No' is the Benefits & Compensation tab's explicit "not entitled" answer
+  // (see ALLOWANCE_OPTIONS in job-profiles/page.tsx) - treat it the same as
+  // unset, not as a literal "Housing Allowance – No." line.
+  if (!value || value.toLowerCase() === 'no') return null;
 
   if (kind === 'amount') {
     const amount = /^\d+(\.\d+)?$/.test(value) ? `KES ${value} per month` : value;

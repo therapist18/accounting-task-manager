@@ -164,6 +164,12 @@ export type Placeholder = {
   linked_job_question_ids?: string[];
   linked_requirement_ids?: string[];
   default_value?: string;
+  // Plain free-text description of where this value comes from - only
+  // rendered by PlaceholderFormDialog when showSourceField is passed
+  // (Employment Contracts' Clause Library opts in; other Placeholder
+  // consumers don't get this field, since it has no meaning for a DTM
+  // template placeholder outside EC's settings_key/offer_field concepts).
+  source?: string;
   linked_job_question_id?: string;
   linked_requirement_id?: string;
   linked_job_question_option?: string;

@@ -26,9 +26,6 @@ interface AutomationTabProps {
   data: JobWorkspaceData
   onRefresh?: () => void
   highlightAutomationId?: string | number
-  // In-app tab switch + highlight, no page reload - JobWorkspace already has this
-  // task's data loaded, so Requirements/Templates just need to become the active
-  // tab rather than being fetched again from a fresh page navigation.
   onNavigateToRequirement?: (requirementId: string) => void
   onNavigateToTemplate?: (documentId: string) => void
 }
@@ -503,15 +500,6 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
     })
   }, [searchQuery, filteredAutomations])
 
-  useEffect(() => {
-    if (!showMissingOnly || missingStats.missingAutoIds.size === 0) return
-    setExpandedAutomations(prev => {
-      const next = new Set(prev)
-      missingStats.missingAutoIds.forEach(id => next.add(id))
-      return next
-    })
-  }, [showMissingOnly, missingStats.missingAutoIds])
-
   const missingStats = useMemo(() => {
     let totalApplicable = 0
     let missingCount = 0
@@ -536,6 +524,15 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
     })
     return { totalApplicable, missingCount, filledCount: totalApplicable - missingCount, missingAutoIds }
   }, [automations, columns, resolvedValues])
+
+  useEffect(() => {
+    if (!showMissingOnly || missingStats.missingAutoIds.size === 0) return
+    setExpandedAutomations(prev => {
+      const next = new Set(prev)
+      missingStats.missingAutoIds.forEach(id => next.add(id))
+      return next
+    })
+  }, [showMissingOnly, missingStats.missingAutoIds])
 
   const missingProgress = missingStats.totalApplicable > 0
     ? Math.round((missingStats.filledCount / missingStats.totalApplicable) * 100)

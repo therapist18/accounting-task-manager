@@ -114,7 +114,9 @@
       "Bash(curl -s -o /tmp/login.html -w \"login -> %{http_code}\\\\n\" \"http://localhost:3411/login\")",
       "WebSearch",
       "WebFetch(domain:supabase.com)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(npm run *)",
+      "Bash(echo \"EXIT:$?\")"
     ],
     "additionalDirectories": [
       "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals"

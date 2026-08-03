@@ -80,6 +80,21 @@ const LEAVE_DAY_OPTIONS = ['7 Days', '14 Days', '21 Days', '30 Days', 'According
 const ALLOWANCE_OPTIONS = ['No', 'Optional', 'Yes', 'According to Company Policy'];
 
 function StringListEditor({ items, onChange, placeholder }: { items: string[]; onChange: (items: string[]) => void; placeholder: string }) {
+  const [bulkText, setBulkText] = useState('');
+
+  // Mirrors departments/upload-requirements/components/AddRequirementsDialog.tsx's
+  // "Configuration Manager" bulk-add pattern (one item per line), but as a
+  // real paste interception rather than re-splitting on every keystroke -
+  // this box only ever holds one in-flight paste, so there's no persisted
+  // bulk-input state to keep in sync with the row list below.
+  const handleBulkPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const text = e.clipboardData.getData('text');
+    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) return;
+    e.preventDefault();
+    onChange([...items, ...lines]);
+  };
+
   return (
     <div className="space-y-3">
       {items.map((item, i) => (
@@ -98,6 +113,16 @@ function StringListEditor({ items, onChange, placeholder }: { items: string[]; o
       <Button type="button" variant="outline" size="sm" className="h-9 text-xs rounded-lg border-dashed border-slate-300 dark:border-slate-700 bg-transparent hover:bg-slate-50 text-slate-600" onClick={() => onChange([...items, ''])}>
         <PlusCircle className="h-3.5 w-3.5 mr-1.5" /> Add Item
       </Button>
+      <div className="pt-2 border-t border-dashed border-slate-200 dark:border-slate-800 space-y-1.5">
+        <label className="text-xs font-medium text-slate-500">Bulk paste (one item per line)</label>
+        <Textarea
+          value={bulkText}
+          onChange={(e) => setBulkText(e.target.value)}
+          onPaste={handleBulkPaste}
+          placeholder="Paste a list here - each line becomes its own item above..."
+          className="min-h-[70px] text-sm bg-white dark:bg-slate-900 border-slate-200"
+        />
+      </div>
     </div>
   );
 }
@@ -418,7 +443,6 @@ export default function JobProfilesPage() {
 
   const tabs: { value: string; label: string; icon: any }[] = [
     { value: 'overview', label: 'Overview', icon: LayoutTemplate },
-    { value: 'requirements', label: 'Requirements', icon: ShieldCheck },
     { value: 'responsibilities', label: 'Responsibilities', icon: UserCog },
     { value: 'employment_rules', label: 'Employment Rules', icon: FileCheck },
     { value: 'working_arrangement', label: 'Working Arrangement', icon: Briefcase },
@@ -752,14 +776,6 @@ export default function JobProfilesPage() {
                               </div>
                             </TabsContent>
 
-                            <TabsContent value="requirements" className="m-0 focus:outline-none">
-                              <div className="max-w-4xl mx-auto space-y-6">
-                                <SectionPanel title="Qualifications & Experience">
-                                  <StringListEditor items={draft.requirements || []} onChange={(v) => updateDraft({ requirements: v })} placeholder="e.g. Bachelor's degree in Computer Science" />
-                                </SectionPanel>
-                              </div>
-                            </TabsContent>
-
                             <TabsContent value="responsibilities" className="m-0 focus:outline-none">
                               <div className="max-w-4xl mx-auto space-y-6">
                                 <SectionPanel title="Key Responsibilities">
@@ -797,6 +813,16 @@ export default function JobProfilesPage() {
                                   <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
                                     <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Currency</span><SettingSelect label="" settingKey="salary_currency" options={['KES', 'USD', 'GBP', 'EUR']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
                                     <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Annual Leave</span><SettingSelect label="" settingKey="annual_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                  </div>
+                                </SectionPanel>
+                                <SectionPanel title="Benefits">
+                                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Medical Cover</span><SettingInput label="" settingKey="medical_cover" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Jubilee Insurance, or Yes" /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Pension</span><SettingInput label="" settingKey="pension_scheme" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. CPF, or Yes" /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Housing Allowance</span><SettingSelect label="" settingKey="housing_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Transport Allowance</span><SettingSelect label="" settingKey="transport_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Telephone Allowance</span><SettingSelect label="" settingKey="telephone_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Meal Allowance</span><SettingSelect label="" settingKey="meal_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
                                   </div>
                                 </SectionPanel>
                               </div>

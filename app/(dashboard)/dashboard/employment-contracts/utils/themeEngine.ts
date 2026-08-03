@@ -82,6 +82,18 @@ const BASE_SECTION_STYLES = `
   .cs-toc-link:hover { background: #f1f5f9; }
   .cs-toc-num { font-weight: 700; margin-right: 6px; min-width: 28px; display: inline-block; }
   .cs-section-heading { margin-top: 20px; margin-bottom: 8px; }
+
+  /* Highlights which entity a resolved placeholder value came from, so an
+     admin reviewing the preview can spot at a glance whether a fact is
+     pulled from the Company record or the Employee record - see
+     ContractPreview.tsx's employeeValues wrapping. Light/pastel so it stays
+     legible in print/PDF, not just on screen. */
+  .ph-entity-company { background: #dbeafe; border-radius: 3px; padding: 0 3px; }
+  .ph-entity-employee { background: #dcfce7; border-radius: 3px; padding: 0 3px; }
+  /* An unresolved token still renders in its entity color (dimmed), so a
+     blank spot reads as "this Company/Employee fact is missing" rather than
+     losing the color coding entirely once there's nothing to show. */
+  .ph-entity-missing { opacity: 0.55; font-style: italic; }
 `;
 
 const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {

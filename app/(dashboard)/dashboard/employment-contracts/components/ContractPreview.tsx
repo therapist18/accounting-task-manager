@@ -25,17 +25,67 @@ import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
 import { fetchCompanies, Company } from '../../companies/database';
+import type { EcPlaceholder } from '../utils/ecPlaceholders';
+
+// Placeholders whose value is HTML list markup (<li>...</li> fragments, not
+// a scalar fact) - an empty list is a legitimate state ("no benefits
+// configured", "no extra responsibilities entered"), not a missing fact, so
+// these never get the missing-value placeholder treatment below.
+const LIST_MARKUP_KEYS = new Set(['applicable_benefits', 'key_responsibilities']);
+
+// A single em dash reads as ambiguous - could be a stray hyphen, could be
+// intentional punctuation in a clause. A visibly blank-looking run makes it
+// unmistakable that a fact belongs there and hasn't been filled in yet.
+const MISSING_VALUE_PLACEHOLDER = '_________________';
+
+// Wraps each resolved value in a colored span keyed by which entity (Company
+// vs Employee) the placeholder is tagged as - purely a visual aid for
+// reviewing the preview, not a data change. Iterates the full ecPlaceholders
+// registry (not just whatever buildStandardPlaceholderValues happened to
+// produce a key for) so a token that never resolved into any value at all -
+// e.g. an unlinked master_field placeholder like contract_date or
+// employee_address, referenced in clause text but with no source_kind
+// default and no master field link yet - still shows the missing-value
+// placeholder instead of silently vanishing via replacePlaceholders' own
+// "unknown key -> ''" behavior.
+function buildHighlightedPreviewValues(
+  employee: any,
+  company: Company | null | undefined,
+  offer: EmploymentOffer | null | undefined,
+  effectiveSettings: Record<string, any>,
+  masterFieldValues: Record<string, string>,
+  selectedJobProfile: EcJobProfile | null,
+  ecPlaceholders: EcPlaceholder[]
+): Record<string, string> {
+  const raw = employee
+    ? buildStandardPlaceholderValues(employee, company, offer, effectiveSettings, offer?.placeholder_overrides, masterFieldValues, selectedJobProfile)
+    : {};
+
+  const wrap = (key: string, value: string, entity: string | undefined): string => {
+    const isMissing = !value && !LIST_MARKUP_KEYS.has(key);
+    const display = isMissing ? MISSING_VALUE_PLACEHOLDER : value;
+    const missingClass = isMissing ? ' ph-entity-missing' : '';
+    if (entity === 'company') return `<span class="ph-entity-company${missingClass}">${display}</span>`;
+    if (entity === 'employee') return `<span class="ph-entity-employee${missingClass}">${display}</span>`;
+    return display;
+  };
+
+  const highlighted: Record<string, string> = {};
+  for (const p of ecPlaceholders) {
+    highlighted[p.key] = wrap(p.key, raw[p.key] || '', p.entity_type?.[0]);
+  }
+  for (const [key, value] of Object.entries(raw)) {
+    if (key in highlighted) continue;
+    highlighted[key] = wrap(key, value, undefined);
+  }
+  return highlighted;
+}
 
 interface ContractPreviewProps {
   contractData: any;
   setContractData?: (updater: any) => void;
   selectedJobProfile: EcJobProfile | null;
   previewOnly?: boolean;
-  // Overrides the root wrapper's layout classes - the default sizing
-  // (flex-1 lg:min-w-[600px], flex-row sibling of ContractEditor) is tuned
-  // for the main Employment Contracts page's flex layout, which fights the
-  // parent's own sizing when this is embedded inside a react-resizable-panels
-  // Panel elsewhere (e.g. job-profiles' live preview).
   className?: string;
 }
 
@@ -219,11 +269,11 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     });
   }, [selectedJobProfile, offer, effectiveClauses]);
 
-  const { masterFieldValues, isResolving: isResolvingMasterFields, refresh: refreshMasterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
+  const { ecPlaceholders, masterFieldValues, isResolving: isResolvingMasterFields, refresh: refreshMasterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
 
   const employeeValues = useMemo(
-    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer?.placeholder_overrides, masterFieldValues) : {}),
-    [employee, company, offer, effectiveSettings, masterFieldValues]
+    () => buildHighlightedPreviewValues(employee, company, offer as EmploymentOffer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders),
+    [employee, company, offer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders]
   );
 
   const bodyHtml = useMemo(() => {
