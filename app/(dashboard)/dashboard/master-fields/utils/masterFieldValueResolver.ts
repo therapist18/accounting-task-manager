@@ -1,3 +1,5 @@
+import supabase from '@/lib/supabase/client';
+
 // Core "resolve a tm_job_fields value from a pre-fetched table cache" logic,
 // extracted out of tasks-requirements/TemplateGenerationDialog.tsx so Document
 // Template Manager and other consumers (Employment Contracts) share one
@@ -59,6 +61,105 @@ export function processCurrentDateField(
   }
 
   return { value: '', source: null };
+}
+
+/**
+ * Picks which of a master field's own `sources[]` to use for a given target
+ * entity type, preferring an exact source_type match and falling back to the
+ * first source otherwise - extracted out of the pattern
+ * TemplateGenerationDialog.tsx's saveFieldToDatabase repeats twice (its
+ * default single-source save path, `mf.sources.find(s => s.source_type ===
+ * targetType) || mf.sources[0]`) so both it and Employment Contracts'
+ * saveEcMasterFieldValue call one implementation instead of two near-
+ * duplicates. DTM's specificSource popover path (matching by exact `table`
+ * name from a user-clicked source row) and its acc_portal_company/
+ * registry_individuals override stay local to DTM - those depend on DTM-only
+ * concepts (a source the user directly clicked, a legacy table-naming
+ * quirk) this generic picker doesn't need to know about.
+ */
+export function pickMasterFieldSource(
+  sources: any[] | undefined,
+  preferredType: 'individual' | 'company'
+): any | undefined {
+  if (!sources?.length) return undefined;
+  return sources.find((s) => s.source_type === preferredType) || sources[0];
+}
+
+export interface SourceWriteTarget {
+  table: string;
+  path?: string;
+  linkVar: string;
+  entityId: string | number;
+}
+
+/**
+ * The generic "write a resolved value back to its source row" core,
+ * extracted out of TemplateGenerationDialog.tsx's saveFieldToDatabase
+ * (lines ~4306-4352 as of this extraction) - which DTM's target/source
+ * *resolution* (director/dependant matching, job-question saves,
+ * individual-registry fallback overrides) stays a private DTM concern, since
+ * none of that exists in other consumers' data models. This is only the
+ * bottom-level mechanic every consumer needs identically: fetch the existing
+ * row (for JSON-path merges), build the update payload, write it, and retry
+ * once with the offending column dropped if Postgres reports it doesn't
+ * exist (PGRST204) - the same graceful-degrade DTM's version already had.
+ */
+export async function writeMasterFieldSourceValue(
+  target: SourceWriteTarget,
+  newValue: string
+): Promise<{ success: boolean; error?: string }> {
+  const { table, path, linkVar, entityId } = target;
+  try {
+    const { data: existing } = await supabase.from(table).select('*').eq(linkVar, entityId).maybeSingle();
+
+    let updatePayload: Record<string, any> = {};
+    if (path && (path.includes('->') || path.includes('.'))) {
+      const pathParts = path.split(/->>|->|\./).map((p) => p.trim().replace(/['"]/g, '')).filter(Boolean);
+      const column = pathParts[0];
+      const nestedPath = pathParts.slice(1);
+      const existingJson = existing ? { ...(existing[column] || {}) } : {};
+      const setDeepValue = (obj: any, parts: string[], val: string) => {
+        let current = obj;
+        for (let i = 0; i < parts.length - 1; i++) {
+          const key = parts[i];
+          if (!(key in current) || typeof current[key] !== 'object') current[key] = {};
+          current = current[key];
+        }
+        current[parts[parts.length - 1]] = val;
+        return obj;
+      };
+      updatePayload[column] = setDeepValue(existingJson, nestedPath, newValue);
+    } else if (path) {
+      updatePayload[path] = newValue;
+    } else {
+      return { success: false, error: 'No column path resolved for this source' };
+    }
+
+    let { error: updateError } = await supabase
+      .from(table)
+      .update({ ...updatePayload, updated_at: new Date().toISOString() })
+      .eq(linkVar, entityId);
+
+    if (updateError && (updateError as any).code === 'PGRST204') {
+      const failedCol = updateError.message?.match(/'(\w+)'/)?.[1];
+      if (failedCol && failedCol in updatePayload) {
+        delete updatePayload[failedCol];
+        const retry = await supabase
+          .from(table)
+          .update({ ...updatePayload, updated_at: new Date().toISOString() })
+          .eq(linkVar, entityId);
+        if (retry.error) return { success: false, error: retry.error.message };
+      } else {
+        return { success: false, error: updateError.message };
+      }
+    } else if (updateError) {
+      return { success: false, error: updateError.message };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to save value' };
+  }
 }
 
 export const parseJsonValue = (data: any, path: string): string => {

@@ -24,7 +24,7 @@ import {
   Loader2, PlusCircle, Trash2, Briefcase, BookText,
   Search, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
   Columns2, FileText, Database, ChevronDown, ShieldCheck, Laptop2,
-  Users, Megaphone, Car, LayoutTemplate, UserCog, FileCheck, Link as LinkIcon, PlayCircle,
+  Users, Megaphone, Car, LayoutTemplate, UserCog, Link as LinkIcon, PlayCircle,
   Copy, Download, AlertCircle, CheckCircle2, ChevronRight, X, FileSignature, Check, ChevronsUpDown,
   ChevronDownIcon, ChevronUpIcon,
 } from 'lucide-react';
@@ -41,6 +41,8 @@ import type { ContractEmployeeInfo } from '../utils/data';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
 import { EMPLOYMENT_TYPE_OPTIONS, WORK_ARRANGEMENT_OPTIONS, withCurrentValue } from '../utils/profileOptions';
 import { ContractPreview } from '../components/ContractPreview';
+import { MasterFieldEditControl } from '../components/MasterFieldEditControl';
+import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
 
 const SETTINGS_GROUPS: { label: string; test: RegExp }[] = [
   { label: 'Compensation & Benefits', test: /allowance|medical|pension|salary|payment/i },
@@ -441,12 +443,28 @@ export default function JobProfilesPage() {
     bankName: '', bankBranch: '', bankAccount: '', contactEmail: '', contactPhone: '', startDate: '',
   }), [draft, selectedCompanyId]);
 
+  // Unlike sampleEmployee.companyId above (which defaults to 0 for typing
+  // convenience elsewhere), this stays null when no real company is selected
+  // ('__general__' or empty) - so MasterFieldEditControl's canEditWith check
+  // (companyId != null) correctly treats "no company" as "nothing to save
+  // against" instead of silently trying to write against a fake id 0.
+  const realCompanyId = selectedCompanyId && selectedCompanyId !== '__general__' ? (Number(selectedCompanyId) || null) : null;
+
+  // Company-scoped master fields ARE real/editable here even though the
+  // employee is a fake stand-in (individualId: 0 - see sampleEmployee above)
+  // - company_id is genuinely real, so saving a company fact from this
+  // preview is safe. Individual-scoped fields never resolve here either way,
+  // so MasterFieldEditControl.canEditWith already hides their edit control.
+  const { ecPlaceholders: previewPlaceholders, masterFieldValues: previewMasterFieldValues, masterFields: previewMasterFields, refresh: refreshPreviewMasterFields } = useMasterFieldValues(0, realCompanyId);
+  const companyFieldPlaceholders = useMemo(
+    () => previewPlaceholders.filter((p) => p.source_kind === 'master_field' && p.entity_type?.includes('company')),
+    [previewPlaceholders]
+  );
+
   const tabs: { value: string; label: string; icon: any }[] = [
     { value: 'overview', label: 'Overview', icon: LayoutTemplate },
     { value: 'responsibilities', label: 'Responsibilities', icon: UserCog },
-    { value: 'employment_rules', label: 'Employment Rules', icon: FileCheck },
-    { value: 'working_arrangement', label: 'Working Arrangement', icon: Briefcase },
-    { value: 'benefits', label: 'Benefits & Compensation', icon: CheckCircle2 },
+    { value: 'fields', label: 'Job Profile Fields', icon: Database },
     { value: 'clauses', label: `Linked Clauses (${clauseSelections.length})`, icon: LinkIcon },
   ];
 
@@ -743,7 +761,16 @@ export default function JobProfilesPage() {
                                     <FormField label="Job Level">
                                       <SearchableSelect
                                         value={draft.job_level || '__unset__'}
-                                        onChange={(v) => updateDraft({ job_level: v === '__unset__' ? null : v })}
+                                        onChange={(v) => {
+                                          const next = v === '__unset__' ? null : v;
+                                          // Mirrors into settings.job_level too - {{job_level}}
+                                          // in a generated contract resolves from the settings
+                                          // cascade (standardPlaceholders.ts), not this top-level
+                                          // column, which otherwise only feeds display strings
+                                          // and clause-suggestion facts elsewhere on this page.
+                                          updateDraft({ job_level: next });
+                                          updateDraftSettings('job_level', next || '');
+                                        }}
                                         placeholder="Select level"
                                         searchPlaceholder="Search levels..."
                                         options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(JOB_LEVEL_OPTIONS, draft.job_level).map((opt) => ({ value: opt, label: opt }))]}
@@ -773,6 +800,34 @@ export default function JobProfilesPage() {
                                 <SectionPanel title="Job Summary" description="This is the role purpose that can feed the job description appendix.">
                                   <Textarea className="min-h-[160px] text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm p-4 leading-relaxed" placeholder="A short summary of what this role does..." value={draft.job_description || ''} onChange={(e) => updateDraft({ job_description: e.target.value })} />
                                 </SectionPanel>
+
+                                {companyFieldPlaceholders.length > 0 && (
+                                  <SectionPanel title="Company Fields" description="Master-field-linked company facts used by this profile's clauses - editing one here saves it to the actual Company record, not just this profile.">
+                                    <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                      {companyFieldPlaceholders.map((p) => {
+                                        const val = previewMasterFieldValues[p.key] || '';
+                                        return (
+                                          <div key={p.id} className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-4 items-center">
+                                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{p.label}</span>
+                                            <div className="flex items-center gap-2">
+                                              <span className="flex-1 text-sm text-slate-600 dark:text-slate-300 truncate">
+                                                {val || <span className="italic text-amber-500/80">No value</span>}
+                                              </span>
+                                              <MasterFieldEditControl
+                                                placeholder={p}
+                                                masterFields={previewMasterFields}
+                                                individualId={null}
+                                                companyId={realCompanyId}
+                                                currentValue={val}
+                                                onSaved={refreshPreviewMasterFields}
+                                              />
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </SectionPanel>
+                                )}
                               </div>
                             </TabsContent>
 
@@ -784,37 +839,42 @@ export default function JobProfilesPage() {
                               </div>
                             </TabsContent>
 
-                            <TabsContent value="employment_rules" className="m-0 focus:outline-none">
+                            {/* Consolidated settings-cascade fields, grouped by
+                                section so every {{token}} standardPlaceholders.ts
+                                can generically resolve (see its ecPlaceholders
+                                dispatch loop) has somewhere to actually be set -
+                                replaces the old Employment Rules/Working
+                                Arrangement/Benefits & Compensation tabs, which
+                                between them only covered 13 of ~27 settings keys. */}
+                            <TabsContent value="fields" className="m-0 focus:outline-none">
                               <div className="max-w-4xl mx-auto space-y-6">
-                                <SectionPanel title="Employment & Termination">
+                                <SectionPanel title="Employment Details" description="Job Level is set on the Overview tab (it also drives clause-suggestion rules there) and mirrors into {{job_level}} automatically.">
                                   <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Probation Period</span><SettingSelect label="" settingKey="probation_period" options={PROBATION_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Notice Period</span><SettingSelect label="" settingKey="notice_period" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Reports To</span><SettingInput label="" settingKey="reports_to" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Finance Manager" /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Work Location</span><SettingInput label="" settingKey="work_location" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Nairobi HQ" /></div>
                                   </div>
                                 </SectionPanel>
-                              </div>
-                            </TabsContent>
 
-                            <TabsContent value="working_arrangement" className="m-0 focus:outline-none">
-                              <div className="max-w-4xl mx-auto space-y-6">
-                                <SectionPanel title="Schedule & Overtime">
+                                <SectionPanel title="Salary & Payment">
+                                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Currency</span><SettingSelect label="" settingKey="salary_currency" options={['KES', 'USD', 'GBP', 'EUR']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Payment Frequency</span><SettingSelect label="" settingKey="payment_frequency" options={['Monthly', 'Bi-weekly', 'Weekly']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Payment Day</span><SettingInput label="" settingKey="payment_day" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. 25th" /></div>
+                                  </div>
+                                </SectionPanel>
+
+                                <SectionPanel title="Working Hours">
                                   <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
                                     <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Working Days</span><SettingSelect label="" settingKey="working_days" options={['Monday-Friday', 'Monday-Saturday', 'Shift Based', 'Flexible']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
                                     <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Start Time</span><SettingInput label="" settingKey="start_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="08:00" type="time" /></div>
                                     <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">End Time</span><SettingInput label="" settingKey="end_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="17:00" type="time" /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Working Hours</span><SettingInput label="" settingKey="working_hours" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. 8 hours/day" /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Break Duration</span><SettingInput label="" settingKey="break_duration" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. 1 hr" /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Rest Days</span><SettingInput label="" settingKey="rest_days" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Saturday, Sunday" /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Work Mode</span><SettingSelect label="" settingKey="work_mode" options={['On-site', 'Remote', 'Hybrid']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
                                   </div>
                                 </SectionPanel>
-                              </div>
-                            </TabsContent>
 
-                            <TabsContent value="benefits" className="m-0 focus:outline-none">
-                              <div className="max-w-4xl mx-auto space-y-6">
-                                <SectionPanel title="Compensation">
-                                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Currency</span><SettingSelect label="" settingKey="salary_currency" options={['KES', 'USD', 'GBP', 'EUR']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Annual Leave</span><SettingSelect label="" settingKey="annual_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                  </div>
-                                </SectionPanel>
                                 <SectionPanel title="Benefits">
                                   <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
                                     <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Medical Cover</span><SettingInput label="" settingKey="medical_cover" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Jubilee Insurance, or Yes" /></div>
@@ -823,6 +883,25 @@ export default function JobProfilesPage() {
                                     <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Transport Allowance</span><SettingSelect label="" settingKey="transport_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
                                     <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Telephone Allowance</span><SettingSelect label="" settingKey="telephone_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
                                     <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Meal Allowance</span><SettingSelect label="" settingKey="meal_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                  </div>
+                                </SectionPanel>
+
+                                <SectionPanel title="Termination & Probation">
+                                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Probation Period</span><SettingSelect label="" settingKey="probation_period" options={PROBATION_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Notice Period</span><SettingSelect label="" settingKey="notice_period" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Probation Notice</span><SettingSelect label="" settingKey="probation_notice" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Termination Reason</span><SettingInput label="" settingKey="termination_reason" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Redundancy, Misconduct..." /></div>
+                                  </div>
+                                </SectionPanel>
+
+                                <SectionPanel title="Leave">
+                                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Annual Leave</span><SettingSelect label="" settingKey="annual_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Sick Leave</span><SettingSelect label="" settingKey="sick_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Maternity Leave</span><SettingSelect label="" settingKey="maternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Paternity Leave</span><SettingSelect label="" settingKey="paternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Compassionate Leave</span><SettingSelect label="" settingKey="compassionate_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
                                   </div>
                                 </SectionPanel>
                               </div>

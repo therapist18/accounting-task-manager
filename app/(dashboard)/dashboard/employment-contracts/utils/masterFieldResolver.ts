@@ -1,5 +1,5 @@
 import supabase from '@/lib/supabase/client';
-import { processTextField, processCurrentDateField } from '../../master-fields/utils/masterFieldValueResolver';
+import { processTextField, processCurrentDateField, writeMasterFieldSourceValue, pickMasterFieldSource } from '../../master-fields/utils/masterFieldValueResolver';
 import { ecPlaceholderToDtmPlaceholder } from './ecPlaceholderAdapter';
 import type { EcPlaceholder } from './ecPlaceholders';
 import type { JobField, JobFieldSource } from '../../master-fields/components/types/database';
@@ -17,15 +17,27 @@ import type { JobField, JobFieldSource } from '../../master-fields/components/ty
 // bulk-fetches each distinct table referenced by the linked master fields
 // once (matching DTM's own fetch-the-table-then-resolve-in-memory shape),
 // then hands the resulting cache to processTextField per placeholder.
+//
+// Also returns the fetched masterFields Map itself (not just the resolved
+// values) - useMasterFieldValues.ts exposes this to ContractEditor.tsx's
+// edit-and-save-to-source UI, which needs each linked field's own `sources`/
+// `type`/`options` to build its multi-source popover and select-aware edit
+// control, without a second duplicate tm_job_fields fetch.
+export interface ResolveEcPlaceholderValuesResult {
+  values: Record<string, string>;
+  masterFields: Map<number, JobField>;
+}
+
 export async function resolveEcPlaceholderValues(
   ecPlaceholders: EcPlaceholder[],
   individualId: number | null | undefined,
   companyId: number | string | null | undefined
-): Promise<Record<string, string>> {
+): Promise<ResolveEcPlaceholderValuesResult> {
+  const empty = { values: {}, masterFields: new Map<number, JobField>() };
   const linked = ecPlaceholders.filter(
     (p) => p.source_kind === 'master_field' && (p.master_field_id || (p.master_field_links?.length ?? 0) > 0)
   );
-  if (linked.length === 0) return {};
+  if (linked.length === 0) return empty;
 
   // Gather every referenced master field id up front so the table-fetch pass
   // below can run once for the whole batch - final per-placeholder
@@ -34,13 +46,13 @@ export async function resolveEcPlaceholderValues(
   for (const p of linked) {
     (ecPlaceholderToDtmPlaceholder(p).master_field_ids || []).forEach((id) => allFieldIds.add(id));
   }
-  if (allFieldIds.size === 0) return {};
+  if (allFieldIds.size === 0) return empty;
 
   const { data: fieldRows, error: fieldsError } = await supabase
     .from('tm_job_fields')
     .select('*')
     .in('id', Array.from(allFieldIds));
-  if (fieldsError || !fieldRows) return {};
+  if (fieldsError || !fieldRows) return empty;
 
   const masterFields = new Map<number, JobField>(fieldRows.map((f: any) => [f.id, f as JobField]));
 
@@ -145,5 +157,48 @@ export async function resolveEcPlaceholderValues(
     }
     if (collected.length > 0) result[p.key] = collected.join(' ');
   }
-  return result;
+  return { values: result, masterFields };
+}
+
+// Picks which of a master field's own sources to write to: prefer whichever
+// entity type actually has a usable id here (company vs individual - EC's
+// own concern, since unlike DTM this call isn't already scoped to one known
+// target entity), falling back to pickMasterFieldSource's "no match -> take
+// the first source" behavior - the SAME shared function
+// TemplateGenerationDialog.tsx's saveFieldToDatabase uses for its own
+// default single-source save path, not a second reimplementation of that
+// matching logic. Then delegates the actual write to the shared
+// writeMasterFieldSourceValue core.
+export async function saveEcMasterFieldValue(
+  masterFieldId: number,
+  masterFields: Map<number, JobField>,
+  newValue: string,
+  individualId: number | null | undefined,
+  companyId: number | string | null | undefined
+): Promise<{ success: boolean; error?: string }> {
+  const mf = masterFields.get(masterFieldId);
+  if (!mf?.sources?.length) return { success: false, error: 'Master field configuration missing' };
+
+  const sources = mf.sources as JobFieldSource[];
+  const companySource = sources.find((s) => s.source_type === 'company');
+  const individualSource = sources.find((s) => s.source_type === 'individual');
+  const source = (companyId != null && companySource)
+    || (individualId != null && individualSource)
+    || pickMasterFieldSource(sources, 'individual')!;
+
+  const linkingVar = (source.linking_variable as string | null | undefined) || 'id';
+  const entityId = linkingVar === 'company_id'
+    ? companyId
+    : linkingVar === 'individual_id'
+    ? individualId
+    : (source.source_type === 'company' ? companyId : individualId);
+
+  if (entityId == null) {
+    return { success: false, error: `No ${source.source_type === 'company' ? 'company' : 'employee'} record to save this value against` };
+  }
+
+  return writeMasterFieldSourceValue(
+    { table: source.table, path: source.path, linkVar: linkingVar, entityId },
+    newValue
+  );
 }

@@ -58,7 +58,7 @@ function buildHighlightedPreviewValues(
   ecPlaceholders: EcPlaceholder[]
 ): Record<string, string> {
   const raw = employee
-    ? buildStandardPlaceholderValues(employee, company, offer, effectiveSettings, offer?.placeholder_overrides, masterFieldValues, selectedJobProfile)
+    ? buildStandardPlaceholderValues(employee, company, offer, effectiveSettings, offer?.placeholder_overrides, masterFieldValues, selectedJobProfile, ecPlaceholders)
     : {};
 
   const wrap = (key: string, value: string, entity: string | undefined): string => {

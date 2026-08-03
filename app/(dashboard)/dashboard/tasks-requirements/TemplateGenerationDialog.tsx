@@ -25,7 +25,7 @@ import { EntityType, ENTITY_TYPES, DEPENDANT_RELATIONSHIPS } from "@/lib/constan
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { executeComputedField } from '../tasks/utils/automationComputedFunctions';
-import { parseJsonValue, processTextField, formatDate, processCurrentDateField } from '../master-fields/utils/masterFieldValueResolver';
+import { parseJsonValue, processTextField, formatDate, processCurrentDateField, writeMasterFieldSourceValue, pickMasterFieldSource } from '../master-fields/utils/masterFieldValueResolver';
 import { PreviewPanel } from './components/PreviewPanel';
 import { UploadModal } from '@/app/generic-components/UploadModal';
 import { SearchableSelect } from '@/components/ui/searchable-select';
@@ -151,8 +151,6 @@ const fetchImageAsBase64 = async (url) => {
     }
 };
 
-// Default mammoth styleMap omits a rule for direct (non-style-based) underline runs,
-// so plain <u> formatting silently disappears from converted HTML unless we add it back.
 const MAMMOTH_STYLE_MAP = [
     "p => p:fresh",
     "u => u",
@@ -161,12 +159,6 @@ const MAMMOTH_STYLE_MAP = [
     "th => th.border.bg-muted.p-2.font-bold"
 ];
 
-// Substitutes {field} tokens with placeholder-type awareness, so image placeholders render as
-// actual <img> tags instead of dumping a raw base64/URL string into the page as text. Iterates
-// the known placeholders (like populateHtmlContent does) rather than a single generic regex,
-// because tokens aren't always plain "{name}" - image/signature placeholders are commonly
-// authored as "{%name}" (and can have extra/repeated braces), which a bare [a-zA-Z_]-first
-// capture group rejects outright and leaves untouched as literal "{%name}" text.
 const replacePlaceholdersRich = (html, renderData = {}, placeholders = []) => {
     if (!html) return '';
     let content = html;
@@ -202,9 +194,6 @@ const escapeXmlText = (str) => String(str)
 const EMU_PER_PX = 9525;
 const BLOCK_TAGS = new Set(['p', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
 
-// Walks the rich-text HTML DOM and produces a list of paragraphs, each a list of runs
-// (text with bold/italic/underline flags, or an inline image), so it can be turned into
-// real OOXML instead of the plain-text dump that used to wipe out all formatting/images.
 const htmlToOoxmlParagraphs = (html) => {
     const container = document.createElement('div');
     container.innerHTML = html;
@@ -249,9 +238,6 @@ const htmlToOoxmlParagraphs = (html) => {
     return paragraphs.filter(runs => runs.length > 0);
 };
 
-// Converts the parsed paragraphs/runs into OOXML <w:p>/<w:r> markup. Image runs become
-// inline <w:drawing> elements referencing a relationship ID; the caller is responsible for
-// writing the actual image bytes + relationships into the docx zip using the returned list.
 const buildOoxmlBody = (paragraphs, imageWidthPx = 300, imageHeightPx = 200) => {
     const images = [];
     let imgCounter = 0;
@@ -285,18 +271,12 @@ const buildOoxmlBody = (paragraphs, imageWidthPx = 300, imageHeightPx = 200) => 
             const rPr = rPrParts.length ? `<w:rPr>${rPrParts.join('')}</w:rPr>` : '';
             return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXmlText(run.text || '')}</w:t></w:r>`;
         }).join('');
-        // Each source <p>/<div> becomes its own <w:p> with no inherited paragraph style, so
-        // without explicit spacing they render back-to-back with no visual gap - unlike the
-        // live HTML preview where <p> margins separate them. w:after adds that gap back.
         return `<w:p><w:pPr><w:spacing w:after="200"/></w:pPr>${runsXml}</w:p>`;
     }).join('');
 
     return { paragraphsXml, images };
 };
 
-// Finds the <w:p> paragraph whose *text content* (tags stripped) contains the literal
-// "{BODY}" marker - tolerating Word having split "{", "BODY", "}" across separate runs -
-// and swaps that whole paragraph for the generated body paragraphs.
 const injectBodyIntoLetterheadXml = (documentXml, paragraphsXml) => {
     const paragraphRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
     let matched = false;
@@ -313,10 +293,6 @@ const injectBodyIntoLetterheadXml = (documentXml, paragraphsXml) => {
     return documentXml.replace('</w:body>', `${paragraphsXml}</w:body>`);
 };
 
-// Builds the final letterhead .docx buffer by splicing real OOXML (bold/italic/underline
-// runs + embedded images) into the {BODY} paragraph, instead of the old approach of
-// flattening the rich HTML to plain text via Docxtemplater (which silently dropped all
-// formatting and every image).
 const renderLetterheadDocxBuffer = async (letterheadBuffer, htmlContent, renderData, placeholders) => {
     const zip = new PizZip(letterheadBuffer);
     const documentXmlFile = zip.file('word/document.xml');
@@ -481,9 +457,6 @@ const generateDocumentChecklist = (
     return checklist.join('\n');
 };
 
-// Anyone associated with the task's company under a given role (director/shareholder/
-// employee/etc.), sourced from registry_individuals.employment_data.associations - same
-// data the Letters module's signatory picker reads from (useLetterData.ts).
 const getCompanyRegistryCandidates = (normType, companyAssociates) => {
     if (!companyAssociates?.length || !normType) return [];
     return companyAssociates.filter((ind: any) =>
@@ -491,10 +464,6 @@ const getCompanyRegistryCandidates = (normType, companyAssociates) => {
     );
 };
 
-// Used as a fallback when the task has no participant tagged with that role, and as the
-// only resolution path for roles (shareholder/employee) that were never task participants
-// at all. entityOverrides[normType] lets the user pick a specific person when more than one
-// candidate matches.
 const resolveCompanyRegistryFallback = (normType, companyAssociates, entityOverrides) => {
     const candidates = getCompanyRegistryCandidates(normType, companyAssociates);
     if (candidates.length === 0) return null;
@@ -587,9 +556,6 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
     const taskResult = resolveFromTaskParticipants();
     if (taskResult) return taskResult;
 
-    // No task participant matched this role - e.g. 'shareholder'/'employee' (which were
-    // never task-participant concepts to begin with), or a 'director' with nobody tagged
-    // as director on this specific task. Fall back to the company registry.
     if (normType && normType !== 'company') {
         const fallback = resolveCompanyRegistryFallback(normType, companyAssociates, entityOverrides);
         if (fallback) return fallback;
@@ -633,9 +599,6 @@ const processOrdinalField = (placeholder, arrayIndex) => {
     }
 };
 
-
-// Resolves one comparison clause's field value and checks it against clause.value/operator.
-// Shared by the primary `comparison` and any AND-ed `additional_comparisons` on a condition.
 const evaluateComparisonClause = (clause, targetEntity, targetId, combinedCache, masterFields, computedFieldCache) => {
     const { field, operator, value: compareValue, master_field_id } = clause;
     if (!field && !master_field_id) return false;
@@ -705,8 +668,6 @@ const processConditionalField = (placeholder, targetEntity, combinedCache, maste
 
     for (const condition of placeholder.conditions) {
         if (condition.comparison) {
-            // All clauses (primary + any AND-ed additional_comparisons) must match, e.g.
-            // Gender=Female AND MaritalStatus=Married -> "Mrs"
             const clauses = [condition.comparison, ...(condition.additional_comparisons || [])];
             const allMatch = clauses.every(clause =>
                 evaluateComparisonClause(clause, targetEntity, targetId, combinedCache, masterFields, computedFieldCache)
@@ -882,7 +843,6 @@ const processDocumentChecklistField = (placeholder, targetEntity, combinedCache)
             matches = [matches[0]];
         }
 
-        // Use label from data source or placeholder display_value as fallback
         const itemLabel = label || placeholder.display_value || placeholder.name;
 
         if (matches.length > 0) {
@@ -896,7 +856,6 @@ const processDocumentChecklistField = (placeholder, targetEntity, combinedCache)
         return { value: '', source: null };
     }
 
-    // Join all checklist items with newlines
     return {
         value: checklistResults.join('\n'),
         source: 'Document Checklist'
@@ -904,9 +863,6 @@ const processDocumentChecklistField = (placeholder, targetEntity, combinedCache)
 };
 
 const processImageField = (placeholder, targetEntity, combinedCache, masterFields) => {
-    // Current placeholders don't carry source_table/linking_variable directly - they resolve
-    // through their master_field_ids' own sources[] instead, same as processTextField does for
-    // text fields. Try that first before falling back to the older placeholder-level config.
     if (placeholder.master_field_ids?.length > 0 && targetEntity) {
         const candidateIds = [
             targetEntity?.id,
@@ -960,8 +916,6 @@ const processImageField = (placeholder, targetEntity, combinedCache, masterField
         }
     }
 
-    // Older placeholder-level config (source_table/linking_variable set directly on the
-    // placeholder rather than resolved via master_field_ids) - kept for backward compatibility.
     const sourceTable = placeholder.source_table;
     const linkingVariable = placeholder.linking_variable;
     const documentTypeIds = placeholder.document_type_ids || [];
@@ -1040,10 +994,6 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
     const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData, companyAssociates, entityOverrides);
     const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
 
-    // System-date fields (date_config.useCurrentDate) don't depend on any target entity -
-    // resolve them before the targetEntity-gated loop so an unresolved targetEntity (e.g.
-    // entity_type left unset/unmatched for a plain "today's date" field) never blocks the
-    // placeholder from populating.
     if (placeholder.master_field_ids?.length > 0 && masterFields) {
         for (const mid of placeholder.master_field_ids) {
             const mf = masterFields.get(parseInt(mid, 10));
@@ -4280,8 +4230,10 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                     targetType = 'company';
                 }
 
-                const src = mf.sources.find(s => s.source_type === targetType)
-                    || mf.sources[0]; // Fallback to first if no specific match
+                // Shared with Employment Contracts' saveEcMasterFieldValue -
+                // one implementation of "match source_type, else take the
+                // field's first source" instead of two near-duplicates.
+                const src = pickMasterFieldSource(mf.sources, targetType as 'individual' | 'company');
 
                 if (!src) throw new Error(`No database source found for type '${targetType}'`);
 
@@ -4303,53 +4255,19 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 throw new Error(`Could not resolve database target. Table: ${table}, ID: ${entId}`);
             }
 
-            const { data: existing, error: findError } = await supabase.from(table).select('*').eq(linkVar, entId).maybeSingle();
+            // The actual write mechanic (fetch-existing + JSON-path merge +
+            // update + PGRST204 unknown-column retry) is shared with
+            // Employment Contracts' save-to-source editing - see
+            // writeMasterFieldSourceValue in master-fields/utils/masterFieldValueResolver.ts.
+            // Only the "which table/column/entity are we even writing to"
+            // resolution above (director/dependant matching, job-question
+            // saves, individual-registry fallback) stays DTM-specific.
+            const writeResult = await writeMasterFieldSourceValue(
+                { table, path: path || placeholder.name, linkVar, entityId: entId },
+                newValue
+            );
+            if (!writeResult.success) throw new Error(writeResult.error || 'Failed to save value');
 
-            let updatePayload = {};
-
-            if (path && (path.includes('->') || path.includes('.'))) {
-                const pathParts = path.split(/->>|->|\./).map(p => p.trim().replace(/['"]/g, '')).filter(Boolean);
-                const column = pathParts[0];
-                const nestedPath = pathParts.slice(1);
-                const existingJson = existing ? { ...(existing[column] || {}) } : {};
-                const setDeepValue = (obj, parts, val) => {
-                    let current = obj;
-                    for (let i = 0; i < parts.length - 1; i++) {
-                        const key = parts[i];
-                        if (!(key in current) || typeof current[key] !== 'object') {
-                            current[key] = {};
-                        }
-                        current = current[key];
-                    }
-                    current[parts[parts.length - 1]] = val;
-                    return obj;
-                };
-
-                updatePayload[column] = setDeepValue(existingJson, nestedPath, newValue);
-            } else {
-                updatePayload[path || placeholder.name] = newValue;
-            }
-
-            let { error: updateError } = await supabase
-                .from(table)
-                .update({ ...updatePayload, updated_at: new Date().toISOString() })
-                .eq(linkVar, entId);
-
-            if (updateError && updateError.code === 'PGRST204') {
-                const failedCol = updateError.message?.match(/'(\w+)'/)?.[1];
-                if (failedCol && failedCol in updatePayload) {
-                    delete updatePayload[failedCol];
-                    const retry = await supabase
-                        .from(table)
-                        .update({ ...updatePayload, updated_at: new Date().toISOString() })
-                        .eq(linkVar, entId);
-                    if (retry.error) throw retry.error;
-                } else {
-                    throw updateError;
-                }
-            } else if (updateError) {
-                throw updateError;
-            }
             const { data: refreshedRecord, error: fetchError } = await supabase
                 .from(table)
                 .select('*')
