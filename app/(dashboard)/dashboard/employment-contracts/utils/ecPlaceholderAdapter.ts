@@ -42,6 +42,7 @@ export function ecPlaceholderToDtmPlaceholder(ec: EcPlaceholder): Placeholder {
     entity_type: (ec.entity_type || []) as any,
     master_field_ids: masterFieldIds,
     source_logic,
+    editable: ec.editable,
     // The dialog's plain-text Source field reads/writes whichever column the
     // placeholder's current source_kind actually resolves from (settings_key
     // for settings_cascade/job_profile/master_field, offer_field for offer) -
@@ -82,5 +83,6 @@ export function dtmPlaceholderToEcUpdates(updated: Placeholder, original: EcPlac
     required: !!updated.required,
     settings_key: isOfferKind ? original.settings_key : sourceText,
     offer_field: isOfferKind ? sourceText : original.offer_field,
+    editable: !!updated.editable,
   };
 }

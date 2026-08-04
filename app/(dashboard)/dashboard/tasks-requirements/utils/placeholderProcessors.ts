@@ -190,9 +190,13 @@ const evaluateComparisonClause = (
         if (!tableData) continue;
 
         const linkingVar = source.linking_variable || 'id';
-        const record = Object.values(tableData).find((rec: any) =>
-          String(rec[linkingVar] || rec.id) === targetId
-        );
+        const docIds: string[] = Array.isArray(source.document_id)
+          ? source.document_id
+          : (source.document_id ? [source.document_id] : []);
+        const record = Object.values(tableData).find((rec: any) => {
+          if (String(rec[linkingVar] || rec.id) !== targetId) return false;
+          return docIds.length === 0 || docIds.includes(rec.document_id);
+        });
 
         if (record) {
           const fieldName = (field as string) || mf.field_key || '';
@@ -246,7 +250,13 @@ export const processConditionalField = (
     if (condition.comparison) {
       // All clauses (primary + any AND-ed additional_comparisons) must match, e.g.
       // Gender=Female AND MaritalStatus=Married -> "Mrs"
-      const clauses = [condition.comparison, ...(condition.additional_comparisons || [])];
+      // master_field_id lives on the condition itself (sibling of comparison), not
+      // inside comparison, so it has to be merged in explicitly for the primary clause.
+      const primaryClause = {
+        ...condition.comparison,
+        master_field_id: condition.comparison.master_field_id ?? condition.master_field_id,
+      };
+      const clauses = [primaryClause, ...(condition.additional_comparisons || [])];
       const allMatch = clauses.every((clause: any) =>
         evaluateComparisonClause(clause, targetEntity, targetId, combinedCache, masterFields, computedFieldCache)
       );
@@ -281,9 +291,13 @@ export const processConditionalField = (
         if (!tableData) continue;
 
         const linkingVar = source.linking_variable || 'id';
-        const record = Object.values(tableData).find((rec: any) =>
-          String(rec[linkingVar] || rec.id) === targetId
-        );
+        const docIds: string[] = Array.isArray(source.document_id)
+          ? source.document_id
+          : (source.document_id ? [source.document_id] : []);
+        const record = Object.values(tableData).find((rec: any) => {
+          if (String(rec[linkingVar] || rec.id) !== targetId) return false;
+          return docIds.length === 0 || docIds.includes(rec.document_id);
+        });
 
         if (record) {
           let rawVal = source.path

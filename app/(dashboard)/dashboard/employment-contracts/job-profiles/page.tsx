@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SearchableSelect } from '../components/SearchableSelect';
@@ -39,11 +40,12 @@ import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
 import { buildDefaultClauseMap } from '../utils/clauseEngine';
 import type { ContractEmployeeInfo } from '../utils/data';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
-import { EMPLOYMENT_TYPE_OPTIONS, WORK_ARRANGEMENT_OPTIONS, withCurrentValue } from '../utils/profileOptions';
+import { EMPLOYMENT_TYPE_OPTIONS, WORK_ARRANGEMENT_OPTIONS, DEFAULT_DEPARTMENT_OPTIONS, withCurrentValue } from '../utils/profileOptions';
 import { ContractPreview } from '../components/ContractPreview';
 import { MasterFieldEditControl } from '../components/MasterFieldEditControl';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
-import { fetchCompanyDirectors, updateCompanySignatory, type CompanyDirectorOption } from '../utils/companySignatory';
+import { fetchCompanyDirectors, type CompanyDirectorOption } from '../utils/companySignatory';
+import { fetchCompanySettings, upsertCompanySettings, fetchCompanyDepartmentsFromEmployees, type EcCompanySettings } from '../utils/companySettings';
 
 const SETTINGS_GROUPS: { label: string; test: RegExp }[] = [
   { label: 'Compensation & Benefits', test: /allowance|medical|pension|salary|payment/i },
@@ -202,7 +204,7 @@ export default function JobProfilesPage() {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [detailTab, setDetailTab] = useState('overview');
-  
+
   const [linkSectionKey, setLinkSectionKey] = useState<string>(CONTRACT_SECTIONS[0].key);
   const [linkSearch, setLinkSearch] = useState('');
   const [expandedClauseId, setExpandedClauseId] = useState<string | null>(null);
@@ -462,26 +464,110 @@ export default function JobProfilesPage() {
     [previewPlaceholders]
   );
 
-  // Signatory director - a company-wide fact (there's exactly one company
-  // record no matter how many Job Profiles reference it), so only shown on
-  // the Company Defaults profile, not per Department/Position profile.
-  const selectedCompanyObj = companies.find((c) => String(c.id) === selectedCompanyId);
+  // Company-wide Employment Contract Engine settings (signatory + each
+  // company's own Job Level/Employment Type/Department vocabulary) - lives
+  // in ec_company_settings, one row per company, not tied to any Job
+  // Profile (Company/Department Defaults scopes are retired - see
+  // handleCreate above). Rendered in the top-level "Company Details/
+  // Defaults" tab, not per-profile.
+  const [companySettings, setCompanySettings] = useState<EcCompanySettings | null>(null);
+  // Draft copy for the list editors (Job Levels/Employment Types/
+  // Departments) - these use StringListEditor, which fires onChange on
+  // every keystroke/paste, so they can't write to the DB on every change
+  // like the Signatory dropdown does. Edited locally, persisted via the
+  // explicit "Save Lists" button instead.
+  const [companyListsDraft, setCompanyListsDraft] = useState<{ job_levels: string[]; employment_types: string[]; departments: string[] }>({ job_levels: [], employment_types: [], departments: [] });
+  const [savingCompanyLists, setSavingCompanyLists] = useState(false);
+  const [syncingDepartments, setSyncingDepartments] = useState(false);
   const [directors, setDirectors] = useState<CompanyDirectorOption[]>([]);
   const [savingSignatory, setSavingSignatory] = useState(false);
+  // Options for the Department picker (New Position Profile dialog) -
+  // company's own configured vocabulary (ec_company_settings.departments)
+  // merged with whatever's actually on employee records, falling back to
+  // DEFAULT_DEPARTMENT_OPTIONS only when the company has neither yet. Kept
+  // separate from companyListsDraft.departments (that one's an unsaved edit
+  // buffer for the Company Details/Defaults list editor; this is the
+  // read-only merged list an actual picker consumes).
+  const [departmentOptions, setDepartmentOptions] = useState<string[]>([]);
 
   useEffect(() => {
-    if (realCompanyId == null) { setDirectors([]); return; }
+    if (realCompanyId == null) { setCompanySettings(null); setDirectors([]); return; }
+    fetchCompanySettings(realCompanyId).then((settings) => {
+      setCompanySettings(settings);
+      setCompanyListsDraft({
+        job_levels: settings?.job_levels || [],
+        employment_types: settings?.employment_types || [],
+        departments: settings?.departments || [],
+      });
+    });
     fetchCompanyDirectors(realCompanyId).then(setDirectors);
   }, [realCompanyId]);
+
+  useEffect(() => {
+    if (realCompanyId == null) { setDepartmentOptions([]); return; }
+    let cancelled = false;
+    fetchCompanyDepartmentsFromEmployees(realCompanyId).then((fromEmployees) => {
+      if (cancelled) return;
+      const configured = companySettings?.departments || [];
+      const real = [...configured, ...fromEmployees];
+      const source = real.length > 0 ? real : DEFAULT_DEPARTMENT_OPTIONS;
+      const seen = new Map<string, string>();
+      for (const d of source) {
+        const trimmed = d.trim();
+        if (!trimmed) continue;
+        const key = trimmed.toLowerCase();
+        if (!seen.has(key)) seen.set(key, trimmed);
+      }
+      setDepartmentOptions(Array.from(seen.values()).sort((a, b) => a.localeCompare(b)));
+    });
+    return () => { cancelled = true; };
+  }, [realCompanyId, companySettings]);
+
+  const handleSaveCompanyLists = async () => {
+    if (realCompanyId == null) return;
+    setSavingCompanyLists(true);
+    const success = await upsertCompanySettings(realCompanyId, companyListsDraft);
+    setSavingCompanyLists(false);
+    if (success) {
+      setCompanySettings((prev) => ({ ...(prev as EcCompanySettings || { id: '', company_id: String(realCompanyId), signatory_individual_id: null, created_at: '', updated_at: '' }), ...companyListsDraft }));
+      toast({ title: 'Company lists saved' });
+    } else {
+      toast({ title: 'Error', description: 'Failed to save company lists', variant: 'destructive' });
+    }
+  };
+
+  // Merges in any department name actually used by this company's employees
+  // (case-insensitive) that isn't already in the draft list, rather than
+  // replacing it outright - preserves department names someone typed here
+  // deliberately (e.g. a not-yet-staffed department) instead of clobbering
+  // them with what employees happen to be tagged with today.
+  const handleSyncDepartmentsFromEmployees = async () => {
+    if (realCompanyId == null) return;
+    setSyncingDepartments(true);
+    const found = await fetchCompanyDepartmentsFromEmployees(realCompanyId);
+    setSyncingDepartments(false);
+    if (found.length === 0) {
+      toast({ title: 'No departments found', description: 'No employees with a department are on record for this company yet.' });
+      return;
+    }
+    const existingKeys = new Set(companyListsDraft.departments.map((d) => d.toLowerCase()));
+    const additions = found.filter((d) => !existingKeys.has(d.toLowerCase()));
+    if (additions.length === 0) {
+      toast({ title: 'Already up to date', description: 'Every department in use is already in this list.' });
+      return;
+    }
+    setCompanyListsDraft((prev) => ({ ...prev, departments: [...prev.departments, ...additions] }));
+    toast({ title: 'Departments added', description: `Added ${additions.length} department${additions.length === 1 ? '' : 's'} from employee records. Click "Save Lists" to keep them.` });
+  };
 
   const handleChangeSignatory = async (directorId: string) => {
     if (realCompanyId == null) return;
     const nextId = directorId === '__unset__' ? null : Number(directorId);
     setSavingSignatory(true);
-    const success = await updateCompanySignatory(realCompanyId, nextId);
+    const success = await upsertCompanySettings(realCompanyId, { signatory_individual_id: nextId });
     setSavingSignatory(false);
     if (success) {
-      setCompanies((prev) => prev.map((c) => (String(c.id) === selectedCompanyId ? { ...c, signatory_individual_id: nextId } : c)));
+      setCompanySettings((prev) => ({ ...(prev as EcCompanySettings || { id: '', company_id: String(realCompanyId), job_levels: [], employment_types: [], departments: [], created_at: '', updated_at: '' }), signatory_individual_id: nextId }));
       toast({ title: 'Signatory updated' });
     } else {
       toast({ title: 'Error', description: 'Failed to update signatory', variant: 'destructive' });
@@ -497,16 +583,16 @@ export default function JobProfilesPage() {
 
   return (
     <div className="h-[calc(100vh-1rem)] w-full flex flex-col bg-slate-50/50 dark:bg-slate-950/50 rounded-xl overflow-hidden shadow-[0_2px_10px_-3px_rgba(55,107,174,0.15)] border border-slate-200 dark:border-slate-800">
-      
+
       {/* GLOBAL HEADER */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shrink-0 gap-4 relative z-20 shadow-[0_1px_2px_0_rgb(0,0,0,0.02)]">
-        
+
         {/* Left Side: Prominent Company Selector */}
         <div className="flex items-center gap-4 min-w-0">
           <div className="flex items-center justify-center w-10 h-10 bg-custom-blue rounded-xl shadow-sm shrink-0">
             <LayoutTemplate className="h-5 w-5 text-white" />
           </div>
-          
+
           <div className="flex flex-col min-w-0">
             <Popover open={companyDropdownOpen} onOpenChange={setCompanyDropdownOpen}>
               <PopoverTrigger asChild>
@@ -586,624 +672,693 @@ export default function JobProfilesPage() {
         </div>
       </div>
 
-      <div className="flex-1 w-full relative overflow-hidden bg-transparent">
-        <PanelGroup direction="horizontal" className="h-full w-full">
+      <Tabs defaultValue="profiles">
+        <TabsList className="flex items-start gap-1.5 px-6 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 shrink-0">
+          <TabsTrigger value={'profiles'}>Job Profiles</TabsTrigger>
+          <TabsTrigger value={'company'}>Company Details/Defaults</TabsTrigger>
+        </TabsList>
 
-          {/* PANEL 1: PROFILES LIST */}
-          <Panel
-            ref={editorPanelRef}
-            defaultSize={22}
-            minSize={18}
-            maxSize={30}
-            collapsible
-            onCollapse={() => setCollapsed(prev => ({ ...prev, editor: true }))}
-            onExpand={() => setCollapsed(prev => ({ ...prev, editor: false }))}
-          >
-            <div className="h-full w-full flex flex-col bg-slate-50 dark:bg-slate-900/50 border-r border-slate-200 dark:border-slate-800">
-              <div className="p-5 border-b border-slate-200 dark:border-slate-800 shrink-0 space-y-4 bg-white/50 dark:bg-slate-900/50">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-base font-bold text-slate-800 dark:text-slate-200 tracking-tight">Saved Profiles</h2>
-                  <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded-full px-2.5 font-bold text-xs">{filteredProfiles.length}</Badge>
-                </div>
-                <div className="relative shadow-sm rounded-full">
-                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <Input placeholder="Search profiles..." className="pl-9 h-9 rounded-full text-sm bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus-visible:ring-1 focus-visible:ring-blue-500/50 transition-all" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-                </div>
-                <Button size="sm" className="h-9 w-full rounded-full text-sm bg-custom-blue hover:bg-[#2d5a94] dark:bg-blue-600 dark:hover:bg-blue-700 text-white shadow-sm transition-all" disabled={!selectedCompanyId && selectedCompanyId !== '__general__'} onClick={openNew}>
-                  <PlusCircle className="h-4 w-4 mr-2" /> Add Profile
-                </Button>
-              </div>
+        <TabsContent value={'profiles'} className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 w-full relative overflow-hidden bg-transparent">
+            <PanelGroup direction="horizontal" className="h-full w-full">
 
-              <ScrollArea className="flex-1 bg-transparent">
-                {isLoading ? (
-                  <div className="flex justify-center items-center h-40"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>
-                ) : filteredProfiles.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-40 text-center m-6">
-                    <div className="w-14 h-14 bg-white dark:bg-slate-900 shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center mb-3">
-                      <Briefcase className="h-6 w-6 text-slate-300" />
+              {/* PANEL 1: PROFILES LIST */}
+              <Panel
+                ref={editorPanelRef}
+                defaultSize={22}
+                minSize={18}
+                maxSize={30}
+                collapsible
+                onCollapse={() => setCollapsed(prev => ({ ...prev, editor: true }))}
+                onExpand={() => setCollapsed(prev => ({ ...prev, editor: false }))}
+              >
+                <div className="h-full w-full flex flex-col bg-slate-50 dark:bg-slate-900/50 border-r border-slate-200 dark:border-slate-800">
+                  <div className="p-5 border-b border-slate-200 dark:border-slate-800 shrink-0 space-y-4 bg-white/50 dark:bg-slate-900/50">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-base font-bold text-slate-800 dark:text-slate-200 tracking-tight">Saved Profiles</h2>
+                      <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded-full px-2.5 font-bold text-xs">{filteredProfiles.length}</Badge>
                     </div>
-                    <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">No profiles found</h3>
-                    <p className="text-xs text-slate-500 mt-1">Create a new profile to start.</p>
+                    <div className="relative shadow-sm rounded-full">
+                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                      <Input placeholder="Search profiles..." className="pl-9 h-9 rounded-full text-sm bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus-visible:ring-1 focus-visible:ring-blue-500/50 transition-all" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+                    </div>
+                    <Button size="sm" className="h-9 w-full rounded-full text-sm bg-custom-blue hover:bg-[#2d5a94] dark:bg-blue-600 dark:hover:bg-blue-700 text-white shadow-sm transition-all" disabled={!selectedCompanyId && selectedCompanyId !== '__general__'} onClick={openNew}>
+                      <PlusCircle className="h-4 w-4 mr-2" /> Add Profile
+                    </Button>
                   </div>
-                ) : (
-                  <div className="flex flex-col p-3 gap-1.5">
-                    {filteredProfiles.map((profile) => {
-                      const isSelected = selectedProfileId === profile.id;
-                      const visual = getProfileVisual(profile.department);
-                      const VisualIcon = visual.icon;
-                      return (
-                        <div
-                          key={profile.id}
-                          onClick={() => setSelectedProfileId(profile.id)}
-                          className={cn(
-                            "group flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all border",
-                            isSelected
-                              ? "bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 shadow-[0_2px_8px_-3px_rgba(0,0,0,0.05)] ring-1 ring-blue-500/20"
-                              : "bg-transparent border-transparent hover:bg-white/60 dark:hover:bg-slate-800/50 hover:border-slate-200"
-                          )}
-                        >
-                          <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5", visual.classes)}>
-                            <VisualIcon className="w-4 h-4" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className={cn("text-base font-semibold truncate tracking-tight transition-colors", isSelected ? "text-blue-700 dark:text-blue-400" : "text-slate-800 dark:text-slate-200 group-hover:text-slate-900")}>{profile.name}</p>
-                            <p className="text-xs text-slate-500 truncate mt-0.5 font-medium">
-                              {profile.department || scopeLabel(profile.scope)}
-                            </p>
-                          </div>
-                          {profile.is_active === false && (
-                            <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full text-slate-500 bg-slate-100 dark:bg-slate-800 mt-1 shrink-0">
-                              Inactive
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </ScrollArea>
-            </div>
-          </Panel>
 
-          {!collapsed.editor && (
-            <PanelResizeHandle className="relative w-2 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-10" />
-          )}
-
-          {/* PANEL 2: MAIN EDITOR */}
-          <Panel
-            ref={detailPanelRef}
-            defaultSize={48}
-            minSize={25}
-            collapsible
-            onCollapse={() => setCollapsed(prev => ({ ...prev, detail: true }))}
-            onExpand={() => setCollapsed(prev => ({ ...prev, detail: false }))}
-          >
-            <div className="h-full w-full flex flex-col bg-slate-50/40 dark:bg-slate-950/40 relative border-r border-slate-200 dark:border-slate-800">
-              {draft && selectedProfile ? (() => {
-                const visual = getProfileVisual(draft.department);
-                const VisualIcon = visual.icon;
-                return (
-                  <>
-                    {/* Editor Header */}
-                    <div className="px-8 py-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 shadow-[0_1px_2px_0_rgb(0,0,0,0.01)] z-10">
-                      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-5">
-                        <div className="flex flex-col gap-3 min-w-0 flex-1">
-                          <div className="flex items-start gap-5">
-                            <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-sm mt-0.5 border border-white/50", visual.classes)}>
-                              <VisualIcon className="w-7 h-7" />
-                            </div>
-                            <div className="min-w-0 flex flex-col gap-1 w-full">
-                              <div className="flex items-center gap-3 flex-wrap">
-                                <input
-                                  value={draft.name}
-                                  onChange={(e) => updateDraft({ name: e.target.value })}
-                                  className="text-xl font-extrabold text-slate-900 dark:text-slate-100 bg-transparent hover:bg-slate-50 dark:hover:bg-slate-800 px-2 py-1 -ml-2 rounded-lg outline-none border border-transparent focus:border-slate-300 dark:focus:border-slate-700 focus:bg-white dark:focus:bg-slate-950 transition-colors w-full max-w-lg truncate tracking-tight"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => updateDraft({ is_active: !draft.is_active })}
-                                  title="Toggle active status"
-                                >
-                                  <Badge className={cn(
-                                    "text-xs px-2.5 py-0.5 rounded-full h-5 shrink-0 cursor-pointer shadow-sm border-transparent transition-colors font-bold uppercase tracking-wider",
-                                    draft.is_active ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-400" : "bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400"
-                                  )}>
-                                    {draft.is_active ? 'Active' : 'Inactive'}
-                                  </Badge>
-                                </button>
-                              </div>
-                              <p className="text-sm text-slate-500 font-medium truncate px-0.5 flex items-center gap-2">
-                                <span>{draft.department || scopeLabel(draft.scope)}</span>
-                                {draft.job_level && <><span className="w-1 h-1 rounded-full bg-slate-300"></span><span>{draft.job_level}</span></>}
-                                {draft.employment_type && <><span className="w-1 h-1 rounded-full bg-slate-300"></span><span>{draft.employment_type}</span></>}
-                              </p>
-                            </div>
-                          </div>
+                  <ScrollArea className="flex-1 bg-transparent">
+                    {isLoading ? (
+                      <div className="flex justify-center items-center h-40"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>
+                    ) : filteredProfiles.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-40 text-center m-6">
+                        <div className="w-14 h-14 bg-white dark:bg-slate-900 shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center mb-3">
+                          <Briefcase className="h-6 w-6 text-slate-300" />
                         </div>
-
-                        <div className="flex items-center gap-3 shrink-0 lg:self-start ml-20 lg:ml-0 mt-2 lg:mt-0">
-                          <Button variant="outline" size="sm" className="h-9 px-4 rounded-full text-sm font-semibold border-slate-200 shadow-sm hover:bg-slate-50 bg-white" onClick={handleCancelEdits} disabled={!isDirty || saving}>Cancel</Button>
-                          <div className="flex rounded-full shadow-sm bg-custom-blue">
-                            <Button size="sm" className="h-9 bg-transparent hover:bg-[#2d5a94] text-white rounded-l-full rounded-r-none border-r border-[#2d5a94]/50 text-sm font-semibold px-5 disabled:opacity-60 transition-colors" onClick={handleSaveProfile} disabled={!isDirty || saving}>
-                              {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                              Save Changes
-                            </Button>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button size="sm" className="h-9 bg-transparent hover:bg-[#2d5a94] text-white rounded-r-full rounded-l-none px-2.5">
-                                  <ChevronDown className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="rounded-xl shadow-lg border-slate-200">
-                                <DropdownMenuItem className="rounded-lg cursor-pointer text-sm font-medium" onClick={handleDuplicate}>
-                                  <Copy className="h-4 w-4 mr-2 text-slate-400" /> Duplicate Profile
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem className="rounded-lg cursor-pointer text-sm font-medium text-red-600 focus:text-red-600 focus:bg-red-50" onClick={() => setDeletingId(selectedProfile.id)}>
-                                  <Trash2 className="h-4 w-4 mr-2" /> Delete Profile
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
-                        </div>
+                        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">No profiles found</h3>
+                        <p className="text-xs text-slate-500 mt-1">Create a new profile to start.</p>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="flex flex-col p-3 gap-1.5">
+                        {filteredProfiles.map((profile) => {
+                          const isSelected = selectedProfileId === profile.id;
+                          const visual = getProfileVisual(profile.department);
+                          const VisualIcon = visual.icon;
+                          return (
+                            <div
+                              key={profile.id}
+                              onClick={() => setSelectedProfileId(profile.id)}
+                              className={cn(
+                                "group flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all border",
+                                isSelected
+                                  ? "bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 shadow-[0_2px_8px_-3px_rgba(0,0,0,0.05)] ring-1 ring-blue-500/20"
+                                  : "bg-transparent border-transparent hover:bg-white/60 dark:hover:bg-slate-800/50 hover:border-slate-200"
+                              )}
+                            >
+                              <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5", visual.classes)}>
+                                <VisualIcon className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className={cn("text-base font-semibold truncate tracking-tight transition-colors", isSelected ? "text-blue-700 dark:text-blue-400" : "text-slate-800 dark:text-slate-200 group-hover:text-slate-900")}>{profile.name}</p>
+                                <p className="text-xs text-slate-500 truncate mt-0.5 font-medium">
+                                  {profile.department || scopeLabel(profile.scope)}
+                                </p>
+                              </div>
+                              {profile.is_active === false && (
+                                <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full text-slate-500 bg-slate-100 dark:bg-slate-800 mt-1 shrink-0">
+                                  Inactive
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </ScrollArea>
+                </div>
+              </Panel>
 
-                    <div className="flex flex-1 overflow-hidden bg-transparent">
-                      <Tabs value={detailTab === 'preview' ? 'overview' : detailTab} onValueChange={setDetailTab} className="flex-1 flex flex-col overflow-hidden">
-                        
-                        {/* Tabs Header */}
-                        <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 lg:px-8 shrink-0 overflow-x-auto scrollbar-hide z-0">
-                          <TabsList className="bg-transparent h-14 p-0 border-none inline-flex w-max gap-6">
-                            {tabs.filter(t => t.value !== 'preview').map((tab) => {
-                              const Icon = tab.icon;
-                              const isActive = detailTab === tab.value;
-                              return (
-                                <TabsTrigger
-                                  key={tab.value}
-                                  value={tab.value}
-                                  className={cn(
-                                    "h-14 rounded-none border-b-[3px] font-semibold text-sm px-1 transition-all gap-2.5 whitespace-nowrap bg-transparent shadow-none data-[state=active]:bg-transparent data-[state=active]:shadow-none",
-                                    isActive 
-                                      ? "border-blue-600 text-blue-700 dark:border-blue-500 dark:text-blue-400" 
-                                      : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300 dark:hover:text-slate-300"
-                                  )}
-                                >
-                                  <Icon className={cn("w-4 h-4", isActive ? "text-blue-600" : "text-slate-400")} />
-                                  {tab.label}
-                                </TabsTrigger>
-                              );
-                            })}
-                          </TabsList>
+              {!collapsed.editor && (
+                <PanelResizeHandle className="relative w-2 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-10" />
+              )}
+
+              {/* PANEL 2: MAIN EDITOR */}
+              <Panel
+                ref={detailPanelRef}
+                defaultSize={48}
+                minSize={25}
+                collapsible
+                onCollapse={() => setCollapsed(prev => ({ ...prev, detail: true }))}
+                onExpand={() => setCollapsed(prev => ({ ...prev, detail: false }))}
+              >
+                <div className="h-full w-full flex flex-col bg-slate-50/40 dark:bg-slate-950/40 relative border-r border-slate-200 dark:border-slate-800">
+                  {draft && selectedProfile ? (() => {
+                    const visual = getProfileVisual(draft.department);
+                    const VisualIcon = visual.icon;
+                    return (
+                      <>
+                        {/* Editor Header */}
+                        <div className="px-8 py-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 shadow-[0_1px_2px_0_rgb(0,0,0,0.01)] z-10">
+                          <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-5">
+                            <div className="flex flex-col gap-3 min-w-0 flex-1">
+                              <div className="flex items-start gap-5">
+                                <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-sm mt-0.5 border border-white/50", visual.classes)}>
+                                  <VisualIcon className="w-7 h-7" />
+                                </div>
+                                <div className="min-w-0 flex flex-col gap-1 w-full">
+                                  <div className="flex items-center gap-3 flex-wrap">
+                                    <input
+                                      value={draft.name}
+                                      onChange={(e) => updateDraft({ name: e.target.value })}
+                                      className="text-xl font-extrabold text-slate-900 dark:text-slate-100 bg-transparent hover:bg-slate-50 dark:hover:bg-slate-800 px-2 py-1 -ml-2 rounded-lg outline-none border border-transparent focus:border-slate-300 dark:focus:border-slate-700 focus:bg-white dark:focus:bg-slate-950 transition-colors w-full max-w-lg truncate tracking-tight"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => updateDraft({ is_active: !draft.is_active })}
+                                      title="Toggle active status"
+                                    >
+                                      <Badge className={cn(
+                                        "text-xs px-2.5 py-0.5 rounded-full h-5 shrink-0 cursor-pointer shadow-sm border-transparent transition-colors font-bold uppercase tracking-wider",
+                                        draft.is_active ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-400" : "bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400"
+                                      )}>
+                                        {draft.is_active ? 'Active' : 'Inactive'}
+                                      </Badge>
+                                    </button>
+                                  </div>
+                                  <p className="text-sm text-slate-500 font-medium truncate px-0.5 flex items-center gap-2">
+                                    <span>{draft.department || scopeLabel(draft.scope)}</span>
+                                    {draft.job_level && <><span className="w-1 h-1 rounded-full bg-slate-300"></span><span>{draft.job_level}</span></>}
+                                    {draft.employment_type && <><span className="w-1 h-1 rounded-full bg-slate-300"></span><span>{draft.employment_type}</span></>}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3 shrink-0 lg:self-start ml-20 lg:ml-0 mt-2 lg:mt-0">
+                              <Button variant="outline" size="sm" className="h-9 px-4 rounded-full text-sm font-semibold border-slate-200 shadow-sm hover:bg-slate-50 bg-white" onClick={handleCancelEdits} disabled={!isDirty || saving}>Cancel</Button>
+                              <div className="flex rounded-full shadow-sm bg-custom-blue">
+                                <Button size="sm" className="h-9 bg-transparent hover:bg-[#2d5a94] text-white rounded-l-full rounded-r-none border-r border-[#2d5a94]/50 text-sm font-semibold px-5 disabled:opacity-60 transition-colors" onClick={handleSaveProfile} disabled={!isDirty || saving}>
+                                  {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                                  Save Changes
+                                </Button>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button size="sm" className="h-9 bg-transparent hover:bg-[#2d5a94] text-white rounded-r-full rounded-l-none px-2.5">
+                                      <ChevronDown className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="rounded-xl shadow-lg border-slate-200">
+                                    <DropdownMenuItem className="rounded-lg cursor-pointer text-sm font-medium" onClick={handleDuplicate}>
+                                      <Copy className="h-4 w-4 mr-2 text-slate-400" /> Duplicate Profile
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem className="rounded-lg cursor-pointer text-sm font-medium text-red-600 focus:text-red-600 focus:bg-red-50" onClick={() => setDeletingId(selectedProfile.id)}>
+                                      <Trash2 className="h-4 w-4 mr-2" /> Delete Profile
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            </div>
+                          </div>
                         </div>
 
-                        <ScrollArea className="flex-1 bg-slate-50/50 dark:bg-slate-950/30">
-                          <div className="p-6 lg:p-8">
-                            <TabsContent value="overview" className="m-0 focus:outline-none">
-                              <div className="max-w-4xl mx-auto space-y-6 lg:space-y-8">
-                                <SectionPanel title="Profile Identity" description="The stable facts that identify this role.">
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
-                                    <FormField label="Job Title"><Input value={draft.job_title || ''} onChange={(e) => updateDraft({ job_title: e.target.value })} className="h-10 text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm" placeholder="e.g. Software Developer" /></FormField>
-                                    <FormField label={`Department${draft.scope === 'department' ? ' *' : ''}`}><Input value={draft.department || ''} onChange={(e) => updateDraft({ department: e.target.value })} className="h-10 text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm" placeholder="e.g. ICT" /></FormField>
-                                    <FormField label="Job Level">
-                                      <SearchableSelect
-                                        value={draft.job_level || '__unset__'}
-                                        onChange={(v) => {
-                                          const next = v === '__unset__' ? null : v;
-                                          // Mirrors into settings.job_level too - {{job_level}}
-                                          // in a generated contract resolves from the settings
-                                          // cascade (standardPlaceholders.ts), not this top-level
-                                          // column, which otherwise only feeds display strings
-                                          // and clause-suggestion facts elsewhere on this page.
-                                          updateDraft({ job_level: next });
-                                          updateDraftSettings('job_level', next || '');
-                                        }}
-                                        placeholder="Select level"
-                                        searchPlaceholder="Search levels..."
-                                        options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(JOB_LEVEL_OPTIONS, draft.job_level).map((opt) => ({ value: opt, label: opt }))]}
-                                      />
-                                    </FormField>
-                                    <FormField label="Employment Type">
-                                      <SearchableSelect
-                                        value={draft.employment_type || '__unset__'}
-                                        onChange={(v) => updateDraft({ employment_type: v === '__unset__' ? null : v })}
-                                        placeholder="Select type"
-                                        searchPlaceholder="Search types..."
-                                        options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, draft.employment_type).map((opt) => ({ value: opt, label: opt }))]}
-                                      />
-                                    </FormField>
-                                    <FormField label="Work Arrangement">
-                                      <SearchableSelect
-                                        value={draft.work_arrangement || '__unset__'}
-                                        onChange={(v) => updateDraft({ work_arrangement: v === '__unset__' ? null : v })}
-                                        placeholder="Select arrangement"
-                                        searchPlaceholder="Search arrangements..."
-                                        options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(WORK_ARRANGEMENT_OPTIONS, draft.work_arrangement).map((opt) => ({ value: opt, label: opt }))]}
-                                      />
-                                    </FormField>
+                        <div className="flex flex-1 overflow-hidden bg-transparent">
+                          <Tabs value={detailTab === 'preview' ? 'overview' : detailTab} onValueChange={setDetailTab} className="flex-1 flex flex-col overflow-hidden">
+
+                            {/* Tabs Header */}
+                            <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 lg:px-8 shrink-0 overflow-x-auto scrollbar-hide z-0">
+                              <TabsList className="bg-transparent h-14 p-0 border-none inline-flex w-max gap-6">
+                                {tabs.filter(t => t.value !== 'preview').map((tab) => {
+                                  const Icon = tab.icon;
+                                  const isActive = detailTab === tab.value;
+                                  return (
+                                    <TabsTrigger
+                                      key={tab.value}
+                                      value={tab.value}
+                                      className={cn(
+                                        "h-14 rounded-none border-b-[3px] font-semibold text-sm px-1 transition-all gap-2.5 whitespace-nowrap bg-transparent shadow-none data-[state=active]:bg-transparent data-[state=active]:shadow-none",
+                                        isActive
+                                          ? "border-blue-600 text-blue-700 dark:border-blue-500 dark:text-blue-400"
+                                          : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300 dark:hover:text-slate-300"
+                                      )}
+                                    >
+                                      <Icon className={cn("w-4 h-4", isActive ? "text-blue-600" : "text-slate-400")} />
+                                      {tab.label}
+                                    </TabsTrigger>
+                                  );
+                                })}
+                              </TabsList>
+                            </div>
+
+                            <ScrollArea className="flex-1 bg-slate-50/50 dark:bg-slate-950/30">
+                              <div className="p-6 lg:p-8">
+                                <TabsContent value="overview" className="m-0 focus:outline-none">
+                                  <div className="max-w-4xl mx-auto space-y-6 lg:space-y-8">
+                                    <SectionPanel title="Profile Identity" description="The stable facts that identify this role.">
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                                        <FormField label="Job Title"><Input value={draft.job_title || ''} onChange={(e) => updateDraft({ job_title: e.target.value })} className="h-10 text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm" placeholder="e.g. Software Developer" /></FormField>
+                                        <FormField label={`Department${draft.scope === 'department' ? ' *' : ''}`}><Input value={draft.department || ''} onChange={(e) => updateDraft({ department: e.target.value })} className="h-10 text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm" placeholder="e.g. ICT" /></FormField>
+                                        <FormField label="Job Level">
+                                          <SearchableSelect
+                                            value={draft.job_level || '__unset__'}
+                                            onChange={(v) => {
+                                              const next = v === '__unset__' ? null : v;
+                                              // Mirrors into settings.job_level too - {{job_level}}
+                                              // in a generated contract resolves from the settings
+                                              // cascade (standardPlaceholders.ts), not this top-level
+                                              // column, which otherwise only feeds display strings
+                                              // and clause-suggestion facts elsewhere on this page.
+                                              updateDraft({ job_level: next });
+                                              updateDraftSettings('job_level', next || '');
+                                            }}
+                                            placeholder="Select level"
+                                            searchPlaceholder="Search levels..."
+                                            options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(JOB_LEVEL_OPTIONS, draft.job_level).map((opt) => ({ value: opt, label: opt }))]}
+                                          />
+                                        </FormField>
+                                        <FormField label="Employment Type">
+                                          <SearchableSelect
+                                            value={draft.employment_type || '__unset__'}
+                                            onChange={(v) => updateDraft({ employment_type: v === '__unset__' ? null : v })}
+                                            placeholder="Select type"
+                                            searchPlaceholder="Search types..."
+                                            options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, draft.employment_type).map((opt) => ({ value: opt, label: opt }))]}
+                                          />
+                                        </FormField>
+                                        <FormField label="Work Arrangement">
+                                          <SearchableSelect
+                                            value={draft.work_arrangement || '__unset__'}
+                                            onChange={(v) => updateDraft({ work_arrangement: v === '__unset__' ? null : v })}
+                                            placeholder="Select arrangement"
+                                            searchPlaceholder="Search arrangements..."
+                                            options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(WORK_ARRANGEMENT_OPTIONS, draft.work_arrangement).map((opt) => ({ value: opt, label: opt }))]}
+                                          />
+                                        </FormField>
+                                      </div>
+                                    </SectionPanel>
+
+                                    <SectionPanel title="Job Summary" description="This is the role purpose that can feed the job description appendix.">
+                                      <Textarea className="min-h-[160px] text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm p-4 leading-relaxed" placeholder="A short summary of what this role does..." value={draft.job_description || ''} onChange={(e) => updateDraft({ job_description: e.target.value })} />
+                                    </SectionPanel>
+
                                   </div>
-                                </SectionPanel>
+                                </TabsContent>
 
-                                <SectionPanel title="Job Summary" description="This is the role purpose that can feed the job description appendix.">
-                                  <Textarea className="min-h-[160px] text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm p-4 leading-relaxed" placeholder="A short summary of what this role does..." value={draft.job_description || ''} onChange={(e) => updateDraft({ job_description: e.target.value })} />
-                                </SectionPanel>
+                                <TabsContent value="responsibilities" className="m-0 focus:outline-none">
+                                  <div className="max-w-4xl mx-auto space-y-6">
+                                    <SectionPanel title="Key Responsibilities">
+                                      <StringListEditor items={draft.key_responsibilities || []} onChange={(v) => updateDraft({ key_responsibilities: v })} placeholder="e.g. Maintain accurate financial records" />
+                                    </SectionPanel>
+                                  </div>
+                                </TabsContent>
 
-                                {draft.scope === 'company' && (
-                                  <SectionPanel title="Signatory" description="Who signs on the Company's behalf in the contract's Signatures section - a company-wide setting, not per Job Profile.">
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-2 items-center">
-                                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Signatory Director</span>
-                                      <SearchableSelect
-                                        value={selectedCompanyObj?.signatory_individual_id != null ? String(selectedCompanyObj.signatory_individual_id) : '__unset__'}
-                                        onChange={handleChangeSignatory}
-                                        placeholder={directors.length === 0 ? 'No directors found for this company' : 'Select a director'}
-                                        searchPlaceholder="Search directors..."
-                                        disabled={savingSignatory || directors.length === 0}
-                                        options={[{ value: '__unset__', label: 'Not set' }, ...directors.map((d) => ({ value: String(d.id), label: d.full_name }))]}
-                                      />
-                                    </div>
-                                  </SectionPanel>
-                                )}
-
-                                {companyFieldPlaceholders.length > 0 && (
-                                  <SectionPanel title="Company Fields" description="Master-field-linked company facts used by this profile's clauses - editing one here saves it to the actual Company record, not just this profile.">
-                                    <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                      {companyFieldPlaceholders.map((p) => {
-                                        const val = previewMasterFieldValues[p.key] || '';
-                                        return (
-                                          <div key={p.id} className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-4 items-center">
-                                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{p.label}</span>
-                                            <div className="flex items-center gap-2">
-                                              <span className="flex-1 text-sm text-slate-600 dark:text-slate-300 truncate">
-                                                {val || <span className="italic text-amber-500/80">No value</span>}
-                                              </span>
-                                              <MasterFieldEditControl
-                                                placeholder={p}
-                                                masterFields={previewMasterFields}
-                                                individualId={null}
-                                                companyId={realCompanyId}
-                                                currentValue={val}
-                                                onSaved={refreshPreviewMasterFields}
-                                              />
-                                            </div>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </SectionPanel>
-                                )}
-                              </div>
-                            </TabsContent>
-
-                            <TabsContent value="responsibilities" className="m-0 focus:outline-none">
-                              <div className="max-w-4xl mx-auto space-y-6">
-                                <SectionPanel title="Key Responsibilities">
-                                  <StringListEditor items={draft.key_responsibilities || []} onChange={(v) => updateDraft({ key_responsibilities: v })} placeholder="e.g. Maintain accurate financial records" />
-                                </SectionPanel>
-                              </div>
-                            </TabsContent>
-
-                            {/* Consolidated settings-cascade fields, grouped by
+                                {/* Consolidated settings-cascade fields, grouped by
                                 section so every {{token}} standardPlaceholders.ts
                                 can generically resolve (see its ecPlaceholders
                                 dispatch loop) has somewhere to actually be set -
                                 replaces the old Employment Rules/Working
                                 Arrangement/Benefits & Compensation tabs, which
                                 between them only covered 13 of ~27 settings keys. */}
-                            <TabsContent value="fields" className="m-0 focus:outline-none">
-                              <div className="max-w-4xl mx-auto space-y-6">
-                                <SectionPanel title="Employment Details" description="Job Level is set on the Overview tab (it also drives clause-suggestion rules there) and mirrors into {{job_level}} automatically.">
-                                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Reports To</span><SettingInput label="" settingKey="reports_to" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Finance Manager" /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Work Location</span><SettingInput label="" settingKey="work_location" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Nairobi HQ" /></div>
-                                  </div>
-                                </SectionPanel>
+                                <TabsContent value="fields" className="m-0 focus:outline-none">
+                                  <div className="max-w-4xl mx-auto space-y-6">
+                                    <SectionPanel title="Employment Details" description="Job Level is set on the Overview tab (it also drives clause-suggestion rules there) and mirrors into {{job_level}} automatically.">
+                                      <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Reports To</span><SettingInput label="" settingKey="reports_to" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Finance Manager" /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Work Location</span><SettingInput label="" settingKey="work_location" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Nairobi HQ" /></div>
+                                      </div>
+                                    </SectionPanel>
 
-                                <SectionPanel title="Salary & Payment">
-                                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Currency</span><SettingSelect label="" settingKey="salary_currency" options={['KES', 'USD', 'GBP', 'EUR']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Payment Frequency</span><SettingSelect label="" settingKey="payment_frequency" options={['Monthly', 'Bi-weekly', 'Weekly']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Payment Day</span><SettingInput label="" settingKey="payment_day" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. 25th" /></div>
-                                  </div>
-                                </SectionPanel>
+                                    <SectionPanel title="Salary & Payment">
+                                      <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Currency</span><SettingSelect label="" settingKey="salary_currency" options={['KES', 'USD', 'GBP', 'EUR']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Payment Frequency</span><SettingSelect label="" settingKey="payment_frequency" options={['Monthly', 'Bi-weekly', 'Weekly']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Payment Day</span><SettingInput label="" settingKey="payment_day" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. 25th" /></div>
+                                      </div>
+                                    </SectionPanel>
 
-                                <SectionPanel title="Working Hours">
-                                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Working Days</span><SettingSelect label="" settingKey="working_days" options={['Monday-Friday', 'Monday-Saturday', 'Shift Based', 'Flexible']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Start Time</span><SettingInput label="" settingKey="start_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="08:00" type="time" /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">End Time</span><SettingInput label="" settingKey="end_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="17:00" type="time" /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Working Hours</span><SettingInput label="" settingKey="working_hours" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. 8 hours/day" /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Break Duration</span><SettingInput label="" settingKey="break_duration" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. 1 hr" /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Rest Days</span><SettingInput label="" settingKey="rest_days" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Saturday, Sunday" /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Work Mode</span><SettingSelect label="" settingKey="work_mode" options={['On-site', 'Remote', 'Hybrid']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                  </div>
-                                </SectionPanel>
+                                    <SectionPanel title="Working Hours">
+                                      <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Working Days</span><SettingSelect label="" settingKey="working_days" options={['Monday-Friday', 'Monday-Saturday', 'Shift Based', 'Flexible']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Start Time</span><SettingInput label="" settingKey="start_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="08:00" type="time" /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">End Time</span><SettingInput label="" settingKey="end_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="17:00" type="time" /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Working Hours</span><SettingInput label="" settingKey="working_hours" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. 8 hours/day" /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Break Duration</span><SettingInput label="" settingKey="break_duration" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. 1 hr" /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Rest Days</span><SettingInput label="" settingKey="rest_days" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Saturday, Sunday" /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Work Mode</span><SettingSelect label="" settingKey="work_mode" options={['On-site', 'Remote', 'Hybrid']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                      </div>
+                                    </SectionPanel>
 
-                                <SectionPanel title="Benefits">
-                                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Medical Cover</span><SettingInput label="" settingKey="medical_cover" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Jubilee Insurance, or Yes" /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Pension</span><SettingInput label="" settingKey="pension_scheme" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. CPF, or Yes" /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Housing Allowance</span><SettingSelect label="" settingKey="housing_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Transport Allowance</span><SettingSelect label="" settingKey="transport_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Telephone Allowance</span><SettingSelect label="" settingKey="telephone_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Meal Allowance</span><SettingSelect label="" settingKey="meal_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                  </div>
-                                </SectionPanel>
+                                    <SectionPanel title="Benefits">
+                                      <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Medical Cover</span><SettingInput label="" settingKey="medical_cover" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Jubilee Insurance, or Yes" /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Pension</span><SettingInput label="" settingKey="pension_scheme" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. CPF, or Yes" /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Housing Allowance</span><SettingSelect label="" settingKey="housing_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Transport Allowance</span><SettingSelect label="" settingKey="transport_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Telephone Allowance</span><SettingSelect label="" settingKey="telephone_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Meal Allowance</span><SettingSelect label="" settingKey="meal_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                      </div>
+                                    </SectionPanel>
 
-                                <SectionPanel title="Termination & Probation">
-                                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Probation Period</span><SettingSelect label="" settingKey="probation_period" options={PROBATION_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Notice Period</span><SettingSelect label="" settingKey="notice_period" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Probation Notice</span><SettingSelect label="" settingKey="probation_notice" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Termination Reason</span><SettingInput label="" settingKey="termination_reason" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Redundancy, Misconduct..." /></div>
-                                  </div>
-                                </SectionPanel>
+                                    <SectionPanel title="Termination & Probation">
+                                      <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Probation Period</span><SettingSelect label="" settingKey="probation_period" options={PROBATION_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Notice Period</span><SettingSelect label="" settingKey="notice_period" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Probation Notice</span><SettingSelect label="" settingKey="probation_notice" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Termination Reason</span><SettingInput label="" settingKey="termination_reason" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Redundancy, Misconduct..." /></div>
+                                      </div>
+                                    </SectionPanel>
 
-                                <SectionPanel title="Leave">
-                                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Annual Leave</span><SettingSelect label="" settingKey="annual_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Sick Leave</span><SettingSelect label="" settingKey="sick_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Maternity Leave</span><SettingSelect label="" settingKey="maternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Paternity Leave</span><SettingSelect label="" settingKey="paternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                    <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Compassionate Leave</span><SettingSelect label="" settingKey="compassionate_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                    <SectionPanel title="Leave">
+                                      <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Annual Leave</span><SettingSelect label="" settingKey="annual_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Sick Leave</span><SettingSelect label="" settingKey="sick_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Maternity Leave</span><SettingSelect label="" settingKey="maternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Paternity Leave</span><SettingSelect label="" settingKey="paternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Compassionate Leave</span><SettingSelect label="" settingKey="compassionate_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
+                                      </div>
+                                    </SectionPanel>
                                   </div>
-                                </SectionPanel>
-                              </div>
-                            </TabsContent>
+                                </TabsContent>
 
-                            {/* Linked Clauses: Merged Panels Layout */}
-                            <TabsContent value="clauses" className="m-0 h-[750px] -mx-6 lg:-mx-8 -mt-6 lg:-mt-8 mb-8 focus:outline-none">
-                              <div className="bg-slate-50 dark:bg-slate-950 flex h-full border-b border-slate-200 dark:border-slate-800">
-                                
-                                {/* Col 1: Sections (Sidebar style) */}
-                                <div className="w-[260px] border-r border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/30 flex flex-col shrink-0">
-                                  <div className="p-5 border-b border-slate-200 dark:border-slate-800 space-y-3.5 bg-slate-50/50">
-                                    <div>
-                                      <p className="text-base font-bold text-slate-900 dark:text-slate-100">Contract Sections</p>
-                                      <p className="text-xs text-slate-500 mt-0.5 font-medium">{CONTRACT_SECTIONS.length} sections to configure</p>
-                                    </div>
-                                    <div className="flex gap-2">
-                                      <Button variant="outline" size="sm" className="flex-1 text-xs h-8 bg-white border-slate-200 shadow-sm hover:bg-blue-50 hover:text-blue-700" onClick={handleAutoFillDefaults}>Apply Defaults</Button>
-                                      <Button variant="outline" size="sm" className="px-3 text-xs h-8 text-red-600 border-slate-200 bg-white shadow-sm hover:bg-red-50 hover:border-red-200" onClick={handleClearAllSelections} title="Clear All">Clear</Button>
-                                    </div>
-                                  </div>
-                                  <ScrollArea className="flex-1">
-                                    <div className="p-3 space-y-1">
-                                      {CONTRACT_SECTIONS.map((section) => {
-                                        const count = clauses.filter((c) => c.section_key === section.key).length;
-                                        const hasSelection = !!draft?.section_clauses?.[section.key];
-                                        return (
-                                          <div
-                                            key={section.key}
-                                            onClick={() => { setLinkSectionKey(section.key); setLinkSearch(''); setExpandedClauseId(null); }}
-                                            className={cn("flex items-center justify-between p-3 rounded-xl text-sm font-semibold cursor-pointer transition-all", section.key === linkSectionKey ? "bg-white shadow-[0_2px_8px_-4px_rgba(0,0,0,0.1)] border border-slate-200 text-blue-700 dark:bg-blue-900/30 dark:border-blue-800/50 dark:text-blue-400" : "text-slate-600 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-800 border border-transparent")}
-                                          >
-                                            <div className="flex items-center gap-2.5 min-w-0">
-                                              {hasSelection ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" /> : <FileText className="w-4 h-4 shrink-0 opacity-40" />}
-                                              <span className="truncate">{section.title}</span>
-                                            </div>
-                                            <Badge variant="secondary" className={cn("text-xs h-4.5 px-2 min-w-[20px] flex items-center justify-center shrink-0 rounded-full font-bold", section.key === linkSectionKey ? "bg-blue-100 text-blue-700" : "bg-slate-200/70 text-slate-500")}>{count}</Badge>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </ScrollArea>
-                                </div>
+                                {/* Linked Clauses: Merged Panels Layout */}
+                                <TabsContent value="clauses" className="m-0 h-[750px] -mx-6 lg:-mx-8 -mt-6 lg:-mt-8 mb-8 focus:outline-none">
+                                  <div className="bg-slate-50 dark:bg-slate-950 flex h-full border-b border-slate-200 dark:border-slate-800">
 
-                                {/* Col 2: Main Area - Cards + Previews */}
-                                <div className="flex-1 flex flex-col min-w-0 bg-slate-50/50 dark:bg-slate-950">
-                                  <div className="px-8 py-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-white/50 dark:bg-slate-900/20 shrink-0 shadow-[0_1px_2px_0_rgb(0,0,0,0.01)]">
-                                    <div>
-                                      <p className="text-lg font-bold text-slate-900 dark:text-slate-100">
-                                        {CONTRACT_SECTIONS.find((s) => s.key === linkSectionKey)?.title}
-                                      </p>
-                                      <p className="text-sm text-slate-500 mt-1">Select a clause to apply to this section.</p>
-                                    </div>
-                                    <div className="relative w-[280px]">
-                                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                                      <Input placeholder="Search clauses in section..." className="pl-9 h-10 rounded-full text-sm bg-white border-slate-200 shadow-sm focus-visible:ring-1 focus-visible:ring-blue-500/50" value={linkSearch} onChange={(e) => setLinkSearch(e.target.value)} />
-                                    </div>
-                                  </div>
-
-                                  <ScrollArea className="flex-1 p-8">
-                                    <div className="space-y-5 max-w-5xl mx-auto">
-                                      
-                                      {/* Deselect / Default Option */}
-                                      <div 
-                                        className={cn(
-                                          "flex items-center justify-between p-4 rounded-2xl border transition-all cursor-pointer bg-white",
-                                          !draft?.section_clauses?.[linkSectionKey] ? "border-blue-500 shadow-[0_4px_12px_-4px_rgba(37,99,235,0.2)] ring-1 ring-blue-500/20" : "border-slate-200 border-dashed hover:border-slate-400 shadow-sm"
-                                        )}
-                                        onClick={() => { if (!draft) return; updateDraftSectionClauses((prev) => { const next = { ...prev }; delete next[linkSectionKey]; return next; }); setExpandedClauseId(null); }}
-                                      >
+                                    {/* Col 1: Sections (Sidebar style) */}
+                                    <div className="w-[260px] border-r border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/30 flex flex-col shrink-0">
+                                      <div className="p-5 border-b border-slate-200 dark:border-slate-800 space-y-3.5 bg-slate-50/50">
                                         <div>
-                                          <p className={cn("text-sm font-bold", !draft?.section_clauses?.[linkSectionKey] ? "text-blue-700" : "text-slate-600")}>No Clause</p>
-                                          <p className="text-xs text-slate-500 mt-0.5">
-                                            This section is left out of the contract until you apply a clause below.
-                                            {defaultClauseMap[linkSectionKey] && <> Suggested: <span className="font-semibold">{clausesById[defaultClauseMap[linkSectionKey]]?.label}</span>.</>}
-                                          </p>
+                                          <p className="text-base font-bold text-slate-900 dark:text-slate-100">Contract Sections</p>
+                                          <p className="text-xs text-slate-500 mt-0.5 font-medium">{CONTRACT_SECTIONS.length} sections to configure</p>
                                         </div>
-                                        <div className={cn("w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0", !draft?.section_clauses?.[linkSectionKey] ? "border-custom-blue bg-custom-blue" : "border-slate-300")}>
-                                          {!draft?.section_clauses?.[linkSectionKey] && <Check className="w-3 h-3 text-white" />}
+                                        <div className="flex gap-2">
+                                          <Button variant="outline" size="sm" className="flex-1 text-xs h-8 bg-white border-slate-200 shadow-sm hover:bg-blue-50 hover:text-blue-700" onClick={handleAutoFillDefaults}>Apply Defaults</Button>
+                                          <Button variant="outline" size="sm" className="px-3 text-xs h-8 text-red-600 border-slate-200 bg-white shadow-sm hover:bg-red-50 hover:border-red-200" onClick={handleClearAllSelections} title="Clear All">Clear</Button>
+                                        </div>
+                                      </div>
+                                      <ScrollArea className="flex-1">
+                                        <div className="p-3 space-y-1">
+                                          {CONTRACT_SECTIONS.map((section) => {
+                                            const count = clauses.filter((c) => c.section_key === section.key).length;
+                                            const hasSelection = !!draft?.section_clauses?.[section.key];
+                                            return (
+                                              <div
+                                                key={section.key}
+                                                onClick={() => { setLinkSectionKey(section.key); setLinkSearch(''); setExpandedClauseId(null); }}
+                                                className={cn("flex items-center justify-between p-3 rounded-xl text-sm font-semibold cursor-pointer transition-all", section.key === linkSectionKey ? "bg-white shadow-[0_2px_8px_-4px_rgba(0,0,0,0.1)] border border-slate-200 text-blue-700 dark:bg-blue-900/30 dark:border-blue-800/50 dark:text-blue-400" : "text-slate-600 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-800 border border-transparent")}
+                                              >
+                                                <div className="flex items-center gap-2.5 min-w-0">
+                                                  {hasSelection ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" /> : <FileText className="w-4 h-4 shrink-0 opacity-40" />}
+                                                  <span className="truncate">{section.title}</span>
+                                                </div>
+                                                <Badge variant="secondary" className={cn("text-xs h-4.5 px-2 min-w-[20px] flex items-center justify-center shrink-0 rounded-full font-bold", section.key === linkSectionKey ? "bg-blue-100 text-blue-700" : "bg-slate-200/70 text-slate-500")}>{count}</Badge>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </ScrollArea>
+                                    </div>
+
+                                    {/* Col 2: Main Area - Cards + Previews */}
+                                    <div className="flex-1 flex flex-col min-w-0 bg-slate-50/50 dark:bg-slate-950">
+                                      <div className="px-8 py-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-white/50 dark:bg-slate-900/20 shrink-0 shadow-[0_1px_2px_0_rgb(0,0,0,0.01)]">
+                                        <div>
+                                          <p className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                                            {CONTRACT_SECTIONS.find((s) => s.key === linkSectionKey)?.title}
+                                          </p>
+                                          <p className="text-sm text-slate-500 mt-1">Select a clause to apply to this section.</p>
+                                        </div>
+                                        <div className="relative w-[280px]">
+                                          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                                          <Input placeholder="Search clauses in section..." className="pl-9 h-10 rounded-full text-sm bg-white border-slate-200 shadow-sm focus-visible:ring-1 focus-visible:ring-blue-500/50" value={linkSearch} onChange={(e) => setLinkSearch(e.target.value)} />
                                         </div>
                                       </div>
 
-                                      {/* Clause Cards Feed */}
-                                      {clauses
-                                        .filter((c) => c.section_key === linkSectionKey && c.label.toLowerCase().includes(linkSearch.toLowerCase()))
-                                        .sort((a, b) => (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) || a.label.localeCompare(b.label))
-                                        .map((clause) => {
-                                          const isSelected = draft?.section_clauses?.[linkSectionKey] === clause.id;
-                                          const isExpanded = expandedClauseId === clause.id;
-                                          const usageCount = allProfiles.filter((p) => p.section_clauses?.[linkSectionKey] === clause.id).length;
-                                          const conditions = (clause as any)?.suggest_conditions as Array<Record<string, string>> | undefined;
-                                          const facts = { employment_type: draft?.employment_type, job_level: draft?.job_level, work_arrangement: draft?.work_arrangement, department: draft?.department };
+                                      <ScrollArea className="flex-1 p-8">
+                                        <div className="space-y-5 max-w-5xl mx-auto">
 
-                                          return (
-                                            <div
-                                              key={clause.id}
-                                              className={cn(
-                                                "bg-white dark:bg-slate-900 border rounded-2xl overflow-hidden transition-all duration-200",
-                                                isSelected ? "border-blue-500 shadow-[0_4px_12px_-4px_rgba(37,99,235,0.15)] ring-1 ring-blue-500/20" : "border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md hover:border-slate-300"
-                                              )}
-                                            >
-                                              {/* Card Header (Clickable to expand) */}
-                                              <div 
-                                                className="p-5 flex items-center justify-between cursor-pointer group"
-                                                onClick={() => setExpandedClauseId(isExpanded ? null : clause.id)}
-                                              >
-                                                <div className="flex-1 min-w-0 pr-6">
-                                                  <div className="flex items-center gap-3 mb-1.5">
-                                                    <h4 className="text-base font-bold text-slate-900 dark:text-slate-100">{clause.label}</h4>
-                                                    {clause.is_default && <Badge variant="secondary" className="bg-amber-100 text-amber-800 text-xs py-0 px-2 uppercase tracking-wider font-bold rounded-md">Default</Badge>}
-                                                    {clause.company_id && <Badge variant="secondary" className="bg-slate-100 text-slate-600 text-xs py-0 px-2 uppercase tracking-wider font-bold rounded-md">Company specific</Badge>}
-                                                  </div>
-                                                  <div className="flex items-center gap-4 text-xs text-slate-500 font-medium">
-                                                    <span className="font-mono text-xs bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">{clause.clause_key}</span>
-                                                    <span>Used in {usageCount} profile{usageCount !== 1 ? 's' : ''}</span>
-                                                  </div>
-                                                </div>
-                                                
-                                                <div className="flex items-center gap-6 shrink-0">
-                                                  {/* The Selection Button */}
-                                                  <Button
-                                                    size="sm"
-                                                    variant={isSelected ? "default" : "outline"}
-                                                    className={cn("h-9 rounded-full px-5 text-sm font-bold shadow-sm transition-all", isSelected ? "bg-custom-blue text-white" : "bg-white text-slate-700 hover:bg-slate-50")}
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      updateDraftSectionClauses((prev) => ({ ...prev, [linkSectionKey]: clause.id }));
-                                                      if(!isExpanded) setExpandedClauseId(clause.id);
-                                                    }}
+                                          {/* Deselect / Default Option */}
+                                          <div
+                                            className={cn(
+                                              "flex items-center justify-between p-4 rounded-2xl border transition-all cursor-pointer bg-white",
+                                              !draft?.section_clauses?.[linkSectionKey] ? "border-blue-500 shadow-[0_4px_12px_-4px_rgba(37,99,235,0.2)] ring-1 ring-blue-500/20" : "border-slate-200 border-dashed hover:border-slate-400 shadow-sm"
+                                            )}
+                                            onClick={() => { if (!draft) return; updateDraftSectionClauses((prev) => { const next = { ...prev }; delete next[linkSectionKey]; return next; }); setExpandedClauseId(null); }}
+                                          >
+                                            <div>
+                                              <p className={cn("text-sm font-bold", !draft?.section_clauses?.[linkSectionKey] ? "text-blue-700" : "text-slate-600")}>No Clause</p>
+                                              <p className="text-xs text-slate-500 mt-0.5">
+                                                This section is left out of the contract until you apply a clause below.
+                                                {defaultClauseMap[linkSectionKey] && <> Suggested: <span className="font-semibold">{clausesById[defaultClauseMap[linkSectionKey]]?.label}</span>.</>}
+                                              </p>
+                                            </div>
+                                            <div className={cn("w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0", !draft?.section_clauses?.[linkSectionKey] ? "border-custom-blue bg-custom-blue" : "border-slate-300")}>
+                                              {!draft?.section_clauses?.[linkSectionKey] && <Check className="w-3 h-3 text-white" />}
+                                            </div>
+                                          </div>
+
+                                          {/* Clause Cards Feed */}
+                                          {clauses
+                                            .filter((c) => c.section_key === linkSectionKey && c.label.toLowerCase().includes(linkSearch.toLowerCase()))
+                                            .sort((a, b) => (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) || a.label.localeCompare(b.label))
+                                            .map((clause) => {
+                                              const isSelected = draft?.section_clauses?.[linkSectionKey] === clause.id;
+                                              const isExpanded = expandedClauseId === clause.id;
+                                              const usageCount = allProfiles.filter((p) => p.section_clauses?.[linkSectionKey] === clause.id).length;
+                                              const conditions = (clause as any)?.suggest_conditions as Array<Record<string, string>> | undefined;
+                                              const facts = { employment_type: draft?.employment_type, job_level: draft?.job_level, work_arrangement: draft?.work_arrangement, department: draft?.department };
+
+                                              return (
+                                                <div
+                                                  key={clause.id}
+                                                  className={cn(
+                                                    "bg-white dark:bg-slate-900 border rounded-2xl overflow-hidden transition-all duration-200",
+                                                    isSelected ? "border-blue-500 shadow-[0_4px_12px_-4px_rgba(37,99,235,0.15)] ring-1 ring-blue-500/20" : "border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md hover:border-slate-300"
+                                                  )}
+                                                >
+                                                  {/* Card Header (Clickable to expand) */}
+                                                  <div
+                                                    className="p-5 flex items-center justify-between cursor-pointer group"
+                                                    onClick={() => setExpandedClauseId(isExpanded ? null : clause.id)}
                                                   >
-                                                    {isSelected ? <><CheckCircle2 className="w-4 h-4 mr-1.5" /> Applied</> : "Apply Clause"}
-                                                  </Button>
-                                                  
-                                                  <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-slate-100 group-hover:text-slate-600 transition-colors">
-                                                    {isExpanded ? <ChevronUpIcon className="w-5 h-5" /> : <ChevronDownIcon className="w-5 h-5" />}
-                                                  </div>
-                                                </div>
-                                              </div>
+                                                    <div className="flex-1 min-w-0 pr-6">
+                                                      <div className="flex items-center gap-3 mb-1.5">
+                                                        <h4 className="text-base font-bold text-slate-900 dark:text-slate-100">{clause.label}</h4>
+                                                        {clause.is_default && <Badge variant="secondary" className="bg-amber-100 text-amber-800 text-xs py-0 px-2 uppercase tracking-wider font-bold rounded-md">Default</Badge>}
+                                                        {clause.company_id && <Badge variant="secondary" className="bg-slate-100 text-slate-600 text-xs py-0 px-2 uppercase tracking-wider font-bold rounded-md">Company specific</Badge>}
+                                                      </div>
+                                                      <div className="flex items-center gap-4 text-xs text-slate-500 font-medium">
+                                                        <span className="font-mono text-xs bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">{clause.clause_key}</span>
+                                                        <span>Used in {usageCount} profile{usageCount !== 1 ? 's' : ''}</span>
+                                                      </div>
+                                                    </div>
 
-                                              {/* Expanded Content (Rules & Preview) */}
-                                              {isExpanded && (
-                                                <div className="border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-6 flex flex-col xl:flex-row gap-8">
-                                                  
-                                                  {/* HTML Preview (Styled like a document snippet) */}
-                                                  <div className="flex-1 min-w-0">
-                                                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Content Preview</p>
-                                                    <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-[0_1px_3px_0_rgba(0,0,0,0.05)]">
-                                                      <div
-                                                        className="prose prose-sm max-w-none text-slate-700 dark:text-slate-300 leading-relaxed [&_table]:w-full [&_table]:my-4 [&_td]:p-2 [&_th]:p-2 [&_td]:align-top"
-                                                        dangerouslySetInnerHTML={{ __html: clause.content }}
-                                                      />
-                                                      {clause.content?.includes('{{') && (
-                                                        <div className="pt-4 border-t border-slate-100 mt-5 shrink-0">
-                                                          <div className="flex flex-wrap gap-2">
-                                                            {Array.from(new Set(Array.from(clause.content.matchAll(/\{\{(\w+)\}\}/g)).map((m) => m[1]))).map((p) => (
-                                                              <span key={p} className="text-xs font-mono bg-blue-50 text-blue-700 px-2 py-1 rounded-md">{'{{' + p + '}}'}</span>
-                                                            ))}
-                                                          </div>
-                                                        </div>
-                                                      )}
+                                                    <div className="flex items-center gap-6 shrink-0">
+                                                      {/* The Selection Button */}
+                                                      <Button
+                                                        size="sm"
+                                                        variant={isSelected ? "default" : "outline"}
+                                                        className={cn("h-9 rounded-full px-5 text-sm font-bold shadow-sm transition-all", isSelected ? "bg-custom-blue text-white" : "bg-white text-slate-700 hover:bg-slate-50")}
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          updateDraftSectionClauses((prev) => ({ ...prev, [linkSectionKey]: clause.id }));
+                                                          if (!isExpanded) setExpandedClauseId(clause.id);
+                                                        }}
+                                                      >
+                                                        {isSelected ? <><CheckCircle2 className="w-4 h-4 mr-1.5" /> Applied</> : "Apply Clause"}
+                                                      </Button>
+
+                                                      <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-slate-100 group-hover:text-slate-600 transition-colors">
+                                                        {isExpanded ? <ChevronUpIcon className="w-5 h-5" /> : <ChevronDownIcon className="w-5 h-5" />}
+                                                      </div>
                                                     </div>
                                                   </div>
 
-                                                  {/* Rules sidebar inside card */}
-                                                  <div className="w-full xl:w-[280px] shrink-0">
-                                                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Suggestion Rules</p>
-                                                    {!conditions?.length ? (
-                                                      <div className="bg-white border border-slate-200 rounded-xl p-5 text-sm text-slate-500 shadow-[0_1px_3px_0_rgba(0,0,0,0.02)]">
-                                                        No automated rules. Manual selection only.
-                                                      </div>
-                                                    ) : (
-                                                      <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-5 shadow-[0_1px_3px_0_rgba(0,0,0,0.02)]">
-                                                        <ul className="space-y-3 text-xs">
-                                                          {Object.entries(conditions[0] || {}).filter(([, v]) => v).map(([key, value]) => {
-                                                            const matches = facts[key as keyof typeof facts] === value;
-                                                            return (
-                                                              <li key={key} className="flex justify-between items-center gap-3 border-b border-emerald-100/50 pb-2 last:border-0 last:pb-0">
-                                                                <span className="text-slate-600 font-medium capitalize">{key.replace(/_/g, ' ')}: <span className="font-bold text-slate-800">{value}</span></span>
-                                                                {matches ? (
-                                                                  <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-xs px-1.5 py-0 border-transparent shadow-none">Matches</Badge>
-                                                                ) : (
-                                                                  <Badge variant="outline" className="text-slate-400 text-xs px-1.5 py-0 shadow-none">No match</Badge>
-                                                                )}
-                                                              </li>
-                                                            );
-                                                          })}
-                                                        </ul>
-                                                      </div>
-                                                    )}
-                                                  </div>
+                                                  {/* Expanded Content (Rules & Preview) */}
+                                                  {isExpanded && (
+                                                    <div className="border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-6 flex flex-col xl:flex-row gap-8">
 
+                                                      {/* HTML Preview (Styled like a document snippet) */}
+                                                      <div className="flex-1 min-w-0">
+                                                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Content Preview</p>
+                                                        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-[0_1px_3px_0_rgba(0,0,0,0.05)]">
+                                                          <div
+                                                            className="prose prose-sm max-w-none text-slate-700 dark:text-slate-300 leading-relaxed [&_table]:w-full [&_table]:my-4 [&_td]:p-2 [&_th]:p-2 [&_td]:align-top"
+                                                            dangerouslySetInnerHTML={{ __html: clause.content }}
+                                                          />
+                                                          {clause.content?.includes('{{') && (
+                                                            <div className="pt-4 border-t border-slate-100 mt-5 shrink-0">
+                                                              <div className="flex flex-wrap gap-2">
+                                                                {Array.from(new Set(Array.from(clause.content.matchAll(/\{\{(\w+)\}\}/g)).map((m) => m[1]))).map((p) => (
+                                                                  <span key={p} className="text-xs font-mono bg-blue-50 text-blue-700 px-2 py-1 rounded-md">{'{{' + p + '}}'}</span>
+                                                                ))}
+                                                              </div>
+                                                            </div>
+                                                          )}
+                                                        </div>
+                                                      </div>
+
+                                                      {/* Rules sidebar inside card */}
+                                                      <div className="w-full xl:w-[280px] shrink-0">
+                                                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Suggestion Rules</p>
+                                                        {!conditions?.length ? (
+                                                          <div className="bg-white border border-slate-200 rounded-xl p-5 text-sm text-slate-500 shadow-[0_1px_3px_0_rgba(0,0,0,0.02)]">
+                                                            No automated rules. Manual selection only.
+                                                          </div>
+                                                        ) : (
+                                                          <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-5 shadow-[0_1px_3px_0_rgba(0,0,0,0.02)]">
+                                                            <ul className="space-y-3 text-xs">
+                                                              {Object.entries(conditions[0] || {}).filter(([, v]) => v).map(([key, value]) => {
+                                                                const matches = facts[key as keyof typeof facts] === value;
+                                                                return (
+                                                                  <li key={key} className="flex justify-between items-center gap-3 border-b border-emerald-100/50 pb-2 last:border-0 last:pb-0">
+                                                                    <span className="text-slate-600 font-medium capitalize">{key.replace(/_/g, ' ')}: <span className="font-bold text-slate-800">{value}</span></span>
+                                                                    {matches ? (
+                                                                      <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-xs px-1.5 py-0 border-transparent shadow-none">Matches</Badge>
+                                                                    ) : (
+                                                                      <Badge variant="outline" className="text-slate-400 text-xs px-1.5 py-0 shadow-none">No match</Badge>
+                                                                    )}
+                                                                  </li>
+                                                                );
+                                                              })}
+                                                            </ul>
+                                                          </div>
+                                                        )}
+                                                      </div>
+
+                                                    </div>
+                                                  )}
                                                 </div>
-                                              )}
-                                            </div>
-                                          );
-                                        })}
+                                              );
+                                            })}
+                                        </div>
+                                      </ScrollArea>
                                     </div>
-                                  </ScrollArea>
-                                </div>
+                                  </div>
+                                </TabsContent>
                               </div>
-                            </TabsContent>
-                          </div>
-                        </ScrollArea>
-                      </Tabs>
+                            </ScrollArea>
+                          </Tabs>
+                        </div>
+                      </>
+                    );
+                  })() : (
+                    <div className="flex flex-col items-center justify-center h-full text-center p-12 bg-slate-50/40 dark:bg-slate-950/40">
+                      <div className="w-24 h-24 bg-white dark:bg-slate-900 shadow-sm rounded-[2rem] flex items-center justify-center mb-6 border border-slate-200 dark:border-slate-800">
+                        <FileText className="w-10 h-10 text-blue-500/40" />
+                      </div>
+                      <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2 tracking-tight">No Profile Selected</h3>
+                      <p className="text-sm text-slate-500 max-w-[280px] leading-relaxed">Select a job profile from the left sidebar to view or edit its details, or create a new profile.</p>
                     </div>
-                  </>
-                );
-              })() : (
-                <div className="flex flex-col items-center justify-center h-full text-center p-12 bg-slate-50/40 dark:bg-slate-950/40">
-                  <div className="w-24 h-24 bg-white dark:bg-slate-900 shadow-sm rounded-[2rem] flex items-center justify-center mb-6 border border-slate-200 dark:border-slate-800">
-                    <FileText className="w-10 h-10 text-blue-500/40" />
-                  </div>
-                  <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2 tracking-tight">No Profile Selected</h3>
-                  <p className="text-sm text-slate-500 max-w-[280px] leading-relaxed">Select a job profile from the left sidebar to view or edit its details, or create a new profile.</p>
+                  )}
                 </div>
+              </Panel>
+
+              {!collapsed.preview && (
+                <PanelResizeHandle className="relative w-2 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-10" />
               )}
-            </div>
-          </Panel>
 
-          {!collapsed.preview && (
-            <PanelResizeHandle className="relative w-2 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-10" />
-          )}
-
-          {/* PANEL 3: PREVIEW (Document Style) */}
-          <Panel
-            ref={previewPanelRef}
-            defaultSize={30}
-            minSize={15}
-            maxSize={80}
-            collapsible
-            onCollapse={() => setCollapsed(prev => ({ ...prev, preview: true }))}
-            onExpand={() => setCollapsed(prev => ({ ...prev, preview: false }))}
-          >
-            <div className="h-full w-full flex flex-col bg-slate-100/70 dark:bg-slate-950/70 overflow-hidden relative">
-              <button
-                onClick={() => togglePanel('preview')}
-                title="Hide preview panel"
-                className="absolute top-4 right-4 z-30 text-slate-400 hover:text-slate-700 hover:bg-white dark:hover:bg-slate-800 rounded-lg h-8 w-8 flex items-center justify-center transition-colors shadow-sm bg-white/80 dark:bg-slate-900/80 backdrop-blur"
+              {/* PANEL 3: PREVIEW (Document Style) */}
+              <Panel
+                ref={previewPanelRef}
+                defaultSize={30}
+                minSize={15}
+                maxSize={80}
+                collapsible
+                onCollapse={() => setCollapsed(prev => ({ ...prev, preview: true }))}
+                onExpand={() => setCollapsed(prev => ({ ...prev, preview: false }))}
               >
-                <X className="w-4 h-4" />
-              </button>
+                <div className="h-full w-full flex flex-col bg-slate-100/70 dark:bg-slate-950/70 overflow-hidden relative">
+                  <button
+                    onClick={() => togglePanel('preview')}
+                    title="Hide preview panel"
+                    className="absolute top-4 right-4 z-30 text-slate-400 hover:text-slate-700 hover:bg-white dark:hover:bg-slate-800 rounded-lg h-8 w-8 flex items-center justify-center transition-colors shadow-sm bg-white/80 dark:bg-slate-900/80 backdrop-blur"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
 
-              {selectedProfile && draft ? (
-                <ContractPreview
-                  contractData={{ employee: sampleEmployee }}
-                  selectedJobProfile={draft}
-                  previewOnly
-                  className="flex flex-col h-full bg-slate-100/70 dark:bg-slate-950/70 relative"
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full text-center opacity-50">
-                  <p className="text-sm font-medium text-slate-500">Select a profile to preview document</p>
+                  {selectedProfile && draft ? (
+                    <ContractPreview
+                      contractData={{ employee: sampleEmployee }}
+                      selectedJobProfile={draft}
+                      previewOnly
+                      className="flex flex-col h-full bg-slate-100/70 dark:bg-slate-950/70 relative"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-center opacity-50">
+                      <p className="text-sm font-medium text-slate-500">Select a profile to preview document</p>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </Panel>
+              </Panel>
 
-        </PanelGroup>
-      </div>
+            </PanelGroup>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="company" className="h-full w-full flex flex-col overflow-hidden">
+          {realCompanyId == null ? (
+            <div className="flex flex-col items-center justify-center h-full text-center opacity-50">
+              <p className="text-sm font-medium text-slate-500">Select a company from the header above to manage its Employment Contract settings.</p>
+            </div>
+          ) : (
+            <ScrollArea className="flex-1">
+              <div className="max-w-4xl mx-auto p-6 space-y-6 lg:space-y-8">
+                <SectionPanel title="Signatory" description="Who signs on the Company's behalf in the contract's Signatures section - shared by every Job Profile under this company (Company/Department Defaults profile scopes are retired, so this can't live on a per-profile tab anymore).">
+                  <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-2 items-center">
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Signatory Director</span>
+                    <SearchableSelect
+                      value={companySettings?.signatory_individual_id != null ? String(companySettings.signatory_individual_id) : '__unset__'}
+                      onChange={handleChangeSignatory}
+                      placeholder={directors.length === 0 ? 'No directors found for this company' : 'Select a director'}
+                      searchPlaceholder="Search directors..."
+                      disabled={savingSignatory || directors.length === 0}
+                      options={[{ value: '__unset__', label: 'Not set' }, ...directors.map((d) => ({ value: String(d.id), label: d.full_name }))]}
+                    />
+                  </div>
+                </SectionPanel>
+
+                <SectionPanel
+                  title="Job Profile Vocabulary"
+                  description="This company's own Job Level / Employment Type / Department options, used by every Job Profile's pickers instead of the generic defaults. Leave a list empty to keep using the generic defaults for that field."
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div>
+                      <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 block">Job Levels</Label>
+                      <StringListEditor
+                        items={companyListsDraft.job_levels}
+                        onChange={(v) => setCompanyListsDraft((prev) => ({ ...prev, job_levels: v }))}
+                        placeholder="e.g. Senior"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 block">Employment Types</Label>
+                      <StringListEditor
+                        items={companyListsDraft.employment_types}
+                        onChange={(v) => setCompanyListsDraft((prev) => ({ ...prev, employment_types: v }))}
+                        placeholder="e.g. Permanent"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Departments</Label>
+                        <button
+                          type="button"
+                          onClick={handleSyncDepartmentsFromEmployees}
+                          disabled={syncingDepartments}
+                          className="text-[11px] font-medium text-custom-blue hover:underline disabled:opacity-50 disabled:no-underline flex items-center gap-1"
+                          title="Add any department in use by this company's employees but missing from this list"
+                        >
+                          {syncingDepartments && <Loader2 className="h-3 w-3 animate-spin" />}
+                          Sync from Employees
+                        </button>
+                      </div>
+                      <StringListEditor
+                        items={companyListsDraft.departments}
+                        onChange={(v) => setCompanyListsDraft((prev) => ({ ...prev, departments: v }))}
+                        placeholder="e.g. Finance"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end mt-6">
+                    <Button size="sm" onClick={handleSaveCompanyLists} disabled={savingCompanyLists} className="rounded-full">
+                      {savingCompanyLists && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />} Save Lists
+                    </Button>
+                  </div>
+                </SectionPanel>
+
+                {companyFieldPlaceholders.length > 0 && (
+                  <SectionPanel title="Company Fields" description="Master-field-linked company facts used by this company's clauses - editing one here saves it to the actual Company record.">
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                      {companyFieldPlaceholders.map((p) => {
+                        const val = previewMasterFieldValues[p.key] || '';
+                        return (
+                          <div key={p.id} className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-4 items-center">
+                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{p.label}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="flex-1 text-sm text-slate-600 dark:text-slate-300 truncate">
+                                {val || <span className="italic text-amber-500/80">No value</span>}
+                              </span>
+                              <MasterFieldEditControl
+                                placeholder={p}
+                                masterFields={previewMasterFields}
+                                individualId={null}
+                                companyId={realCompanyId}
+                                currentValue={val}
+                                onSaved={refreshPreviewMasterFields}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </SectionPanel>
+                )}
+              </div>
+            </ScrollArea>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* Dialogs */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -1218,7 +1373,17 @@ export default function JobProfilesPage() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Department</label>
-              <Input value={createDepartment} onChange={(e) => setCreateDepartment(e.target.value)} placeholder="e.g. Finance" className="h-10 rounded-xl text-sm shadow-sm border-slate-200" />
+              <SearchableSelect
+                value={createDepartment || '__unset__'}
+                onChange={(v) => setCreateDepartment(v === '__unset__' ? '' : v)}
+                placeholder="Select a department"
+                searchPlaceholder="Search departments..."
+                className="rounded-xl"
+                options={[
+                  { value: '__unset__', label: 'Not set' },
+                  ...withCurrentValue(departmentOptions, createDepartment).map((opt) => ({ value: opt, label: opt })),
+                ]}
+              />
             </div>
           </div>
           <div className="flex justify-end gap-3 pt-8">

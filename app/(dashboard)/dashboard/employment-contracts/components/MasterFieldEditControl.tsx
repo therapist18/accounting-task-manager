@@ -8,7 +8,7 @@ import { Pencil, Loader2, Save, X } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { SearchableSelect, type SearchableSelectOption } from './SearchableSelect';
 import { ecPlaceholderToDtmPlaceholder } from '../utils/ecPlaceholderAdapter';
-import { saveEcMasterFieldValue } from '../utils/masterFieldResolver';
+import { saveEcMasterFieldValue, resolveEntityScope } from '../utils/masterFieldResolver';
 import type { EcPlaceholder } from '../utils/ecPlaceholders';
 import type { JobField } from '../../master-fields/components/types/database';
 
@@ -45,9 +45,16 @@ export function MasterFieldEditControl({ placeholder, masterFields, individualId
   const linkedIds = ecPlaceholderToDtmPlaceholder(placeholder).master_field_ids || [];
   if (linkedIds.length === 0) return null;
 
+  // Scoped to this placeholder's own entity_type - a field shared by both a
+  // company-scoped and an employee-scoped placeholder (e.g. KRA PIN) must
+  // only ever be editable/saveable against the source matching THIS
+  // placeholder, not whichever entity id happens to be available.
+  const scope = resolveEntityScope(placeholder.entity_type);
   const canEditWith = (id: number) => {
     const mf = masterFields.get(id);
     if (!mf?.sources?.length) return false;
+    if (scope === 'company') return companyId != null && mf.sources.some((s) => s.source_type === 'company');
+    if (scope === 'individual') return individualId != null && mf.sources.some((s) => s.source_type === 'individual');
     return mf.sources.some((s) => (s.source_type === 'company' ? companyId != null : individualId != null));
   };
   const editableIds = linkedIds.filter(canEditWith);
@@ -67,7 +74,7 @@ export function MasterFieldEditControl({ placeholder, masterFields, individualId
   const handleSave = async () => {
     if (editingFieldId == null) return;
     setSaving(true);
-    const result = await saveEcMasterFieldValue(editingFieldId, masterFields, editValue, individualId, companyId);
+    const result = await saveEcMasterFieldValue(editingFieldId, masterFields, editValue, individualId, companyId, placeholder.entity_type);
     setSaving(false);
     if (result.success) {
       toast({ title: 'Saved to source record' });

@@ -170,6 +170,15 @@ export type Placeholder = {
   // consumers don't get this field, since it has no meaning for a DTM
   // template placeholder outside EC's settings_key/offer_field concepts).
   source?: string;
+  // Whether a user can override the value resolved for this placeholder
+  // (e.g. Employment Contracts' Data & Values table shows an editable
+  // Input when true, a read-only display when false, and only shows the
+  // "Reset to default" override control when true - see ContractEditor.tsx)
+  // vs always rendering exactly what its source resolved to. Only rendered
+  // by PlaceholderFormDialog when showSourceField is passed, same gating as
+  // `source` above - this has no meaning for a DTM template placeholder
+  // outside EC's per-contract override concept (offer.placeholder_overrides).
+  editable?: boolean;
   linked_job_question_id?: string;
   linked_requirement_id?: string;
   linked_job_question_option?: string;

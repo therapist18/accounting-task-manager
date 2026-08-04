@@ -21,11 +21,6 @@ export type Company = {
   sheria_client_effective_from?: string | null;
   sheria_client_effective_to?: string | null;
   cease_details?: any;
-  // Which registry_individuals row (a Director) is designated to sign
-  // documents on the company's behalf - used by the Employment Contract
-  // Engine's {{signatory_name}}/{{signatory_title}} tokens. See
-  // employment-contracts/utils/companySignatory.ts.
-  signatory_individual_id?: number | null;
 }
 
 export async function fetchCompanies(): Promise<Company[]> {
@@ -47,8 +42,7 @@ export async function fetchCompanies(): Promise<Company[]> {
         audit_client_effective_to,
         sheria_client_effective_from,
         sheria_client_effective_to,
-        cease_details,
-        signatory_individual_id
+        cease_details
       `)
       .order('company_name', { ascending: true })
 
@@ -76,8 +70,7 @@ export async function fetchCompanies(): Promise<Company[]> {
       audit_client_effective_to: company.audit_client_effective_to,
       sheria_client_effective_from: company.sheria_client_effective_from,
       sheria_client_effective_to: company.sheria_client_effective_to,
-      cease_details: company.cease_details,
-      signatory_individual_id: company.signatory_individual_id
+      cease_details: company.cease_details
     }))
 
     return companies

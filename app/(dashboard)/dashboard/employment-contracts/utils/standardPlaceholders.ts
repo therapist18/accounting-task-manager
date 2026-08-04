@@ -3,6 +3,7 @@ import type { Company } from '../../companies/database';
 import type { EmploymentOffer } from './employmentOfferData';
 import type { EcJobProfile } from './jobProfileData';
 import type { EcPlaceholder } from './ecPlaceholders';
+import { buildStatutoryDeductionsTable, type StatutoryDeductionsBreakdown } from './statutoryDeductions';
 
 // Builds the full set of well-known placeholder tokens that clause content
 // may reference as {{token_name}}. Values come from five layers, merged in
@@ -14,8 +15,12 @@ import type { EcPlaceholder } from './ecPlaceholders';
 //      start_date/end_date - Offer wins, Employee record is the fallback),
 //      formatted aggregates (allowances joined into a readable list,
 //      applicable_benefits combining 6 separate settings into one rendered
-//      list, key_responsibilities joining an array into <li> markup), and
-//      statutory/tax numbers kept as direct Employee/Company reads rather
+//      list, key_responsibilities joining an array into <li> markup,
+//      statutory_deductions_table rendering PAYE/SHIF/AHL/NSSF/NITA - via
+//      statutoryDeductions.ts, preferring the real payroll line the caller
+//      fetched (payrollStatutoryLine below) and falling back to computing
+//      from gross_salary only when no payroll run exists yet),
+//      and statutory/tax numbers kept as direct Employee/Company reads rather
 //      than master-field-linked or settings-driven, per the repo owner's
 //      explicit decision (payroll/statutory identifiers, not general record
 //      facts). These always win regardless of what an ec_placeholders row
@@ -70,7 +75,15 @@ export function buildStandardPlaceholderValues(
   // already passed here). Title is fixed to 'Director' since that's the only
   // role this designation can point at (see companySignatory.ts /
   // fetchCompanyDirectors, which only lists current Directors).
-  signatoryName?: string
+  signatoryName?: string,
+  // The employee's latest already-computed payroll line (PAYE/SHIF/AHL/
+  // NSSF/NITA/net pay), fetched by the caller via
+  // payrollIntegration.ts's fetchPayrollStatutoryLine - another async
+  // lookup this function can't do itself (see signatoryName above for the
+  // same reasoning). undefined/null means no payroll run exists yet for
+  // this employee, in which case statutory_deductions_table falls back to
+  // computing from gross_salary instead of reflecting real payroll figures.
+  payrollStatutoryLine?: StatutoryDeductionsBreakdown | null
 ): Record<string, string> {
   // Format allowances from the offer into a readable list.
   const allowances = offer?.allowances || [];
@@ -79,6 +92,8 @@ export function buildStandardPlaceholderValues(
     : '';
 
   const s = effectiveSettings || {};
+
+  const grossSalary = offer?.basic_salary != null ? String(offer.basic_salary) : String(employee.grossSalary || '');
 
   const hardcoded: Record<string, string> = {
     // employee_number has no ec_placeholders/master_field seed row (only
@@ -101,7 +116,7 @@ export function buildStandardPlaceholderValues(
     // Multi-source fallback chains - Offer wins, Employee/settings record is
     // the fallback. Not expressible as a single settings_key/offer_field read.
     basic_salary: offer?.basic_salary != null ? String(offer.basic_salary) : String(employee.basicSalary || ''),
-    gross_salary: offer?.basic_salary != null ? String(offer.basic_salary) : String(employee.grossSalary || ''),
+    gross_salary: grossSalary,
     currency: offer?.currency || String(s.salary_currency || '') || 'KES',
     start_date: offer?.start_date || employee.startDate || '',
     end_date: offer?.end_date || '',
@@ -111,6 +126,7 @@ export function buildStandardPlaceholderValues(
     // Aggregates - combine multiple settings/columns into one rendered value.
     applicable_benefits: buildApplicableBenefitsList(s),
     key_responsibilities: (jobProfile?.key_responsibilities || []).map((r) => `<li>${r}</li>`).join(''),
+    statutory_deductions_table: buildStatutoryDeductionsTable(grossSalary, payrollStatutoryLine),
   };
 
   const generic: Record<string, string> = {};

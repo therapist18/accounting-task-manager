@@ -7,7 +7,9 @@ import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
 import type { EcPlaceholder } from '../utils/ecPlaceholders';
 import { fetchCompanies, Company } from '../../companies/database';
-import { fetchSignatoryName } from '../utils/companySignatory';
+import { fetchSignatoryNameForCompany } from '../utils/companySettings';
+import { fetchPayrollStatutoryLine } from '../utils/payrollIntegration';
+import type { StatutoryDeductionsBreakdown } from '../utils/statutoryDeductions';
 import { fetchClauses, EcClause } from '../utils/clauseLibraryData';
 import { detectTokens } from '../utils/placeholderDetection';
 import { SearchableSelect } from './SearchableSelect';
@@ -17,10 +19,10 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Settings2, UserRound, RotateCcw, RefreshCw, AlertCircle, PlusCircle, X, Wallet } from 'lucide-react';
+import { Loader2, Settings2, UserRound, RotateCcw, RefreshCw, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ENTITY_TYPES } from '@/lib/constants/entity-types';
+import { useToast } from '@/components/ui/use-toast';
 
 interface ContractEditorProps {
   companyId: string | null;
@@ -65,12 +67,19 @@ export function ContractEditor({
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(false);
   const [signatoryName, setSignatoryName] = useState('');
+  const [payrollStatutoryLine, setPayrollStatutoryLine] = useState<StatutoryDeductionsBreakdown | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetchSignatoryName(company?.signatory_individual_id).then((name) => { if (!cancelled) setSignatoryName(name); });
+    fetchSignatoryNameForCompany(companyId).then((name) => { if (!cancelled) setSignatoryName(name); });
     return () => { cancelled = true; };
-  }, [company?.signatory_individual_id]);
+  }, [companyId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchPayrollStatutoryLine(companyId, employee?.individualId).then((line) => { if (!cancelled) setPayrollStatutoryLine(line); });
+    return () => { cancelled = true; };
+  }, [companyId, employee?.individualId]);
 
   const offer: Partial<EmploymentOffer> = contractData.offer || {};
   const updateOffer = (patch: Partial<EmploymentOffer>) => {
@@ -150,9 +159,19 @@ export function ContractEditor({
 
   const { ecPlaceholders, masterFieldValues, masterFields, isResolving, refresh: refreshMasterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
 
+  const { toast } = useToast();
+  const handleRefreshMasterFieldValues = async () => {
+    try {
+      await refreshMasterFieldValues();
+      toast({ title: 'Refreshed', description: 'Data & Values updated with the latest source data.' });
+    } catch (err: any) {
+      toast({ title: 'Refresh failed', description: err?.message || 'Could not fetch the latest values.', variant: 'destructive' });
+    }
+  };
+
   const placeholderValues = useMemo(
-    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer.placeholder_overrides, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName) : {}),
-    [employee, company, offer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName]
+    () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer.placeholder_overrides, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine) : {}),
+    [employee, company, offer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine]
   );
 
   const [allClauses, setAllClauses] = useState<EcClause[]>([]);
@@ -245,110 +264,6 @@ export function ContractEditor({
 
       <ScrollArea className="flex-1">
         <div className="max-w-6xl mx-auto p-6 space-y-8 pb-24">
-          {/* Offer Adjustments - the 5 offer-kind placeholders
-              (basic_salary/currency/start_date/end_date/allowances) have no
-              editor anywhere else: they're per-employee-contract facts, not
-              Job Profile template settings, so they don't belong on the
-              Job Profile Fields tab - and are marked non-editable in the
-              Data & Values table below since this is their dedicated editor. */}
-          <div className="space-y-4">
-            <div className="px-1">
-              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <Wallet className="w-4 h-4 text-blue-500" /> Offer Adjustments
-              </h3>
-              <p className="text-sm text-slate-500">Salary, dates and allowances specific to this employee's offer.</p>
-            </div>
-            <div className="bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800/70 rounded-xl shadow-sm p-5 space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-500">Basic Salary</Label>
-                  <Input
-                    type="number"
-                    className="h-9 text-sm"
-                    value={offer.basic_salary ?? ''}
-                    onChange={(e) => updateOffer({ basic_salary: e.target.value === '' ? null : Number(e.target.value) })}
-                    placeholder="e.g. 90000"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-500">Currency</Label>
-                  <Select value={offer.currency || 'KES'} onValueChange={(v) => updateOffer({ currency: v })}>
-                    <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="KES">KES</SelectItem>
-                      <SelectItem value="USD">USD</SelectItem>
-                      <SelectItem value="GBP">GBP</SelectItem>
-                      <SelectItem value="EUR">EUR</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-500">Start Date</Label>
-                  <Input
-                    type="date"
-                    className="h-9 text-sm"
-                    value={offer.start_date || ''}
-                    onChange={(e) => updateOffer({ start_date: e.target.value || null })}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-500">End Date</Label>
-                  <Input
-                    type="date"
-                    className="h-9 text-sm"
-                    value={offer.end_date || ''}
-                    onChange={(e) => updateOffer({ end_date: e.target.value || null })}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-xs font-medium text-slate-500">Allowances</Label>
-                {(offer.allowances || []).map((a, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <Input
-                      className="h-9 text-sm flex-1"
-                      value={a.label}
-                      onChange={(e) => {
-                        const next = [...(offer.allowances || [])];
-                        next[i] = { ...next[i], label: e.target.value };
-                        updateOffer({ allowances: next });
-                      }}
-                      placeholder="e.g. Housing Allowance"
-                    />
-                    <Input
-                      type="number"
-                      className="h-9 text-sm w-36"
-                      value={a.amount ?? ''}
-                      onChange={(e) => {
-                        const next = [...(offer.allowances || [])];
-                        next[i] = { ...next[i], amount: e.target.value === '' ? undefined : Number(e.target.value) };
-                        updateOffer({ allowances: next });
-                      }}
-                      placeholder="Amount"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => updateOffer({ allowances: (offer.allowances || []).filter((_, ii) => ii !== i) })}
-                      className="text-slate-400 hover:text-red-500 shrink-0 p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-xs rounded-lg border-dashed"
-                  onClick={() => updateOffer({ allowances: [...(offer.allowances || []), { label: '', amount: undefined }] })}
-                >
-                  <PlusCircle className="h-3.5 w-3.5 mr-1.5" /> Add Allowance
-                </Button>
-              </div>
-            </div>
-          </div>
-
           {/* Data & Values Table Layout */}
           <div className="space-y-4">
             <div className="flex items-center justify-between px-1">
@@ -361,7 +276,7 @@ export function ContractEditor({
                   {profileScopedPlaceholders.length} / {ecPlaceholders.length} active
                 </Badge>
                 <button
-                  onClick={refreshMasterFieldValues}
+                  onClick={handleRefreshMasterFieldValues}
                   disabled={isResolving}
                   title="Refresh values"
                   className="w-8 h-8 flex items-center justify-center rounded-md text-slate-500 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"

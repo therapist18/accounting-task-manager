@@ -201,6 +201,21 @@ export function PlaceholderFormDialog({
                   />
                 </div>
               )}
+              {showSourceField && (
+                <div className="col-span-2 flex items-center space-x-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                  <Checkbox
+                    id="editable"
+                    checked={!!placeholder.editable}
+                    onCheckedChange={(c) => onChange({ editable: !!c })}
+                  />
+                  <div>
+                    <Label htmlFor="editable" className="text-sm font-semibold text-slate-700">Allow user override</Label>
+                    <p className="text-[11px] text-slate-400">
+                      When off, this field is locked: the resolved value is always rendered as-is and can't be edited or overridden per contract.
+                    </p>
+                  </div>
+                </div>
+              )}
               <div className="col-span-2 space-y-2">
                 <Label htmlFor="description" className="text-[11px] font-black uppercase text-slate-400">Description</Label>
                 <Textarea

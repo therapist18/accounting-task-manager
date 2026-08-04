@@ -64,6 +64,10 @@ export interface PlaceholderDetailsUpdate {
   source_kind?: PlaceholderSourceKind;
   settings_key?: string | null;
   offer_field?: string | null;
+  // Whether a user can override this placeholder's resolved value in the
+  // Contract Editor's Data & Values table (see ContractEditor.tsx) - set via
+  // PlaceholderFormDialog's "Lock Value" checkbox (showSourceField gate).
+  editable?: boolean;
 }
 
 // Persists either: everything the reused DTM PlaceholderFormDialog can map

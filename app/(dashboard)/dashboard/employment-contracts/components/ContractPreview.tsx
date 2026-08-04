@@ -25,14 +25,20 @@ import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
 import { fetchCompanies, Company } from '../../companies/database';
-import { fetchSignatoryName } from '../utils/companySignatory';
+import { fetchSignatoryNameForCompany } from '../utils/companySettings';
+import { fetchPayrollStatutoryLine } from '../utils/payrollIntegration';
+import type { StatutoryDeductionsBreakdown } from '../utils/statutoryDeductions';
 import type { EcPlaceholder } from '../utils/ecPlaceholders';
 
-// Placeholders whose value is HTML list markup (<li>...</li> fragments, not
-// a scalar fact) - an empty list is a legitimate state ("no benefits
-// configured", "no extra responsibilities entered"), not a missing fact, so
-// these never get the missing-value placeholder treatment below.
-const LIST_MARKUP_KEYS = new Set(['applicable_benefits', 'key_responsibilities']);
+// Placeholders whose value is block-level HTML (<li>...</li> fragments or a
+// full <table>, not a scalar fact) - wrapping these in the <span> below
+// would be invalid nesting (inline span around block content), which
+// browsers/html2canvas/docx export handle by silently hoisting the block
+// element back out, breaking layout. An empty list is also a legitimate
+// state ("no benefits configured", "no extra responsibilities entered"),
+// not a missing fact, so these never get the missing-value placeholder
+// treatment below either.
+const LIST_MARKUP_KEYS = new Set(['applicable_benefits', 'key_responsibilities', 'statutory_deductions_table']);
 
 // A single em dash reads as ambiguous - could be a stray hyphen, could be
 // intentional punctuation in a clause. A visibly blank-looking run makes it
@@ -57,10 +63,11 @@ function buildHighlightedPreviewValues(
   masterFieldValues: Record<string, string>,
   selectedJobProfile: EcJobProfile | null,
   ecPlaceholders: EcPlaceholder[],
-  signatoryName: string
+  signatoryName: string,
+  payrollStatutoryLine: StatutoryDeductionsBreakdown | null
 ): Record<string, string> {
   const raw = employee
-    ? buildStandardPlaceholderValues(employee, company, offer, effectiveSettings, offer?.placeholder_overrides, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName)
+    ? buildStandardPlaceholderValues(employee, company, offer, effectiveSettings, offer?.placeholder_overrides, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine)
     : {};
 
   const wrap = (key: string, value: string, entity: string | undefined): string => {
@@ -109,12 +116,19 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const [company, setCompany] = useState<Company | null>(null);
   const [loadingContext, setLoadingContext] = useState(false);
   const [signatoryName, setSignatoryName] = useState('');
+  const [payrollStatutoryLine, setPayrollStatutoryLine] = useState<StatutoryDeductionsBreakdown | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetchSignatoryName(company?.signatory_individual_id).then((name) => { if (!cancelled) setSignatoryName(name); });
+    fetchSignatoryNameForCompany(companyId).then((name) => { if (!cancelled) setSignatoryName(name); });
     return () => { cancelled = true; };
-  }, [company?.signatory_individual_id]);
+  }, [companyId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchPayrollStatutoryLine(companyId, employee?.individualId).then((line) => { if (!cancelled) setPayrollStatutoryLine(line); });
+    return () => { cancelled = true; };
+  }, [companyId, employee?.individualId]);
 
   const [themeOverride, setThemeOverride] = useState<ContractThemeSettings | null>(contractData?.metadata?.themeSettings || null);
   const [themePanelOpen, setThemePanelOpen] = useState(false);
@@ -290,8 +304,8 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const { ecPlaceholders, masterFieldValues, isResolving: isResolvingMasterFields, refresh: refreshMasterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
 
   const employeeValues = useMemo(
-    () => buildHighlightedPreviewValues(employee, company, offer as EmploymentOffer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName),
-    [employee, company, offer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName]
+    () => buildHighlightedPreviewValues(employee, company, offer as EmploymentOffer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine),
+    [employee, company, offer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine]
   );
 
   const bodyHtml = useMemo(() => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { EcPlaceholder, fetchPlaceholders } from '../utils/ecPlaceholders';
 import { resolveEcPlaceholderValues } from '../utils/masterFieldResolver';
 import type { JobField } from '../../master-fields/components/types/database';
@@ -23,39 +23,48 @@ export function useMasterFieldValues(
   const [masterFieldValues, setMasterFieldValues] = useState<Record<string, string>>({});
   const [masterFields, setMasterFields] = useState<Map<number, JobField>>(new Map());
   const [isResolving, setIsResolving] = useState(false);
-  // Bumping this re-runs both effects below - the manual "Refresh" button
-  // exposed by refresh() exists because linking a placeholder to a master
-  // field happens on a different page (Data Sources admin), so nothing here
-  // would otherwise know the link changed until individualId/companyId
-  // themselves change (e.g. switching employees). Also called after a
-  // successful save-to-source edit, so the newly-saved value reflects
-  // immediately instead of showing the stale pre-edit one.
-  const [refreshKey, setRefreshKey] = useState(0);
-  const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+  // Tags each refresh() call so a slow, superseded call (e.g. the user
+  // switched employees again before the first fetch landed) can detect
+  // it's stale and skip applying its result instead of clobbering the
+  // newer one.
+  const requestIdRef = useRef(0);
 
-  useEffect(() => {
-    fetchPlaceholders().then(setEcPlaceholders);
-  }, [refreshKey]);
+  // refresh() re-fetches ec_placeholders (in case a placeholder was newly
+  // linked to a master field on the Data Sources admin page, which this
+  // component has no other way to learn about) and re-resolves every
+  // value from scratch, then applies both to state. It's a plain async
+  // function (not the earlier refreshKey-bump-and-let-effects-catch-up
+  // shape) specifically so callers - the manual "Refresh" button and the
+  // post-save-to-source callback - can await it and know once the new
+  // data has actually landed, e.g. to show a success toast.
+  const refresh = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    const placeholders = await fetchPlaceholders();
+    if (requestId !== requestIdRef.current) return;
+    setEcPlaceholders(placeholders);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function resolve() {
-      if (individualId == null) {
-        setMasterFieldValues({});
-        setMasterFields(new Map());
-        return;
-      }
-      setIsResolving(true);
-      const { values, masterFields: fields } = await resolveEcPlaceholderValues(ecPlaceholders, individualId, companyId);
-      if (!cancelled) {
-        setMasterFieldValues(values);
-        setMasterFields(fields);
-      }
-      setIsResolving(false);
+    if (individualId == null) {
+      setMasterFieldValues({});
+      setMasterFields(new Map());
+      return;
     }
-    resolve();
-    return () => { cancelled = true; };
-  }, [ecPlaceholders, individualId, companyId, refreshKey]);
+
+    setIsResolving(true);
+    try {
+      const { values, masterFields: fields } = await resolveEcPlaceholderValues(placeholders, individualId, companyId);
+      if (requestId !== requestIdRef.current) return;
+      setMasterFieldValues(values);
+      setMasterFields(fields);
+    } finally {
+      if (requestId === requestIdRef.current) setIsResolving(false);
+    }
+  }, [individualId, companyId]);
+
+  useEffect(() => {
+    refresh();
+    // refresh's own identity already changes with individualId/companyId,
+    // so depending on it alone re-runs this on every relevant change.
+  }, [refresh]);
 
   return { ecPlaceholders, masterFieldValues, masterFields, isResolving, refresh };
 }

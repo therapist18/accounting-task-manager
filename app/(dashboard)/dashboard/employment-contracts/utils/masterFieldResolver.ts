@@ -8,10 +8,11 @@ import type { JobField, JobFieldSource } from '../../master-fields/components/ty
 // (source_kind === 'master_field') for one employee/company pair, using the
 // same core table/path/priority resolver Document Template Manager uses
 // (see master-fields/utils/masterFieldValueResolver.ts) instead of a second,
-// EC-only re-implementation of that walk. Only entity_type 'individual' and
-// 'company' sources are meaningful here - EC has no task, no document
-// uploads, no director/dependant graph, so those DTM-only source shapes are
-// simply never in a linked field's sources for this module.
+// EC-only re-implementation of that walk. 'individual', 'company', and
+// 'document' sources are all meaningful here - master fields shared with DTM
+// (e.g. Kenyan ID/passport, sourced from acc_portal_directors_documents) can
+// carry a 'document' source_type, keyed the same way DTM keys it: by
+// director_id, which for an individual is just their registry_individuals id.
 //
 // Unlike the old per-field-per-source Supabase query this replaces, this
 // bulk-fetches each distinct table referenced by the linked master fields
@@ -26,6 +27,28 @@ import type { JobField, JobFieldSource } from '../../master-fields/components/ty
 export interface ResolveEcPlaceholderValuesResult {
   values: Record<string, string>;
   masterFields: Map<number, JobField>;
+}
+
+// A placeholder's own entity_type is the single source of truth for which
+// entity it's allowed to read from or write to - EC only ever has one
+// employee and one company in scope, so 'company' means the company and
+// anything else (employee, or any other tag someone puts on entity_type)
+// means the employee. Without this, a field shared by two placeholders
+// (e.g. master field 56 with both a company-KRA-PIN and an employee-KRA-PIN
+// source) resolves/saves against whichever source happens to be checked
+// first - which in practice is almost always the company one, since
+// companyId is present on every contract. entity_type tagging BOTH (or
+// neither) falls back to 'either', preserving that old any-source-wins
+// behavior for placeholders that genuinely don't care.
+export type EntityScope = 'company' | 'individual' | 'either';
+export function resolveEntityScope(entityType: string[] | string | undefined | null): EntityScope {
+  const types = Array.isArray(entityType) ? entityType : (entityType ? [entityType] : []);
+  const wantsCompany = types.includes('company');
+  const wantsIndividual = types.some((t) => t !== 'company');
+  if (wantsCompany && wantsIndividual) return 'either';
+  if (wantsCompany) return 'company';
+  if (wantsIndividual) return 'individual';
+  return 'either';
 }
 
 export async function resolveEcPlaceholderValues(
@@ -67,7 +90,7 @@ export async function resolveEcPlaceholderValues(
   const tableConfigs = new Map<string, Map<string, Set<string | number>>>();
   for (const mf of masterFields.values()) {
     for (const source of (mf.sources || []) as JobFieldSource[]) {
-      if (source.source_type !== 'individual' && source.source_type !== 'company') continue;
+      if (source.source_type !== 'individual' && source.source_type !== 'company' && source.source_type !== 'document') continue;
       if (!source.table) continue;
 
       // JobFieldSource['linking_variable'] is typed 'id' | 'director_id' | null
@@ -122,8 +145,6 @@ export async function resolveEcPlaceholderValues(
     combinedCache[table] = rowsByKey;
   }));
 
-  const targetEntity = { individual_id: individualId ?? undefined, company_id: companyId ?? undefined };
-
   // Resolve one master field id at a time (not the whole list at once) so
   // each link's own strategy can be honored: 'fallback' stops at the first
   // link that resolves a non-empty value (the common case - e.g. try the
@@ -133,6 +154,16 @@ export async function resolveEcPlaceholderValues(
   // whatever ids it's given), so that per-link decision has to live here.
   const result: Record<string, string> = {};
   for (const p of linked) {
+    // Scoped per-placeholder, not shared - a field linked to both a
+    // company-scoped and an employee-scoped placeholder (e.g. KRA PIN) must
+    // resolve each independently, never letting one borrow the other's value.
+    const scope = resolveEntityScope(p.entity_type);
+    const scopedTargetEntity = scope === 'company'
+      ? { company_id: companyId ?? undefined }
+      : scope === 'individual'
+      ? { individual_id: individualId ?? undefined }
+      : { individual_id: individualId ?? undefined, company_id: companyId ?? undefined };
+
     const links = p.master_field_links && p.master_field_links.length > 0
       ? [...p.master_field_links].sort((a, b) => a.display_priority - b.display_priority)
       : p.master_field_id
@@ -150,7 +181,7 @@ export async function resolveEcPlaceholderValues(
       const mf = masterFields.get(id) as (JobField & { date_config?: { useCurrentDate?: boolean } }) | undefined;
       const { value } = mf?.date_config?.useCurrentDate
         ? processCurrentDateField([id], masterFields)
-        : processTextField([id], targetEntity, combinedCache, masterFields, null);
+        : processTextField([id], scopedTargetEntity, combinedCache, masterFields, null);
       if (!value) continue;
       collected.push(value);
       if (link.strategy !== 'merge') break;
@@ -160,21 +191,27 @@ export async function resolveEcPlaceholderValues(
   return { values: result, masterFields };
 }
 
-// Picks which of a master field's own sources to write to: prefer whichever
-// entity type actually has a usable id here (company vs individual - EC's
-// own concern, since unlike DTM this call isn't already scoped to one known
-// target entity), falling back to pickMasterFieldSource's "no match -> take
-// the first source" behavior - the SAME shared function
-// TemplateGenerationDialog.tsx's saveFieldToDatabase uses for its own
-// default single-source save path, not a second reimplementation of that
-// matching logic. Then delegates the actual write to the shared
-// writeMasterFieldSourceValue core.
+// Picks which of a master field's own sources to write to. Must be scoped by
+// the EDITING PLACEHOLDER's own entity_type, not just "whichever id happens
+// to be available" - companyId is present on essentially every contract, so
+// the old id-availability check always preferred the company source, even
+// when the user was editing an employee-scoped placeholder (e.g.
+// employee_kra_pin) that shares a master field with a company-scoped one
+// (company_kra_pin). That silently wrote personal edits into the company's
+// record. entityType (the placeholder's own entity_type) makes the choice
+// deliberate instead of incidental. Falls back to pickMasterFieldSource's
+// "no match -> take the first source" behavior only when entityType is
+// absent/ambiguous - the SAME shared function TemplateGenerationDialog.tsx's
+// saveFieldToDatabase uses for its own default single-source save path, not
+// a second reimplementation of that matching logic. Then delegates the
+// actual write to the shared writeMasterFieldSourceValue core.
 export async function saveEcMasterFieldValue(
   masterFieldId: number,
   masterFields: Map<number, JobField>,
   newValue: string,
   individualId: number | null | undefined,
-  companyId: number | string | null | undefined
+  companyId: number | string | null | undefined,
+  entityType?: string[] | string | null
 ): Promise<{ success: boolean; error?: string }> {
   const mf = masterFields.get(masterFieldId);
   if (!mf?.sources?.length) return { success: false, error: 'Master field configuration missing' };
@@ -182,9 +219,18 @@ export async function saveEcMasterFieldValue(
   const sources = mf.sources as JobFieldSource[];
   const companySource = sources.find((s) => s.source_type === 'company');
   const individualSource = sources.find((s) => s.source_type === 'individual');
-  const source = (companyId != null && companySource)
-    || (individualId != null && individualSource)
-    || pickMasterFieldSource(sources, 'individual')!;
+  const scope = resolveEntityScope(entityType);
+
+  const source = scope === 'company'
+    ? companySource
+    : scope === 'individual'
+    ? individualSource
+    : (companyId != null && companySource) || (individualId != null && individualSource) || pickMasterFieldSource(sources, 'individual');
+
+  if (!source) {
+    const wanted = scope === 'company' ? 'company' : scope === 'individual' ? 'employee' : 'matching';
+    return { success: false, error: `This field has no ${wanted} source configured` };
+  }
 
   const linkingVar = (source.linking_variable as string | null | undefined) || 'id';
   const entityId = linkingVar === 'company_id'

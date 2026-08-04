@@ -31,14 +31,10 @@ export async function fetchCompanyDirectors(companyId: number | string): Promise
   return directors;
 }
 
-export async function updateCompanySignatory(companyId: number | string, individualId: number | null): Promise<boolean> {
-  const { error } = await supabase
-    .from('acc_portal_company_duplicate')
-    .update({ signatory_individual_id: individualId })
-    .eq('id', companyId);
-  return !error;
-}
-
+// Setting the signatory itself goes through companySettings.ts's
+// upsertCompanySettings ({ signatory_individual_id }) - it lives in
+// ec_company_settings, not a column this file's fetchCompanyDirectors query
+// touches, so there's no update helper to duplicate here.
 export async function fetchSignatoryName(individualId: number | string | null | undefined): Promise<string> {
   if (individualId == null) return '';
   const { data, error } = await supabase

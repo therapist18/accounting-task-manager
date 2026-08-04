@@ -607,6 +607,11 @@ const evaluateComparisonClause = (clause, targetEntity, targetId, combinedCache,
 
     if (master_field_id) {
         const mf = masterFields.get(parseInt(master_field_id, 10));
+        if (!mf) {
+            console.log(`[cond-debug] master_field_id=${master_field_id} not found in masterFields map`);
+        } else if (!mf?.sources?.length) {
+            console.log(`[cond-debug] master_field_id=${master_field_id} (${mf.label || mf.field_key}) has no sources configured`);
+        }
         if (mf?.sources) {
             for (const source of mf.sources) {
                 // Handle computed fields
@@ -625,12 +630,24 @@ const evaluateComparisonClause = (clause, targetEntity, targetId, combinedCache,
 
                 // Handle regular database fields
                 const tableData = combinedCache[source.table];
-                if (!tableData) continue;
+                if (!tableData) {
+                    console.log(`[cond-debug] master_field_id=${master_field_id}: table "${source.table}" not in combinedCache (never fetched) - targetId=${targetId}`);
+                    continue;
+                }
 
                 const linkingVar = source.linking_variable || 'id';
-                const record = Object.values(tableData).find(rec =>
-                    String(rec[linkingVar] || rec.id) === targetId
-                );
+                const docIds: string[] = Array.isArray(source.document_id)
+                    ? source.document_id
+                    : (source.document_id ? [source.document_id] : []);
+                const record = Object.values(tableData).find(rec => {
+                    if (String(rec[linkingVar] || rec.id) !== targetId) return false;
+                    return docIds.length === 0 || docIds.includes(rec.document_id);
+                });
+
+                if (!record) {
+                    console.log(`[cond-debug] master_field_id=${master_field_id}: no row in "${source.table}" matching ${linkingVar}=${targetId}${docIds.length ? ` + document_id in [${docIds.join(',')}]` : ''}`);
+                    continue;
+                }
 
                 if (record) {
                     fieldValue = source.path
@@ -640,12 +657,14 @@ const evaluateComparisonClause = (clause, targetEntity, targetId, combinedCache,
                     if (fieldValue && typeof fieldValue === 'object') {
                         fieldValue = fieldValue.number || fieldValue.value || fieldValue.name || String(fieldValue);
                     }
+                    console.log(`[cond-debug] master_field_id=${master_field_id}: field "${field || mf.field_key}" on "${source.table}" = ${JSON.stringify(fieldValue)}`);
                     break;
                 }
             }
         }
     } else {
         fieldValue = targetEntity[field];
+        console.log(`[cond-debug] direct field "${field}" on targetEntity = ${JSON.stringify(fieldValue)}`);
     }
 
     if (fieldValue === null || fieldValue === undefined) return false;
@@ -653,12 +672,15 @@ const evaluateComparisonClause = (clause, targetEntity, targetId, combinedCache,
     const strFieldValue = String(fieldValue).trim().toLowerCase();
     const strCompareValue = String(compareValue || '').trim().toLowerCase();
 
+    let result;
     switch (operator) {
-        case 'equals': return strFieldValue === strCompareValue;
-        case 'not_equals': return strFieldValue !== strCompareValue;
-        case 'contains': return strFieldValue.includes(strCompareValue);
-        default: return Boolean(fieldValue);
+        case 'equals': result = strFieldValue === strCompareValue; break;
+        case 'not_equals': result = strFieldValue !== strCompareValue; break;
+        case 'contains': result = strFieldValue.includes(strCompareValue); break;
+        default: result = Boolean(fieldValue);
     }
+    console.log(`[cond-debug] "${strFieldValue}" ${operator} "${strCompareValue}" -> ${result}`);
+    return result;
 };
 
 const processConditionalField = (placeholder, targetEntity, combinedCache, masterFields, computedFieldCache) => {
@@ -668,7 +690,11 @@ const processConditionalField = (placeholder, targetEntity, combinedCache, maste
 
     for (const condition of placeholder.conditions) {
         if (condition.comparison) {
-            const clauses = [condition.comparison, ...(condition.additional_comparisons || [])];
+            const primaryClause = {
+                ...condition.comparison,
+                master_field_id: condition.comparison.master_field_id ?? condition.master_field_id,
+            };
+            const clauses = [primaryClause, ...(condition.additional_comparisons || [])];
             const allMatch = clauses.every(clause =>
                 evaluateComparisonClause(clause, targetEntity, targetId, combinedCache, masterFields, computedFieldCache)
             );
@@ -705,9 +731,13 @@ const processConditionalField = (placeholder, targetEntity, combinedCache, maste
                 if (!tableData) continue;
 
                 const linkingVar = source.linking_variable || 'id';
-                const record = Object.values(tableData).find(rec =>
-                    String(rec[linkingVar] || rec.id) === targetId
-                );
+                const docIds: string[] = Array.isArray(source.document_id)
+                    ? source.document_id
+                    : (source.document_id ? [source.document_id] : []);
+                const record = Object.values(tableData).find(rec => {
+                    if (String(rec[linkingVar] || rec.id) !== targetId) return false;
+                    return docIds.length === 0 || docIds.includes(rec.document_id);
+                });
 
                 if (record) {
                     let rawVal = source.path
@@ -2488,8 +2518,11 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
             const allLinkedMasterIds = new Set([
                 ...(p.master_field_ids || []),
                 ...(p.conditions?.map((c: any) => c.master_field_id).filter(Boolean) || []),
+                ...(p.conditions?.map((c: any) => c.comparison?.master_field_id).filter(Boolean) || []),
+                ...(p.conditions?.flatMap((c: any) => (c.additional_comparisons || []).map((ac: any) => ac.master_field_id)).filter(Boolean) || []),
                 ...(p.boolean_conditions?.map((c: any) => c.master_field_id).filter(Boolean) || []),
             ]);
+            console.log(`[fetch-debug] placeholder "${p.name}" (type=${p.type}) -> master_field_ids to fetch: [${Array.from(allLinkedMasterIds).join(', ')}]`);
 
             allLinkedMasterIds.forEach(mId => {
                 const masterField = masterFields.get(parseInt(mId));

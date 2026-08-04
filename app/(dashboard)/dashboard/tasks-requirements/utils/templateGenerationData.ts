@@ -167,7 +167,15 @@ export async function buildTemplateGenerationInfo(
 
   templates.forEach((template: any) => {
     ; (template.placeholders || []).forEach((placeholder: any) => {
-      const pids = placeholder.master_field_ids || (placeholder.master_field_id ? [placeholder.master_field_id] : [])
+      const pids = new Set<any>([
+        ...(placeholder.master_field_ids || []),
+        ...(placeholder.master_field_id ? [placeholder.master_field_id] : []),
+        ...(placeholder.conditions?.map((c: any) => c.master_field_id).filter(Boolean) || []),
+        ...(placeholder.conditions?.map((c: any) => c.comparison?.master_field_id).filter(Boolean) || []),
+        ...(placeholder.conditions?.flatMap((c: any) => (c.additional_comparisons || []).map((ac: any) => ac.master_field_id)).filter(Boolean) || []),
+        ...(placeholder.boolean_conditions?.map((c: any) => c.master_field_id).filter(Boolean) || []),
+      ])
+      console.log(`[fetch-debug] template "${template.file_name}" placeholder "${placeholder.name}" -> master_field_ids: [${Array.from(pids).join(', ')}]`)
       pids.forEach((id: any) => {
         const masterField = masterFields.get(parseInt(id, 10))
         if (masterField?.sources) {

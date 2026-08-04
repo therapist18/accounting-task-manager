@@ -77,6 +77,8 @@ export const useTemplateDataFetching = ({
       const allLinkedMasterIds = new Set([
         ...(p.master_field_ids || []),
         ...(p.conditions?.map((c: any) => c.master_field_id).filter(Boolean) || []),
+        ...(p.conditions?.map((c: any) => c.comparison?.master_field_id).filter(Boolean) || []),
+        ...(p.conditions?.flatMap((c: any) => (c.additional_comparisons || []).map((ac: any) => ac.master_field_id)).filter(Boolean) || []),
         ...(p.boolean_conditions?.map((c: any) => c.master_field_id).filter(Boolean) || []),
       ]);
 
@@ -229,7 +231,14 @@ export const useTemplateDataFetching = ({
 
     const allLinkedMasterIds = new Set<number>();
     selectedTemplate.placeholders.forEach((p: any) => {
-      (p.master_field_ids || []).forEach((id: any) => allLinkedMasterIds.add(parseInt(id)));
+      const ids = [
+        ...(p.master_field_ids || []),
+        ...(p.conditions?.map((c: any) => c.master_field_id).filter(Boolean) || []),
+        ...(p.conditions?.map((c: any) => c.comparison?.master_field_id).filter(Boolean) || []),
+        ...(p.conditions?.flatMap((c: any) => (c.additional_comparisons || []).map((ac: any) => ac.master_field_id)).filter(Boolean) || []),
+        ...(p.boolean_conditions?.map((c: any) => c.master_field_id).filter(Boolean) || []),
+      ];
+      ids.forEach((id: any) => allLinkedMasterIds.add(parseInt(id)));
     });
 
     interface PlanEntry {
