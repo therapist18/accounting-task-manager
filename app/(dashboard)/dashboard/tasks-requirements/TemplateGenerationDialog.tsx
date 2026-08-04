@@ -29,15 +29,7 @@ import { parseJsonValue, processTextField, formatDate, processCurrentDateField, 
 import { PreviewPanel } from './components/PreviewPanel';
 import { UploadModal } from '@/app/generic-components/UploadModal';
 import { SearchableSelect } from '@/components/ui/searchable-select';
-
-// Common docxtemplater format functions
-const formatFunctions = new Set([
-    'upper', 'lower', 'capital', 'capitalize', 'title', 'camel', 'snake', 'kebab',
-    'date', 'time', 'datetime', 'currency', 'number', 'int', 'float', 'round',
-    'prettify', 'escape', 'unescape', 'html', 'raw', 'json', 'parse', 'stringify'
-]);
-
-const formatRegex = /\{\{\s*([a-zA-Z0-9_]+)\s*(\/([a-zA-Z0-9_]+))?\s*\}\}/g;
+import { applyFormat, formatFunctions } from './utils/templateFormatters';
 
 const EDITOR_PREVIEW_STYLES = `
   prose prose-sm sm:prose-base dark:prose-invert max-w-full focus:outline-none 
@@ -166,11 +158,11 @@ const replacePlaceholdersRich = (html, renderData = {}, placeholders = []) => {
         if (placeholder.parent_name) return; // block children aren't supported in this flat body context
         const cleanName = placeholder.name.replace(/[%#{}]/g, '').trim();
         if (!cleanName) return;
-        const formatSuffix = placeholder.format || '';
-        const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}${formatSuffix ? '\\s*\\/\\s*' + formatSuffix : ''}\\s*\\}+`, 'gi');
         const rawValue = renderData[cleanName];
 
         if (placeholder.type === 'image') {
+            const formatSuffix = placeholder.format || '';
+            const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}${formatSuffix ? '\\s*\\/\\s*' + formatSuffix : ''}\\s*\\}+`, 'gi');
             const value = typeof rawValue === 'string' ? rawValue : (rawValue != null ? String(rawValue) : '');
             if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
                 const width = placeholder.image_width || '200px';
@@ -179,8 +171,17 @@ const replacePlaceholdersRich = (html, renderData = {}, placeholders = []) => {
                 content = content.replace(regex, '');
             }
         } else {
+            // Captures an optional inline /format suffix per occurrence (e.g.
+            // {employee_name/upper}), so the same placeholder can render in a
+            // different case each place it's used in the document - falls
+            // back to the placeholder's own configured .format when a given
+            // occurrence has no inline suffix of its own.
+            const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}(?:\\s*\\/\\s*([a-zA-Z]+))?\\s*\\}+`, 'gi');
             const value = rawValue != null && rawValue !== '' ? String(rawValue) : '';
-            content = content.replace(regex, value);
+            content = content.replace(regex, (_match, inlineFormat) => {
+                const format = inlineFormat || placeholder.format;
+                return format && formatFunctions.has(format) ? applyFormat(value, format) : value;
+            });
         }
     });
     return content;
@@ -3585,10 +3586,10 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                         let rowHtml = innerTemplate;
                         block.children.forEach(child => {
                             const rawValue = row?.[child.name];
-                            const childFormatSuffix = child.format || '';
-                            const childRegex = new RegExp(`\\{+\\s*%?\\s*${child.name}${childFormatSuffix ? '\\s*\\/\\s*' + childFormatSuffix : ''}\\s*\\}+`, 'g');
 
                             if (child.type === 'image') {
+                                const childFormatSuffix = child.format || '';
+                                const childRegex = new RegExp(`\\{+\\s*%?\\s*${child.name}${childFormatSuffix ? '\\s*\\/\\s*' + childFormatSuffix : ''}\\s*\\}+`, 'g');
                                 const value = typeof rawValue === 'string' ? rawValue : extractDisplayValue(rawValue);
                                 if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
                                     const styleKey = `${blockName}_${rowIndex}_${child.name}`;
@@ -3616,9 +3617,15 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                     rowHtml = rowHtml.replace(childRegex, `<span style="color:#ccc; font-size: 8px;">[Empty Image: ${child.display_value || child.name}]</span>`);
                                 }
                             } else {
-                                // Standard text inside block
-                                const value = extractDisplayValue(rawValue);
-                                rowHtml = rowHtml.replace(childRegex, String(value || ''));
+                                // Standard text inside block - captures an optional
+                                // inline /format suffix per occurrence, same as the
+                                // top-level placeholder handling below.
+                                const childRegex = new RegExp(`\\{+\\s*%?\\s*${child.name}(?:\\s*\\/\\s*([a-zA-Z]+))?\\s*\\}+`, 'g');
+                                const value = String(extractDisplayValue(rawValue) || '');
+                                rowHtml = rowHtml.replace(childRegex, (_match, inlineFormat) => {
+                                    const format = inlineFormat || child.format;
+                                    return format && formatFunctions.has(format) ? applyFormat(value, format) : value;
+                                });
                             }
                         });
                         return rowHtml;
@@ -3637,8 +3644,12 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
             const rawValue = data[placeholder.name];
             const cleanName = placeholder.name.replace(/[{}]/g, '').trim();
-            const formatSuffix = placeholder.format || '';
-            const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}${formatSuffix ? '\\s*\\/\\s*' + formatSuffix : ''}\\s*\\}+`, 'gi');
+            // Captures an optional inline /format suffix per occurrence (e.g.
+            // {employee_name/upper}), so the same placeholder can render in a
+            // different case each place it's used in the document - falls
+            // back to the placeholder's own configured .format when a given
+            // occurrence has no inline suffix of its own.
+            const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}(?:\\s*\\/\\s*([a-zA-Z]+))?\\s*\\}+`, 'gi');
 
             // Handle Digit Splitting (Sequences like {passport_1}, {passport_2})
             if (placeholder.is_digit_split) {
@@ -3647,7 +3658,11 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                     const seqRegex = new RegExp(`\\{+\\s*%?\\s*${cleanName}_${i}\\s*\\}+`, 'gi');
                     universalReplace(seqRegex, chars[i - 1] || '&nbsp;');
                 }
-                universalReplace(regex, extractDisplayValue(rawValue) || '');
+                const fullValue = extractDisplayValue(rawValue) || '';
+                universalReplace(regex, (_match, inlineFormat) => {
+                    const format = inlineFormat || placeholder.format;
+                    return format && formatFunctions.has(format) ? applyFormat(fullValue, format) : fullValue;
+                });
             } else if (placeholder.type === 'image') {
                 const value = typeof rawValue === 'string' ? rawValue : extractDisplayValue(rawValue);
                 const cleanName = placeholder.name.replace(/[{}]/g, '').trim();
@@ -3680,13 +3695,18 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 }
             } else {
                 const value = extractDisplayValue(rawValue);
-                // Apply formatting to the data being injected
-                const formattedValue = formatWhitespace(value);
+                const emptyPlaceholder = `<span style="background-color: #fef9c3; color: #854d0e; padding: 0 2px; border-radius: 2px;">[${placeholder.display_value || placeholder.name}]</span>`;
 
-                const replacement = formattedValue ||
-                    `<span style="background-color: #fef9c3; color: #854d0e; padding: 0 2px; border-radius: 2px;">[${placeholder.display_value || placeholder.name}]</span>`;
-
-                universalReplace(regex, replacement);
+                universalReplace(regex, (_match, inlineFormat) => {
+                    const format = inlineFormat || placeholder.format;
+                    // Case-format the raw value BEFORE whitespace formatting -
+                    // formatWhitespace() introduces &nbsp;/<br /> HTML fragments,
+                    // and applying .toUpperCase() etc. after that would mangle
+                    // them (HTML named entities are case-sensitive - &NBSP; is
+                    // not &nbsp;).
+                    const formattedValue = format && formatFunctions.has(format) ? applyFormat(value, format) : value;
+                    return formatWhitespace(formattedValue) || emptyPlaceholder;
+                });
             }
         });
 

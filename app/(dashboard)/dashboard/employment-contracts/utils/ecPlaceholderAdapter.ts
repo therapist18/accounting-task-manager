@@ -37,7 +37,9 @@ export function ecPlaceholderToDtmPlaceholder(ec: EcPlaceholder): Placeholder {
     display_value: ec.label,
     description: ec.description || '',
     default_value: ec.default_value || '',
-    type: 'text',
+    type: ec.type || 'text',
+    conditions: ec.conditions || [],
+    boolean_conditions: ec.boolean_conditions || [],
     required: ec.required,
     entity_type: (ec.entity_type || []) as any,
     master_field_ids: masterFieldIds,
@@ -84,5 +86,12 @@ export function dtmPlaceholderToEcUpdates(updated: Placeholder, original: EcPlac
     settings_key: isOfferKind ? original.settings_key : sourceText,
     offer_field: isOfferKind ? sourceText : original.offer_field,
     editable: !!updated.editable,
+    // 'conditional'/'boolean' only actually resolve when source_kind is
+    // 'master_field' (see resolveEcPlaceholderValues) - persisted regardless
+    // of current source_kind anyway so switching kind back to master_field
+    // later doesn't lose a conditions setup someone already built.
+    type: updated.type === 'conditional' || updated.type === 'boolean' ? updated.type : 'text',
+    conditions: updated.conditions || [],
+    boolean_conditions: updated.boolean_conditions || [],
   };
 }

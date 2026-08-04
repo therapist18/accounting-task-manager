@@ -4,7 +4,7 @@
  */
 
 export const formatFunctions = new Set([
-  'upper', 'lower', 'capital', 'capitalize', 'title', 'camel', 'snake', 'kebab',
+  'upper', 'lower', 'capital', 'capitalize', 'title', 'sentence', 'camel', 'snake', 'kebab',
   'date', 'time', 'datetime', 'currency', 'number', 'int', 'float', 'round',
   'prettify', 'escape', 'unescape', 'html', 'raw', 'json', 'parse', 'stringify'
 ]);
@@ -31,9 +31,15 @@ export function applyFormat(value: any, format: string): string {
       return strValue.replace(/\b\w/g, char => char.toUpperCase());
     
     case 'capitalize':
-      // Capitalize only first letter
+      // Capitalize only first letter, lowercase the rest
       return strValue.charAt(0).toUpperCase() + strValue.slice(1).toLowerCase();
-    
+
+    case 'sentence':
+      // Capitalize only first letter, leave the rest exactly as-is (unlike
+      // 'capitalize', which also lowercases the rest) - for values that are
+      // already correctly cased apart from their leading letter
+      return strValue.charAt(0).toUpperCase() + strValue.slice(1);
+
     case 'title':
       // Title case (each word capitalized)
       return strValue.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());

@@ -1,8 +1,35 @@
 import supabase from '@/lib/supabase/client';
 import { processTextField, processCurrentDateField, writeMasterFieldSourceValue, pickMasterFieldSource } from '../../master-fields/utils/masterFieldValueResolver';
-import { ecPlaceholderToDtmPlaceholder } from './ecPlaceholderAdapter';
+import { processConditionalField, processBooleanField } from '../../tasks-requirements/utils/placeholderProcessors';
 import type { EcPlaceholder } from './ecPlaceholders';
 import type { JobField, JobFieldSource } from '../../master-fields/components/types/database';
+
+// Every master field id an EC placeholder references, wherever it's actually
+// stored - master_field_id/master_field_links for plain 'text' placeholders,
+// or scattered across conditions[]/boolean_conditions[] for 'conditional'/
+// 'boolean' ones (a condition's own master_field_id, or nested inside its
+// comparison/additional_comparisons for the gender/marital-status style).
+// Used both to decide whether a placeholder is "linked" at all and to know
+// which master fields' source tables need fetching - missing any of these
+// spots is exactly the bug that made tasks-requirements' own conditional
+// placeholders silently resolve blank before this session's fixes to
+// templateGenerationData.ts / TemplateGenerationDialog.tsx.
+function collectPlaceholderMasterFieldIds(p: EcPlaceholder): number[] {
+  const ids = new Set<number>();
+  if (p.master_field_id) ids.add(Number(p.master_field_id));
+  (p.master_field_links || []).forEach((l) => ids.add(Number(l.master_field_id)));
+  (p.conditions || []).forEach((c: any) => {
+    if (c.master_field_id) ids.add(Number(c.master_field_id));
+    if (c.comparison?.master_field_id) ids.add(Number(c.comparison.master_field_id));
+    (c.additional_comparisons || []).forEach((ac: any) => {
+      if (ac.master_field_id) ids.add(Number(ac.master_field_id));
+    });
+  });
+  (p.boolean_conditions || []).forEach((bc: any) => {
+    if (bc.master_field_id) ids.add(Number(bc.master_field_id));
+  });
+  return Array.from(ids);
+}
 
 // Resolves every ec_placeholders row linked to a master field
 // (source_kind === 'master_field') for one employee/company pair, using the
@@ -58,7 +85,7 @@ export async function resolveEcPlaceholderValues(
 ): Promise<ResolveEcPlaceholderValuesResult> {
   const empty = { values: {}, masterFields: new Map<number, JobField>() };
   const linked = ecPlaceholders.filter(
-    (p) => p.source_kind === 'master_field' && (p.master_field_id || (p.master_field_links?.length ?? 0) > 0)
+    (p) => p.source_kind === 'master_field' && collectPlaceholderMasterFieldIds(p).length > 0
   );
   if (linked.length === 0) return empty;
 
@@ -67,7 +94,7 @@ export async function resolveEcPlaceholderValues(
   // resolution (which respects each link's own strategy) happens later.
   const allFieldIds = new Set<number>();
   for (const p of linked) {
-    (ecPlaceholderToDtmPlaceholder(p).master_field_ids || []).forEach((id) => allFieldIds.add(id));
+    collectPlaceholderMasterFieldIds(p).forEach((id) => allFieldIds.add(id));
   }
   if (allFieldIds.size === 0) return empty;
 
@@ -163,6 +190,32 @@ export async function resolveEcPlaceholderValues(
       : scope === 'individual'
       ? { individual_id: individualId ?? undefined }
       : { individual_id: individualId ?? undefined, company_id: companyId ?? undefined };
+
+    // Conditional/boolean placeholders skip the plain master_field_links
+    // fallback chain below entirely - processConditionalField/
+    // processBooleanField (the SAME functions tasks-requirements' own
+    // document templates use, already hardened this session) walk
+    // p.conditions/p.boolean_conditions directly instead.
+    if (p.type === 'conditional' && (p.conditions?.length ?? 0) > 0) {
+      const { value } = processConditionalField(p, scopedTargetEntity, combinedCache, masterFields, null);
+      if (value) result[p.key] = String(value);
+      continue;
+    }
+
+    if (p.type === 'boolean' && (p.boolean_conditions?.length ?? 0) > 0) {
+      const { value: results } = processBooleanField(p, scopedTargetEntity, combinedCache, masterFields, null);
+      const checkedLabels: string[] = [];
+      for (const r of (results as any[]) || []) {
+        // Each condition's own tag becomes its own token too (e.g.
+        // {{has_disability}} alongside the parent {{disability_status}}),
+        // matching how tasks-requirements' own boolean placeholders expose
+        // per-condition tags as separate replaceable tokens.
+        if (r?.tag) result[r.tag] = r.checked ? (r.label || '') : '';
+        if (r?.checked && r.label) checkedLabels.push(r.label);
+      }
+      if (checkedLabels.length > 0) result[p.key] = checkedLabels.join(', ');
+      continue;
+    }
 
     const links = p.master_field_links && p.master_field_links.length > 0
       ? [...p.master_field_links].sort((a, b) => a.display_priority - b.display_priority)

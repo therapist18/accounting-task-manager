@@ -20,7 +20,8 @@ import * as TableHeaderModule from '@tiptap/extension-table-header';
 import {
   Bold, Italic, Underline as UnderlineIcon, Highlighter, List, ListOrdered,
   AlignLeft, AlignCenter, AlignRight, Code2, Pilcrow, Heading1, Heading2,
-  Image as ImageIcon, Table as TableIcon, Trash2, Plus, Minus, Split, Merge
+  Image as ImageIcon, Table as TableIcon, Trash2, Plus, Minus, Split, Merge,
+  PaintBucket, Palette, Ban
 } from 'lucide-react';
 
 import {
@@ -109,10 +110,79 @@ export default function TemplateEditor({
     const TableCellExt = resolve(TableCellModule, 'TableCell');
     const TableHeaderExt = resolve(TableHeaderModule, 'TableHeader');
 
+    // Table design tools (cell background, table border style/width/color)
+    // need attributes TipTap's table extensions don't ship with - added via
+    // .extend() rather than a separate extension file, since this editor is
+    // their only consumer. Each renderHTML below returns just its own style
+    // fragment; TipTap's mergeAttributes concatenates multiple attributes'
+    // 'style' results into one combined style string automatically, so
+    // these don't need to be aware of each other.
+    const TableCellWithBg = TableCellExt?.extend({
+      addAttributes() {
+        return {
+          ...this.parent?.(),
+          backgroundColor: {
+            default: null,
+            parseHTML: (element) => element.style.backgroundColor || null,
+            renderHTML: (attributes) =>
+              attributes.backgroundColor ? { style: `background-color: ${attributes.backgroundColor}` } : {},
+          },
+        };
+      },
+    });
+
+    const TableHeaderWithBg = TableHeaderExt?.extend({
+      addAttributes() {
+        return {
+          ...this.parent?.(),
+          backgroundColor: {
+            default: null,
+            parseHTML: (element) => element.style.backgroundColor || null,
+            renderHTML: (attributes) =>
+              attributes.backgroundColor ? { style: `background-color: ${attributes.backgroundColor}` } : {},
+          },
+        };
+      },
+    });
+
+    // Border customization is table-level (applies to the whole table via
+    // its own attrs) rather than per-cell - simpler to reason about and to
+    // build a toolbar for than tracking borders per individual cell edge.
+    const TableWithBorder = TableExt?.extend({
+      addAttributes() {
+        return {
+          ...this.parent?.(),
+          borderColor: {
+            default: null,
+            parseHTML: (element) => element.style.borderColor || null,
+            renderHTML: (attributes) =>
+              attributes.borderColor ? { style: `border-color: ${attributes.borderColor}` } : {},
+          },
+          borderWidthPx: {
+            default: null,
+            parseHTML: (element) => (element.style.borderWidth ? parseInt(element.style.borderWidth, 10) : null),
+            renderHTML: (attributes) =>
+              attributes.borderWidthPx ? { style: `border-width: ${attributes.borderWidthPx}px` } : {},
+          },
+          tableBorderStyle: {
+            default: null,
+            parseHTML: (element) => element.style.borderStyle || null,
+            renderHTML: (attributes) =>
+              attributes.tableBorderStyle ? { style: `border-style: ${attributes.tableBorderStyle}` } : {},
+          },
+        };
+      },
+    });
+
     return [
       StarterKit.configure({ underline: false }),
       Underline.configure({ HTMLAttributes: { class: 'underline' } }),
-      TextAlign.configure({ types: ['heading', 'paragraph'] }),
+      // tableCell/tableHeader added so the existing align buttons also work
+      // as a "column alignment" tool - selecting a column (click-drag across
+      // its cells) and clicking Align Center sets textAlign on both the
+      // cells and their paragraphs, not just whichever paragraph the cursor
+      // happened to be in.
+      TextAlign.configure({ types: ['heading', 'paragraph', 'tableCell', 'tableHeader'] }),
       Highlight.configure({ multicolor: true }),
       Placeholder.configure({ placeholder: 'Start writing your letter template here…' }),
 
@@ -124,14 +194,14 @@ export default function TemplateEditor({
       }) : undefined,
 
       // Configure Table if resolved
-      TableExt ? TableExt.configure({
+      TableWithBorder ? TableWithBorder.configure({
         resizable: true,
         HTMLAttributes: { class: 'border-collapse table-auto w-full' },
       }) : undefined,
 
       TableRowExt,
-      TableHeaderExt,
-      TableCellExt,
+      TableHeaderWithBg,
+      TableCellWithBg,
     ].filter(Boolean); // Filter out any null/undefined entries
   }, []);
 
@@ -182,8 +252,20 @@ export default function TemplateEditor({
     },
     editorProps: {
       attributes: {
+        // Paragraph spacing is pinned to a fixed px value instead of relying
+        // on prose/prose-sm's default em-based margins - those scale with
+        // whatever font-size happens to be ambient at the mount point, which
+        // can silently differ between contexts this same shared editor is
+        // used in (a full-page Card here, a Dialog in ClauseDialog.tsx),
+        // making one Enter press look like a different amount of space
+        // depending on where the editor is mounted. Fixed px keeps a single
+        // paragraph break visually consistent everywhere this component is
+        // used. Mirrors the same override the live preview renderer
+        // (TemplateGenerationDialog.tsx's EDITOR_PREVIEW_STYLES) already
+        // applies for the same reason.
         class: `
           prose prose-sm sm:prose-base dark:prose-invert max-w-full focus:outline-none px-4 pt-0 pb-4 min-h-[200px]
+          [&_p]:mt-0 [&_p]:mb-3 [&_p]:leading-normal
           [&_table]:border-collapse [&_table]:border [&_table]:border-border [&_table]:w-full [&_table]:my-4
           [&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:p-2 [&_th]:text-left
           [&_td]:border [&_td]:border-border [&_td]:p-2 relative
@@ -216,6 +298,25 @@ export default function TemplateEditor({
 
     editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
   }, [editor]);
+
+  // Applies to whichever of tableCell/tableHeader the current selection
+  // actually contains - updateAttributes is a no-op if the selection has no
+  // node of that type, so calling both unconditionally is safe even when a
+  // selection is only cells or only header cells.
+  const setCellBackground = useCallback((color: string | null) => {
+    if (!editor) return;
+    editor.chain().focus().updateAttributes('tableCell', { backgroundColor: color }).updateAttributes('tableHeader', { backgroundColor: color }).run();
+  }, [editor]);
+
+  const setTableBorder = useCallback((patch: { borderColor?: string | null; borderWidthPx?: number | null; tableBorderStyle?: string | null }) => {
+    if (!editor) return;
+    editor.chain().focus().updateAttributes('table', patch).run();
+  }, [editor]);
+
+  const currentTableAttrs = editor?.getAttributes('table') || {};
+  const currentCellAttrs = editor?.isActive('tableHeader')
+    ? editor.getAttributes('tableHeader')
+    : editor?.getAttributes('tableCell') || {};
 
   if (!editor) return null;
 
@@ -363,6 +464,82 @@ export default function TemplateEditor({
               className="text-red-500 hover:text-red-600"
             >
               <Trash2 className="h-3 w-3" />
+            </ToolbarButton>
+            <div className="w-[1px] h-4 bg-border mx-1" />
+
+            {/* Cell background - applies to whichever cell(s)/header(s) the
+            current selection contains (see setCellBackground). Alignment for
+            a selected column reuses the main toolbar's Align Left/Center/
+            Right buttons - tableCell/tableHeader are now valid TextAlign
+            target types (see extensions above), so those buttons already
+            work here. */}
+            <span className="text-muted-foreground mr-1 font-medium text-[10px] flex items-center gap-1">
+              <PaintBucket className="h-3 w-3" /> Cell:
+            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <label className="p-1 rounded-md cursor-pointer hover:bg-accent flex items-center">
+                  <input
+                    type="color"
+                    value={currentCellAttrs.backgroundColor || '#ffffff'}
+                    onChange={(e) => setCellBackground(e.target.value)}
+                    className="w-5 h-5 rounded border border-border cursor-pointer p-0 bg-transparent"
+                  />
+                </label>
+              </TooltipTrigger>
+              <TooltipContent><p>Cell Background Color</p></TooltipContent>
+            </Tooltip>
+            <ToolbarButton onClick={() => setCellBackground(null)} tooltip="Clear Cell Background">
+              <Ban className="h-3 w-3" />
+            </ToolbarButton>
+            <div className="w-[1px] h-4 bg-border mx-1" />
+
+            {/* Table border - applies to the whole table, not per-cell. */}
+            <span className="text-muted-foreground mr-1 font-medium text-[10px] flex items-center gap-1">
+              <Palette className="h-3 w-3" /> Border:
+            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <label className="p-1 rounded-md cursor-pointer hover:bg-accent flex items-center">
+                  <input
+                    type="color"
+                    value={currentTableAttrs.borderColor || '#94a3b8'}
+                    onChange={(e) => setTableBorder({ borderColor: e.target.value })}
+                    className="w-5 h-5 rounded border border-border cursor-pointer p-0 bg-transparent"
+                  />
+                </label>
+              </TooltipTrigger>
+              <TooltipContent><p>Border Color</p></TooltipContent>
+            </Tooltip>
+            <select
+              value={currentTableAttrs.borderWidthPx || ''}
+              onChange={(e) => setTableBorder({ borderWidthPx: e.target.value ? parseInt(e.target.value, 10) : null })}
+              className="h-6 text-[10px] rounded border border-border bg-background px-1"
+              title="Border Width"
+            >
+              <option value="">Width</option>
+              <option value="1">1px</option>
+              <option value="2">2px</option>
+              <option value="3">3px</option>
+              <option value="4">4px</option>
+            </select>
+            <select
+              value={currentTableAttrs.tableBorderStyle || ''}
+              onChange={(e) => setTableBorder({ tableBorderStyle: e.target.value || null })}
+              className="h-6 text-[10px] rounded border border-border bg-background px-1"
+              title="Border Style"
+            >
+              <option value="">Style</option>
+              <option value="solid">Solid</option>
+              <option value="dashed">Dashed</option>
+              <option value="dotted">Dotted</option>
+              <option value="double">Double</option>
+            </select>
+            <ToolbarButton
+              onClick={() => setTableBorder({ borderColor: null, borderWidthPx: null, tableBorderStyle: null })}
+              tooltip="Reset Border to Default"
+            >
+              <Ban className="h-3 w-3" />
             </ToolbarButton>
           </div>
         )}

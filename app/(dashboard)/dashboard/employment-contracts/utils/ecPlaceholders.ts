@@ -1,4 +1,5 @@
 import supabase from '@/lib/supabase/client';
+import type { ConditionalCondition, BooleanCondition } from '../../templates/document-template-manager/types';
 
 // 'job_profile' = a structured column on the selected EcJobProfile itself
 // (e.g. requirements/key_responsibilities) - reuses the settings_key column
@@ -33,6 +34,14 @@ export interface EcPlaceholder {
   default_value: string | null;
   description: string | null;
   required: boolean;
+  // 'conditional'/'boolean' only meaningful when source_kind = 'master_field' -
+  // evaluated via processConditionalField/processBooleanField (imported from
+  // tasks-requirements/utils/placeholderProcessors.ts) inside
+  // resolveEcPlaceholderValues, same shape/engine tasks-requirements' own
+  // document templates use, not a second reimplementation.
+  type: 'text' | 'conditional' | 'boolean';
+  conditions: ConditionalCondition[];
+  boolean_conditions: BooleanCondition[];
   created_at: string;
   updated_at: string;
 }
@@ -68,6 +77,9 @@ export interface PlaceholderDetailsUpdate {
   // Contract Editor's Data & Values table (see ContractEditor.tsx) - set via
   // PlaceholderFormDialog's "Lock Value" checkbox (showSourceField gate).
   editable?: boolean;
+  type?: 'text' | 'conditional' | 'boolean';
+  conditions?: ConditionalCondition[];
+  boolean_conditions?: BooleanCondition[];
 }
 
 // Persists either: everything the reused DTM PlaceholderFormDialog can map

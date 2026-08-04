@@ -258,3 +258,54 @@ body {
   width: 100% !important;
   min-height: 297mm !important;
 }
+
+/* ── TipTap/ProseMirror table column resize (components/TemplateEditor.tsx) ──
+   The Table extension is configured with resizable: true, which enables the
+   resize behavior in JS, but ProseMirror ships no CSS of its own - without
+   these rules (copied from prosemirror-tables' own style/tables.css, never
+   previously imported anywhere in this app) the resize handles have no
+   visible affordance or cursor, so columns were never actually draggable. */
+.ProseMirror .tableWrapper {
+  overflow-x: auto;
+}
+.ProseMirror table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  overflow: hidden;
+}
+.ProseMirror td,
+.ProseMirror th {
+  vertical-align: top;
+  box-sizing: border-box;
+  position: relative;
+}
+.ProseMirror td:not([data-colwidth]):not(.column-resize-dragging),
+.ProseMirror th:not([data-colwidth]):not(.column-resize-dragging) {
+  min-width: 25px;
+}
+.ProseMirror .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  z-index: 20;
+  background-color: hsl(var(--primary));
+  pointer-events: none;
+}
+.ProseMirror.resize-cursor {
+  cursor: ew-resize;
+  cursor: col-resize;
+}
+.ProseMirror .selectedCell:after {
+  z-index: 2;
+  position: absolute;
+  content: '';
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(59, 130, 246, 0.15);
+  pointer-events: none;
+}

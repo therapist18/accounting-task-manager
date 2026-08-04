@@ -44,14 +44,21 @@ import { EMPLOYMENT_TYPE_OPTIONS, WORK_ARRANGEMENT_OPTIONS, DEFAULT_DEPARTMENT_O
 import { ContractPreview } from '../components/ContractPreview';
 import { MasterFieldEditControl } from '../components/MasterFieldEditControl';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
+import type { EcPlaceholder } from '../utils/ecPlaceholders';
 import { fetchCompanyDirectors, type CompanyDirectorOption } from '../utils/companySignatory';
 import { fetchCompanySettings, upsertCompanySettings, fetchCompanyDepartmentsFromEmployees, type EcCompanySettings } from '../utils/companySettings';
 
-const SETTINGS_GROUPS: { label: string; test: RegExp }[] = [
-  { label: 'Compensation & Benefits', test: /allowance|medical|pension|salary|payment/i },
+// Buckets the "Fields" tab's dynamically-fetched ec_placeholders (source_kind
+// = 'job_profile') into the same panel layout the tab used to hardcode,
+// matched against each placeholder's own settings_key. Anything that matches
+// no pattern falls into an "Other" panel rather than being silently dropped.
+const SETTINGS_GROUPS: { label: string; description?: string; test: RegExp }[] = [
+  { label: 'Employment Details', description: 'Job Level is set on the Overview tab (it also drives clause-suggestion rules there) and mirrors into {{job_level}} automatically.', test: /^reports_to$|^work_location$/i },
+  { label: 'Salary & Payment', test: /^salary_currency$|^payment_frequency$|^payment_day$/i },
   { label: 'Working Hours', test: /^working_|start_time|end_time|break_|rest_days|work_mode/i },
+  { label: 'Benefits', test: /allowance|medical|pension/i },
+  { label: 'Termination & Probation', test: /notice_|probation_|termination_/i },
   { label: 'Leave', test: /leave_days$/i },
-  { label: 'Termination & Probation', test: /notice_|probation_/i },
 ];
 
 const DEPARTMENT_VISUALS: { test: RegExp; icon: typeof Briefcase; classes: string }[] = [
@@ -83,6 +90,40 @@ const PROBATION_OPTIONS = ['Not Applicable', '1 Month', '3 Months', '6 Months'];
 const NOTICE_OPTIONS = ['1 Week', '2 Weeks', '1 Month', '2 Months', '3 Months'];
 const LEAVE_DAY_OPTIONS = ['7 Days', '14 Days', '21 Days', '30 Days', 'According to Company Policy'];
 const ALLOWANCE_OPTIONS = ['No', 'Optional', 'Yes', 'According to Company Policy'];
+
+// ec_placeholders (source_kind = 'job_profile') carries no widget-type/options
+// info of its own - just key/label/default_value - so the Fields tab has no
+// way to know a given settings_key should render as a curated dropdown
+// instead of free text. This is a static fallback for the settings_keys the
+// tab used to hardcode a <SettingSelect> for, keyed by settings_key, so
+// switching that tab to be data-driven doesn't downgrade those to plain text
+// inputs. Any settings_key not listed here (including brand-new placeholders
+// added from Data Sources) renders as plain text - reasonable default given
+// the schema has no options to draw from.
+const KNOWN_SELECT_OPTIONS: Record<string, string[]> = {
+  salary_currency: ['KES', 'USD', 'GBP', 'EUR'],
+  payment_frequency: ['Monthly', 'Bi-weekly', 'Weekly'],
+  working_days: ['Monday-Friday', 'Monday-Saturday', 'Shift Based', 'Flexible'],
+  work_mode: ['On-site', 'Remote', 'Hybrid'],
+  housing_allowance: ALLOWANCE_OPTIONS,
+  transport_allowance: ALLOWANCE_OPTIONS,
+  telephone_allowance: ALLOWANCE_OPTIONS,
+  meal_allowance: ALLOWANCE_OPTIONS,
+  probation_period: PROBATION_OPTIONS,
+  notice_period: NOTICE_OPTIONS,
+  probation_notice: NOTICE_OPTIONS,
+  annual_leave_days: LEAVE_DAY_OPTIONS,
+  sick_leave_days: LEAVE_DAY_OPTIONS,
+  maternity_leave_days: LEAVE_DAY_OPTIONS,
+  paternity_leave_days: LEAVE_DAY_OPTIONS,
+  compassionate_leave_days: LEAVE_DAY_OPTIONS,
+};
+// Same idea for <input type="...">  - only start/end time genuinely need
+// type="time" instead of the SettingInput default of "text".
+const KNOWN_INPUT_TYPES: Record<string, string> = {
+  start_time: 'time',
+  end_time: 'time',
+};
 
 function StringListEditor({ items, onChange, placeholder }: { items: string[]; onChange: (items: string[]) => void; placeholder: string }) {
   const [bulkText, setBulkText] = useState('');
@@ -141,14 +182,14 @@ function FormField({ label, children, className }: { label: string; children: Re
   );
 }
 
-function SettingInput({ label, settingKey, settings, onChange, placeholder, type = 'text' }: {
-  label: string; settingKey: string; settings: Record<string, any>; onChange: (key: string, value: string) => void; placeholder?: string; type?: string;
+function SettingInput({ label, settingKey, settings, onChange, placeholder, type = 'text', defaultValue }: {
+  label: string; settingKey: string; settings: Record<string, any>; onChange: (key: string, value: string) => void; placeholder?: string; type?: string; defaultValue?: string;
 }) {
   return (
     <FormField label={label}>
       <Input
         type={type}
-        value={settings?.[settingKey] || ''}
+        value={settings?.[settingKey] ?? defaultValue ?? ''}
         onChange={(e) => onChange(settingKey, e.target.value)}
         className="h-10 text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm focus-visible:ring-1 focus-visible:ring-blue-500/50"
         placeholder={placeholder || 'Not set'}
@@ -157,10 +198,10 @@ function SettingInput({ label, settingKey, settings, onChange, placeholder, type
   );
 }
 
-function SettingSelect({ label, settingKey, options, settings, onChange, placeholder = 'Select' }: {
-  label: string; settingKey: string; options: string[]; settings: Record<string, any>; onChange: (key: string, value: string) => void; placeholder?: string;
+function SettingSelect({ label, settingKey, options, settings, onChange, placeholder = 'Select', defaultValue }: {
+  label: string; settingKey: string; options: string[]; settings: Record<string, any>; onChange: (key: string, value: string) => void; placeholder?: string; defaultValue?: string;
 }) {
-  const current = settings?.[settingKey] ? String(settings[settingKey]) : null;
+  const current = settings?.[settingKey] ? String(settings[settingKey]) : (defaultValue || null);
   return (
     <FormField label={label}>
       <SearchableSelect
@@ -464,6 +505,33 @@ export default function JobProfilesPage() {
     [previewPlaceholders]
   );
 
+  // The "Fields" tab (below) renders these directly instead of a hardcoded
+  // field list, so a new settings-cascade placeholder added from Data
+  // Sources shows up here automatically. This tab is bound to
+  // draft.settings[key], which is exactly what source_kind='settings_cascade'
+  // means in standardPlaceholders.ts (effectiveSettings[settings_key]) -
+  // NOT what 'job_profile' means there (a literal column on the EcJobProfile
+  // row itself, e.g. key_responsibilities/requirements, already covered by
+  // their own dedicated tabs/editors). Falls back to the placeholder's own
+  // `key` when settings_key hasn't been filled in on that row. Bucketed via
+  // SETTINGS_GROUPS (matched against each placeholder's effective key), same
+  // panel layout the tab used to hardcode; anything unmatched lands in "Other".
+  const settingsFields = useMemo(
+    () => previewPlaceholders.filter((p) => p.source_kind === 'settings_cascade' && (p.settings_key || p.key)),
+    [previewPlaceholders]
+  );
+  const groupedSettingsFields = useMemo(() => {
+    const groups = SETTINGS_GROUPS.map((g) => ({ ...g, fields: [] as EcPlaceholder[] }));
+    const other: EcPlaceholder[] = [];
+    for (const p of settingsFields) {
+      const effectiveKey = p.settings_key || p.key;
+      const group = groups.find((g) => g.test.test(effectiveKey));
+      (group ? group.fields : other).push(p);
+    }
+    const all = other.length > 0 ? [...groups, { label: 'Other', description: undefined, test: /(?:)/, fields: other }] : groups;
+    return all.filter((g) => g.fields.length > 0);
+  }, [settingsFields]);
+
   // Company-wide Employment Contract Engine settings (signatory + each
   // company's own Job Level/Employment Type/Department vocabulary) - lives
   // in ec_company_settings, one row per company, not tied to any Job
@@ -672,14 +740,13 @@ export default function JobProfilesPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="profiles">
+      <Tabs defaultValue="profiles" className="flex-1 flex flex-col overflow-hidden">
         <TabsList className="flex items-start gap-1.5 px-6 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 shrink-0">
           <TabsTrigger value={'profiles'}>Job Profiles</TabsTrigger>
           <TabsTrigger value={'company'}>Company Details/Defaults</TabsTrigger>
         </TabsList>
 
-        <TabsContent value={'profiles'} className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 w-full relative overflow-hidden bg-transparent">
+        <TabsContent value={'profiles'} className="flex-1 w-full relative overflow-auto bg-transparent">
             <PanelGroup direction="horizontal" className="h-full w-full">
 
               {/* PANEL 1: PROFILES LIST */}
@@ -932,71 +999,45 @@ export default function JobProfilesPage() {
                                   </div>
                                 </TabsContent>
 
-                                {/* Consolidated settings-cascade fields, grouped by
-                                section so every {{token}} standardPlaceholders.ts
-                                can generically resolve (see its ecPlaceholders
-                                dispatch loop) has somewhere to actually be set -
-                                replaces the old Employment Rules/Working
-                                Arrangement/Benefits & Compensation tabs, which
-                                between them only covered 13 of ~27 settings keys. */}
+                                {/* Data-driven: renders whatever ec_placeholders rows are
+                                configured with source_kind = 'settings_cascade' (Data
+                                Sources admin) - the kind standardPlaceholders.ts actually
+                                reads out of effectiveSettings[settings_key], i.e. exactly
+                                draft.settings. Bucketed into panels via SETTINGS_GROUPS; a
+                                new placeholder added there shows up here with no code
+                                change. Each field's default_value (if set) is shown as its
+                                actual value until the user overrides it, not just
+                                placeholder hint text, so a fresh profile starts
+                                pre-populated. */}
                                 <TabsContent value="fields" className="m-0 focus:outline-none">
-                                  <div className="max-w-4xl mx-auto space-y-6">
-                                    <SectionPanel title="Employment Details" description="Job Level is set on the Overview tab (it also drives clause-suggestion rules there) and mirrors into {{job_level}} automatically.">
-                                      <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Reports To</span><SettingInput label="" settingKey="reports_to" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Finance Manager" /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Work Location</span><SettingInput label="" settingKey="work_location" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Nairobi HQ" /></div>
-                                      </div>
-                                    </SectionPanel>
+                                  <div className="max-w-4xl mx-auto space-y-6 overflow-auto">
+                                    {groupedSettingsFields.map((group) => (
+                                      <SectionPanel key={group.label} title={group.label} description={group.description}>
+                                        <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                          {group.fields.map((p) => {
+                                            const effectiveKey = p.settings_key || p.key;
+                                            const options = KNOWN_SELECT_OPTIONS[effectiveKey];
+                                            const inputType = KNOWN_INPUT_TYPES[effectiveKey];
+                                            return (
+                                              <div key={p.id} className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center">
+                                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{p.label}</span>
+                                                {options ? (
+                                                  <SettingSelect label="" settingKey={effectiveKey} options={options} settings={draft.settings || {}} onChange={updateDraftSettings} defaultValue={p.default_value || undefined} />
+                                                ) : (
+                                                  <SettingInput label="" settingKey={effectiveKey} settings={draft.settings || {}} onChange={updateDraftSettings} placeholder={p.default_value || p.description || 'Not set'} defaultValue={p.default_value || undefined} type={inputType || 'text'} />
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </SectionPanel>
+                                    ))}
 
-                                    <SectionPanel title="Salary & Payment">
-                                      <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Currency</span><SettingSelect label="" settingKey="salary_currency" options={['KES', 'USD', 'GBP', 'EUR']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Payment Frequency</span><SettingSelect label="" settingKey="payment_frequency" options={['Monthly', 'Bi-weekly', 'Weekly']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Payment Day</span><SettingInput label="" settingKey="payment_day" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. 25th" /></div>
+                                    {settingsFields.length === 0 && (
+                                      <div className="text-center py-12 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
+                                        <p className="text-sm text-slate-500">No settings fields configured yet - add them from Data Sources.</p>
                                       </div>
-                                    </SectionPanel>
-
-                                    <SectionPanel title="Working Hours">
-                                      <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Working Days</span><SettingSelect label="" settingKey="working_days" options={['Monday-Friday', 'Monday-Saturday', 'Shift Based', 'Flexible']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Start Time</span><SettingInput label="" settingKey="start_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="08:00" type="time" /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">End Time</span><SettingInput label="" settingKey="end_time" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="17:00" type="time" /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Working Hours</span><SettingInput label="" settingKey="working_hours" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. 8 hours/day" /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Break Duration</span><SettingInput label="" settingKey="break_duration" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. 1 hr" /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Rest Days</span><SettingInput label="" settingKey="rest_days" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Saturday, Sunday" /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Work Mode</span><SettingSelect label="" settingKey="work_mode" options={['On-site', 'Remote', 'Hybrid']} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                      </div>
-                                    </SectionPanel>
-
-                                    <SectionPanel title="Benefits">
-                                      <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Medical Cover</span><SettingInput label="" settingKey="medical_cover" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Jubilee Insurance, or Yes" /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Pension</span><SettingInput label="" settingKey="pension_scheme" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. CPF, or Yes" /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Housing Allowance</span><SettingSelect label="" settingKey="housing_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Transport Allowance</span><SettingSelect label="" settingKey="transport_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Telephone Allowance</span><SettingSelect label="" settingKey="telephone_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Meal Allowance</span><SettingSelect label="" settingKey="meal_allowance" options={ALLOWANCE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                      </div>
-                                    </SectionPanel>
-
-                                    <SectionPanel title="Termination & Probation">
-                                      <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Probation Period</span><SettingSelect label="" settingKey="probation_period" options={PROBATION_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Notice Period</span><SettingSelect label="" settingKey="notice_period" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Probation Notice</span><SettingSelect label="" settingKey="probation_notice" options={NOTICE_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Termination Reason</span><SettingInput label="" settingKey="termination_reason" settings={draft.settings || {}} onChange={updateDraftSettings} placeholder="e.g. Redundancy, Misconduct..." /></div>
-                                      </div>
-                                    </SectionPanel>
-
-                                    <SectionPanel title="Leave">
-                                      <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Annual Leave</span><SettingSelect label="" settingKey="annual_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Sick Leave</span><SettingSelect label="" settingKey="sick_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Maternity Leave</span><SettingSelect label="" settingKey="maternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Paternity Leave</span><SettingSelect label="" settingKey="paternity_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                        <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center"><span className="text-sm font-medium text-slate-700 dark:text-slate-300">Compassionate Leave</span><SettingSelect label="" settingKey="compassionate_leave_days" options={LEAVE_DAY_OPTIONS} settings={draft.settings || {}} onChange={updateDraftSettings} /></div>
-                                      </div>
-                                    </SectionPanel>
+                                    )}
                                   </div>
                                 </TabsContent>
 
@@ -1253,10 +1294,9 @@ export default function JobProfilesPage() {
               </Panel>
 
             </PanelGroup>
-          </div>
         </TabsContent>
 
-        <TabsContent value="company" className="h-full w-full flex flex-col overflow-hidden">
+        <TabsContent value="company" className="w-full overflow-hidden">
           {realCompanyId == null ? (
             <div className="flex flex-col items-center justify-center h-full text-center opacity-50">
               <p className="text-sm font-medium text-slate-500">Select a company from the header above to manage its Employment Contract settings.</p>
