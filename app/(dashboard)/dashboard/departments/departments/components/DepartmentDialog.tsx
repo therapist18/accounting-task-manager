@@ -161,9 +161,8 @@ export default function DepartmentDialog({
         ])
     }
 
-    const getCurrentIds = (history = []) => (history || []).filter(h => !h.end_date || new Date(h.end_date) > new Date()).map(h => h.id)
-    const getCurrentManagerIds = (sIdx = null) => { /* logic kept identical */ return [] } // Kept short for snippet brevity, use your exact logic here.
-    const getCurrentAssistantIds = (sIdx = null) => { /* logic kept identical */ return [] }
+    const getDeptStaffIds = (field) => Array.isArray(departmentForm[field]) ? departmentForm[field] : []
+    const updateStaffIds = (field) => (ids) => updateFormState([field], ids)
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -210,7 +209,15 @@ export default function DepartmentDialog({
                             <div className="col-span-12 md:col-span-4 space-y-5">
                                 <div className="space-y-1.5">
                                     <Label className="text-slate-600 font-semibold text-xs uppercase tracking-wider">Department Officers</Label>
-                                    <MultiSelectUser users={officerUsers} value={getCurrentIds(departmentForm.officers_history)} onChange={(ids) => updateFormState(['officers_history'], ids.map(id => ({ id, start_date: new Date().toISOString() })))} placeholder="Assign officers..." />
+                                    <MultiSelectUser users={officerUsers} value={getDeptStaffIds('officerIds')} onChange={updateStaffIds('officerIds')} placeholder="Assign officers..." />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label className="text-slate-600 font-semibold text-xs uppercase tracking-wider">Task Managers</Label>
+                                    <MultiSelectUser users={managerUsers} value={getDeptStaffIds('managerIds')} onChange={updateStaffIds('managerIds')} placeholder="Assign task managers..." />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label className="text-slate-600 font-semibold text-xs uppercase tracking-wider">Task Assistants</Label>
+                                    <MultiSelectUser users={assistantUsers} value={getDeptStaffIds('assistantIds')} onChange={updateStaffIds('assistantIds')} placeholder="Assign task assistants..." />
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label className="text-slate-600 font-semibold text-xs uppercase tracking-wider">Global Entity Types</Label>

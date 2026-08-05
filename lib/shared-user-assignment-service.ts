@@ -266,6 +266,14 @@ class UnifiedUserService {
   }
 
   /**
+   * Public accessor to invalidate the in-memory cache (e.g. after role
+   * assignments change) so the next getAllUserData call refetches.
+   */
+  clearUserDataCache(): void {
+    this.cache.clear();
+  }
+
+  /**
    * Transform raw user data to display format with role assignments
    */
   private transformUserToDisplayFormat(user: any, departments: any[] = []): DisplayUser {

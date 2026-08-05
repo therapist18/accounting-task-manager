@@ -72,19 +72,10 @@ const BASE_SECTION_STYLES = `
   .cs-section h1 { margin-bottom: 16px; }
   .cs-section h2 { margin-top: 4px; margin-bottom: 8px; }
   .cs-section h3 { margin-top: 10px; margin-bottom: 6px; }
-  .cs-section table { margin: 12px 0; }
-  .cs-section th, .cs-section td { padding: 8px 12px; }
   .cs-section .signature-block { margin-top: 28px; }
   [data-section="appendix_job_description"] { page-break-before: always; }
   [data-section="signatures"] { page-break-inside: avoid; }
 
-  .cs-toc { margin-bottom: 28px; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; }
-  .cs-toc-heading { font-size: 12pt; font-weight: 700; padding: 10px 16px; margin: 0; text-transform: uppercase; letter-spacing: 0.05em; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
-  .cs-toc-list { list-style: none; margin: 0; padding: 8px 0; }
-  .cs-toc-item { margin: 0; }
-  .cs-toc-link { display: block; padding: 5px 16px; text-decoration: none; color: inherit; font-size: 10.5pt; line-height: 1.5; transition: background 0.15s; }
-  .cs-toc-link:hover { background: #f1f5f9; }
-  .cs-toc-num { font-weight: 700; margin-right: 6px; min-width: 28px; display: inline-block; }
   .cs-section-heading { margin-top: 20px; margin-bottom: 8px; }
 
   /* Highlights which entity a resolved placeholder value came from, so an
@@ -100,6 +91,19 @@ const BASE_SECTION_STYLES = `
   .ph-entity-missing { opacity: 0.55; font-style: italic; }
 `;
 
+// Every theme's `table { margin: ... }` and `th, td { padding: ... }` use
+// the same values (24px 0 / 10px 14px) deliberately - tables should be a
+// standard, predictable size everywhere; only border/background/color/font
+// treatment should vary per theme, not cell dimensions. This also used to
+// be moot: BASE_SECTION_STYLES had its own `.cs-section table`/`.cs-section
+// th, .cs-section td` rules which, once scoped by applyThemeToHtml into
+// `.contract-theme-X .cs-section table` etc., carry HIGHER CSS specificity
+// (two classes) than a theme's own `.contract-theme-X table` (one class) -
+// since every real table in an assembled contract sits inside a .cs-section
+// wrapper, that base rule silently won for margin/padding on every table in
+// every theme regardless of what each theme specified. Removed now that
+// sizing is unified here instead.
+
 const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
   corporate: ({ primaryColor, accentColor, fontFamily, fontScale }) => `
     font-family: ${fontFamily};
@@ -112,8 +116,8 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     p { margin-bottom: 16px; text-align: justify; }
     ul, ol { margin-bottom: 16px; padding-left: 24px; }
     li { margin-bottom: 8px; }
-    table { width: 100%; border-collapse: collapse; margin: 32px 0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03); border: 1px solid #e2e8f0; }
-    th, td { border-bottom: 1px solid #e2e8f0; padding: 14px 18px; text-align: left; }
+    table { width: 100%; border-collapse: collapse; margin: 24px 0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03); border: 1px solid #e2e8f0; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 10px 14px; text-align: left; }
     th { background-color: ${primaryColor}; color: #ffffff; font-weight: 600; font-size: 10pt; text-transform: uppercase; letter-spacing: 0.05em; }
     tr:nth-child(even) td { background-color: #f8fafc; }
     tr:last-child td { border-bottom: none; }
@@ -136,8 +140,8 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     p { margin-bottom: 24px; text-indent: 48px; }
     p.no-indent { text-indent: 0; }
     ol { list-style-type: upper-roman; padding-left: 48px; margin-bottom: 24px; }
-    table { width: 100%; border-collapse: collapse; margin: 32px 0; border: 2px solid ${primaryColor}; }
-    th, td { border: 1px solid ${primaryColor}; padding: 12px 16px; vertical-align: top; }
+    table { width: 100%; border-collapse: collapse; margin: 24px 0; border: 2px solid ${primaryColor}; }
+    th, td { border: 1px solid ${primaryColor}; padding: 10px 14px; vertical-align: top; }
     th { font-weight: bold; text-transform: uppercase; font-size: 10pt; text-align: center; background: #f5f5f5; }
     .signature-block { margin-top: 80px; display: flex; justify-content: space-between; gap: 40px; }
     .signature-column { flex: 1; }
@@ -154,8 +158,8 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     h2::before { content: ''; display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: ${accentColor}; margin-right: 12px; }
     h3 { color: ${accentColor}; font-weight: 600; font-size: ${11.5 * fontScale}pt; margin-top: 24px; margin-bottom: 10px; background: ${accentColor}10; display: inline-block; padding: 4px 12px; border-radius: 20px; }
     p { margin-bottom: 18px; }
-    table { width: 100%; border-collapse: separate; border-spacing: 0; margin: 32px 0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); border: 1px solid #f3f4f6; }
-    th, td { padding: 16px 24px; text-align: left; }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; margin: 24px 0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); border: 1px solid #f3f4f6; }
+    th, td { padding: 10px 14px; text-align: left; }
     th { background-color: #f9fafb; color: ${primaryColor}; font-weight: 700; font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e5e7eb; }
     td { border-bottom: 1px solid #f3f4f6; }
     tr:last-child td { border-bottom: none; }
@@ -175,8 +179,8 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     h2::after { content: ''; display: block; width: 40px; height: 2px; background: ${accentColor}; margin: 12px auto 0; }
     h3 { color: ${accentColor}; font-style: italic; font-weight: normal; font-size: ${12 * fontScale}pt; margin-top: 24px; margin-bottom: 12px; }
     p { margin-bottom: 20px; text-align: justify; }
-    table { width: 100%; border-collapse: collapse; margin: 40px 0; border-top: 2px solid ${primaryColor}; border-bottom: 2px solid ${primaryColor}; }
-    th, td { border-bottom: 1px solid #e2e8f0; padding: 16px; }
+    table { width: 100%; border-collapse: collapse; margin: 24px 0; border-top: 2px solid ${primaryColor}; border-bottom: 2px solid ${primaryColor}; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 10px 14px; }
     th { font-weight: 700; color: ${primaryColor}; text-transform: uppercase; font-size: 9pt; letter-spacing: 0.1em; background: #f8fafc; }
     .signature-block { margin-top: 88px; display: flex; justify-content: space-around; gap: 40px; }
     .signature-column { flex: 1; max-width: 45%; }
@@ -192,8 +196,8 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     h2 { font-weight: 500; font-size: ${12 * fontScale}pt; margin-top: 40px; margin-bottom: 16px; color: ${primaryColor}; border-bottom: 1px solid #f4f4f5; padding-bottom: 8px; }
     h3 { font-weight: 400; font-size: ${10.5 * fontScale}pt; margin-top: 24px; margin-bottom: 8px; color: ${accentColor}; text-transform: uppercase; letter-spacing: 0.05em; }
     p { margin-bottom: 20px; color: #3f3f46; font-weight: 300; }
-    table { width: 100%; border-collapse: collapse; margin: 40px 0; }
-    th, td { border-bottom: 1px solid #e4e4e7; padding: 16px 8px; text-align: left; }
+    table { width: 100%; border-collapse: collapse; margin: 24px 0; }
+    th, td { border-bottom: 1px solid #e4e4e7; padding: 10px 14px; text-align: left; }
     th { font-weight: 500; color: #a1a1aa; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.1em; }
     .signature-block { margin-top: 80px; display: flex; gap: 64px; }
     .signature-column { flex: 1; }
@@ -210,8 +214,8 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     h2 { color: #ffffff; background: ${primaryColor}; font-weight: 700; font-size: ${12 * fontScale}pt; padding: 8px 16px; margin: 40px 0 20px; letter-spacing: 0.05em; text-transform: uppercase; }
     h3 { font-weight: 700; font-size: ${11.5 * fontScale}pt; color: ${accentColor}; margin-top: 24px; margin-bottom: 12px; }
     p { margin-bottom: 18px; }
-    table { width: 100%; border-collapse: collapse; margin: 32px 0; box-shadow: 0 0 0 1px #e5e7eb; }
-    th, td { padding: 14px 16px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+    table { width: 100%; border-collapse: collapse; margin: 24px 0; box-shadow: 0 0 0 1px #e5e7eb; }
+    th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #e5e7eb; }
     th { font-weight: 700; font-size: 9.5pt; text-transform: uppercase; color: ${primaryColor}; background: #f9fafb; border-bottom: 2px solid ${primaryColor}; }
     .signature-block { margin-top: 72px; display: flex; justify-content: space-between; gap: 48px; }
     .signature-column { flex: 1; border-top: 1px solid #e5e7eb; padding-top: 24px; }
@@ -227,8 +231,8 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     h2 { color: #000000; display: inline-block; font-weight: 900; font-size: ${14 * fontScale}pt; padding: 8px 16px; margin-top: 40px; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.05em; border: 3px solid #000000; box-shadow: 4px 4px 0px ${accentColor}; background: #ffffff; }
     h3 { color: ${primaryColor}; font-weight: 900; font-size: ${12 * fontScale}pt; margin-top: 24px; margin-bottom: 12px; text-transform: uppercase; border-bottom: 4px solid ${accentColor}; display: inline-block; }
     p { margin-bottom: 20px; font-weight: 500; }
-    table { width: 100%; border-collapse: collapse; margin: 40px 0; border: 4px solid #000000; box-shadow: 8px 8px 0px ${accentColor}; background: #ffffff; }
-    th, td { padding: 16px; text-align: left; border: 2px solid #000000; }
+    table { width: 100%; border-collapse: collapse; margin: 24px 0; border: 4px solid #000000; box-shadow: 8px 8px 0px ${accentColor}; background: #ffffff; }
+    th, td { padding: 10px 14px; text-align: left; border: 2px solid #000000; }
     th { background: ${primaryColor}; color: #ffffff; font-weight: 900; font-size: 10pt; text-transform: uppercase; letter-spacing: 0.05em; }
     .signature-block { margin-top: 80px; display: flex; gap: 40px; }
     .signature-column { flex: 1; border: 4px solid #000000; padding: 24px; box-shadow: 8px 8px 0px ${accentColor}; background: #ffffff; }
@@ -246,13 +250,88 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     h3 { font-weight: 700; font-style: italic; font-size: ${12 * fontScale}pt; color: ${accentColor}; margin-top: 24px; margin-bottom: 12px; border-left: 3px solid ${accentColor}; padding-left: 12px; }
     p { margin-bottom: 24px; text-align: justify; }
     p:first-of-type::first-letter { font-size: 4.5em; font-weight: 400; float: left; line-height: 0.8; padding-right: 16px; padding-top: 8px; color: ${primaryColor}; }
-    table { width: 100%; border-collapse: collapse; margin: 40px 0; }
-    th, td { padding: 18px 12px; border-bottom: 1px solid #e7e5e4; text-align: left; }
+    table { width: 100%; border-collapse: collapse; margin: 24px 0; }
+    th, td { padding: 10px 14px; border-bottom: 1px solid #e7e5e4; text-align: left; }
     th { font-weight: 600; font-style: italic; color: ${primaryColor}; font-size: 11pt; border-bottom: 2px solid ${accentColor}; }
     .signature-block { margin-top: 88px; display: flex; justify-content: space-between; gap: 64px; }
     .signature-column { flex: 1; text-align: center; }
     .signature-line { border-bottom: 1px solid ${primaryColor}; height: 48px; margin-bottom: 16px; }
     .signature-label { font-size: 11pt; font-style: italic; color: ${primaryColor}; font-weight: 600; }
+  `,
+};
+
+// Table of Contents styling per theme - previously lived in
+// BASE_SECTION_STYLES as one fixed, hardcoded-color block appended to every
+// theme identically, so the ToC never actually changed no matter which
+// theme/colors/font were selected. Each entry here mirrors that theme's own
+// heading/table treatment (border style, background, letter-spacing) instead
+// of a generic gray box, and uses primaryColor/accentColor/fontFamily so it
+// reacts to the same theme controls everything else in the document does.
+const THEME_TOC_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
+  corporate: ({ primaryColor, accentColor }) => `
+    .cs-toc { margin-bottom: 32px; border: 1px solid #e2e8f0; border-left: 6px solid ${accentColor}; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+    .cs-toc-heading { font-size: 11pt; font-weight: 800; padding: 12px 18px; margin: 0; text-transform: uppercase; letter-spacing: 0.08em; background: #f8fafc; color: ${primaryColor}; border-bottom: 1px solid #e2e8f0; }
+    .cs-toc-list { list-style: none; margin: 0; padding: 8px 0; }
+    .cs-toc-item { margin: 0; }
+    .cs-toc-link { display: block; padding: 6px 18px; text-decoration: none; color: inherit; font-size: 10.5pt; line-height: 1.6; }
+    .cs-toc-num { font-weight: 700; margin-right: 8px; min-width: 28px; display: inline-block; color: ${accentColor}; }
+  `,
+  legal: ({ primaryColor }) => `
+    .cs-toc { margin-bottom: 40px; border: 3px double ${primaryColor}; padding: 20px 0; }
+    .cs-toc-heading { font-size: 13pt; font-weight: bold; text-align: left; text-transform: uppercase; letter-spacing: 0.15em; margin: 0 0 12px; color: ${primaryColor}; }
+    .cs-toc-list { list-style: none; margin: 0; padding: 0 32px; }
+    .cs-toc-item { margin: 0; text-align: left; }
+    .cs-toc-link { display: block; padding: 4px 0; text-decoration: none; color: inherit; font-size: 10.5pt; }
+    .cs-toc-num { font-weight: bold; margin-right: 8px; }
+  `,
+  modern: ({ primaryColor, accentColor }) => `
+    .cs-toc { margin-bottom: 32px; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -8px rgba(0,0,0,0.08); border: 1px solid #f3f4f6; }
+    .cs-toc-heading { font-size: 11pt; font-weight: 700; padding: 14px 20px; margin: 0; color: ${primaryColor}; background: #f9fafb; }
+    .cs-toc-list { list-style: none; margin: 0; padding: 6px 0; }
+    .cs-toc-item { margin: 0; }
+    .cs-toc-link { display: block; position: relative; padding: 7px 20px 7px 34px; text-decoration: none; color: inherit; font-size: 10pt; }
+    .cs-toc-link::before { content: ''; position: absolute; left: 20px; top: 50%; margin-top: -3px; width: 6px; height: 6px; border-radius: 50%; background: ${accentColor}; }
+    .cs-toc-num { font-weight: 700; margin-right: 6px; color: ${accentColor}; }
+  `,
+  executive: ({ primaryColor, accentColor }) => `
+    .cs-toc { margin-bottom: 40px; border-top: 1px solid ${accentColor}; border-bottom: 1px solid ${accentColor}; padding: 20px 0; background: rgba(0,0,0,0.01); }
+    .cs-toc-heading { font-size: 11pt; font-weight: 700; text-align: left; text-transform: uppercase; letter-spacing: 0.15em; margin: 0 0 14px; color: ${primaryColor}; }
+    .cs-toc-list { list-style: none; margin: 0; padding: 0 40px; }
+    .cs-toc-item { margin: 0; text-align: left; }
+    .cs-toc-link { display: block; padding: 5px 0; text-decoration: none; color: inherit; font-size: 10.5pt; }
+    .cs-toc-num { font-weight: 700; margin-right: 8px; color: ${accentColor}; }
+  `,
+  minimal: ({ primaryColor, accentColor }) => `
+    .cs-toc { margin-bottom: 32px; border-bottom: 1px solid #f4f4f5; padding-bottom: 16px; }
+    .cs-toc-heading { font-size: 10.5pt; font-weight: 500; margin: 0 0 10px; color: ${primaryColor}; text-transform: uppercase; letter-spacing: 0.08em; }
+    .cs-toc-list { list-style: none; margin: 0; padding: 0; }
+    .cs-toc-item { margin: 0; }
+    .cs-toc-link { display: block; padding: 4px 0; text-decoration: none; color: #3f3f46; font-size: 10pt; }
+    .cs-toc-num { font-weight: 500; margin-right: 8px; color: ${accentColor}; }
+  `,
+  letterhead: ({ primaryColor, accentColor }) => `
+    .cs-toc { margin-bottom: 32px; box-shadow: 0 0 0 1px #e5e7eb; }
+    .cs-toc-heading { font-size: 10.5pt; font-weight: 700; padding: 8px 16px; margin: 0; color: #ffffff; background: ${primaryColor}; text-transform: uppercase; letter-spacing: 0.05em; }
+    .cs-toc-list { list-style: none; margin: 0; padding: 8px 0; }
+    .cs-toc-item { margin: 0; }
+    .cs-toc-link { display: block; padding: 5px 16px; text-decoration: none; color: inherit; font-size: 10.5pt; border-bottom: 1px solid #f3f4f6; }
+    .cs-toc-num { font-weight: 700; margin-right: 8px; color: ${accentColor}; }
+  `,
+  bold: ({ primaryColor, accentColor }) => `
+    .cs-toc { margin-bottom: 40px; border: 3px solid #000000; box-shadow: 6px 6px 0px ${accentColor}; background: #ffffff; }
+    .cs-toc-heading { font-size: 11pt; font-weight: 900; padding: 12px 18px; margin: 0; text-transform: uppercase; letter-spacing: 0.05em; background: ${primaryColor}; color: #ffffff; }
+    .cs-toc-list { list-style: none; margin: 0; padding: 8px 0; }
+    .cs-toc-item { margin: 0; }
+    .cs-toc-link { display: block; padding: 6px 18px; text-decoration: none; color: #000000; font-weight: 700; font-size: 10.5pt; }
+    .cs-toc-num { font-weight: 900; margin-right: 8px; color: ${accentColor}; }
+  `,
+  editorial: ({ primaryColor, accentColor }) => `
+    .cs-toc { margin-bottom: 40px; text-align: left; padding-bottom: 24px; border-bottom: 1px solid #e7e5e4; }
+    .cs-toc-heading { font-size: 11pt; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2em; margin: 0 0 14px; color: ${primaryColor}; }
+    .cs-toc-list { list-style: none; margin: 0; padding: 0; }
+    .cs-toc-item { margin: 0 0 4px; }
+    .cs-toc-link { display: block; padding: 3px 0; text-decoration: none; color: inherit; font-style: italic; font-size: 10.5pt; }
+    .cs-toc-num { font-weight: 700; margin-right: 8px; font-style: normal; color: ${accentColor}; }
   `,
 };
 
@@ -300,7 +379,7 @@ const THEME_HEADERS: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     </div>`,
   letterhead: ({ primaryColor, accentColor }) => `
     <div style="text-align: center; border-top: 6px solid ${primaryColor}; border-bottom: 2px solid ${accentColor}; padding: 32px 0; margin-bottom: 48px; font-family: 'Calibri', Arial, sans-serif; background: #fafaf9;">
-      <div style="font-size: 32px; font-weight: 800; color: ${primaryColor}; letter-spacing: 0.1em;">COMPANY NAME</div>
+      <div style="font-size: 32px; font-weight: 800; color: ${primaryColor}; letter-spacing: 0.1em;">{{company_name}}</div>
       <div style="font-size: 11px; font-weight: 700; color: #6b7280; letter-spacing: 0.25em; text-transform: uppercase; margin-top: 12px;">Official Corporate Correspondence</div>
     </div>`,
   bold: ({ primaryColor, accentColor }) => `
@@ -377,7 +456,9 @@ export function applyThemeToHtml(content: string, settings: ContractThemeSetting
   }
 
   // 2. Apply theme styling - inject a flat (Word-parseable), scoped <style> block
-  const rawCss = (THEME_STYLES[theme]?.(args) || THEME_STYLES.corporate(args)) + BASE_SECTION_STYLES;
+  const rawCss = (THEME_STYLES[theme]?.(args) || THEME_STYLES.corporate(args))
+    + (THEME_TOC_STYLES[theme]?.(args) || THEME_TOC_STYLES.corporate(args))
+    + BASE_SECTION_STYLES;
   const rootSelector = `.contract-theme-${theme}`;
   let flatCss = flattenNestedCss(rootSelector, rawCss);
   if (options?.wordSafe) flatCss = makeWordSafe(flatCss);

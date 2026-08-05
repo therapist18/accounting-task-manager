@@ -27,7 +27,7 @@ import {
   Columns2, FileText, Database, ChevronDown, ShieldCheck, Laptop2,
   Users, Megaphone, Car, LayoutTemplate, UserCog, Link as LinkIcon, PlayCircle,
   Copy, Download, AlertCircle, CheckCircle2, ChevronRight, X, FileSignature, Check, ChevronsUpDown,
-  ChevronDownIcon, ChevronUpIcon, Braces,
+  ChevronDownIcon, ChevronUpIcon, Braces, Sliders, Building2,
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
@@ -40,7 +40,7 @@ import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
 import { buildDefaultClauseMap } from '../utils/clauseEngine';
 import type { ContractEmployeeInfo } from '../utils/data';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
-import { EMPLOYMENT_TYPE_OPTIONS, WORK_ARRANGEMENT_OPTIONS, DEFAULT_DEPARTMENT_OPTIONS, withCurrentValue } from '../utils/profileOptions';
+import { DEFAULT_DEPARTMENT_OPTIONS, withCurrentValue } from '../utils/profileOptions';
 import { ContractPreview } from '../components/ContractPreview';
 import { MasterFieldEditControl } from '../components/MasterFieldEditControl';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
@@ -53,13 +53,23 @@ import { fetchCompanySettings, upsertCompanySettings, fetchCompanyDepartmentsFro
 // matched against each placeholder's own settings_key. Anything that matches
 // no pattern falls into an "Other" panel rather than being silently dropped.
 const SETTINGS_GROUPS: { label: string; description?: string; test: RegExp }[] = [
-  { label: 'Employment Details', description: 'Job Level is set on the Overview tab (it also drives clause-suggestion rules there) and mirrors into {{job_level}} automatically.', test: /^reports_to$|^work_location$/i },
+  { label: 'Employment Details', test: /^reports_to$|^work_location$/i },
   { label: 'Salary & Payment', test: /^salary_currency$|^payment_frequency$|^payment_day$/i },
   { label: 'Working Hours', test: /^working_|start_time|end_time|break_|rest_days|work_mode/i },
   { label: 'Benefits', test: /allowance|medical|pension/i },
   { label: 'Termination & Probation', test: /notice_|probation_|termination_/i },
   { label: 'Leave', test: /leave_days$/i },
 ];
+
+// Excluded from the Job Profile Fields tab even though they're
+// source_kind='settings_cascade' rows - standardPlaceholders.ts's HARDCODED
+// layer resolves both unconditionally from the Company's Signatory Director
+// selection (ec_company_settings.signatory_individual_id, via
+// fetchSignatoryNameForCompany), which always wins over the generic
+// settings-cascade dispatch. Editing them here would silently do nothing at
+// contract-generation time; the real editor is the Signatory Director picker
+// in the Company Details/Defaults tab.
+const SETTINGS_TAB_EXCLUDED_KEYS = new Set(['signatory_name', 'signatory_title']);
 
 const DEPARTMENT_VISUALS: { test: RegExp; icon: typeof Briefcase; classes: string }[] = [
   { test: /audit/i, icon: ShieldCheck, classes: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400' },
@@ -84,8 +94,6 @@ const SECTION_BADGE_COLORS = [
   'bg-amber-50 text-amber-700 border-amber-200',
   'bg-emerald-50 text-emerald-700 border-emerald-200',
 ];
-
-const JOB_LEVEL_OPTIONS = ['Entry Level', 'Junior', 'Mid-Level', 'Senior', 'Manager', 'Executive'];
 const PROBATION_OPTIONS = ['Not Applicable', '1 Month', '3 Months', '6 Months'];
 const NOTICE_OPTIONS = ['1 Week', '2 Weeks', '1 Month', '2 Months', '3 Months'];
 const LEAVE_DAY_OPTIONS = ['7 Days', '14 Days', '21 Days', '30 Days', 'According to Company Policy'];
@@ -218,14 +226,29 @@ function SettingSelect({ label, settingKey, options, settings, onChange, placeho
   );
 }
 
-function SectionPanel({ title, description, children, className }: {
+function SectionPanel({ title, description, children, className, icon: Icon, accent = 'blue' }: {
   title: string; description?: string; children: ReactNode; className?: string;
+  icon?: typeof Briefcase;
+  accent?: 'blue' | 'emerald' | 'indigo' | 'amber';
 }) {
+  const ACCENTS: Record<string, string> = {
+    blue: 'bg-blue-50 text-custom-blue dark:bg-blue-500/10 dark:text-blue-400',
+    emerald: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400',
+    indigo: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400',
+    amber: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400',
+  };
   return (
     <div className={cn("bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800/60 p-6 md:p-8 shadow-[0_1px_3px_0_rgb(0,0,0,0.02)]", className)}>
-      <div className="mb-7">
-        <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 tracking-tight">{title}</h3>
-        {description && <p className="text-sm text-slate-500 mt-1.5">{description}</p>}
+      <div className="mb-7 flex items-start gap-3.5">
+        {Icon && (
+          <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center shrink-0", ACCENTS[accent])}>
+            <Icon className="w-4.5 h-4.5" />
+          </div>
+        )}
+        <div>
+          <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 tracking-tight">{title}</h3>
+          {description && <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">{description}</p>}
+        </div>
       </div>
       {children}
     </div>
@@ -520,9 +543,11 @@ export default function JobProfilesPage() {
   // silently sharing one value (see standardPlaceholders.ts for the full
   // history). Bucketed via SETTINGS_GROUPS (matched against each
   // placeholder's key), same panel layout the tab used to hardcode; anything
-  // unmatched lands in "Other".
+  // unmatched lands in "Other". See SETTINGS_TAB_EXCLUDED_KEYS above for why
+  // signatory_name/signatory_title never show up here despite matching
+  // source_kind='settings_cascade'.
   const settingsFields = useMemo(
-    () => previewPlaceholders.filter((p) => p.source_kind === 'settings_cascade'),
+    () => previewPlaceholders.filter((p) => p.source_kind === 'settings_cascade' && !SETTINGS_TAB_EXCLUDED_KEYS.has(p.key)),
     [previewPlaceholders]
   );
   const groupedSettingsFields = useMemo(() => {
@@ -946,59 +971,88 @@ export default function JobProfilesPage() {
                               <div className="p-6 lg:p-8">
                                 <TabsContent value="overview" className="m-0 focus:outline-none">
                                   <div className="max-w-4xl mx-auto space-y-6 lg:space-y-8">
-                                    <SectionPanel title="Profile Identity" description="The stable facts that identify this role.">
-                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
-                                        <FormField label="Job Title"><Input value={draft.job_title || ''} onChange={(e) => updateDraft({ job_title: e.target.value })} className="h-10 text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm" placeholder="e.g. Software Developer" /></FormField>
-                                        <FormField label={`Department${draft.scope === 'department' ? ' *' : ''}`}><Input value={draft.department || ''} onChange={(e) => updateDraft({ department: e.target.value })} className="h-10 text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm" placeholder="e.g. ICT" /></FormField>
-                                        <FormField label="Job Level">
-                                          <SearchableSelect
-                                            value={draft.job_level || '__unset__'}
-                                            onChange={(v) => {
-                                              const next = v === '__unset__' ? null : v;
-                                              // Mirrors into settings.job_level too - {{job_level}}
-                                              // in a generated contract resolves from the settings
-                                              // cascade (standardPlaceholders.ts), not this top-level
-                                              // column, which otherwise only feeds display strings
-                                              // and clause-suggestion facts elsewhere on this page.
-                                              updateDraft({ job_level: next });
-                                              updateDraftSettings('job_level', next || '');
-                                            }}
-                                            placeholder="Select level"
-                                            searchPlaceholder="Search levels..."
-                                            options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(JOB_LEVEL_OPTIONS, draft.job_level).map((opt) => ({ value: opt, label: opt }))]}
-                                          />
-                                        </FormField>
-                                        <FormField label="Employment Type">
-                                          <SearchableSelect
-                                            value={draft.employment_type || '__unset__'}
-                                            onChange={(v) => updateDraft({ employment_type: v === '__unset__' ? null : v })}
-                                            placeholder="Select type"
-                                            searchPlaceholder="Search types..."
-                                            options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, draft.employment_type).map((opt) => ({ value: opt, label: opt }))]}
-                                          />
-                                        </FormField>
-                                        <FormField label="Work Arrangement">
-                                          <SearchableSelect
-                                            value={draft.work_arrangement || '__unset__'}
-                                            onChange={(v) => updateDraft({ work_arrangement: v === '__unset__' ? null : v })}
-                                            placeholder="Select arrangement"
-                                            searchPlaceholder="Search arrangements..."
-                                            options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(WORK_ARRANGEMENT_OPTIONS, draft.work_arrangement).map((opt) => ({ value: opt, label: opt }))]}
-                                          />
-                                        </FormField>
-                                      </div>
+                                    <SectionPanel title="Profile Identity" description="The stable fact that identifies this role." icon={Briefcase} accent="blue">
+                                      <FormField label="Job Title"><Input value={draft.job_title || ''} onChange={(e) => updateDraft({ job_title: e.target.value })} className="h-10 text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm max-w-md" placeholder="e.g. Software Developer" /></FormField>
                                     </SectionPanel>
 
-                                    <SectionPanel title="Job Summary" description="This is the role purpose that can feed the job description appendix.">
-                                      <Textarea className="min-h-[160px] text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm p-4 leading-relaxed" placeholder="A short summary of what this role does..." value={draft.job_description || ''} onChange={(e) => updateDraft({ job_description: e.target.value })} />
-                                    </SectionPanel>
+                                    {(() => {
+                                      const totalSections = CONTRACT_SECTIONS.length;
+                                      const linkedSections = Object.keys(draft.section_clauses || {}).length;
+                                      const totalFields = settingsFields.length;
+                                      const completedFields = settingsFields.filter((p) => !!(draft.settings || {})[p.key]).length;
+                                      const responsibilitiesCount = (draft.key_responsibilities || []).length;
+                                      const formatDate = (iso?: string) => iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
+                                      const stats: { label: string; value: string; sub?: string; icon: typeof CheckCircle2; accent: string }[] = [
+                                        {
+                                          label: 'Status',
+                                          value: draft.is_active === false ? 'Inactive' : 'Active',
+                                          icon: draft.is_active === false ? AlertCircle : CheckCircle2,
+                                          accent: draft.is_active === false ? 'bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-400' : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400',
+                                        },
+                                        {
+                                          label: 'Clauses Linked',
+                                          value: `${linkedSections} / ${totalSections}`,
+                                          sub: 'contract sections',
+                                          icon: LinkIcon,
+                                          accent: 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400',
+                                        },
+                                        {
+                                          label: 'Fields Completed',
+                                          value: totalFields > 0 ? `${completedFields} / ${totalFields}` : '—',
+                                          sub: 'job profile fields',
+                                          icon: Database,
+                                          accent: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400',
+                                        },
+                                        {
+                                          label: 'Responsibilities',
+                                          value: String(responsibilitiesCount),
+                                          sub: responsibilitiesCount === 1 ? 'item listed' : 'items listed',
+                                          icon: UserCog,
+                                          accent: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400',
+                                        },
+                                        {
+                                          label: 'Created',
+                                          value: formatDate(draft.created_at),
+                                          icon: FileText,
+                                          accent: 'bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+                                        },
+                                        {
+                                          label: 'Last Updated',
+                                          value: formatDate(draft.updated_at),
+                                          icon: FileText,
+                                          accent: 'bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+                                        },
+                                      ];
+
+                                      return (
+                                        <SectionPanel title="At a Glance" description="Snapshot of how complete and up to date this profile is." icon={LayoutTemplate} accent="indigo">
+                                          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                            {stats.map((s) => {
+                                              const Icon = s.icon;
+                                              return (
+                                                <div key={s.label} className="group p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 flex flex-col gap-2.5 transition-all hover:shadow-[0_4px_14px_-6px_rgba(0,0,0,0.08)] hover:border-slate-300 dark:hover:border-slate-700">
+                                                  <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105", s.accent)}>
+                                                    <Icon className="w-4.5 h-4.5" />
+                                                  </div>
+                                                  <div>
+                                                    <p className="text-xl font-extrabold text-slate-800 dark:text-slate-100 leading-tight tracking-tight">{s.value}</p>
+                                                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-0.5">{s.label}</p>
+                                                    {s.sub && <p className="text-[11px] text-slate-400">{s.sub}</p>}
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </SectionPanel>
+                                      );
+                                    })()}
                                   </div>
                                 </TabsContent>
 
                                 <TabsContent value="responsibilities" className="m-0 focus:outline-none">
                                   <div className="max-w-4xl mx-auto space-y-6">
-                                    <SectionPanel title="Key Responsibilities">
+                                    <SectionPanel title="Key Responsibilities" description="What this role is actually accountable for day to day." icon={UserCog} accent="amber">
                                       <StringListEditor items={draft.key_responsibilities || []} onChange={(v) => updateDraft({ key_responsibilities: v })} placeholder="e.g. Maintain accurate financial records" />
                                     </SectionPanel>
                                   </div>
@@ -1017,16 +1071,18 @@ export default function JobProfilesPage() {
                                 <TabsContent value="fields" className="m-0 focus:outline-none">
                                   <div className="max-w-4xl mx-auto space-y-6 overflow-auto">
                                     {groupedSettingsFields.map((group) => (
-                                      <SectionPanel key={group.label} title={group.label} description={group.description}>
+                                      <SectionPanel key={group.label} title={group.label} description={group.description} icon={Sliders} accent="blue">
                                         <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
                                           {group.fields.map((p) => {
                                             const options = KNOWN_SELECT_OPTIONS[p.key];
                                             const inputType = KNOWN_INPUT_TYPES[p.key];
                                             return (
-                                              <div key={p.id} className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center">
+                                              <div key={p.id} className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-4 items-center rounded-lg -mx-2 px-2 transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/30">
                                                 <div className="flex flex-col gap-0.5">
                                                   <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{p.label}</span>
-                                                  {p.settings_key && <span className="text-[11px] text-slate-400">{p.settings_key}</span>}
+                                                  {p.settings_key && (
+                                                    <span className="text-[10px] font-semibold uppercase tracking-wide text-blue-400 dark:text-blue-500/80">{p.settings_key}</span>
+                                                  )}
                                                 </div>
                                                 {options ? (
                                                   <SettingSelect label="" settingKey={p.key} options={options} settings={draft.settings || {}} onChange={updateDraftSettings} defaultValue={p.default_value || undefined} />
@@ -1311,7 +1367,39 @@ export default function JobProfilesPage() {
           ) : (
             <ScrollArea className="flex-1">
               <div className="max-w-4xl mx-auto p-6 space-y-6 lg:space-y-8">
-                <SectionPanel title="Signatory" description="Who signs on the Company's behalf in the contract's Signatures section - shared by every Job Profile under this company (Company/Department Defaults profile scopes are retired, so this can't live on a per-profile tab anymore).">
+                {/* Hero strip - quick-glance status of this company's EC config */}
+                <div className="rounded-2xl bg-gradient-to-br from-custom-blue to-[#2d5a94] p-6 md:p-7 text-white shadow-[0_8px_24px_-8px_rgba(55,107,174,0.45)] flex flex-col sm:flex-row sm:items-center gap-5 sm:gap-8">
+                  <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center shrink-0">
+                    <Building2 className="w-6 h-6" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-white/70">Employment Contract Settings</p>
+                    <h2 className="text-lg font-bold tracking-tight truncate">
+                      {companies.find((c) => String(c.id) === selectedCompanyId)?.company_name || 'This Company'}
+                    </h2>
+                  </div>
+                  <div className="flex items-center gap-6 sm:gap-8 shrink-0">
+                    <div>
+                      <p className="text-lg font-extrabold leading-tight">{directors.length === 0 ? '—' : (companySettings?.signatory_individual_id != null ? 'Set' : 'Unset')}</p>
+                      <p className="text-[11px] font-medium text-white/70 uppercase tracking-wide">Signatory</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-extrabold leading-tight">{companyListsDraft.job_levels.length + companyListsDraft.employment_types.length + companyListsDraft.departments.length}</p>
+                      <p className="text-[11px] font-medium text-white/70 uppercase tracking-wide">Vocabulary Items</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-extrabold leading-tight">{companyFieldPlaceholders.length}</p>
+                      <p className="text-[11px] font-medium text-white/70 uppercase tracking-wide">Company Fields</p>
+                    </div>
+                  </div>
+                </div>
+
+                <SectionPanel
+                  title="Signatory"
+                  description="Who signs on the Company's behalf in the contract's Signatures section - shared by every Job Profile under this company (Company/Department Defaults profile scopes are retired, so this can't live on a per-profile tab anymore)."
+                  icon={FileSignature}
+                  accent="emerald"
+                >
                   <div className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-2 items-center">
                     <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Signatory Director</span>
                     <SearchableSelect
@@ -1328,26 +1416,28 @@ export default function JobProfilesPage() {
                 <SectionPanel
                   title="Job Profile Vocabulary"
                   description="This company's own Job Level / Employment Type / Department options, used by every Job Profile's pickers instead of the generic defaults. Leave a list empty to keep using the generic defaults for that field."
+                  icon={Sliders}
+                  accent="blue"
                 >
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div>
-                      <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 block">Job Levels</Label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 p-4">
+                      <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3 block">Job Levels</Label>
                       <StringListEditor
                         items={companyListsDraft.job_levels}
                         onChange={(v) => setCompanyListsDraft((prev) => ({ ...prev, job_levels: v }))}
                         placeholder="e.g. Senior"
                       />
                     </div>
-                    <div>
-                      <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 block">Employment Types</Label>
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 p-4">
+                      <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3 block">Employment Types</Label>
                       <StringListEditor
                         items={companyListsDraft.employment_types}
                         onChange={(v) => setCompanyListsDraft((prev) => ({ ...prev, employment_types: v }))}
                         placeholder="e.g. Permanent"
                       />
                     </div>
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 p-4">
+                      <div className="flex items-center justify-between mb-3">
                         <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Departments</Label>
                         <button
                           type="button"
@@ -1375,12 +1465,17 @@ export default function JobProfilesPage() {
                 </SectionPanel>
 
                 {companyFieldPlaceholders.length > 0 && (
-                  <SectionPanel title="Company Fields" description="Master-field-linked company facts used by this company's clauses - editing one here saves it to the actual Company record.">
+                  <SectionPanel
+                    title="Company Fields"
+                    description="Master-field-linked company facts used by this company's clauses - editing one here saves it to the actual Company record."
+                    icon={Database}
+                    accent="amber"
+                  >
                     <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
                       {companyFieldPlaceholders.map((p) => {
                         const val = previewMasterFieldValues[p.key] || '';
                         return (
-                          <div key={p.id} className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-4 items-center">
+                          <div key={p.id} className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-4 items-center rounded-lg -mx-2 px-2 transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/30">
                             <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{p.label}</span>
                             <div className="flex items-center gap-2">
                               <span className="flex-1 text-sm text-slate-600 dark:text-slate-300 truncate">

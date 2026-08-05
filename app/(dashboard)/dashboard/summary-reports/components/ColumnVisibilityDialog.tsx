@@ -31,9 +31,9 @@ export function ColumnVisibilityDialog({ visibleColumnIds, setVisibleColumnIds }
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
-          className="h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all shrink-0 border-slate-200 text-slate-600 hover:bg-slate-50"
+          className="h-9 px-3 rounded-lg text-sm font-bold gap-1.5 transition-all shrink-0 text-slate-500 hover:bg-slate-100"
         >
           <Eye className="h-3.5 w-3.5" />
           Columns

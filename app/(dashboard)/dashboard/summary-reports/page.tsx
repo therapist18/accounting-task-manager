@@ -379,77 +379,85 @@ export default function SummaryReportsPage() {
   const breadcrumbSubtext = activeSubDepartment?.name || (activeDeptId !== 'all' ? 'All Sub-units' : 'All Departments');
 
   return (
-    <div className="flex flex-col flex-1 overflow-auto bg-white">
-      {/* Title Bar — mirrors ReportsHeader */}
-      <div className="border-b border-slate-200 bg-white px-8 py-5 antialiased flex flex-col justify-center">
-        <div className="flex items-center justify-between">
-          <div className="min-w-0 flex flex-col gap-1.5">
-            <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight truncate leading-none flex items-center gap-2.5">
-              <LayoutDashboard className="h-5 w-5 text-blue-500 shrink-0" />
-              Summary Reports Dashboard
-            </h1>
-            <div className="flex items-center text-sm text-slate-500 font-semibold gap-1">
-              <Building2 className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-              <span className="text-blue-600 font-bold">{activeDepartment?.name || "All Departments"}</span>
-              <span className="text-slate-300 mx-0.5">/</span>
-              <span className="truncate text-slate-500">{breadcrumbSubtext}</span>
+    <div className="flex flex-col flex-1 overflow-auto bg-slate-50">
+      {/* Title Bar — the one strong, unambiguous focal point at the top of the page */}
+      <div className="border-b border-slate-200 bg-white px-6 py-4 antialiased flex flex-col justify-center">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 flex items-center gap-3">
+            <span className="h-10 w-10 rounded-xl bg-custom-blue text-white shadow-sm shrink-0 flex items-center justify-center">
+              <LayoutDashboard className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex flex-col gap-0.5">
+              <h1 className="text-xl font-black text-slate-900 tracking-tight truncate leading-none">
+                Summary Reports Dashboard
+              </h1>
+              <div className="flex items-center text-sm text-slate-500 font-semibold gap-1">
+                <span className="text-blue-600 font-bold">{activeDepartment?.name || "All Departments"}</span>
+                <span className="text-slate-300 mx-0.5">/</span>
+                <span className="truncate text-slate-500">{breadcrumbSubtext}</span>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          {/* Secondary controls — deliberately smaller and ghost-styled (no border, tint only
+              when active) so they recede behind the title instead of competing with it. */}
+          <div className="flex items-center gap-1 shrink-0">
             <ColumnVisibilityDialog visibleColumnIds={visibleColumnIds} setVisibleColumnIds={setVisibleColumnIds} />
-
-            {/* Show Time Toggle — same control/behavior as ReportsHeader, driving the same
-                formatDateCell(dateValue, showTime) used by the Reports module. */}
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={() => setShowTime((v) => !v)}
               className={cn(
-                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all shrink-0",
-                showTime ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                "h-9 px-3 rounded-lg text-sm font-bold gap-1.5 transition-all shrink-0",
+                showTime ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-100"
               )}
             >
               <Clock className="h-3.5 w-3.5" />
-              {showTime ? "Hide Time" : "Show Time"}
+              Time
             </Button>
-
-            {/* Delta Toggle — same control as ReportsHeader, showing day-gaps between
-                consecutive milestone columns. */}
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={() => setShowDelta((v) => !v)}
               className={cn(
-                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all shrink-0",
-                showDelta ? "bg-violet-50 border-violet-300 text-violet-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                "h-9 px-3 rounded-lg text-sm font-bold gap-1.5 transition-all shrink-0",
+                showDelta ? "bg-violet-50 text-violet-700" : "text-slate-500 hover:bg-slate-100"
               )}
             >
               <GitCompare className="h-3.5 w-3.5" />
-              {showDelta ? "Hide Δ" : "Show Δ"}
+              Δ
             </Button>
           </div>
         </div>
       </div>
 
-      <HierarchyTabs
-        departments={departments}
-        activeDeptId={activeDeptId} setActiveDeptId={setActiveDeptId}
-        activeSubDeptId={activeSubDeptId} setActiveSubDeptId={setActiveSubDeptId}
-        activeClassId={activeClassId} setActiveClassId={setActiveClassId}
-        deptTaskCounts={deptTaskCounts} subDeptTaskCounts={subDeptTaskCounts} classTaskCounts={classTaskCounts}
-      />
+      {/* Scope card — Department → Sub-Department → Class → Status grouped as one visual
+          unit instead of four independent full-width bars, per feedback: this is the single
+          biggest legibility fix on the page. Depth reads via color/weight (solid Department
+          tabs → lighter breadcrumb Sub-Department/Class → colored Status ghost tabs), not by
+          stacking more borders. */}
+      <div className="mx-6 mt-4 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <HierarchyTabs
+          departments={departments}
+          activeDeptId={activeDeptId} setActiveDeptId={setActiveDeptId}
+          activeSubDeptId={activeSubDeptId} setActiveSubDeptId={setActiveSubDeptId}
+          activeClassId={activeClassId} setActiveClassId={setActiveClassId}
+          deptTaskCounts={deptTaskCounts} subDeptTaskCounts={subDeptTaskCounts} classTaskCounts={classTaskCounts}
+        />
+        <StatusTabs activeTaskStatus={activeTaskStatus} setActiveTaskStatus={setActiveTaskStatus} counts={taskStatusCounts} />
+      </div>
 
-      <StatusTabs activeTaskStatus={activeTaskStatus} setActiveTaskStatus={setActiveTaskStatus} counts={taskStatusCounts} />
-
-      <PerspectiveTabs
-        activePerspective={activePerspective} setActivePerspective={setActivePerspective}
-        allCount={statusScopedTasks.length} officersCount={officersCount} managersCount={managersCount} clientsCount={clientsCount}
-        availableOfficers={availableOfficers} activeOfficerId={activeOfficerId} setActiveOfficerId={setActiveOfficerId} officerCounts={officerCounts}
-        availableTaskManagers={availableTaskManagers} activeManagerId={activeManagerId} setActiveManagerId={setActiveManagerId} managerCounts={managerCounts}
-        searchQuery={searchQuery} setSearchQuery={setSearchQuery}
-        refreshData={handleRefresh} loading={isRefreshing}
-      />
+      {/* View card — perspective switcher + search, a separate concern from Scope/Status */}
+      <div className="mx-6 mt-3 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <PerspectiveTabs
+          activePerspective={activePerspective} setActivePerspective={setActivePerspective}
+          allCount={statusScopedTasks.length} officersCount={officersCount} managersCount={managersCount} clientsCount={clientsCount}
+          availableOfficers={availableOfficers} activeOfficerId={activeOfficerId} setActiveOfficerId={setActiveOfficerId} officerCounts={officerCounts}
+          availableTaskManagers={availableTaskManagers} activeManagerId={activeManagerId} setActiveManagerId={setActiveManagerId} managerCounts={managerCounts}
+          searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+          refreshData={handleRefresh} loading={isRefreshing}
+        />
+      </div>
 
       <SummaryTable
         tasks={sortedTasks} companies={companies} departments={departments}

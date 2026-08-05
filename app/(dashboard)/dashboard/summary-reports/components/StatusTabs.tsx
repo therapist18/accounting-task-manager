@@ -2,52 +2,31 @@
 "use client";
 
 import React from "react";
-import { cn } from "@/lib/utils";
-import { AlertTriangle } from "lucide-react";
+import { PillTrack } from "./PillTrack";
 
-const TABS = [
-  { id: 'all', label: 'All' },
-  { id: 'enquiry', label: 'Enquiry' },
-  { id: 'wip', label: 'WIP' },
-  { id: 'completed', label: 'Completed' },
-  { id: 'overdue', label: 'Overdue', warn: true },
+// Semantic colors so status reads at a glance: All=blue, Enquiry=grey, WIP=amber,
+// Completed=green, Overdue=red. Same PillTrack control as every other tab row on the page —
+// only the color changes.
+const STATUS_ITEMS = [
+  { id: 'all', label: 'All', activeBg: 'bg-custom-blue', dot: 'bg-blue-400' },
+  { id: 'enquiry', label: 'Enquiry', activeBg: 'bg-slate-600', dot: 'bg-slate-400' },
+  { id: 'wip', label: 'WIP', activeBg: 'bg-amber-500', dot: 'bg-amber-400' },
+  { id: 'completed', label: 'Completed', activeBg: 'bg-emerald-600', dot: 'bg-emerald-400' },
+  { id: 'overdue', label: 'Overdue', activeBg: 'bg-rose-600', dot: 'bg-rose-400' },
 ];
 
-// Mirrors ReportsHeader's StatusFilterBar styling exactly, placed after the
-// Department/Sub-Department/Class hierarchy tabs.
 export function StatusTabs({ activeTaskStatus, setActiveTaskStatus, counts = {} }: {
   activeTaskStatus: string;
   setActiveTaskStatus: (v: string) => void;
   counts?: Record<string, number>;
 }) {
   return (
-    <div className="px-8 py-2.5 flex items-center border-b border-slate-200 bg-white antialiased">
-      <div className="flex gap-1.5">
-        {TABS.map(tab => {
-          const isActive = activeTaskStatus === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTaskStatus(tab.id)}
-              className={cn(
-                "h-10 px-5 text-base font-semibold rounded-lg transition-all flex items-center gap-2",
-                isActive
-                  ? (tab.warn ? "bg-rose-600 text-white shadow-sm" : "bg-custom-blue text-white shadow-sm")
-                  : (tab.warn ? "bg-white text-rose-600 border border-rose-200 hover:border-rose-300" : "bg-white text-slate-500 border border-slate-200 hover:border-slate-300 hover:text-slate-700")
-              )}
-            >
-              {tab.warn && <AlertTriangle className="h-3.5 w-3.5" />}
-              {tab.label}
-              <span className={cn(
-                "px-2 py-1 rounded-md text-sm font-bold tabular-nums",
-                isActive ? "bg-white/20 text-white" : tab.warn ? "bg-rose-50 text-rose-600" : "bg-slate-100 text-slate-500"
-              )}>
-                {counts[tab.id] ?? 0}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+    <div className="px-5 pb-3 pt-3 border-t border-slate-100">
+      <PillTrack
+        value={activeTaskStatus}
+        onValueChange={setActiveTaskStatus}
+        items={STATUS_ITEMS.map(s => ({ ...s, count: counts[s.id] ?? 0 }))}
+      />
     </div>
   );
 }

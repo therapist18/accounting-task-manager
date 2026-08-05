@@ -304,7 +304,10 @@ export default function Departments() {
     description: '',
     default_display: true,
     subdepartments: [],
-    officerId: ''
+    officerId: '',
+    officerIds: [],
+    managerIds: [],
+    assistantIds: []
   })
 
   // Sticky column widths
@@ -428,39 +431,94 @@ export default function Departments() {
     filteredDepartments.every(dept => expanded[dept.id]) &&
     filteredDepartments.every(dept => (dept.tm_subdepartments || []).every(subdept => expanded[`subdept-${subdept.id}`]));
 
+  const syncDepartmentRoleAssignments = async (deptId, deptForm = departmentForm) => {
+    const deptIdNum = parseInt(deptId, 10);
+    if (isNaN(deptIdNum)) return;
+
+    const targets = [
+      { role: 'officer', userIds: deptForm.officerIds || [] },
+      { role: 'manager', userIds: deptForm.managerIds || [] },
+      { role: 'assistant', userIds: deptForm.assistantIds || [] }
+    ];
+
+    const currentByRole = {};
+    for (const user of userData.allUsers) {
+      for (const assignment of user.assignments || []) {
+        if (assignment.department_id === deptIdNum && (assignment.subdepartment_id === null || assignment.subdepartment_id === undefined)) {
+          if (!currentByRole[assignment.role]) currentByRole[assignment.role] = [];
+          currentByRole[assignment.role].push({ id: assignment.id, user_id: user.id });
+        }
+      }
+    }
+
+    for (const { role, userIds } of targets) {
+      const current = currentByRole[role] || [];
+      const currentIds = new Set(current.map(c => c.user_id));
+      const targetSet = new Set(userIds);
+
+      for (const c of current) {
+        if (!targetSet.has(c.user_id)) {
+          await fetch(`/api/auth/role-assignments?id=${c.id}`, { method: 'DELETE' });
+        }
+      }
+
+      for (const uid of userIds) {
+        if (!currentIds.has(uid)) {
+          await fetch('/api/auth/role-assignments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role, user_id: uid, department_id: deptIdNum })
+          });
+        }
+      }
+    }
+  };
+
   const handleSaveDepartment = async () => {
     setSaving(true);
     try {
-      if (editingDepartmentId) await updateExistingDepartment(departmentForm);
-      else {
+      let deptId = editingDepartmentId;
+      if (deptId) {
+        await updateExistingDepartment(departmentForm);
+      } else {
         const newDept = await createNewDepartment(departmentForm);
+        deptId = newDept.id;
         setEditingDepartmentId(newDept.id);
       }
 
-      for (const sub of departmentForm.subdepartments) {
-        const isNew = !sub.id;
-        if (isNew) {
-          const { data: existing } = await supabase.from('tm_subdepartments').select('id').ilike('name', sub.name.trim()).eq('department_id', editingDepartmentId).limit(1);
-          if (existing?.length > 0) {
-            toast.error(`Subdepartment "${sub.name}" exists. Skipping.`);
-            continue;
+      if (editingDepartmentId) {
+        for (const sub of departmentForm.subdepartments) {
+          const isNew = !sub.id;
+          if (isNew) {
+            const { data: existing } = await supabase.from('tm_subdepartments').select('id').ilike('name', sub.name.trim()).eq('department_id', deptId).limit(1);
+            if (existing?.length > 0) {
+              toast.error(`Subdepartment "${sub.name}" exists. Skipping.`);
+              continue;
+            }
+          }
+
+          const payload = {
+            name: sub.name.trim(), description: sub.description, department_id: deptId,
+            default_display: sub.default_display, classes: sub.classes || [],
+            entity_types: sub.entity_types || []
+          };
+
+          if (isNew) {
+            const { data: newSub } = await supabase.from('tm_subdepartments').insert(payload).select().single();
+            if (newSub) await saveClassRequirements(newSub.id, sub.classes);
+          } else {
+            await supabase.from('tm_subdepartments').update(payload).eq('id', sub.id);
+            await updateClassRequirements(sub.id, sub.classes);
           }
         }
-
-        const payload = {
-          name: sub.name.trim(), description: sub.description, department_id: editingDepartmentId,
-          default_display: sub.default_display, classes: sub.classes || [],
-          entity_types: sub.entity_types || []
-        };
-
-        if (isNew) {
-          const { data: newSub } = await supabase.from('tm_subdepartments').insert(payload).select().single();
-          if (newSub) await saveClassRequirements(newSub.id, sub.classes);
-        } else {
-          await supabase.from('tm_subdepartments').update(payload).eq('id', sub.id);
-          await updateClassRequirements(sub.id, sub.classes);
-        }
       }
+
+      await syncDepartmentRoleAssignments(deptId);
+
+      userService.clearUserDataCache();
+      const refreshedUserData = await userService.getAllUserData({ payrollAccess: true }, departments);
+      setUserData(refreshedUserData);
+
       toast.success('Department structure saved successfully!');
       setIsAddDepartmentOpen(false);
       await fetchData();
@@ -472,8 +530,10 @@ export default function Departments() {
   };
 
   const createNewDepartment = async (formData: DepartmentForm) => {
-    const { officerId, subdepartments, officers_history = [], ...departmentData } = formData;
-    const { data: newDept, error: deptError } = await supabase.from('tm_departments').insert([{ ...departmentData, officers_history }]).select('*').single();
+    const { officerId, subdepartments, officers_history, officerIds = [], ...departmentData } = formData;
+    const officersHistory = (officerIds.length > 0 ? officerIds : (officers_history || []).map(h => h.id))
+      .map(id => ({ id, start_date: new Date().toISOString() }));
+    const { data: newDept, error: deptError } = await supabase.from('tm_departments').insert([{ ...departmentData, officers_history: officersHistory }]).select('*').single();
     if (deptError) throw deptError;
     if (subdepartments?.length > 0) await createSubdepartmentsForDepartment(newDept.id, subdepartments);
     return newDept;
@@ -481,8 +541,10 @@ export default function Departments() {
 
   const updateExistingDepartment = async (formData: DepartmentForm) => {
     if (!editingDepartmentId) return;
-    const { officerId, subdepartments, officers_history = [], ...departmentData } = formData;
-    const { data: updatedDept, error: deptError } = await supabase.from('tm_departments').update({ ...departmentData, officers_history }).eq('id', editingDepartmentId).select('*').single();
+    const { officerId, subdepartments, officers_history, officerIds = [], ...departmentData } = formData;
+    const officersHistory = (officerIds.length > 0 ? officerIds : (officers_history || []).map(h => h.id))
+      .map(id => ({ id, start_date: new Date().toISOString() }));
+    const { data: updatedDept, error: deptError } = await supabase.from('tm_departments').update({ ...departmentData, officers_history: officersHistory }).eq('id', editingDepartmentId).select('*').single();
     if (deptError) throw deptError;
     return updatedDept;
   };
@@ -530,15 +592,24 @@ export default function Departments() {
     }
   };
 
+  const getDeptRoleState = (deptId) => {
+    const { officers, managers, assistants } = userService.getDepartmentUsers(userData.allUsers, String(deptId));
+    return {
+      officerIds: officers.map(o => o.id),
+      managerIds: managers.map(m => m.id),
+      assistantIds: assistants.map(a => a.id)
+    };
+  };
+
   const handleAddDepartment = () => {
     setEditingDepartmentId(null); setEditingSubdepartmentId(null);
-    setDepartmentForm({ name: '', description: '', default_display: true, subdepartments: [], officers_history: [], officerId: '' });
+    setDepartmentForm({ name: '', description: '', default_display: true, subdepartments: [], officerIds: [], managerIds: [], assistantIds: [], officerId: '' });
     setIsAddDepartmentOpen(true);
   };
 
   const handleEditDepartment = (dept) => {
     setEditingDepartmentId(dept.id); setEditingSubdepartmentId(null);
-    const associatedOfficerIds = userService.getDepartmentUsers(userData.allUsers, dept.id.toString()).officers.map(o => o.id);
+    const roleState = getDeptRoleState(dept.id);
     const mappedSubdepartments = (dept.tm_subdepartments || []).map(sub => ({
       ...sub,
       classes: (sub.classes || []).map(cls => ({
@@ -550,15 +621,17 @@ export default function Departments() {
     setDepartmentForm({
       name: dept.name, description: dept.description || '', default_display: dept.default_display ?? true,
       entity_types: dept.entity_types || [], subdepartments: mappedSubdepartments,
-      officers_history: associatedOfficerIds.map(id => ({ id, start_date: new Date().toISOString() })), officerId: ''
+      officerIds: roleState.officerIds, managerIds: roleState.managerIds, assistantIds: roleState.assistantIds, officerId: ''
     });
     setIsAddDepartmentOpen(true);
   };
 
   const handleAddSubdepartment = (deptId, deptName) => {
     setEditingDepartmentId(deptId); setEditingSubdepartmentId(null);
+    const roleState = getDeptRoleState(deptId);
     setDepartmentForm({
       name: deptName, description: '', default_display: true, officerId: '',
+      officerIds: roleState.officerIds, managerIds: roleState.managerIds, assistantIds: roleState.assistantIds,
       subdepartments: [{
         name: '', description: '', classes: [], taskManagerId: '', taskAssistantIds: [],
         default_display: true, entity_types: [], officerId: ''
@@ -572,10 +645,12 @@ export default function Departments() {
     if (!department) return;
     const fullSubdept = department.tm_subdepartments?.find(sd => sd.id === subdept.id);
     if (!fullSubdept) return;
+    const roleState = getDeptRoleState(department.id);
 
     setDepartmentForm({
       name: department.name, description: department.description || '', default_display: department.default_display || true,
-      entity_types: department.entity_types || [], officers_history: [], officerId: '',
+      entity_types: department.entity_types || [], officerId: '',
+      officerIds: roleState.officerIds, managerIds: roleState.managerIds, assistantIds: roleState.assistantIds,
       subdepartments: [{ ...fullSubdept, officerId: '', taskManagerId: '', taskAssistantIds: [] }]
     });
     setEditingDepartmentId(department.id); setEditingSubdepartmentId(fullSubdept.id); setIsAddDepartmentOpen(true);
@@ -583,7 +658,7 @@ export default function Departments() {
 
   useEffect(() => {
     if (!isAddDepartmentOpen) {
-      setDepartmentForm({ name: '', description: '', default_display: true, subdepartments: [], officers_history: [], officerId: '' });
+      setDepartmentForm({ name: '', description: '', default_display: true, subdepartments: [], officerIds: [], managerIds: [], assistantIds: [], officerId: '' });
       setEditingDepartmentId(null); setEditingSubdepartmentId(null);
     }
   }, [isAddDepartmentOpen]);

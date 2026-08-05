@@ -2,84 +2,7 @@
 "use client";
 
 import React from "react";
-import { cn } from "@/lib/utils";
-import { Check } from "lucide-react";
-
-// Level 1 (Departments) mirrors ReportsHeader's StatusFilterBar: solid rounded-lg tabs.
-const DeptRow = ({ value, onValueChange, items, counts }: {
-  value: string; onValueChange: (v: string) => void; items: { id: string; name: string }[]; counts: Record<string, number>;
-}) => (
-  <div className="px-8 py-2.5 flex items-center flex-wrap gap-1.5 border-b border-slate-200 bg-white antialiased">
-    <button
-      onClick={() => onValueChange('all')}
-      className={cn(
-        "h-10 px-5 text-base font-semibold rounded-lg transition-all flex items-center gap-2",
-        value === 'all' ? "bg-custom-blue text-white shadow-sm" : "bg-white text-slate-500 border border-slate-200 hover:border-slate-300 hover:text-slate-700"
-      )}
-    >
-      All Departments
-      <span className={cn("px-2 py-1 rounded-md text-sm font-bold tabular-nums", value === 'all' ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500")}>
-        {counts.all ?? 0}
-      </span>
-    </button>
-    {items.map(item => {
-      const isActive = value === item.id;
-      return (
-        <button
-          key={item.id}
-          onClick={() => onValueChange(item.id)}
-          className={cn(
-            "h-10 px-5 text-base font-semibold rounded-lg transition-all flex items-center gap-2",
-            isActive ? "bg-custom-blue text-white shadow-sm" : "bg-white text-slate-500 border border-slate-200 hover:border-slate-300 hover:text-slate-700"
-          )}
-        >
-          {item.name}
-          <span className={cn("px-2 py-1 rounded-md text-sm font-bold tabular-nums", isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500")}>
-            {counts[item.id] ?? 0}
-          </span>
-        </button>
-      );
-    })}
-  </div>
-);
-
-// Levels 2 & 3 (Subdepartments / Classes) mirror PersonFilterStrip's "assignee pill" row —
-// subordinate to the solid dept tabs above, nested on a tinted strip.
-const SubRow = ({ label, value, onValueChange, items, counts, tint }: {
-  label: string; value: string; onValueChange: (v: string) => void; items: { id: string; name: string }[]; counts: Record<string, number>; tint: string;
-}) => (
-  <div className="px-8 py-2.5 flex flex-wrap items-center gap-1.5 border-b border-slate-100 bg-slate-50/80">
-    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mr-1 shrink-0">{label}</span>
-    <button
-      onClick={() => onValueChange('all')}
-      className={cn(
-        "h-9 px-4 rounded-full text-sm font-bold transition-all border flex items-center gap-1.5",
-        value === 'all' ? "bg-slate-800 border-slate-800 text-white shadow-sm" : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-      )}
-    >
-      {value === 'all' && <Check className="h-3 w-3" />}
-      All
-      <span className={cn("text-xs font-black tabular-nums", value === 'all' ? "text-white/60" : "text-slate-400")}>{counts.all ?? 0}</span>
-    </button>
-    {items.map(item => {
-      const isActive = value === item.id;
-      return (
-        <button
-          key={item.id}
-          onClick={() => onValueChange(item.id)}
-          className={cn(
-            "h-9 px-4 rounded-full text-sm font-bold transition-all border flex items-center gap-1.5",
-            isActive ? `${tint} text-white shadow-sm` : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-          )}
-        >
-          {isActive && <Check className="h-3 w-3" />}
-          {item.name}
-          <span className={cn("text-xs font-black tabular-nums", isActive ? "text-white/60" : "text-slate-400")}>{counts[item.id] ?? 0}</span>
-        </button>
-      );
-    })}
-  </div>
-);
+import { PillTrack } from "./PillTrack";
 
 export function HierarchyTabs({
   departments,
@@ -106,31 +29,45 @@ export function HierarchyTabs({
 
   return (
     <div className="flex flex-col">
-      <DeptRow
-        value={activeDeptId}
-        onValueChange={(v) => { setActiveDeptId(v); setActiveSubDeptId('all'); setActiveClassId('all'); }}
-        items={departments.map(d => ({ id: d.id.toString(), name: d.name }))}
-        counts={deptTaskCounts}
-      />
+      <div className="px-5 py-3">
+        <PillTrack
+          value={activeDeptId}
+          onValueChange={(v) => { setActiveDeptId(v); setActiveSubDeptId('all'); setActiveClassId('all'); }}
+          items={[
+            { id: 'all', label: 'All Departments', count: deptTaskCounts.all ?? 0 },
+            ...departments.map((d: any) => ({ id: d.id.toString(), label: d.name, count: deptTaskCounts[d.id.toString()] ?? 0 })),
+          ]}
+        />
+      </div>
+
       {activeDeptId !== 'all' && subDepartments.length > 0 && (
-        <SubRow
-          label="Sub-Department"
-          tint="bg-custom-blue border-custom-blue"
-          value={activeSubDeptId}
-          onValueChange={(v) => { setActiveSubDeptId(v); setActiveClassId('all'); }}
-          items={subDepartments.map((s: any) => ({ id: s.id.toString(), name: s.name }))}
-          counts={subDeptTaskCounts}
-        />
+        <div className="px-5 pb-3 flex items-center gap-2 border-t border-slate-100 pt-3">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest shrink-0">Sub-Dept</span>
+          <PillTrack
+            size="sm"
+            value={activeSubDeptId}
+            onValueChange={(v) => { setActiveSubDeptId(v); setActiveClassId('all'); }}
+            items={[
+              { id: 'all', label: 'All', count: subDeptTaskCounts.all ?? 0 },
+              ...subDepartments.map((s: any) => ({ id: s.id.toString(), label: s.name, count: subDeptTaskCounts[s.id.toString()] ?? 0 })),
+            ]}
+          />
+        </div>
       )}
+
       {activeSubDeptId !== 'all' && classes.length > 0 && (
-        <SubRow
-          label="Class"
-          tint="bg-violet-600 border-violet-600"
-          value={activeClassId}
-          onValueChange={setActiveClassId}
-          items={classes.map((c: any) => ({ id: c.id.toString(), name: c.name }))}
-          counts={classTaskCounts}
-        />
+        <div className="px-5 pb-3 flex items-center gap-2 border-t border-slate-100 pt-3">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest shrink-0">Class</span>
+          <PillTrack
+            size="sm"
+            value={activeClassId}
+            onValueChange={setActiveClassId}
+            items={[
+              { id: 'all', label: 'All', count: classTaskCounts.all ?? 0, activeBg: 'bg-violet-600' },
+              ...classes.map((c: any) => ({ id: c.id.toString(), label: c.name, count: classTaskCounts[c.id.toString()] ?? 0, activeBg: 'bg-violet-600' })),
+            ]}
+          />
+        </div>
       )}
     </div>
   );

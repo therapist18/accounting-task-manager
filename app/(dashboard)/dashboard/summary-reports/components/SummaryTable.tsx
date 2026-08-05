@@ -226,9 +226,9 @@ export function SummaryTable({
   };
 
   return (
-    <div className="flex flex-col flex-1 antialiased pt-0 bg-white">
-      <div className="relative overflow-hidden border border-slate-200 shadow-sm">
-        <div className="overflow-auto max-h-[calc(100vh-330px)] custom-scrollbar">
+    <div className="flex flex-col flex-1 antialiased bg-slate-50 px-6 pb-6">
+      <div className="relative overflow-hidden rounded-xl border border-slate-200 shadow-sm mt-3">
+        <div className="overflow-auto max-h-[calc(100vh-360px)] custom-scrollbar">
           <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
             <colgroup>
               <col style={{ width: INDEX_COL_WIDTH }} />
@@ -354,8 +354,8 @@ export function SummaryTable({
                   const idx = item.globalIdx;
 
                   return (
-                    <TableRow key={task.id} className={cn("group border-0 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-slate-50/70", "hover:bg-blue-50/50")}>
-                      <TableCell className={cn("sticky left-0 z-20 border-r border-b border-slate-200 text-center py-1.5", idx % 2 === 0 ? "bg-white" : "bg-slate-50/70", "group-hover:bg-blue-50/50")}>
+                    <TableRow key={task.id} className={cn("group border-0 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "hover:bg-blue-50/50")}>
+                      <TableCell className={cn("sticky left-0 z-20 border-r border-b border-slate-200 text-center py-2.5", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "group-hover:bg-blue-50/50")}>
                         <span className="text-sm font-semibold text-slate-400 group-hover:text-slate-600 transition-colors">
                           {((currentPage - 1) * rowsPerPage) + idx + 1}
                         </span>
@@ -380,8 +380,8 @@ export function SummaryTable({
                             <TableCell
                               key={col.id}
                               className={cn(
-                                "px-1 py-1.5 border-r border-b border-slate-100 text-center border-l-[3px] border-l-amber-300/40",
-                                idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
+                                "px-1 py-2.5 border-r border-b border-slate-100 text-center border-l-[3px] border-l-amber-300/40",
+                                idx % 2 === 0 ? "bg-white" : "bg-slate-100/50",
                                 "group-hover:bg-blue-50/50"
                               )}
                             >
@@ -422,7 +422,7 @@ export function SummaryTable({
                           <TableCell
                             key={col.id}
                             className={cn(
-                              "px-4 py-1.5 border-r border-b border-slate-200 text-sm whitespace-nowrap transition-colors",
+                              "px-4 py-2.5 border-r border-b border-slate-200 text-sm max-w-0 overflow-hidden whitespace-nowrap text-ellipsis transition-colors",
                               isSticky && "sticky z-20 shadow-[2px_0_4px_rgba(0,0,0,0.02)] bg-inherit",
                               col.highlight ? "bg-amber-50/40 group-hover:bg-amber-50/70 text-amber-800 font-medium"
                                 : col.type === 'computed_time' ? "bg-violet-50/40 group-hover:bg-violet-50/60"

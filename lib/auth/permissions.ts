@@ -7,6 +7,7 @@ export type PermissionKey =
   | "tasks.view"
   | "reports.view"
   | "summary_reports.view"
+  | "company_profiles.view"
   | "users.view"
   | "users.manage"
   | "settings.departments.view"
@@ -43,6 +44,7 @@ export const PERMISSIONS: PermissionDefinition[] = [
   { key: "tasks.view", label: "Task Tracking", group: "Task Management", description: "View and work with tracked tasks.", paths: ["/dashboard/tasks"] },
   { key: "reports.view", label: "Reports", group: "Task Management", description: "View reports dashboards.", paths: ["/dashboard/reports"] },
   { key: "summary_reports.view", label: "Summary Reports Dashboard", group: "Task Management", description: "View the admin summary reports dashboard.", paths: ["/dashboard/summary-reports"] },
+  { key: "company_profiles.view", label: "Company Profiles", group: "Task Management", description: "View company profiles: their people and tasks.", paths: ["/dashboard/company-profiles"] },
   { key: "users.view", label: "View Users", group: "Administration", description: "Open user management screens.", paths: ["/dashboard/users-management"] },
   { key: "users.manage", label: "Manage Users", group: "Administration", description: "Create, update, and delete user accounts." },
   { key: "settings.departments.view", label: "Departments", group: "Settings", description: "Manage department structures.", paths: ["/dashboard/departments/departments", "/dashboard/departments"] },

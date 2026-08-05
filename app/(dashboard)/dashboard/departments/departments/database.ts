@@ -225,6 +225,9 @@ export type DepartmentForm = {
   subdepartments: SubdepartmentForm[]
   officerId: string
   officers_history?: OfficerHistory[]
+  officerIds?: string[]
+  managerIds?: string[]
+  assistantIds?: string[]
   specification?: string[] // Changed from string to string[]
 }
 

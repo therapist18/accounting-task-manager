@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import supabase from '@/lib/supabase/client';
 import { replacePlaceholders } from '../../tasks-requirements/utils/templateFormatters';
 import { Button } from '@/components/ui/button';
@@ -10,8 +11,6 @@ import {
 import { saveAs } from 'file-saver';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ContractThemePanel } from './ContractThemePanel';
 import { ContractThemeSettings, DEFAULT_CONTRACT_THEME, applyThemeToHtml } from '../utils/themeEngine';
@@ -33,7 +32,7 @@ import type { EcPlaceholder } from '../utils/ecPlaceholders';
 // Placeholders whose value is block-level HTML (<li>...</li> fragments or a
 // full <table>, not a scalar fact) - wrapping these in the <span> below
 // would be invalid nesting (inline span around block content), which
-// browsers/html2canvas/docx export handle by silently hoisting the block
+// browsers/print/docx export handle by silently hoisting the block
 // element back out, breaking layout. An empty list is also a legitimate
 // state ("no benefits configured", "no extra responsibilities entered"),
 // not a missing fact, so these never get the missing-value placeholder
@@ -118,6 +117,12 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const [signatoryName, setSignatoryName] = useState('');
   const [payrollStatutoryLine, setPayrollStatutoryLine] = useState<StatutoryDeductionsBreakdown | null>(null);
 
+  const loadSignatoryName = useCallback(() => fetchSignatoryNameForCompany(companyId).then(setSignatoryName), [companyId]);
+  const loadPayrollStatutoryLine = useCallback(
+    () => fetchPayrollStatutoryLine(companyId, employee?.individualId).then(setPayrollStatutoryLine),
+    [companyId, employee?.individualId]
+  );
+
   useEffect(() => {
     let cancelled = false;
     fetchSignatoryNameForCompany(companyId).then((name) => { if (!cancelled) setSignatoryName(name); });
@@ -134,10 +139,8 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const [themePanelOpen, setThemePanelOpen] = useState(false);
 
   const [isSaving, setIsSaving] = useState(false);
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [showToc, setShowToc] = useState(true);
 
-  const htmlCaptureRef = useRef<HTMLDivElement>(null);
   const contentMeasureRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -174,19 +177,18 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   // getting stuck on a fetch that never runs. No job-profiles fetch here -
   // settings/clauses resolve only from selectedJobProfile itself (no
   // Company/Department inheritance, see resolveEffectiveClauses).
-  useEffect(() => {
-    async function loadContext() {
-      setLoadingContext(true);
-      const [allClauses, companies] = await Promise.all([
-        fetchClauses(),
-        fetchCompanies(),
-      ]);
-      setClauses(allClauses);
-      setCompany(companyId ? companies.find((c) => String(c.id) === String(companyId)) || null : null);
-      setLoadingContext(false);
-    }
-    loadContext();
+  const loadContext = useCallback(async () => {
+    setLoadingContext(true);
+    const [allClauses, companies] = await Promise.all([
+      fetchClauses(),
+      fetchCompanies(),
+    ]);
+    setClauses(allClauses);
+    setCompany(companyId ? companies.find((c) => String(c.id) === String(companyId)) || null : null);
+    setLoadingContext(false);
   }, [companyId]);
+
+  useEffect(() => { loadContext(); }, [loadContext]);
 
   // Reset the live theme customization whenever we switch to a different
   // employee's contract, preloading whatever theme was saved on it last time.
@@ -303,6 +305,19 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
 
   const { ecPlaceholders, masterFieldValues, isResolving: isResolvingMasterFields, refresh: refreshMasterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
 
+  // The toolbar's refresh button used to only re-run refreshMasterFieldValues,
+  // leaving clauses/company/signatory/payroll figures stale until the next
+  // company or employee switch remounted those effects - re-fetch
+  // everything the initial load fetches, not just master fields.
+  const handleRefreshAll = useCallback(async () => {
+    await Promise.all([
+      refreshMasterFieldValues(),
+      loadContext(),
+      loadSignatoryName(),
+      loadPayrollStatutoryLine(),
+    ]);
+  }, [refreshMasterFieldValues, loadContext, loadSignatoryName, loadPayrollStatutoryLine]);
+
   const employeeValues = useMemo(
     () => buildHighlightedPreviewValues(employee, company, offer as EmploymentOffer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine),
     [employee, company, offer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine]
@@ -320,19 +335,148 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     });
   }, [clausesById, effectiveClauses, effectiveSettings, employeeValues, employee, showToc]);
 
+  // Same assembly, but for the actual submitted document (PDF/Word/the copy
+  // saved to storage) rather than the on-screen editing preview -
+  // hideMissingClauses drops the "[No clause configured]" warning sections
+  // entirely instead of rendering them, since that warning exists to help
+  // whoever is still assembling the contract notice gaps, not to appear in
+  // what the employee actually receives. includeToc still follows the same
+  // showToc toggle, so hiding the ToC in the preview hides it from the
+  // export too.
+  const exportBodyHtml = useMemo(() => {
+    if (!employee) return '';
+    return assembleContractHtml({
+      sectionKeys: CONTRACT_SECTIONS.map((s) => s.key),
+      clausesById,
+      effectiveClauses,
+      effectiveSettings,
+      employeePlaceholderValues: employeeValues,
+      includeToc: showToc,
+      hideMissingClauses: true,
+    });
+  }, [clausesById, effectiveClauses, effectiveSettings, employeeValues, employee, showToc]);
+
   const themeSettings: ContractThemeSettings = themeOverride || DEFAULT_CONTRACT_THEME;
   const mergedValues = { ...effectiveSettings, ...employeeValues };
 
   const themedHtml = bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings), mergedValues) : '';
-  const wordSafeHtml = bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings, { wordSafe: true }), mergedValues) : '';
+  // Renamed id="section-x"/href="#section-x" to a "pdf-section-x" namespace,
+  // distinct from the live on-screen preview's own id="section-x" elements
+  // (which stay mounted, just display:none via print:hidden, during
+  // window.print()). Without this, the browser's anchor lookup while
+  // printing resolves #section-x to whichever element comes first in the
+  // DOM - the hidden on-screen copy, not this print-only one - so the
+  // resulting PDF's Table of Contents links pointed at nothing. Word export
+  // doesn't need this: it's a separate file with no shared DOM to collide
+  // with, which is why its bookmarks (see buildOutput below) already worked.
+  const exportThemedHtml = exportBodyHtml
+    ? replacePlaceholders(applyThemeToHtml(exportBodyHtml, themeSettings), mergedValues)
+        .replace(/id="section-/g, 'id="pdf-section-')
+        .replace(/href="#section-/g, 'href="#pdf-section-')
+    : '';
+  const wordSafeHtml = exportBodyHtml ? replacePlaceholders(applyThemeToHtml(exportBodyHtml, themeSettings, { wordSafe: true }), mergedValues) : '';
 
   const updateThemeSettings = (settings: ContractThemeSettings) => setThemeOverride(settings);
 
   const buildOutput = (): { blob: Blob; fileName: string } | null => {
     if (!employee || !wordSafeHtml) return null;
     const baseName = employee.fullName.replace(/\s+/g, '_');
-    const htmlDoc = `<!doctype html><html><head><meta charset="utf-8"><title>${baseName} Employment Contract</title></head><body>${wordSafeHtml}</body></html>`;
-    return { blob: new Blob([htmlDoc], { type: 'application/msword' }), fileName: `${baseName}_Employment_Contract.doc` };
+
+    // Word's HTML import filter only reliably reads <style> blocks that are
+    // direct children of <head> - a <style> tag buried inside <body> (which
+    // is where applyThemeToHtml embeds its theme CSS, nested inside the
+    // .contract-theme-X div, so it works as a normal in-page <style> for the
+    // live preview/PDF) gets partially or entirely ignored by Word, which is
+    // exactly why only the parts of the layout NOT driven by that stylesheet
+    // (nothing, really - even headings render because Word applies some
+    // default heading weight regardless) looked styled while paragraphs and
+    // tables didn't. Pull the theme's own <style> content out and move it to
+    // <head> instead - same approach the reference file
+    // (lynne-drafts/contracts/manan-travkings.html) uses.
+    const styleMatch = wordSafeHtml.match(/<style>([\s\S]*?)<\/style>/);
+    const themeCss = styleMatch ? styleMatch[1] : '';
+    let bodyContent = wordSafeHtml.replace(/<style>[\s\S]*?<\/style>/, '');
+
+    // Table of Contents links (#section-x hrefs, from assembleContractHtml)
+    // work as scroll-to-anchor clicks in the live web preview already (see
+    // the click interceptor in the scroll-tracking effect above). Word
+    // doesn't recognize a plain id="..." as a jump target via its HTML
+    // import filter, only a genuine bookmark - <a name="..."></a> is the
+    // one format guaranteed compatible, because it's exactly what Word
+    // itself emits for a bookmark when it exports its own "Save as Web
+    // Page" HTML, so its importer is guaranteed to round-trip it correctly.
+    // Insert one at the start of every section the ToC can point to; the
+    // ToC's own <a href="#section-x"> needs no change, since #name matching
+    // an <a name="name"> is standard anchor behavior. (This document is a
+    // separate file with no shared DOM, unlike the live page - see
+    // exportThemedHtml's id="pdf-section-x" renaming above for the
+    // equivalent PDF fix, a different problem with a different cause.)
+    //
+    // Also strip Word's own default table cell margins via the legacy
+    // cellpadding/cellspacing HTML attributes - Word's table rendering
+    // applies its own built-in cell margins on top of/instead of a table's
+    // CSS `padding` unless told not to, which is why the exported tables
+    // showed noticeably more cell padding than the same theme's PDF output
+    // even though both share the exact same padding CSS.
+    if (typeof DOMParser !== 'undefined') {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(`<div>${bodyContent}</div>`, 'text/html');
+      doc.querySelectorAll('section[id]').forEach((section) => {
+        const id = section.getAttribute('id');
+        if (!id) return;
+        const bookmark = doc.createElement('a');
+        bookmark.setAttribute('name', id);
+        section.insertBefore(bookmark, section.firstChild);
+      });
+      doc.querySelectorAll('table').forEach((table) => {
+        table.setAttribute('cellpadding', '0');
+        table.setAttribute('cellspacing', '0');
+      });
+      bodyContent = doc.body.firstElementChild?.innerHTML ?? bodyContent;
+    }
+
+    // Real Microsoft Office HTML export markup, adopted from a proven
+    // reference (lynne-drafts/contracts/manan-travkings.html) rather than
+    // the plain-HTML-with-a-.doc-extension this used before. The
+    // xmlns:o/xmlns:w namespaces + <!--[if gte mso 9]> block tell Word's
+    // HTML import filter this is genuine Office markup, so it honors mso-*
+    // CSS and the named @page region below instead of falling back to a
+    // generic unstyled import. @page WordSection1 + div.page:WordSection1
+    // is Word's own mechanism for page size/margins on HTML-sourced
+    // documents - 1in matches the PDF export's page margin (see the
+    // .ec-print-area print stylesheet) so both formats agree. The theme
+    // wrapper's own inline padding/max-width (from applyThemeToHtml) is
+    // zeroed here for the same reason it is for print: @page already
+    // supplies the page margin, so leaving both in would double it on the
+    // first page.
+    const htmlDoc = `<!doctype html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<title>${baseName} Employment Contract</title>
+<!--[if gte mso 9]>
+<xml>
+  <w:WordDocument>
+    <w:View>Print</w:View>
+    <w:DoNotOptimizeForBrowser/>
+  </w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+${themeCss}
+  @page WordSection1 { size: 8.5in 11.7in; margin: 1in; mso-page-orientation: portrait; }
+  div.WordSection1 { page: WordSection1; }
+  div.WordSection1 [class^="contract-theme-"] { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }
+</style>
+</head>
+<body>
+<div class="WordSection1">${bodyContent}</div>
+</body>
+</html>`;
+    // Leading UTF-8 BOM so Word recognizes the encoding correctly instead of
+    // mis-rendering special characters (curly quotes, KES amounts, etc.).
+    const bomChar = String.fromCharCode(0xfeff);
+    return { blob: new Blob([bomChar, htmlDoc], { type: 'application/msword' }), fileName: `${baseName}_Employment_Contract.doc` };
   };
 
   const handleDownloadWord = () => {
@@ -340,48 +484,17 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     if (output) saveAs(output.blob, output.fileName);
   };
 
-  const handleDownloadPdf = async () => {
-    const element = htmlCaptureRef.current;
-    if (!element || !employee) return;
-
-    setIsGeneratingPdf(true);
-    try {
-      if (typeof document !== 'undefined' && (document as any).fonts?.ready) {
-        try { await (document as any).fonts.ready; } catch { /* ignore */ }
-      }
-      await Promise.all(
-        Array.from(element.querySelectorAll('img')).map((img) =>
-          (img as HTMLImageElement).complete
-            ? Promise.resolve()
-            : new Promise<void>((resolve) => {
-                (img as HTMLImageElement).addEventListener('load', () => resolve(), { once: true });
-                (img as HTMLImageElement).addEventListener('error', () => resolve(), { once: true });
-              })
-        )
-      );
-
-      const canvas = await html2canvas(element, { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' });
-      const imgData = canvas.toDataURL('image/jpeg', 0.95);
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgWidth = pageWidth;
-      const imgHeight = (canvas.height * pageWidth) / canvas.width;
-      const totalPdfPages = Math.ceil(imgHeight / pageHeight);
-
-      for (let i = 0; i < totalPdfPages; i++) {
-        if (i > 0) pdf.addPage();
-        pdf.addImage(imgData, 'JPEG', 0, -(i * pageHeight), imgWidth, imgHeight);
-      }
-
-      const baseName = employee.fullName.replace(/\s+/g, '_');
-      pdf.save(`${baseName}_Employment_Contract.pdf`);
-    } catch (err: any) {
-      console.error('PDF generation failed:', err);
-      toast.error('Failed to generate PDF. Please try again.');
-    } finally {
-      setIsGeneratingPdf(false);
-    }
+  // Uses the browser's native print pipeline instead of rasterizing a
+  // screenshot (html2canvas + jsPDF, the previous approach): the print-only
+  // area below renders themedHtml directly, so "Save as PDF" from the print
+  // dialog produces real vector text (selectable/searchable, small file
+  // size) and respects the page-break-before/page-break-inside rules already
+  // defined in themeEngine.ts's BASE_SECTION_STYLES, instead of a canvas
+  // getting sliced into A4-height chunks with no regard for where a
+  // paragraph, table row, or signature block actually ends.
+  const handleDownloadPdf = () => {
+    if (!hasOutput || !employee) return;
+    window.print();
   };
 
   const handleSaveToDb = async () => {
@@ -446,8 +559,9 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const hasOutput = !!bodyHtml;
 
   return (
-    <div className={className || "flex flex-col h-full bg-slate-100/50 dark:bg-slate-900 shadow-inner overflow-hidden flex-1 lg:min-w-[600px] relative"}>
-      
+  <>
+    <div className={cn(className || "flex flex-col h-full bg-slate-100/50 dark:bg-slate-900 shadow-inner overflow-hidden flex-1 lg:min-w-[600px] relative", "print:hidden")}>
+
       {/* Sleek Glassy Toolbar */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2.5 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200/60 dark:border-slate-700/60 shadow-lg shadow-slate-200/20 dark:shadow-black/20 rounded-2xl z-20 flex items-center gap-4 transition-all">
         <div className="flex items-center gap-2">
@@ -522,12 +636,12 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
             <Palette className="w-4 h-4" />
           </button>
           <button
-            onClick={refreshMasterFieldValues}
-            disabled={isResolvingMasterFields}
-            title="Re-resolve master field values (e.g. after linking a placeholder on the Data Sources page)"
+            onClick={handleRefreshAll}
+            disabled={isResolvingMasterFields || loadingContext}
+            title="Refresh everything (clauses, company, signatory, payroll figures, master fields)"
             className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
           >
-            <RefreshCw className={cn("w-4 h-4", isResolvingMasterFields && "animate-spin")} />
+            <RefreshCw className={cn("w-4 h-4", (isResolvingMasterFields || loadingContext) && "animate-spin")} />
           </button>
         </div>
 
@@ -541,13 +655,13 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
                 disabled={!hasOutput || loadingContext}
                 className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
               >
-                {isGeneratingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                <Download className="w-3.5 h-3.5" />
                 Export
                 <ChevronDown className="w-3 h-3 ml-0.5" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-40 rounded-xl">
-              <DropdownMenuItem onClick={handleDownloadPdf} disabled={!hasOutput || loadingContext || isGeneratingPdf}>
+              <DropdownMenuItem onClick={handleDownloadPdf} disabled={!hasOutput || loadingContext}>
                 <FileDown className="w-3.5 h-3.5 mr-2 text-slate-400" /> PDF Document
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleDownloadWord} disabled={!hasOutput || loadingContext}>
@@ -655,24 +769,80 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
         onChange={updateThemeSettings}
       />
 
-      <div 
-        className="absolute top-0 left-0 pointer-events-none z-[-1] opacity-0" 
+      <div
+        className="absolute top-0 left-0 pointer-events-none z-[-1] opacity-0"
         aria-hidden="true"
       >
-        <div 
-          ref={contentMeasureRef} 
-          className="bg-white" 
-          style={{ width: PAGE_WIDTH_PX }} 
+        <div
+          ref={contentMeasureRef}
+          className="bg-white"
+          style={{ width: PAGE_WIDTH_PX }}
         >
           <div className="p-12 text-[14.5px] leading-relaxed">
             <div dangerouslySetInnerHTML={{ __html: themedHtml }} />
           </div>
         </div>
-        
-        <div ref={htmlCaptureRef} className="bg-white text-black p-12 text-[14.5px] leading-relaxed" style={{ width: PAGE_WIDTH_PX }}>
-          <div dangerouslySetInnerHTML={{ __html: themedHtml }} />
-        </div>
       </div>
     </div>
+
+    {/* Print-only area, portaled straight to document.body rather than left
+        in place. ContractPreview is nested many layers deep inside the full
+        Employment Contracts page (entities sidebar, the Data & Values
+        panel, react-resizable-panels' Panel/PanelGroup wrappers, the page's
+        own h-[calc(100vh-1rem)] overflow-hidden root, ...). The classic
+        "print just this element" trick (visibility:hidden on body *,
+        visibility:visible + position:absolute on the target) still gets
+        clipped in a tree like this: an absolutely positioned element's
+        containing block is its nearest positioned ancestor, and if any
+        overflow-hidden wrapper sits between here and <body> (several do),
+        the print area gets cropped to that ancestor's fixed pixel height
+        instead of showing the whole document. Portaling to document.body
+        makes it a true sibling of the entire app root, so there is no
+        overflow-hidden/position ancestor left to clip it. */}
+    {typeof document !== 'undefined' && createPortal(
+      <>
+        <style>{`
+          @media print {
+            /* Standard 1in page margin (same value used for the Word
+               export's @page WordSection1, so both formats agree) - lets
+               the browser's print engine put a consistent gap at the top
+               and bottom of every physical page, which is what actually
+               makes multi-page breaks look deliberate instead of content
+               being cut off flush against the page edge. Previously this
+               was margin:0, relying solely on applyThemeToHtml's one-time
+               48px padding around the whole flowing document - since that
+               padding only wraps the start/end of the content, not each
+               page, every page after the first began right at the very top
+               edge with zero breathing room. */
+            @page { size: A4; margin: 1in; }
+            html, body { margin: 0; height: auto !important; overflow: visible !important; }
+            body > * { visibility: hidden !important; }
+            .ec-print-area, .ec-print-area * { visibility: visible !important; }
+            .ec-print-area {
+              position: absolute !important;
+              top: 0; left: 0;
+              width: 100% !important;
+              height: auto !important;
+              margin: 0;
+              overflow: visible !important;
+            }
+            /* Zero out applyThemeToHtml's own inline padding/max-width for
+               print specifically - @page above already supplies the page
+               margin on every page, so leaving the theme's 48px padding in
+               place too would double the whitespace at the top of page 1. */
+            .ec-print-area [class^="contract-theme-"] {
+              padding: 0 !important;
+              max-width: 100% !important;
+              margin: 0 !important;
+            }
+          }
+        `}</style>
+        <div className="hidden print:block ec-print-area bg-white text-black">
+          <div dangerouslySetInnerHTML={{ __html: exportThemedHtml }} />
+        </div>
+      </>,
+      document.body
+    )}
+  </>
   );
 }

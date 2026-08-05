@@ -119,6 +119,13 @@ export interface AssembleContractHtmlParams {
   employeePlaceholderValues: Record<string, string>; // from utils/standardPlaceholders.ts
   includeToc?: boolean;
   includeSectionNumbers?: boolean;
+  // When true, an unconfigured section is omitted entirely instead of
+  // rendering the "[No clause configured]" warning - for the actual
+  // exported/submitted document (PDF, Word, the copy saved to storage),
+  // which shouldn't carry an internal authoring warning meant for whoever
+  // is still assembling the contract. The live editing preview keeps this
+  // false so gaps stay visible while the contract is being put together.
+  hideMissingClauses?: boolean;
 }
 
 /**
@@ -137,6 +144,7 @@ export function assembleContractHtml({
   employeePlaceholderValues,
   includeToc = true,
   includeSectionNumbers = true,
+  hideMissingClauses = false,
 }: AssembleContractHtmlParams): string {
   const mergedValues = { ...effectiveSettings, ...employeePlaceholderValues };
 
@@ -200,6 +208,7 @@ export function assembleContractHtml({
     const dataAttr = `data-section="${section.key}"`;
 
     if (!clause) {
+      if (hideMissingClauses) return '';
       return `<section ${idAttr} class="${cls}" ${dataAttr}><p class="cs-missing-clause">[No clause configured for "${section.title}"]</p></section>`;
     }
 

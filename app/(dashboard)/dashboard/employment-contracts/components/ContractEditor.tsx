@@ -77,6 +77,7 @@ export function ContractEditor({
   const [loading, setLoading] = useState(false);
   const [signatoryName, setSignatoryName] = useState('');
   const [payrollStatutoryLine, setPayrollStatutoryLine] = useState<StatutoryDeductionsBreakdown | null>(null);
+  const [dataFilter, setDataFilter] = useState<'all' | 'with' | 'missing'>('all');
 
   useEffect(() => {
     let cancelled = false;
@@ -204,6 +205,36 @@ export function ContractEditor({
     return ecPlaceholders.filter((p) => profilePlaceholderKeys.includes(p.key));
   }, [ecPlaceholders, selectedJobProfile, profilePlaceholderKeys]);
 
+  // What the contract would actually render right now for each field
+  // (override wins, else the resolved default) - drives both the missing-
+  // value styling already in the row markup and the All/With Data/Missing
+  // filter above the table, so "missing" always means the exact same thing
+  // in both places.
+  const placeholderIsMissing = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const p of profileScopedPlaceholders) {
+      const val = placeholderValues[p.key] ?? '';
+      const overrideVal = offer.placeholder_overrides?.[p.key];
+      const effectiveVal = overrideVal ?? val;
+      map.set(p.id, !effectiveVal);
+    }
+    return map;
+  }, [profileScopedPlaceholders, placeholderValues, offer.placeholder_overrides]);
+
+  const missingCount = useMemo(
+    () => profileScopedPlaceholders.filter((p) => placeholderIsMissing.get(p.id)).length,
+    [profileScopedPlaceholders, placeholderIsMissing]
+  );
+  const withDataCount = profileScopedPlaceholders.length - missingCount;
+
+  const dataFilteredPlaceholders = useMemo(() => {
+    if (dataFilter === 'all') return profileScopedPlaceholders;
+    return profileScopedPlaceholders.filter((p) => {
+      const missing = !!placeholderIsMissing.get(p.id);
+      return dataFilter === 'missing' ? missing : !missing;
+    });
+  }, [profileScopedPlaceholders, dataFilter, placeholderIsMissing]);
+
   if (!companyId || !employeeId) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-slate-500 bg-[#F8F9FB] dark:bg-slate-900">
@@ -225,7 +256,7 @@ export function ContractEditor({
 
   // Calculate grouped placeholders
   const entityGroups = new Map<string, { placeholders: EcPlaceholder[]; label: string }>();
-  for (const p of profileScopedPlaceholders) {
+  for (const p of dataFilteredPlaceholders) {
     const entity = (p.entity_type && p.entity_type.length > 0) ? p.entity_type[0] : 'none';
     if (!entityGroups.has(entity)) {
       const label = entity === 'none'
@@ -275,7 +306,7 @@ export function ContractEditor({
         <div className="max-w-6xl mx-auto p-6 space-y-8 pb-24">
           {/* Data & Values Table Layout */}
           <div className="space-y-4">
-            <div className="flex items-center justify-between px-1">
+            <div className="flex items-center justify-between px-1 flex-wrap gap-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">Data & Values</h3>
                 <p className="text-sm text-slate-500">Document fields resolved specifically for this contract.</p>
@@ -295,12 +326,45 @@ export function ContractEditor({
               </div>
             </div>
 
+            {/* All / With Data / Missing filter - lets the user see upfront
+                which fields have nothing to render before they ever open the
+                document preview, instead of discovering gaps in the
+                generated contract. */}
+            <div className="flex items-center gap-1.5 px-1">
+              {([
+                { key: 'all', label: 'All', count: profileScopedPlaceholders.length },
+                { key: 'with', label: 'With Data', count: withDataCount },
+                { key: 'missing', label: 'Missing', count: missingCount },
+              ] as const).map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setDataFilter(tab.key)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-full text-xs font-semibold transition-colors border",
+                    dataFilter === tab.key
+                      ? tab.key === 'missing'
+                        ? "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800"
+                        : "bg-custom-blue text-white border-custom-blue shadow-sm"
+                      : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-800 dark:hover:bg-slate-800"
+                  )}
+                >
+                  {tab.label} ({tab.count})
+                </button>
+              ))}
+            </div>
+
             {profileScopedPlaceholders.length === 0 ? (
               <div className="text-center py-12 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
                 <p className="text-sm text-slate-500">
                   {selectedJobProfile
                     ? 'No placeholders are referenced by this profile\'s clauses.'
                     : 'Select a job profile to see available placeholders.'}
+                </p>
+              </div>
+            ) : dataFilteredPlaceholders.length === 0 ? (
+              <div className="text-center py-12 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
+                <p className="text-sm text-slate-500">
+                  {dataFilter === 'missing' ? 'Nothing is missing - every field resolves to a value.' : 'No fields have data yet.'}
                 </p>
               </div>
             ) : (
