@@ -10,7 +10,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Loader2, PlusCircle, Settings, Trash2, BookText, Star, Briefcase, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2, FileText, Search, List, Layers, } from 'lucide-react';
+import { Loader2, PlusCircle, Settings, Trash2, BookText, Star, Briefcase, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2, FileText, Search, List, Layers, Braces } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
@@ -274,6 +274,7 @@ export default function ClauseLibraryPage() {
         <div className="hidden lg:flex items-center bg-slate-50 dark:bg-slate-900 p-1 rounded-full border border-slate-200 dark:border-slate-800/80 shadow-sm gap-1">
           <Link href="/dashboard/employment-contracts" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all">Contracts</Link>
           <Link href="/dashboard/employment-contracts/job-profiles" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"><Briefcase className="w-3.5 h-3.5" /> Job Profiles</Link>
+          <Link href="/dashboard/employment-contracts/placeholders" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"><Braces className="w-3.5 h-3.5" /> Placeholders</Link>
         </div>
       </div>
 

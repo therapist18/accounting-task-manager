@@ -23,7 +23,6 @@ import { getOfficerDisplayName } from "@/lib/shared-user-assignment-service";
 import { fetchDepartments } from "../departments/departments/database";
 import { userService } from "@/lib/shared-user-assignment-service";
 import { MemorizedReportDialog } from "./MemorizedReportDialog";
-import { calculateStageDate } from "../tasks/utils/dateUtils";
 import { cn } from "@/lib/utils";
 import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
@@ -39,6 +38,7 @@ import {
   getStageOfficerIds as sharedGetStageOfficerIds,
   taskHasStageOfficer as sharedTaskHasStageOfficer,
   isTaskWithClient as sharedIsTaskWithClient,
+  computeStageDateInfo as sharedComputeStageDateInfo,
 } from "./utils/reportStageLogic";
 
 const SPECIAL_STAGE_IDS = [
@@ -627,82 +627,9 @@ export default function ReportsPage() {
   // and falls back to stageData.date verbatim, which is sometimes garbage (e.g. literally
   // "completed", written by a bug elsewhere in stage submission). Shared by the cell
   // renderer, the sort comparator, the export, and the total-time columns.
-  const computeStageDateInfo = useCallback((task: any, stage: any, col: any) => {
-    const stageData = task.stages?.[col.stageId];
-    const isSkipped = stageData?.status === 'skipped';
-    const isCompleted = stageData?.status === 'completed' || stageData?.documentsUploaded === true;
-
-    let docsForStage: any[] = [];
-    const sourceDocRef = task.source_document_id?.[col.stageId];
-    if (sourceDocRef) {
-      const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
-      docsForStage = docIds.map((d: any) => {
-        const docId = typeof d === 'string' ? d : d?.id;
-        return allDocuments.find((ad: any) => ad.id?.toString() === docId?.toString());
-      }).filter(Boolean);
-    }
-    if (docsForStage.length === 0 && stageData?.documents) {
-      // stageData.documents holds lightweight link stubs ({id, name, status, ...}), not the
-      // full document row, so resolve each stub's id against allDocuments to get the record
-      // that actually carries extracted_details (falling back to the stub if not found).
-      const stubs = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
-      docsForStage = stubs
-        .map((stub: any) => allDocuments.find((ad: any) => ad.id?.toString() === stub?.id?.toString()) || stub)
-        .filter(Boolean);
-    }
-
-    const linkedDocument = docsForStage.length > 0 ? docsForStage[0] : null;
-    const documentFields = linkedDocument?.document_type_id ? (kycDocuments.get(linkedDocument.document_type_id)?.fields || []) : [];
-
-    const dateValue = !isSkipped ? calculateStageDate(stage, stageData, linkedDocument, documentFields, null, false) : null;
-
-    const immigrationDateField = col.fields?.find((f: any) => f.isImmigrationDate);
-    let immigrationDateValue: string | null = null;
-    if (immigrationDateField && docsForStage.length > 0) {
-      for (const doc of docsForStage) {
-        const val = doc.extracted_details?.[immigrationDateField.fieldName] ||
-          doc.edited_details?.[immigrationDateField.fieldName] ||
-          doc.extracted_data?.[immigrationDateField.fieldName];
-        if (val && typeof val === 'string' && val.trim()) {
-          immigrationDateValue = val.trim();
-          break;
-        }
-      }
-    }
-
-    const effectiveDateValue = dateValue || immigrationDateValue;
-
-    let isOverdue = false;
-    if (effectiveDateValue && stage.estimated_time) {
-      const sortedStagesList = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-      const currentStageIndex = sortedStagesList.findIndex(s => s.id === stage.id);
-
-      let prevStage = currentStageIndex > 0 ? sortedStagesList[currentStageIndex - 1] : null;
-      let prevDateStr = null;
-
-      while (prevStage) {
-        prevDateStr = task.stages?.[prevStage.id]?.date || task.stages?.[prevStage.id]?.completedAt || task.stages?.[prevStage.id]?.date_completed;
-        if (prevDateStr) break;
-        const prevIndex = sortedStagesList.findIndex(s => s.id === prevStage.id);
-        if (prevIndex <= 0) break;
-        prevStage = sortedStagesList[prevIndex - 1];
-      }
-
-      const startStr = prevDateStr || task.date_initiated || task.created_at;
-      const start = parseDateSafe(startStr);
-      const end = parseDateSafe(effectiveDateValue);
-
-      if (start && end) {
-        const durationMs = end.getTime() - start.getTime();
-        const durationMinutes = Math.floor(durationMs / (1000 * 60));
-        isOverdue = durationMinutes > stage.estimated_time;
-      }
-    }
-
-    const isPending = !isCompleted && !isSkipped;
-
-    return { stageData, isSkipped, isCompleted, isPending, docsForStage, linkedDocument, documentFields, dateValue, immigrationDateValue, effectiveDateValue, isOverdue };
-  }, [stages, allDocuments, kycDocuments]);
+  const computeStageDateInfo = useCallback((task: any, stage: any, col: any) =>
+    sharedComputeStageDateInfo(task, stage, col, { stages, allDocuments, kycDocuments }),
+    [stages, allDocuments, kycDocuments]);
 
   const getSortableValue = useCallback((task: any, col: any) => {
     if (!col) return '';

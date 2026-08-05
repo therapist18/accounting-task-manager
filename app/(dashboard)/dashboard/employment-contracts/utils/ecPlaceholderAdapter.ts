@@ -1,5 +1,5 @@
 import type { Placeholder } from '../../templates/document-template-manager/types';
-import type { EcPlaceholder, MasterFieldLink } from './ecPlaceholders';
+import type { EcPlaceholder, MasterFieldLink, PlaceholderDetailsUpdate } from './ecPlaceholders';
 
 // The single source of truth for "what does the Source text field in the
 // add/edit dialog currently hold" - reused by both the dialog (via
@@ -53,7 +53,7 @@ export function ecPlaceholderToDtmPlaceholder(ec: EcPlaceholder): Placeholder {
   };
 }
 
-export function dtmPlaceholderToEcUpdates(updated: Placeholder, original: EcPlaceholder) {
+export function dtmPlaceholderToEcUpdates(updated: Placeholder, original: EcPlaceholder): PlaceholderDetailsUpdate {
   const masterFieldIds = updated.master_field_ids || [];
   // Map DTM's single per-placeholder source_logic onto every link's strategy -
   // 'all' (its "Return All (Merge)" option) -> 'merge' for every link, so

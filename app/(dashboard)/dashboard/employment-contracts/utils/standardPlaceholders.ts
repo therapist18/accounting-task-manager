@@ -27,19 +27,28 @@ import { buildStatutoryDeductionsTable, type StatutoryDeductionsBreakdown } from
 //      says for that key, since there's no single settings_key/offer_field
 //      that could replicate the fallback/formatting logic anyway.
 //   2. GENERIC dispatch - every OTHER placeholder in the ecPlaceholders
-//      registry not covered by #1, resolved purely from its own
-//      source_kind + settings_key/offer_field:
-//        - 'settings_cascade' -> effectiveSettings[settings_key]
-//        - 'job_profile'      -> the named column on the selected EcJobProfile
-//                                 (array columns join to <li> markup)
+//      registry not covered by #1, resolved purely from its own key
+//      (the token name itself, e.g. {{department}} -> key 'department') and
+//      source_kind:
+//        - 'settings_cascade' -> effectiveSettings[key]
+//        - 'job_profile'      -> the same-named column on the selected
+//                                 EcJobProfile (array columns join to <li>
+//                                 markup)
 //        - 'offer'            -> the named column on the Employment Offer
+//                                 (still keyed by offer_field, since a
+//                                 placeholder's own key doesn't have to match
+//                                 the EmploymentOffer column it reads)
 //        - 'master_field'     -> left alone here, resolved by layer 3 instead
-//      This is what makes reassigning a placeholder's source_kind or
-//      renaming its settings_key/offer_field (via the Edit dialog or the
-//      inline Source Kind select in PlaceholderSources.tsx) actually change
-//      resolution - previously every one of these was a second hardcoded
-//      literal (e.g. `job_level: String(s.job_level || '')`), so changing
-//      the DB row did nothing observable.
+//      Resolution is deliberately NOT keyed by settings_key - that column is
+//      just an admin-facing description of where a settings_cascade/
+//      job_profile placeholder's value comes from (e.g. "Job Profile
+//      Settings", "Company Profile"), edited via PlaceholderSources.tsx's
+//      Source field, and is expected to repeat across many placeholders that
+//      share the same source. Keying resolution off it too (as an earlier
+//      version of this file did) meant two placeholders with the same
+//      settings_key silently read and wrote the exact same
+//      effectiveSettings/draft.settings slot - typing into either one in the
+//      Job Profile Fields tab overwrote the other's value.
 //   3. Linked master-field values - for every ec_placeholders row with
 //      source_kind='master_field', the value resolved via
 //      masterFieldResolver.ts's resolveEcPlaceholderValues - which shares
@@ -132,10 +141,10 @@ export function buildStandardPlaceholderValues(
   const generic: Record<string, string> = {};
   for (const p of ecPlaceholders || []) {
     if (p.key in hardcoded) continue; // hardcoded formula always wins
-    if (p.source_kind === 'settings_cascade' && p.settings_key) {
-      generic[p.key] = String(s[p.settings_key] ?? '');
-    } else if (p.source_kind === 'job_profile' && p.settings_key) {
-      const raw = (jobProfile as any)?.[p.settings_key];
+    if (p.source_kind === 'settings_cascade') {
+      generic[p.key] = String(s[p.key] ?? '');
+    } else if (p.source_kind === 'job_profile') {
+      const raw = (jobProfile as any)?.[p.key];
       generic[p.key] = Array.isArray(raw) ? raw.map((r) => `<li>${r}</li>`).join('') : String(raw ?? '');
     } else if (p.source_kind === 'offer' && p.offer_field) {
       generic[p.key] = String((offer as any)?.[p.offer_field] ?? '');

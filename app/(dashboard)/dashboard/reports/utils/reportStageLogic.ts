@@ -3,6 +3,7 @@
 // logic, extracted from reports/page.tsx so it has a single implementation instead of
 // being duplicated across report-style pages (e.g. summary-reports).
 import { isValid } from "date-fns";
+import { calculateStageDate } from "../../tasks/utils/dateUtils";
 
 export const parseDateSafe = (s: string | null | undefined): Date | null => {
   if (!s || typeof s !== 'string') return null;
@@ -112,4 +113,94 @@ export const taskHasStageOfficer = (task: any, stages: any[], officerIds: string
 export const isTaskWithClient = (task: any, stages: any[], departments: any[]) => {
   const current = getCanonicalCurrentStage(task, stages, departments);
   return current?.follow_up?.toString().toLowerCase() === 'client';
+};
+
+// Resolves the same "effective" date a stage_info cell displays on screen (document
+// extraction date, completedAt fallback, or manual stage date via calculateStageDate),
+// plus overdue status. Must NOT be gated on whether the report has "Docs" fields
+// configured for the stage — otherwise calculateStageDate never sees a linkedDocument
+// and falls back to stageData.date verbatim, which is sometimes garbage (e.g. literally
+// "completed", written by a bug elsewhere in stage submission). Shared by the report cell
+// renderer, the sort comparator, the export, and the total-time (Expected/Actual) columns.
+export const computeStageDateInfo = (
+  task: any,
+  stage: any,
+  col: any,
+  deps: { stages: any[]; allDocuments: any[]; kycDocuments: Map<string, any> }
+) => {
+  const { stages, allDocuments, kycDocuments } = deps;
+  const stageData = task.stages?.[col.stageId];
+  const isSkipped = stageData?.status === 'skipped';
+  const isCompleted = stageData?.status === 'completed' || stageData?.documentsUploaded === true;
+
+  let docsForStage: any[] = [];
+  const sourceDocRef = task.source_document_id?.[col.stageId];
+  if (sourceDocRef) {
+    const docIds = Array.isArray(sourceDocRef) ? sourceDocRef : [sourceDocRef];
+    docsForStage = docIds.map((d: any) => {
+      const docId = typeof d === 'string' ? d : d?.id;
+      return allDocuments.find((ad: any) => ad.id?.toString() === docId?.toString());
+    }).filter(Boolean);
+  }
+  if (docsForStage.length === 0 && stageData?.documents) {
+    // stageData.documents holds lightweight link stubs ({id, name, status, ...}), not the
+    // full document row, so resolve each stub's id against allDocuments to get the record
+    // that actually carries extracted_details (falling back to the stub if not found).
+    const stubs = typeof stageData.documents === 'object' ? Object.values(stageData.documents) : [];
+    docsForStage = stubs
+      .map((stub: any) => allDocuments.find((ad: any) => ad.id?.toString() === stub?.id?.toString()) || stub)
+      .filter(Boolean);
+  }
+
+  const linkedDocument = docsForStage.length > 0 ? docsForStage[0] : null;
+  const documentFields = linkedDocument?.document_type_id ? (kycDocuments.get(linkedDocument.document_type_id)?.fields || []) : [];
+
+  const dateValue = !isSkipped ? calculateStageDate(stage, stageData, linkedDocument, documentFields, null, false) : null;
+
+  const immigrationDateField = col.fields?.find((f: any) => f.isImmigrationDate);
+  let immigrationDateValue: string | null = null;
+  if (immigrationDateField && docsForStage.length > 0) {
+    for (const doc of docsForStage) {
+      const val = doc.extracted_details?.[immigrationDateField.fieldName] ||
+        doc.edited_details?.[immigrationDateField.fieldName] ||
+        doc.extracted_data?.[immigrationDateField.fieldName];
+      if (val && typeof val === 'string' && val.trim()) {
+        immigrationDateValue = val.trim();
+        break;
+      }
+    }
+  }
+
+  const effectiveDateValue = dateValue || immigrationDateValue;
+
+  let isOverdue = false;
+  if (effectiveDateValue && stage.estimated_time) {
+    const sortedStagesList = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+    const currentStageIndex = sortedStagesList.findIndex(s => s.id === stage.id);
+
+    let prevStage = currentStageIndex > 0 ? sortedStagesList[currentStageIndex - 1] : null;
+    let prevDateStr = null;
+
+    while (prevStage) {
+      prevDateStr = task.stages?.[prevStage.id]?.date || task.stages?.[prevStage.id]?.completedAt || task.stages?.[prevStage.id]?.date_completed;
+      if (prevDateStr) break;
+      const prevIndex = sortedStagesList.findIndex(s => s.id === prevStage.id);
+      if (prevIndex <= 0) break;
+      prevStage = sortedStagesList[prevIndex - 1];
+    }
+
+    const startStr = prevDateStr || task.date_initiated || task.created_at;
+    const start = parseDateSafe(startStr);
+    const end = parseDateSafe(effectiveDateValue);
+
+    if (start && end) {
+      const durationMs = end.getTime() - start.getTime();
+      const durationMinutes = Math.floor(durationMs / (1000 * 60));
+      isOverdue = durationMinutes > stage.estimated_time;
+    }
+  }
+
+  const isPending = !isCompleted && !isSkipped;
+
+  return { stageData, isSkipped, isCompleted, isPending, docsForStage, linkedDocument, documentFields, dateValue, immigrationDateValue, effectiveDateValue, isOverdue };
 };

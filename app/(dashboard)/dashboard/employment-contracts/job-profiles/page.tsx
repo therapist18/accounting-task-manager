@@ -27,7 +27,7 @@ import {
   Columns2, FileText, Database, ChevronDown, ShieldCheck, Laptop2,
   Users, Megaphone, Car, LayoutTemplate, UserCog, Link as LinkIcon, PlayCircle,
   Copy, Download, AlertCircle, CheckCircle2, ChevronRight, X, FileSignature, Check, ChevronsUpDown,
-  ChevronDownIcon, ChevronUpIcon,
+  ChevronDownIcon, ChevronUpIcon, Braces,
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
@@ -508,24 +508,28 @@ export default function JobProfilesPage() {
   // The "Fields" tab (below) renders these directly instead of a hardcoded
   // field list, so a new settings-cascade placeholder added from Data
   // Sources shows up here automatically. This tab is bound to
-  // draft.settings[key], which is exactly what source_kind='settings_cascade'
-  // means in standardPlaceholders.ts (effectiveSettings[settings_key]) -
-  // NOT what 'job_profile' means there (a literal column on the EcJobProfile
-  // row itself, e.g. key_responsibilities/requirements, already covered by
-  // their own dedicated tabs/editors). Falls back to the placeholder's own
-  // `key` when settings_key hasn't been filled in on that row. Bucketed via
-  // SETTINGS_GROUPS (matched against each placeholder's effective key), same
-  // panel layout the tab used to hardcode; anything unmatched lands in "Other".
+  // draft.settings[p.key] - the placeholder's own token name, which is
+  // exactly what source_kind='settings_cascade' reads in
+  // standardPlaceholders.ts (effectiveSettings[key]) - NOT what 'job_profile'
+  // means there (a literal column on the EcJobProfile row itself, e.g.
+  // key_responsibilities/requirements, already covered by their own
+  // dedicated tabs/editors). Deliberately NOT settings_key - that column is
+  // just an admin-facing description of where the value comes from (e.g.
+  // "Job Profile Settings"), expected to repeat across many placeholders, so
+  // it can't double as the storage slot without different placeholders
+  // silently sharing one value (see standardPlaceholders.ts for the full
+  // history). Bucketed via SETTINGS_GROUPS (matched against each
+  // placeholder's key), same panel layout the tab used to hardcode; anything
+  // unmatched lands in "Other".
   const settingsFields = useMemo(
-    () => previewPlaceholders.filter((p) => p.source_kind === 'settings_cascade' && (p.settings_key || p.key)),
+    () => previewPlaceholders.filter((p) => p.source_kind === 'settings_cascade'),
     [previewPlaceholders]
   );
   const groupedSettingsFields = useMemo(() => {
     const groups = SETTINGS_GROUPS.map((g) => ({ ...g, fields: [] as EcPlaceholder[] }));
     const other: EcPlaceholder[] = [];
     for (const p of settingsFields) {
-      const effectiveKey = p.settings_key || p.key;
-      const group = groups.find((g) => g.test.test(effectiveKey));
+      const group = groups.find((g) => g.test.test(p.key));
       (group ? group.fields : other).push(p);
     }
     const all = other.length > 0 ? [...groups, { label: 'Other', description: undefined, test: /(?:)/, fields: other }] : groups;
@@ -722,6 +726,7 @@ export default function JobProfilesPage() {
           <div className="hidden lg:flex items-center bg-slate-50 dark:bg-slate-900 p-1 rounded-full border border-slate-200 dark:border-slate-800/80 shadow-sm gap-1">
             <Link href="/dashboard/employment-contracts" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"><FileSignature className="w-3.5 h-3.5" /> Contracts</Link>
             <Link href="/dashboard/employment-contracts/clause-library" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"><BookText className="w-3.5 h-3.5" /> Clauses</Link>
+            <Link href="/dashboard/employment-contracts/placeholders" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"><Braces className="w-3.5 h-3.5" /> Placeholders</Link>
           </div>
 
           <div className="w-px h-6 bg-slate-200 dark:bg-slate-800 hidden md:block"></div>
@@ -1015,16 +1020,18 @@ export default function JobProfilesPage() {
                                       <SectionPanel key={group.label} title={group.label} description={group.description}>
                                         <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
                                           {group.fields.map((p) => {
-                                            const effectiveKey = p.settings_key || p.key;
-                                            const options = KNOWN_SELECT_OPTIONS[effectiveKey];
-                                            const inputType = KNOWN_INPUT_TYPES[effectiveKey];
+                                            const options = KNOWN_SELECT_OPTIONS[p.key];
+                                            const inputType = KNOWN_INPUT_TYPES[p.key];
                                             return (
                                               <div key={p.id} className="grid grid-cols-[200px_1fr] sm:grid-cols-[240px_1fr] gap-6 py-5 items-center">
-                                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{p.label}</span>
+                                                <div className="flex flex-col gap-0.5">
+                                                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{p.label}</span>
+                                                  {p.settings_key && <span className="text-[11px] text-slate-400">{p.settings_key}</span>}
+                                                </div>
                                                 {options ? (
-                                                  <SettingSelect label="" settingKey={effectiveKey} options={options} settings={draft.settings || {}} onChange={updateDraftSettings} defaultValue={p.default_value || undefined} />
+                                                  <SettingSelect label="" settingKey={p.key} options={options} settings={draft.settings || {}} onChange={updateDraftSettings} defaultValue={p.default_value || undefined} />
                                                 ) : (
-                                                  <SettingInput label="" settingKey={effectiveKey} settings={draft.settings || {}} onChange={updateDraftSettings} placeholder={p.default_value || p.description || 'Not set'} defaultValue={p.default_value || undefined} type={inputType || 'text'} />
+                                                  <SettingInput label="" settingKey={p.key} settings={draft.settings || {}} onChange={updateDraftSettings} placeholder={p.default_value || p.description || 'Not set'} defaultValue={p.default_value || undefined} type={inputType || 'text'} />
                                                 )}
                                               </div>
                                             );

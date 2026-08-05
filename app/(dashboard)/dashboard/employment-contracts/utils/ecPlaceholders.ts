@@ -28,7 +28,18 @@ export interface EcPlaceholder {
   master_field_links: MasterFieldLink[];
   // Entity types this placeholder applies to
   entity_type: string[];
+  // Admin-facing description of where a settings_cascade/job_profile
+  // placeholder's value comes from (e.g. "Job Profile Settings", "Company
+  // Profile") - shown in the Source column/dialog, but NOT used to resolve
+  // the actual value. Resolution reads effectiveSettings[key]/jobProfile[key]
+  // (the placeholder's own key) instead - see standardPlaceholders.ts.
+  // Expected to repeat across many placeholders that share a source; nothing
+  // requires it to be unique.
   settings_key: string | null;
+  // Unlike settings_key, this DOES drive resolution for 'offer'-kind
+  // placeholders - standardPlaceholders.ts reads offer[offer_field] literally,
+  // so it must name a real EmploymentOffer column (basic_salary, currency,
+  // start_date, end_date, allowances).
   offer_field: string | null;
   editable: boolean;
   default_value: string | null;
@@ -104,4 +115,19 @@ export async function updatePlaceholderDetails(
     throw error;
   }
   return data as EcPlaceholder;
+}
+
+// Deletes the placeholder row outright. Any clause content still containing
+// {{this_key}} will silently render blank afterwards (replacePlaceholders
+// treats an unresolved key as '', not an error) - the Placeholders admin
+// page warns the caller before deleting one still referenced by a clause,
+// but doesn't block it, since a global registry can't know every place a
+// token might be typed into free-text clause content.
+export async function deletePlaceholder(id: string): Promise<boolean> {
+  const { error } = await supabase.from('ec_placeholders').delete().eq('id', id);
+  if (error) {
+    console.error('Error deleting placeholder:', error);
+    return false;
+  }
+  return true;
 }

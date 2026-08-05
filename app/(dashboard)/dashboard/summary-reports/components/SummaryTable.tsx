@@ -2,45 +2,72 @@
 "use client";
 
 import React, { useMemo, useState, useEffect } from "react";
-import { format } from "date-fns";
+import { useReactTable, getCoreRowModel, type ColumnDef, type ColumnSizingState } from "@tanstack/react-table";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, ArrowLeftRight, Layers, AlertTriangle } from "lucide-react";
+import { differenceInDays } from "date-fns";
 import { cn } from "@/lib/utils";
+import { formatDateCell, formatEstimatedMins } from "../../reports/components/reportCellRenderers";
 import { parseDateSafe } from "../../reports/utils/reportStageLogic";
-import { MILESTONE_STAGE_COLUMNS } from "../stageColumnConfig";
+import { getSubDepartmentDisplay, getCompanyPrefixFromParticipants } from "../../tasks/overall-view/tableUtils";
+import { SUMMARY_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS } from "../stageColumnConfig";
 
-const DATE_ONLY_RE = /^(\d{2})\/(\d{2})\/(\d{4})$/;
-const DATE_TIME_RE = /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}):(\d{2})/;
+const DEFAULT_COL_WIDTH = 170;
+const INDEX_COL_WIDTH = 48;
+const DELTA_COL_WIDTH = 62;
 
-function resolveMilestoneParts(task: any, stageId: string): { date: string | null; time: string | null } {
+const resolveMilestoneDate = (task: any, stageId: string): string | null => {
   const stageData = task?.stages?.[stageId];
-  const raw = stageData?.date || stageData?.completedAt || null;
-  if (!raw || typeof raw !== 'string') return { date: null, time: null };
-  if (DATE_ONLY_RE.test(raw)) return { date: raw, time: null };
-  const dtMatch = raw.match(DATE_TIME_RE);
-  if (dtMatch) return { date: `${dtMatch[1]}/${dtMatch[2]}/${dtMatch[3]}`, time: `${dtMatch[4].padStart(2, '0')}:${dtMatch[5]}` };
-  const parsed = parseDateSafe(raw);
-  if (!parsed) return { date: raw, time: null };
-  return { date: format(parsed, 'dd/MM/yyyy'), time: format(parsed, 'HH:mm') };
-}
-
-// Fixed columns rendered ahead of the milestone date/time pairs. Mirrors StandardReportView's
-// column-driven table (bg-custom-blue header, zebra rows, sticky header, border-slate-200
-// grid) but with a static column set instead of a dynamic report configuration.
-const buildColumns = () => {
-  const cols: any[] = [
-    { id: 'company', label: 'Company Name', render: (t: any, companies: any) => companies.get(t.company_id)?.name || t.company_name || null, primary: true },
-    { id: 'applicant', label: 'Applicant Name', render: (t: any) => t.applicant_name, primary: true },
-    { id: 'job_description', label: 'Job Description', render: (t: any) => t.job_description, highlight: true },
-  ];
-  MILESTONE_STAGE_COLUMNS.forEach(col => {
-    cols.push({ id: `${col.key}_date`, label: col.dateLabel, highlight: col.highlight, milestone: col, part: 'date' });
-    cols.push({ id: `${col.key}_time`, label: col.timeLabel, highlight: col.highlight, milestone: col, part: 'time' });
-  });
-  return cols;
+  return stageData?.date || stageData?.completedAt || null;
 };
+
+const getSponsorName = (task: any): string | null => {
+  const sponsor = task?.participants_details?.find((p: any) =>
+    (Array.isArray(p.role) && p.role.includes('sponsor')) || p.role === 'sponsor'
+  );
+  return sponsor?.name || null;
+};
+
+const resolveFieldValue = (colId: string, task: any, companies: Map<number, any>, enhancedTasksData: Map<string, any>): any => {
+  const enhancedTask = enhancedTasksData?.get(task.id?.toString()) || task;
+  switch (colId) {
+    case 'company': return companies.get(task.company_id)?.name || task.company_name || null;
+    case 'applicant': return task.applicant_name || null;
+    case 'job_description': return task.job_description || null;
+    case 'company_prefix': {
+      const v = getCompanyPrefixFromParticipants(task, companies);
+      return v && v !== 'N/A' ? v : null;
+    }
+    case 'sponsor_name': return getSponsorName(task);
+    case 'application_type': return enhancedTask.renewal_status || task.renewal_status || null;
+    case 'duration': return enhancedTask.duration || task.duration || null;
+    default: return null;
+  }
+};
+
+// Mirrors reportCellRenderers.tsx's "Overdue actual time" cell (red text + exceeded badge).
+const ActualTimeCell = ({ display, exceededMinutes }: { display: string; exceededMinutes: number }) => (
+  <TooltipProvider delayDuration={200}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex items-center gap-1 cursor-default select-none">
+          <span className="text-sm font-bold text-red-600 tabular-nums">{display}</span>
+          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-red-500 bg-red-50 border border-red-200 rounded px-1 py-0.5">
+            <AlertTriangle className="h-2.5 w-2.5" />
+            {formatEstimatedMins(exceededMinutes)}
+          </span>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="bg-red-50 border-red-200 text-red-900 text-xs shadow-lg rounded-lg px-3 py-2 z-[9999]">
+        <p className="font-bold">Exceeds Expected Time</p>
+        <p>Over by {formatEstimatedMins(exceededMinutes)}</p>
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);
 
 const PaginationButton = ({ children, onClick, disabled }: any) => (
   <Button
@@ -54,16 +81,101 @@ const PaginationButton = ({ children, onClick, disabled }: any) => (
   </Button>
 );
 
-export function SummaryTable({ tasks, companies }: { tasks: any[]; companies: Map<number, { name: string; prefix: string }> }) {
-  const columns = useMemo(() => buildColumns(), []);
+export function SummaryTable({
+  tasks, companies, departments = [],
+  showTime = false, showDelta = false,
+  sortConfig, handleSort,
+  enhancedTasksData,
+  getExpectedMinutesForTask, getActualTimeInfoForTask,
+  visibleColumnIds = DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS,
+}: {
+  tasks: any[];
+  companies: Map<number, { name: string; prefix: string }>;
+  departments?: any[];
+  showTime?: boolean;
+  showDelta?: boolean;
+  sortConfig?: { key: string; direction: 'asc' | 'desc' } | null;
+  handleSort?: (columnId: string) => void;
+  enhancedTasksData?: Map<string, any>;
+  getExpectedMinutesForTask?: (task: any) => number;
+  getActualTimeInfoForTask?: (task: any) => { diffDays: number; isOverdue: boolean; exceededMinutes: number } | null;
+  visibleColumnIds?: string[];
+}) {
+  const columns = useMemo(() => SUMMARY_COLUMNS.filter(c => visibleColumnIds.includes(c.id)), [visibleColumnIds]);
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
+
+  // ── Column sizing (tanstack react-table, resizable columns) ──
+  const columnDefs = useMemo<ColumnDef<any>[]>(() => [
+    { id: '__index__', size: INDEX_COL_WIDTH, enableResizing: false },
+    ...columns.map((col: any) => ({ id: col.id, size: DEFAULT_COL_WIDTH, minSize: 90, maxSize: 640 })),
+  ], [columns]);
+
+  const table = useReactTable({
+    data: [],
+    columns: columnDefs,
+    columnResizeMode: 'onChange',
+    state: { columnSizing },
+    onColumnSizingChange: setColumnSizing,
+    getCoreRowModel: getCoreRowModel(),
+  });
+
+  const getColWidth = (colId: string): number => table.getColumn(colId)?.getSize() ?? DEFAULT_COL_WIDTH;
+
+  const applyWidthToAllColumns = (colId: string) => {
+    const width = getColWidth(colId);
+    setColumnSizing(prev => {
+      const next = { ...prev };
+      columns.forEach((c: any) => { next[c.id] = width; });
+      return next;
+    });
+  };
+
+  const headerById: Record<string, any> = {};
+  table.getHeaderGroups().forEach(hg => hg.headers.forEach(h => { headerById[h.id] = h; }));
+
+  const stickyColumnOffsets = useMemo(() => {
+    const offsets: Record<string, number> = {};
+    let cursor = INDEX_COL_WIDTH;
+    columns.forEach((col: any) => {
+      if (col.sticky) {
+        offsets[col.id] = cursor;
+        cursor += columnSizing[col.id] ?? DEFAULT_COL_WIDTH;
+      }
+    });
+    return offsets;
+  }, [columns, columnSizing]);
+
+  // ── Δ columns between consecutive milestone columns ──
+  const interleavedColumns = useMemo(() => {
+    if (!showDelta) return columns;
+    const result: any[] = [];
+    const priorMilestoneCols: any[] = [];
+    columns.forEach((col: any, i: number) => {
+      result.push(col);
+      if (col.type === 'milestone') priorMilestoneCols.push(col);
+      const next = columns[i + 1];
+      if (col.type === 'milestone' && next?.type === 'milestone') {
+        result.push({ id: `__delta__${i}`, isDelta: true, prevCol: col, nextCol: next, priorCols: [...priorMilestoneCols], label: 'Δ' });
+      }
+    });
+    return result;
+  }, [columns, showDelta]);
+
+  const firstHighlightId = useMemo(() => columns.find(c => c.highlight)?.id, [columns]);
 
   const rows = useMemo(() => tasks.map(task => {
-    const milestoneParts: Record<string, { date: string | null; time: string | null }> = {};
-    MILESTONE_STAGE_COLUMNS.forEach(col => { milestoneParts[col.key] = resolveMilestoneParts(task, col.stageId); });
-    return { task, milestoneParts };
-  }), [tasks]);
+    const milestoneDates: Record<string, string | null> = {};
+    const milestoneDateObjs: Record<string, Date | null> = {};
+    columns.forEach(col => {
+      if (col.type !== 'milestone') return;
+      const raw = resolveMilestoneDate(task, col.milestone.stageId);
+      milestoneDates[col.milestone.key] = raw;
+      milestoneDateObjs[col.milestone.key] = raw ? parseDateSafe(raw) : null;
+    });
+    return { task, milestoneDates, milestoneDateObjs };
+  }), [tasks, columns]);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / rowsPerPage));
   useEffect(() => { if (currentPage > totalPages) setCurrentPage(totalPages); }, [currentPage, totalPages]);
@@ -73,69 +185,263 @@ export function SummaryTable({ tasks, companies }: { tasks: any[]; companies: Ma
     return rows.slice(start, start + rowsPerPage);
   }, [rows, currentPage, rowsPerPage]);
 
-  const firstHighlightId = useMemo(() => columns.find(c => c.highlight)?.id, [columns]);
+  // ── Subdepartment section grouping (current page only, mirrors StandardReportView) ──
+  const subDeptGroups = useMemo(() => {
+    const map = new Map<string, typeof paginatedRows>();
+    for (const row of paginatedRows) {
+      const name = getSubDepartmentDisplay(row.task, departments);
+      if (!map.has(name)) map.set(name, []);
+      map.get(name)!.push(row);
+    }
+    return Array.from(map.entries())
+      .sort(([a], [b]) => (a === 'N/A' ? 1 : b === 'N/A' ? -1 : a.localeCompare(b)))
+      .map(([name, groupRows]) => ({ name, rows: groupRows }));
+  }, [paginatedRows, departments]);
+
+  const sectionedRows = useMemo(() => {
+    const result: ({ type: 'section'; name: string; count: number } | { type: 'row'; row: any; globalIdx: number })[] = [];
+    let globalIdx = 0;
+    for (const group of subDeptGroups) {
+      result.push({ type: 'section', name: group.name, count: group.rows.length });
+      for (const row of group.rows) { result.push({ type: 'row', row, globalIdx }); globalIdx++; }
+    }
+    return result;
+  }, [subDeptGroups]);
+
+  const resolveCellValue = (col: any, task: any): React.ReactNode => {
+    if (col.type === 'field') return resolveFieldValue(col.id, task, companies, enhancedTasksData);
+    if (col.type === 'computed_time') {
+      if (col.id === 'planned_execution') {
+        const minutes = getExpectedMinutesForTask?.(task) ?? 0;
+        return minutes > 0 ? formatEstimatedMins(minutes) : null;
+      }
+      if (col.id === 'actual_execution') {
+        const info = getActualTimeInfoForTask?.(task);
+        if (!info) return null;
+        const display = `${info.diffDays}d`;
+        return info.isOverdue ? <ActualTimeCell display={display} exceededMinutes={info.exceededMinutes} /> : display;
+      }
+    }
+    return null;
+  };
 
   return (
     <div className="flex flex-col flex-1 antialiased pt-0 bg-white">
       <div className="relative overflow-hidden border border-slate-200 shadow-sm">
         <div className="overflow-auto max-h-[calc(100vh-330px)] custom-scrollbar">
-          <Table className="border-separate border-spacing-0 table-fixed" style={{ minWidth: '100%' }}>
+          <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
+            <colgroup>
+              <col style={{ width: INDEX_COL_WIDTH }} />
+              {interleavedColumns.map((col: any) => (
+                <col key={col.id} style={{ width: col.isDelta ? DELTA_COL_WIDTH : getColWidth(col.id) }} />
+              ))}
+            </colgroup>
+
             <TableHeader className="sticky top-0 z-40">
               <TableRow className="hover:bg-transparent border-0">
-                <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-2.5 px-2 bg-custom-blue" style={{ width: 48 }}>
+                <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-2.5 px-2 bg-custom-blue">
                   <span className="text-[10px] font-semibold text-white uppercase tracking-wider">#</span>
                 </TableHead>
-                {columns.map(col => (
-                  <TableHead
-                    key={col.id}
-                    className={cn(
-                      "border-r border-b border-white/30 px-4 py-2.5 whitespace-nowrap",
-                      col.highlight ? "bg-amber-500" : "bg-custom-blue",
-                      col.id === firstHighlightId && "border-l-[3px] border-l-amber-300"
-                    )}
-                  >
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-white whitespace-normal break-words leading-snug">
-                      {col.label}
-                    </span>
-                  </TableHead>
-                ))}
+
+                {interleavedColumns.map((col: any) => {
+                  if (col.isDelta) {
+                    return (
+                      <TableHead key={col.id} className="border-r border-b border-white/30 text-center px-1 py-2.5 bg-custom-blue" style={{ width: DELTA_COL_WIDTH }}>
+                        <TooltipProvider delayDuration={300}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="text-[10px] font-black text-amber-300/90 uppercase tracking-wide cursor-default bg-white/10 px-1.5 py-0.5 rounded">Δ</span>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" className="bg-slate-900 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[9999] max-w-[200px]">
+                              Days between milestones
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </TableHead>
+                    );
+                  }
+
+                  const isSticky = !!col.sticky;
+                  const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
+                  const isActive = sortConfig?.key === col.id;
+
+                  return (
+                    <TableHead
+                      key={col.id}
+                      onClick={() => handleSort?.(col.id)}
+                      className={cn(
+                        "group relative border-r border-b border-white/30 transition-colors select-none px-4 py-2.5",
+                        handleSort && "cursor-pointer",
+                        col.highlight ? "bg-amber-500 hover:bg-amber-600" : col.type === 'computed_time' ? "bg-violet-600 hover:bg-violet-700" : "bg-custom-blue hover:bg-slate-700",
+                        isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.15)]",
+                        isActive && !col.highlight && col.type !== 'computed_time' && "bg-slate-700",
+                        col.id === firstHighlightId && "border-l-[3px] border-l-amber-300"
+                      )}
+                      style={isSticky ? { left: `${left}px` } : undefined}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <TooltipProvider delayDuration={500}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="text-[11px] font-semibold uppercase tracking-wider text-white whitespace-normal break-words leading-snug">
+                                {col.label}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" className="bg-slate-900 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[9999] max-w-[260px] break-words">
+                              {col.milestone?.description || col.label}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+
+                        <div className="flex items-center gap-1.5">
+                          <TooltipProvider delayDuration={300}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => { e.stopPropagation(); applyWidthToAllColumns(col.id); }}
+                                  className="h-4 w-4 shrink-0 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-slate-600 opacity-0 group-hover:opacity-100 transition-all"
+                                >
+                                  <ArrowLeftRight size={10} strokeWidth={2.5} />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom" className="bg-slate-900 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[9999]">
+                                Apply this column's width to all columns
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          {handleSort && <ArrowUpDown className={cn("h-3 w-3 shrink-0", isActive ? "text-white" : "text-white/40 opacity-0 group-hover:opacity-100")} />}
+                        </div>
+                      </div>
+
+                      <div
+                        onMouseDown={(e) => { e.stopPropagation(); headerById[col.id]?.getResizeHandler()(e); }}
+                        onTouchStart={(e) => { e.stopPropagation(); headerById[col.id]?.getResizeHandler()(e); }}
+                        onClick={(e) => e.stopPropagation()}
+                        className={cn(
+                          "absolute inset-y-0 right-0 w-2 cursor-col-resize touch-none select-none transition-colors",
+                          headerById[col.id]?.column.getIsResizing() ? "bg-blue-300" : "hover:bg-white/30"
+                        )}
+                      />
+                    </TableHead>
+                  );
+                })}
               </TableRow>
             </TableHeader>
+
             <TableBody>
-              {paginatedRows.length > 0 ? (
-                paginatedRows.map(({ task, milestoneParts }, idx) => (
-                  <TableRow key={task.id} className={cn("group border-0 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-slate-50/70", "hover:bg-blue-50/50")}>
-                    <TableCell className={cn("sticky left-0 z-20 border-r border-b border-slate-200 text-center py-1.5", idx % 2 === 0 ? "bg-white" : "bg-slate-50/70", "group-hover:bg-blue-50/50")}>
-                      <span className="text-sm font-semibold text-slate-400 group-hover:text-slate-600 transition-colors">
-                        {((currentPage - 1) * rowsPerPage) + idx + 1}
-                      </span>
-                    </TableCell>
-                    {columns.map(col => {
-                      let value: React.ReactNode;
-                      if (col.milestone) {
-                        value = milestoneParts[col.milestone.key]?.[col.part] ?? null;
-                      } else {
-                        value = col.render(task, companies);
-                      }
-                      return (
-                        <TableCell
-                          key={col.id}
-                          className={cn(
-                            "px-4 py-1.5 border-r border-b border-slate-200 text-sm whitespace-nowrap transition-colors",
-                            col.highlight ? "bg-amber-50/40 group-hover:bg-amber-50/70 text-amber-800 font-medium" : "group-hover:bg-blue-50/50",
-                            col.primary ? "text-slate-900 font-semibold" : !col.highlight && "text-slate-600",
-                            col.id === firstHighlightId && "border-l-[3px] border-l-amber-300"
-                          )}
-                        >
-                          {value ?? <span className="text-slate-300">—</span>}
+              {sectionedRows.length > 0 ? (
+                sectionedRows.map((item) => {
+                  if (item.type === 'section') {
+                    return (
+                      <TableRow key={`section-${item.name}`} className="border-0 hover:bg-transparent">
+                        <TableCell className="sticky left-0 z-30 border-r border-b-2 border-t border-slate-300 py-2.5 px-2 bg-slate-100/80 text-center">
+                          <Layers className="h-3.5 w-3.5 text-slate-500 mx-auto shrink-0" />
                         </TableCell>
-                      );
-                    })}
-                  </TableRow>
-                ))
+                        <TableCell colSpan={interleavedColumns.length} className="px-4 py-2 border-b-2 border-t border-slate-300 bg-slate-100/80">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-bold uppercase tracking-widest text-slate-600">
+                              {item.name === 'N/A' ? 'Unassigned' : item.name}
+                            </span>
+                            <span className="text-[10px] font-medium text-slate-400 ml-1">({item.count})</span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  }
+
+                  const { task, milestoneDates, milestoneDateObjs } = item.row;
+                  const idx = item.globalIdx;
+
+                  return (
+                    <TableRow key={task.id} className={cn("group border-0 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-slate-50/70", "hover:bg-blue-50/50")}>
+                      <TableCell className={cn("sticky left-0 z-20 border-r border-b border-slate-200 text-center py-1.5", idx % 2 === 0 ? "bg-white" : "bg-slate-50/70", "group-hover:bg-blue-50/50")}>
+                        <span className="text-sm font-semibold text-slate-400 group-hover:text-slate-600 transition-colors">
+                          {((currentPage - 1) * rowsPerPage) + idx + 1}
+                        </span>
+                      </TableCell>
+
+                      {interleavedColumns.map((col: any) => {
+                        // ── Δ cell ──
+                        if (col.isDelta) {
+                          const nextDate = milestoneDateObjs[col.nextCol.milestone.key];
+                          let prevDate: Date | null = null;
+                          let bridgedFromCol: any = col.prevCol;
+                          if (nextDate) {
+                            for (let i = col.priorCols.length - 1; i >= 0; i--) {
+                              const candidate = col.priorCols[i];
+                              const d = milestoneDateObjs[candidate.milestone.key];
+                              if (d) { prevDate = d; bridgedFromCol = candidate; break; }
+                            }
+                          }
+                          const diff = prevDate && nextDate ? differenceInDays(nextDate, prevDate) : null;
+                          const bridged = diff !== null && bridgedFromCol?.id !== col.prevCol?.id;
+                          return (
+                            <TableCell
+                              key={col.id}
+                              className={cn(
+                                "px-1 py-1.5 border-r border-b border-slate-100 text-center border-l-[3px] border-l-amber-300/40",
+                                idx % 2 === 0 ? "bg-white" : "bg-slate-50/70",
+                                "group-hover:bg-blue-50/50"
+                              )}
+                            >
+                              {diff !== null ? (
+                                <TooltipProvider delayDuration={200}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className={cn(
+                                        "text-sm font-bold tabular-nums cursor-default",
+                                        bridged && "italic underline decoration-dotted",
+                                        diff < 0 ? "text-red-600" : diff > 30 ? "text-rose-500" : diff > 14 ? "text-amber-500" : "text-slate-500"
+                                      )}>
+                                        {diff >= 0 ? `+${diff}d` : `${diff}d`}
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="bg-slate-900 text-white text-xs rounded-lg px-2 py-1.5 z-[9999]">
+                                      {bridged
+                                        ? `${diff} day${Math.abs(diff) !== 1 ? "s" : ""} since ${bridgedFromCol?.label} — ${col.prevCol?.label} has no date yet`
+                                        : `${diff} day${Math.abs(diff) !== 1 ? "s" : ""} between milestones`}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              ) : (
+                                <span className="text-slate-200 text-sm">—</span>
+                              )}
+                            </TableCell>
+                          );
+                        }
+
+                        const isSticky = !!col.sticky;
+                        const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
+                        const value: React.ReactNode = col.type === 'milestone'
+                          ? formatDateCell(milestoneDates[col.milestone.key], showTime)
+                          : resolveCellValue(col, task);
+                        const isEmpty = value === null || value === undefined || value === '—';
+
+                        return (
+                          <TableCell
+                            key={col.id}
+                            className={cn(
+                              "px-4 py-1.5 border-r border-b border-slate-200 text-sm whitespace-nowrap transition-colors",
+                              isSticky && "sticky z-20 shadow-[2px_0_4px_rgba(0,0,0,0.02)] bg-inherit",
+                              col.highlight ? "bg-amber-50/40 group-hover:bg-amber-50/70 text-amber-800 font-medium"
+                                : col.type === 'computed_time' ? "bg-violet-50/40 group-hover:bg-violet-50/60"
+                                : "group-hover:bg-blue-50/50",
+                              col.primary ? "text-slate-900 font-semibold" : (!col.highlight && col.type !== 'computed_time') && "text-slate-600",
+                              col.id === firstHighlightId && "border-l-[3px] border-l-amber-300"
+                            )}
+                            style={isSticky ? { left: `${left}px` } : undefined}
+                          >
+                            {isEmpty ? <span className="text-slate-300">—</span> : value}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  );
+                })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={columns.length + 1} className="h-64 bg-slate-50">
+                  <TableCell colSpan={interleavedColumns.length + 1} className="h-64 bg-slate-50">
                     <div className="flex flex-col items-center justify-center">
                       <div className="h-12 w-12 rounded-full bg-slate-200 flex items-center justify-center mb-3">
                         <SearchX size={24} className="text-slate-500" />

@@ -2,20 +2,43 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Loader2, LayoutDashboard, Building2 } from "lucide-react";
+import { Loader2, LayoutDashboard, Building2, Clock, GitCompare } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { toast } from "@/lib/hooks/use-toast";
 import { fetchDepartments } from "../departments/departments/database";
-import { fetchTasks, fetchStages, fetchCompanies } from "../tasks/utils/taskManagerData";
+import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields } from "../tasks/utils/taskManagerData";
+import { enhanceTasksWithIndividualData } from "../tasks/overall-view/tableUtils";
 import { userService } from "@/lib/shared-user-assignment-service";
+import { supabase } from "@/lib/supabase/client";
 import {
   getCanonicalCurrentStage,
   getCurrentOfficerStage,
   getStageOfficerIds,
   isTaskWithClient,
+  isStageApplicableToTask,
+  computeStageDateInfo,
+  parseDateSafe,
 } from "../reports/utils/reportStageLogic";
 import { HierarchyTabs } from "./components/HierarchyTabs";
+import { StatusTabs } from "./components/StatusTabs";
 import { PerspectiveTabs } from "./components/PerspectiveTabs";
 import { SummaryTable } from "./components/SummaryTable";
+import { ColumnVisibilityDialog } from "./components/ColumnVisibilityDialog";
+import { MILESTONE_STAGE_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS } from "./stageColumnConfig";
+
+const TERMINAL_STATUSES = ['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'];
+const COMPLETED_STATUSES = ['write_up_completed', 'endorsed', 'completed'];
+
+const buildJobLevelKey = (task: any, fallbackDeptId?: string) => {
+  const jl = task.job_level || {};
+  return JSON.stringify({
+    department_id: Number(jl.department_id || task.department_id || fallbackDeptId),
+    subdepartment_id: jl.subdepartment_id || null,
+    class_id: jl.class_id || null,
+    subclass_id: jl.subclass_id || null,
+  });
+};
 
 export default function SummaryReportsPage() {
   const [loading, setLoading] = useState(true);
@@ -27,15 +50,24 @@ export default function SummaryReportsPage() {
   const [unifiedOfficers, setUnifiedOfficers] = useState<any[]>([]);
   const [unifiedManagers, setUnifiedManagers] = useState<any[]>([]);
   const [unifiedAssistants, setUnifiedAssistants] = useState<any[]>([]);
+  const [allDocuments, setAllDocuments] = useState<any[]>([]);
+  const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map());
+  const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
+  const [expectedTimeByJobLevel, setExpectedTimeByJobLevel] = useState<Map<string, number>>(new Map());
 
   const [activeDeptId, setActiveDeptId] = useState<string>("all");
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
   const [activeClassId, setActiveClassId] = useState<string>("all");
+  const [activeTaskStatus, setActiveTaskStatus] = useState<'all' | 'enquiry' | 'wip' | 'completed' | 'overdue'>('all');
 
   const [activePerspective, setActivePerspective] = useState<'all' | 'officers' | 'managers' | 'clients'>('all');
   const [activeOfficerId, setActiveOfficerId] = useState<string>("all");
   const [activeManagerId, setActiveManagerId] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [showTime, setShowTime] = useState(false);
+  const [showDelta, setShowDelta] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+  const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS);
 
   const loadAllData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -68,6 +100,46 @@ export default function SummaryReportsPage() {
       });
       setAllTasks(newAllTasks);
       setStagesByDept(newStagesByDept);
+
+      const [docs, kycFields, { enhancedTasksData: enhancedMap }] = await Promise.all([
+        fetchAllDocuments(),
+        fetchAllKycFields(),
+        enhanceTasksWithIndividualData(newAllTasks),
+      ]);
+      setAllDocuments(docs);
+      setKycDocuments(kycFields?.kycDocsMap || new Map());
+      setEnhancedTasksData(enhancedMap);
+
+      // Expected total time per job level (tm_class_requirements.expected_total_time_minutes),
+      // same source ReportsPage's "Expected Time" column reads from — fetched here across
+      // every unique job level actually present in the loaded tasks, since this page spans
+      // every department at once rather than one department at a time.
+      const jobLevels = new Map<string, any>();
+      newAllTasks.forEach((task: any) => {
+        const key = buildJobLevelKey(task);
+        if (!jobLevels.has(key)) {
+          const jl = task.job_level || {};
+          jobLevels.set(key, {
+            department_id: Number(jl.department_id || task.department_id),
+            subdepartment_id: jl.subdepartment_id || null,
+            class_id: jl.class_id || null,
+            subclass_id: jl.subclass_id || null,
+            level: jl.level || 1,
+          });
+        }
+      });
+      const newExpectedTimeMap = new Map<string, number>();
+      await Promise.all(Array.from(jobLevels.entries()).map(async ([key, jobLevel]) => {
+        const { data, error } = await supabase
+          .from('tm_class_requirements')
+          .select('expected_total_time_minutes')
+          .eq('job_level', JSON.stringify(jobLevel))
+          .maybeSingle();
+        if (!error && typeof data?.expected_total_time_minutes === 'number') {
+          newExpectedTimeMap.set(key, data.expected_total_time_minutes);
+        }
+      }));
+      setExpectedTimeByJobLevel(newExpectedTimeMap);
     } catch (err) {
       toast({ title: "Error", description: "Could not load summary reports data.", variant: "destructive" });
     } finally {
@@ -92,6 +164,59 @@ export default function SummaryReportsPage() {
   const getCurrentOfficerStageForTask = useCallback((task: any) => getCurrentOfficerStage(task, getTaskStages(task), departments), [getTaskStages, departments]);
   const getStageOfficerIdsForTask = useCallback((task: any, mode: 'current' | 'history' = 'current') => getStageOfficerIds(task, getTaskStages(task), mode, departments), [getTaskStages, departments]);
   const isTaskWithClientForTask = useCallback((task: any) => isTaskWithClient(task, getTaskStages(task), departments), [getTaskStages, departments]);
+  const computeStageDateInfoForTask = useCallback((task: any, stage: any, col: any) =>
+    computeStageDateInfo(task, stage, col, { stages: getTaskStages(task), allDocuments, kycDocuments }),
+    [getTaskStages, allDocuments, kycDocuments]);
+
+  // ── Expected / Actual total time — same source & math as ReportsPage's "Expected Time" /
+  // "Actual Time Taken" columns, reused here for the Planned/Actual Execution columns and
+  // for the Overdue(Delayed) status tab. ──
+  const getExpectedMinutesForTask = useCallback((task: any) => {
+    const stored = expectedTimeByJobLevel.get(buildJobLevelKey(task));
+    if (typeof stored === 'number') return stored;
+    let total = 0;
+    getTaskStages(task).forEach((stage: any) => {
+      if (stage.estimated_time && isStageApplicableToTask(stage, task, departments)) total += stage.estimated_time;
+    });
+    return total;
+  }, [expectedTimeByJobLevel, getTaskStages, departments]);
+
+  // Returns null if there's no first stage / no effective start date yet; otherwise
+  // { diffDays, expectedMinutes, isOverdue, exceededMinutes }.
+  const getActualTimeInfoForTask = useCallback((task: any) => {
+    const applicableStagesSorted = [...getTaskStages(task)]
+      .filter((s: any) => isStageApplicableToTask(s, task, departments))
+      .sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
+    const firstStage = applicableStagesSorted[0];
+    if (!firstStage) return null;
+
+    const info = computeStageDateInfoForTask(task, firstStage, { stageId: firstStage.id, hasDate: true, fields: [] });
+    if (info.isSkipped || !info.effectiveDateValue) return null;
+
+    const startDate = parseDateSafe(info.effectiveDateValue);
+    if (!startDate) return null;
+
+    const diffDays = Math.max(0, Math.floor((Date.now() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
+    const actualMinutes = diffDays * 24 * 60;
+    const expectedMinutes = getExpectedMinutesForTask(task);
+    const isOverdue = expectedMinutes > 0 && actualMinutes > expectedMinutes;
+    return { diffDays, expectedMinutes, actualMinutes, isOverdue, exceededMinutes: isOverdue ? actualMinutes - expectedMinutes : 0 };
+  }, [getTaskStages, departments, computeStageDateInfoForTask, getExpectedMinutesForTask]);
+
+  const isTaskOverdue = useCallback((task: any) => {
+    if (TERMINAL_STATUSES.includes(task.status)) return false;
+    return getActualTimeInfoForTask(task)?.isOverdue ?? false;
+  }, [getActualTimeInfoForTask]);
+
+  // ── Task status scoping (Enquiry / WIP / Completed / Overdue) ──
+  const matchesActiveTaskStatus = useCallback((task: any) => {
+    if (activeTaskStatus === 'all') return true;
+    if (activeTaskStatus === 'enquiry') return task.status === 'enquiry';
+    if (activeTaskStatus === 'wip') return task.status !== 'enquiry' && !TERMINAL_STATUSES.includes(task.status);
+    if (activeTaskStatus === 'completed') return COMPLETED_STATUSES.includes(task.status);
+    if (activeTaskStatus === 'overdue') return isTaskOverdue(task);
+    return true;
+  }, [activeTaskStatus, isTaskOverdue]);
 
   // ── Hierarchy scoping (dept → subdept → class) ──
   const deptScopedTasks = useMemo(() => allTasks.filter(task => {
@@ -125,6 +250,21 @@ export default function SummaryReportsPage() {
     return counts;
   }, [tasksInActiveSubDept, departments, activeDeptId, activeSubDeptId]);
 
+  // Task-status tab badges: totals per status, unaffected by which status tab is currently
+  // selected (sourced from deptScopedTasks, not statusScopedTasks) so switching tabs never
+  // zeroes out the others' counts — same convention as ReportsPage's StatusFilterBar.
+  const taskStatusCounts = useMemo(() => ({
+    all: deptScopedTasks.length,
+    enquiry: deptScopedTasks.filter(t => t.status === 'enquiry').length,
+    wip: deptScopedTasks.filter(t => t.status !== 'enquiry' && !TERMINAL_STATUSES.includes(t.status)).length,
+    completed: deptScopedTasks.filter(t => COMPLETED_STATUSES.includes(t.status)).length,
+    overdue: deptScopedTasks.filter(t => isTaskOverdue(t)).length,
+  }), [deptScopedTasks, isTaskOverdue]);
+
+  // + the active StatusTabs selection — this is the pool everything downstream (perspective
+  // badges, search, rendered rows) narrows from.
+  const statusScopedTasks = useMemo(() => deptScopedTasks.filter(matchesActiveTaskStatus), [deptScopedTasks, matchesActiveTaskStatus]);
+
   // ── Perspective scoping (Officers / Managers / Clients) ──
   const availableOfficers = useMemo(() => {
     if (activeDeptId === 'all') return [];
@@ -141,33 +281,33 @@ export default function SummaryReportsPage() {
     return unifiedManagers.filter((m: any) => allowedIds.has(m.id));
   }, [activeDeptId, activeSubDeptId, unifiedOfficers, unifiedManagers, unifiedAssistants]);
 
-  const officersCount = useMemo(() => deptScopedTasks.filter(t => !!getCurrentOfficerStageForTask(t)).length, [deptScopedTasks, getCurrentOfficerStageForTask]);
-  const managersCount = useMemo(() => deptScopedTasks.filter(t => getCanonicalCurrentStageForTask(t)?.follow_up?.toLowerCase() === 'bcl').length, [deptScopedTasks, getCanonicalCurrentStageForTask]);
-  const clientsCount = useMemo(() => deptScopedTasks.filter(t => isTaskWithClientForTask(t)).length, [deptScopedTasks, isTaskWithClientForTask]);
+  const officersCount = useMemo(() => statusScopedTasks.filter(t => !!getCurrentOfficerStageForTask(t)).length, [statusScopedTasks, getCurrentOfficerStageForTask]);
+  const managersCount = useMemo(() => statusScopedTasks.filter(t => getCanonicalCurrentStageForTask(t)?.follow_up?.toLowerCase() === 'bcl').length, [statusScopedTasks, getCanonicalCurrentStageForTask]);
+  const clientsCount = useMemo(() => statusScopedTasks.filter(t => isTaskWithClientForTask(t)).length, [statusScopedTasks, isTaskWithClientForTask]);
 
   const officerCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 };
-    const pool = deptScopedTasks.filter(t => getCurrentOfficerStageForTask(t) !== null);
+    const pool = statusScopedTasks.filter(t => getCurrentOfficerStageForTask(t) !== null);
     availableOfficers.forEach((o: any) => {
       const c = pool.filter(t => getStageOfficerIdsForTask(t, 'current').includes(o.id.toString())).length;
       counts[o.id.toString()] = c;
       counts.all += c;
     });
     return counts;
-  }, [deptScopedTasks, availableOfficers, getCurrentOfficerStageForTask, getStageOfficerIdsForTask]);
+  }, [statusScopedTasks, availableOfficers, getCurrentOfficerStageForTask, getStageOfficerIdsForTask]);
 
   const managerCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 };
-    const pool = deptScopedTasks.filter(t => getCanonicalCurrentStageForTask(t)?.follow_up?.toLowerCase() === 'bcl');
+    const pool = statusScopedTasks.filter(t => getCanonicalCurrentStageForTask(t)?.follow_up?.toLowerCase() === 'bcl');
     availableTaskManagers.forEach((m: any) => {
       const c = pool.filter(t => t.task_manager?.id?.toString() === m.id.toString()).length;
       counts[m.id.toString()] = c;
       counts.all += c;
     });
     return counts;
-  }, [deptScopedTasks, availableTaskManagers, getCanonicalCurrentStageForTask]);
+  }, [statusScopedTasks, availableTaskManagers, getCanonicalCurrentStageForTask]);
 
-  const perspectiveScopedTasks = useMemo(() => deptScopedTasks.filter(task => {
+  const perspectiveScopedTasks = useMemo(() => statusScopedTasks.filter(task => {
     if (activePerspective === 'officers') {
       const officerStage = getCurrentOfficerStageForTask(task);
       if (!officerStage) return false;
@@ -179,7 +319,7 @@ export default function SummaryReportsPage() {
     }
     if (activePerspective === 'clients' && !isTaskWithClientForTask(task)) return false;
     return true;
-  }), [deptScopedTasks, activePerspective, activeOfficerId, activeManagerId, getCurrentOfficerStageForTask, getStageOfficerIdsForTask, getCanonicalCurrentStageForTask, isTaskWithClientForTask]);
+  }), [statusScopedTasks, activePerspective, activeOfficerId, activeManagerId, getCurrentOfficerStageForTask, getStageOfficerIdsForTask, getCanonicalCurrentStageForTask, isTaskWithClientForTask]);
 
   const searchedTasks = useMemo(() => {
     if (!searchQuery) return perspectiveScopedTasks;
@@ -190,6 +330,38 @@ export default function SummaryReportsPage() {
       (companies.get(t.company_id)?.name?.toLowerCase().includes(q))
     );
   }, [perspectiveScopedTasks, searchQuery, companies]);
+
+  const getSortableValue = useCallback((task: any, columnId: string) => {
+    if (columnId === 'company') return (companies.get(task.company_id)?.name || task.company_name || '').toLowerCase();
+    if (columnId === 'applicant') return (task.applicant_name || '').toLowerCase();
+    if (columnId === 'job_description') return (task.job_description || '').toLowerCase();
+    if (columnId === 'company_prefix' || columnId === 'sponsor_name' || columnId === 'application_type' || columnId === 'duration') return '';
+    if (columnId === 'planned_execution') return getExpectedMinutesForTask(task);
+    if (columnId === 'actual_execution') return getActualTimeInfoForTask(task)?.actualMinutes ?? 0;
+    const milestone = MILESTONE_STAGE_COLUMNS.find(c => c.key === columnId);
+    if (milestone) {
+      const stageData = task.stages?.[milestone.stageId];
+      const raw = stageData?.date || stageData?.completedAt || null;
+      const parsed = raw ? parseDateSafe(raw) : null;
+      return parsed ? parsed.getTime() : 0;
+    }
+    return '';
+  }, [companies, getExpectedMinutesForTask, getActualTimeInfoForTask]);
+
+  const handleSort = useCallback((columnId: string) => {
+    setSortConfig(cur => cur?.key === columnId ? { key: columnId, direction: cur.direction === 'asc' ? 'desc' : 'asc' } : { key: columnId, direction: 'asc' });
+  }, []);
+
+  const sortedTasks = useMemo(() => {
+    if (!sortConfig) return searchedTasks;
+    return [...searchedTasks].sort((a, b) => {
+      const av = getSortableValue(a, sortConfig.key);
+      const bv = getSortableValue(b, sortConfig.key);
+      if (av < bv) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (av > bv) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [searchedTasks, sortConfig, getSortableValue]);
 
   if (loading) {
     return (
@@ -223,6 +395,40 @@ export default function SummaryReportsPage() {
               <span className="truncate text-slate-500">{breadcrumbSubtext}</span>
             </div>
           </div>
+
+          <div className="flex items-center gap-2.5 shrink-0">
+            <ColumnVisibilityDialog visibleColumnIds={visibleColumnIds} setVisibleColumnIds={setVisibleColumnIds} />
+
+            {/* Show Time Toggle — same control/behavior as ReportsHeader, driving the same
+                formatDateCell(dateValue, showTime) used by the Reports module. */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowTime((v) => !v)}
+              className={cn(
+                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all shrink-0",
+                showTime ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              <Clock className="h-3.5 w-3.5" />
+              {showTime ? "Hide Time" : "Show Time"}
+            </Button>
+
+            {/* Delta Toggle — same control as ReportsHeader, showing day-gaps between
+                consecutive milestone columns. */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowDelta((v) => !v)}
+              className={cn(
+                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all shrink-0",
+                showDelta ? "bg-violet-50 border-violet-300 text-violet-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              <GitCompare className="h-3.5 w-3.5" />
+              {showDelta ? "Hide Δ" : "Show Δ"}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -234,16 +440,26 @@ export default function SummaryReportsPage() {
         deptTaskCounts={deptTaskCounts} subDeptTaskCounts={subDeptTaskCounts} classTaskCounts={classTaskCounts}
       />
 
+      <StatusTabs activeTaskStatus={activeTaskStatus} setActiveTaskStatus={setActiveTaskStatus} counts={taskStatusCounts} />
+
       <PerspectiveTabs
         activePerspective={activePerspective} setActivePerspective={setActivePerspective}
-        allCount={deptScopedTasks.length} officersCount={officersCount} managersCount={managersCount} clientsCount={clientsCount}
+        allCount={statusScopedTasks.length} officersCount={officersCount} managersCount={managersCount} clientsCount={clientsCount}
         availableOfficers={availableOfficers} activeOfficerId={activeOfficerId} setActiveOfficerId={setActiveOfficerId} officerCounts={officerCounts}
         availableTaskManagers={availableTaskManagers} activeManagerId={activeManagerId} setActiveManagerId={setActiveManagerId} managerCounts={managerCounts}
         searchQuery={searchQuery} setSearchQuery={setSearchQuery}
         refreshData={handleRefresh} loading={isRefreshing}
       />
 
-      <SummaryTable tasks={searchedTasks} companies={companies} />
+      <SummaryTable
+        tasks={sortedTasks} companies={companies} departments={departments}
+        showTime={showTime} showDelta={showDelta}
+        sortConfig={sortConfig} handleSort={handleSort}
+        enhancedTasksData={enhancedTasksData}
+        getExpectedMinutesForTask={getExpectedMinutesForTask}
+        getActualTimeInfoForTask={getActualTimeInfoForTask}
+        visibleColumnIds={visibleColumnIds}
+      />
     </div>
   );
 }

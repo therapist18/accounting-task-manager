@@ -6,6 +6,7 @@ import { resolveEffectiveSettings } from '../utils/clauseEngine';
 import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
 import type { EcPlaceholder } from '../utils/ecPlaceholders';
+import type { JobField } from '../../master-fields/components/types/database';
 import { fetchCompanies, Company } from '../../companies/database';
 import { fetchSignatoryNameForCompany } from '../utils/companySettings';
 import { fetchPayrollStatutoryLine } from '../utils/payrollIntegration';
@@ -34,15 +35,23 @@ interface ContractEditorProps {
 }
 
 // Renders the specific source an admin configured for this placeholder
-// (settings_key/offer_field, set via the Edit Source dialog in
+// (settings_key/offer_field, or the linked master field's own name for
+// master_field placeholders - set via the Edit Source dialog in
 // PlaceholderSources.tsx) rather than just the generic source_kind category -
-// falls back to "Profile" when that specific source hasn't been set, since an
-// unconfigured settings_cascade/offer placeholder still resolves off
-// whatever's in the selected Job Profile/Offer record by default.
-const getSourceLabel = (p: Pick<EcPlaceholder, 'source_kind' | 'settings_key' | 'offer_field'>) => {
+// falls back to "Profile"/"Not linked" when that specific source hasn't been
+// set, since an unconfigured settings_cascade/offer placeholder still
+// resolves off whatever's in the selected Job Profile/Offer record by
+// default.
+const getSourceLabel = (
+  p: Pick<EcPlaceholder, 'source_kind' | 'settings_key' | 'offer_field' | 'master_field_id' | 'master_field_links'>,
+  masterFields: Map<number, JobField>
+) => {
   switch (p.source_kind) {
-    case 'master_field':
-      return 'Master Field';
+    case 'master_field': {
+      const linkedId = p.master_field_links?.[0]?.master_field_id ?? p.master_field_id;
+      const field = linkedId != null ? masterFields.get(Number(linkedId)) : undefined;
+      return field?.label || field?.field_key || 'Not linked';
+    }
     case 'settings_cascade':
       return p.settings_key || 'Profile';
     case 'job_profile':
@@ -371,8 +380,8 @@ export function ContractEditor({
                                       p.source_kind === 'offer' ? "bg-purple-50 text-purple-600 border-purple-100 dark:bg-purple-900/30 dark:text-purple-400 dark:border-purple-800/50" :
                                         p.source_kind === 'job_profile' ? "bg-emerald-50 text-emerald-600 border-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800/50" :
                                           "bg-gray-50 text-gray-500 border-gray-100 dark:bg-gray-800/50 dark:text-gray-400 dark:border-gray-700/50"
-                                )} title={getSourceLabel(p)}>
-                                  {getSourceLabel(p)}
+                                )} title={getSourceLabel(p, masterFields)}>
+                                  {getSourceLabel(p, masterFields)}
                                 </span>
                               </div>
 

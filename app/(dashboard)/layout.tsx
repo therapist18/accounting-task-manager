@@ -46,7 +46,7 @@ export default async function DashboardLayout({
         <AppSidebar />
         <SidebarInset className="flex flex-col w-full bg-transparent overflow-hidden">
           {/* {!pathname.startsWith("/dashboard/reports") && <Navbar />}*/}
-          {!pathname.startsWith("/dashboard/tasks") && !pathname.startsWith("/dashboard/employment-contracts") && <Navbar />}
+          {!pathname.startsWith("/dashboard/tasks") && !pathname.startsWith("/dashboard/employment-contracts") && !pathname.startsWith("/dashboard/summary-reports") && <Navbar />}
           {/* Add margin and rounded corners to create the 'card' effect */}
           <main className="flex-1 relative dark:bg-zinc-900">
             {children}

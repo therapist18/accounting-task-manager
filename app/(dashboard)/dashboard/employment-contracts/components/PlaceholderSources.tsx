@@ -6,11 +6,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Sliders, FileStack, Pencil, Database, Search, ArrowUpDown, ArrowUp, ArrowDown, Shuffle, ListOrdered, ClipboardList } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Loader2, Sliders, FileStack, Pencil, Trash2, Database, Search, ArrowUpDown, ArrowUp, ArrowDown, Shuffle, ListOrdered, ClipboardList } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
-import { EcPlaceholder, PlaceholderSourceKind, fetchPlaceholders, updatePlaceholderDetails } from '../utils/ecPlaceholders';
-import { MasterFieldOption, fetchMasterFieldOptions } from '../utils/placeholderDetection';
+import { EcPlaceholder, PlaceholderSourceKind, fetchPlaceholders, updatePlaceholderDetails, deletePlaceholder } from '../utils/ecPlaceholders';
+import { MasterFieldOption, fetchMasterFieldOptions, detectTokens } from '../utils/placeholderDetection';
+import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
 import { ecPlaceholderToDtmPlaceholder, dtmPlaceholderToEcUpdates, getPlaceholderSourceText } from '../utils/ecPlaceholderAdapter';
 import { PlaceholderFormDialog } from '../../templates/document-template-manager/components/PlaceholderFormDialog';
 import { useTemplateData } from '../../templates/document-template-manager/hooks/useTemplateData';
@@ -24,7 +29,7 @@ interface PlaceholderSourcesProps {
   refreshKey?: number;
 }
 
-type SortColumn = '#' | 'token' | 'group' | 'source' | 'entity' | 'linked' | 'default';
+type SortColumn = '#' | 'token' | 'group' | 'source' | 'entity' | 'linked' | 'clauses' | 'default';
 type SortDir = 'asc' | 'desc';
 
 const EC_HIDDEN_SECTIONS = {
@@ -42,6 +47,7 @@ const StrategyIcon = ({ strategy }: { strategy: string }) =>
 export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0 }: PlaceholderSourcesProps) {
   const [placeholders, setPlaceholders] = useState<EcPlaceholder[]>([]);
   const [masterFields, setMasterFields] = useState<MasterFieldOption[]>([]);
+  const [clauses, setClauses] = useState<EcClause[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
 
@@ -53,18 +59,37 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
   const { masterFields: dtmMasterFields, jobQuestions, requirements, kycDocuments, documentTypes } = useTemplateData(!!editingEc, null);
   const { tables, loadingTables } = useTableData();
   const [changingKindId, setChangingKindId] = useState<string | null>(null);
+  const [deletingP, setDeletingP] = useState<EcPlaceholder | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const sectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     (async () => {
       setIsLoading(true);
-      const [fields, ecPlaceholders] = await Promise.all([fetchMasterFieldOptions(), fetchPlaceholders()]);
+      const [fields, ecPlaceholders, ecClauses] = await Promise.all([fetchMasterFieldOptions(), fetchPlaceholders(), fetchClauses()]);
       setMasterFields(fields);
       setPlaceholders(ecPlaceholders);
+      setClauses(ecClauses);
       setIsLoading(false);
     })();
   }, [refreshKey]);
+
+  // Which clauses actually reference each placeholder's {{token}} - scanned
+  // from real clause content (detectTokens), not from any stored link, since
+  // nothing records that relationship anywhere else. A placeholder can be
+  // configured with a source and still be referenced by zero clauses (dead/
+  // orphaned) or by several (shared across sections).
+  const clauseUsage = useMemo(() => {
+    const map = new Map<string, EcClause[]>();
+    for (const clause of clauses) {
+      for (const token of detectTokens(clause.content)) {
+        if (!map.has(token)) map.set(token, []);
+        map.get(token)!.push(clause);
+      }
+    }
+    return map;
+  }, [clauses]);
 
   // tm_job_fields ids arrive as numbers, while ec_placeholders stores
   // master_field_id as a number but master_field_links[].master_field_id as a
@@ -149,6 +174,9 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
         case 'linked':
           cmp = getLinkedLabels(a).map((l) => l.label).join(', ').localeCompare(getLinkedLabels(b).map((l) => l.label).join(', '));
           break;
+        case 'clauses':
+          cmp = (clauseUsage.get(a.key)?.length || 0) - (clauseUsage.get(b.key)?.length || 0);
+          break;
         case 'default':
           cmp = (a.default_value || '').localeCompare(b.default_value || '');
           break;
@@ -157,7 +185,7 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
     });
 
     return list;
-  }, [placeholders, search, masterFieldMap, sortColumn, sortDir, filterByKeys]);
+  }, [placeholders, search, masterFieldMap, sortColumn, sortDir, filterByKeys, clauseUsage]);
 
   const openEdit = (placeholder: EcPlaceholder) => {
     setEditingEc(placeholder);
@@ -171,8 +199,33 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
 
   const handleSaveEdit = async (updated: Placeholder) => {
     if (!editingEc) return;
+    const ecUpdates = dtmPlaceholderToEcUpdates(updated, editingEc);
+
+    // Guard against two 'offer' placeholders pointing at the same offer_field -
+    // standardPlaceholders.ts's generic resolver reads that column literally
+    // (offer[offer_field]), so a collision means both read the exact same
+    // EmploymentOffer field. NOT applied to settings_key: that column is just
+    // an admin-facing description of where a settings_cascade/job_profile
+    // placeholder's value comes from (e.g. "Job Profile Settings"), expected
+    // to repeat across many placeholders that share a source - resolution is
+    // keyed off each placeholder's own `key` instead (see
+    // standardPlaceholders.ts), so settings_key duplicates are harmless.
+    if (editingEc.source_kind === 'offer' && ecUpdates.offer_field) {
+      const conflict = placeholders.find((p) =>
+        p.id !== editingEc.id && p.source_kind === 'offer' && p.offer_field === ecUpdates.offer_field
+      );
+      if (conflict) {
+        toast({
+          title: 'Offer field already in use',
+          description: `"${ecUpdates.offer_field}" is already the source for "${conflict.label}" (${conflict.key}). Two placeholders sharing an offer field will always show the same value - pick a different one.`,
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
     try {
-      const persisted = await updatePlaceholderDetails(editingEc.id, dtmPlaceholderToEcUpdates(updated, editingEc));
+      const persisted = await updatePlaceholderDetails(editingEc.id, ecUpdates);
       if (persisted) {
         setPlaceholders((prev) => prev.map((p) => (p.id === persisted.id ? persisted : p)));
         toast({ title: 'Placeholder updated' });
@@ -218,6 +271,20 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
     } finally {
       setChangingKindId(null);
     }
+  };
+
+  const handleDelete = async () => {
+    if (!deletingP) return;
+    setDeleting(true);
+    const ok = await deletePlaceholder(deletingP.id);
+    setDeleting(false);
+    if (ok) {
+      setPlaceholders((prev) => prev.filter((p) => p.id !== deletingP.id));
+      toast({ title: 'Placeholder deleted' });
+    } else {
+      toast({ title: 'Error', description: 'Failed to delete placeholder', variant: 'destructive' });
+    }
+    setDeletingP(null);
   };
 
   return (
@@ -294,6 +361,11 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
                     Default Value <SortIcon col="default" />
                   </button>
                 </TableHead>
+                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
+                  <button onClick={() => toggleSort('clauses')} className="flex items-center gap-0">
+                    Clause Usage <SortIcon col="clauses" />
+                  </button>
+                </TableHead>
                 <TableHead className="text-right font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -301,6 +373,7 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
               {sortedPlaceholders.map((p, idx) => {
                 const linkedLabels = getLinkedLabels(p);
                 const entityLabels = getEntityLabels(p);
+                const usedByClauses = clauseUsage.get(p.key) || [];
                 return (
                 <TableRow
                   key={p.id}
@@ -377,6 +450,21 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
                     <span className="text-xs text-slate-500">{p.default_value || '—'}</span>
                   </TableCell>
+                  <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
+                    {usedByClauses.length > 0 ? (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200"
+                        title={usedByClauses.map((c) => c.label).join(', ')}
+                      >
+                        Linked · {usedByClauses.length} clause{usedByClauses.length === 1 ? '' : 's'}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
+                        Not linked
+                      </Badge>
+                    )}
+                  </TableCell>
                   <TableCell className="text-right border border-slate-200 dark:border-slate-700 px-2 py-2">
                     <Button
                       variant="ghost"
@@ -386,6 +474,15 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
                       title="Edit placeholder"
                     >
                       <Pencil className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-slate-400 hover:text-red-600"
+                      onClick={() => setDeletingP(p)}
+                      title="Delete placeholder"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -415,6 +512,41 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
           showSourceField
         />
       )}
+
+      <AlertDialog open={!!deletingP} onOpenChange={(open) => !open && setDeletingP(null)}>
+        <AlertDialogContent className="rounded-2xl max-w-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-lg font-bold text-slate-800">Delete this placeholder?</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm text-slate-500">
+              {deletingP && (() => {
+                const usedBy = clauseUsage.get(deletingP.key) || [];
+                return (
+                  <>
+                    Deletes <span className="font-mono">{'{{' + deletingP.key + '}}'}</span> ("{deletingP.label}") from the registry.{' '}
+                    {usedBy.length > 0 ? (
+                      <>It's currently referenced by <strong>{usedBy.length} clause{usedBy.length === 1 ? '' : 's'}</strong> ({usedBy.map((c) => c.label).join(', ')}) - those will render blank where it was used.</>
+                    ) : (
+                      "It isn't referenced by any clause right now."
+                    )}{' '}
+                    This cannot be undone.
+                  </>
+                );
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 mt-4">
+            <AlertDialogCancel className="h-9 px-4 rounded-full text-sm font-semibold">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="h-9 px-4 rounded-full bg-red-600 hover:bg-red-700 text-white text-sm font-semibold shadow-md shadow-red-500/10 border-0"
+            >
+              {deleting && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin inline" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
