@@ -32,7 +32,7 @@ import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { fetchCompanies, Company } from '../../companies/database';
 import {
-  EcJobProfile, fetchJobProfiles, createJobProfile, updateJobProfile, deleteJobProfile,
+  EcJobProfile, fetchJobProfiles, fetchGlobalJobProfiles, createJobProfile, updateJobProfile, deleteJobProfile,
   JobProfileScope,
 } from '../utils/jobProfileData';
 import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
@@ -319,8 +319,11 @@ export default function JobProfilesPage() {
     if (!id) return;
     setIsLoading(true);
     if (id === '__general__') {
-      const allData = await fetchJobProfiles();
-      setProfiles(allData);
+      const [globalData, allData] = await Promise.all([
+        fetchGlobalJobProfiles(),
+        fetchJobProfiles(),
+      ]);
+      setProfiles(globalData);
       setAllProfiles(allData);
     } else {
       const [data, allData] = await Promise.all([
@@ -373,9 +376,13 @@ export default function JobProfilesPage() {
       setCompanies(comps);
       setClauses(allClauses);
       setAllProfiles(allData);
-      setProfiles(selectedCompanyId && selectedCompanyId !== '__general__'
-        ? allData.filter((p) => String(p.company_id) === selectedCompanyId)
-        : allData);
+      setProfiles(
+        selectedCompanyId === '__general__'
+          ? allData.filter((p) => !p.company_id)
+          : selectedCompanyId
+          ? allData.filter((p) => String(p.company_id) === selectedCompanyId)
+          : allData
+      );
       if (selectedProfileId) {
         const fresh = allData.find((p) => p.id === selectedProfileId) || null;
         if (fresh) setDraft({ ...fresh });
@@ -436,7 +443,7 @@ export default function JobProfilesPage() {
         // in utils/clauseEngine.ts). Every profile created here is a
         // self-contained Position profile.
         scope: 'position',
-        company_id: selectedCompanyId,
+        company_id: selectedCompanyId === '__general__' ? null : selectedCompanyId,
         name: createName.trim(),
         department: createDepartment.trim() || null,
         is_active: true,
@@ -754,6 +761,7 @@ export default function JobProfilesPage() {
                       >
                         <Check className={cn("mr-2 h-4 w-4 text-blue-600", selectedCompanyId === '__general__' ? "opacity-100" : "opacity-0")} />
                         General (No Company)
+                        <Badge variant="secondary" className="ml-auto text-xs">{allProfiles.filter((p) => !p.company_id).length}</Badge>
                       </CommandItem>
                       {companies.map((c) => (
                         <CommandItem
