@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import Link from 'next/link';
 import { saveAs } from 'file-saver';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
 import { Button } from '@/components/ui/button';
@@ -22,12 +21,12 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import {
-  Loader2, PlusCircle, Trash2, Briefcase, BookText,
+  Loader2, PlusCircle, Trash2, Briefcase,
   Search, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
   Columns2, FileText, Database, ChevronDown, ShieldCheck, Laptop2,
   Users, Megaphone, Car, LayoutTemplate, UserCog, Link as LinkIcon, PlayCircle,
   Copy, Download, AlertCircle, CheckCircle2, ChevronRight, X, FileSignature, Check, ChevronsUpDown,
-  ChevronDownIcon, ChevronUpIcon, Braces, Sliders, Building2,
+  ChevronDownIcon, ChevronUpIcon, Sliders, Building2, Palette, Monitor, Tag,
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
@@ -40,8 +39,10 @@ import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
 import { buildDefaultClauseMap } from '../utils/clauseEngine';
 import type { ContractEmployeeInfo } from '../utils/data';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
-import { DEFAULT_DEPARTMENT_OPTIONS, withCurrentValue } from '../utils/profileOptions';
+import { DEFAULT_DEPARTMENT_OPTIONS, EMPLOYMENT_TYPE_OPTIONS, withCurrentValue } from '../utils/profileOptions';
 import { ContractPreview } from '../components/ContractPreview';
+import { ContractThemeEditor } from '../components/ContractThemePanel';
+import { DEFAULT_CONTRACT_THEME, type ContractThemeSettings } from '../utils/themeEngine';
 import { MasterFieldEditControl } from '../components/MasterFieldEditControl';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
 import type { EcPlaceholder } from '../utils/ecPlaceholders';
@@ -238,8 +239,8 @@ function SectionPanel({ title, description, children, className, icon: Icon, acc
     amber: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400',
   };
   return (
-    <div className={cn("bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800/60 p-6 md:p-8 shadow-[0_1px_3px_0_rgb(0,0,0,0.02)]", className)}>
-      <div className="mb-7 flex items-start gap-3.5">
+    <div className={cn("bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800/60 p-5 shadow-[0_1px_3px_0_rgb(0,0,0,0.02)]", className)}>
+      <div className="mb-5 flex items-start gap-3.5">
         {Icon && (
           <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center shrink-0", ACCENTS[accent])}>
             <Icon className="w-4.5 h-4.5" />
@@ -247,7 +248,7 @@ function SectionPanel({ title, description, children, className, icon: Icon, acc
         )}
         <div>
           <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 tracking-tight">{title}</h3>
-          {description && <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">{description}</p>}
+          {description && <p className="text-sm text-slate-500 mt-1 leading-relaxed">{description}</p>}
         </div>
       </div>
       {children}
@@ -407,6 +408,7 @@ export default function JobProfilesPage() {
         department: createDepartment.trim() || null,
         is_active: true,
         settings: {},
+        theme_settings: {},
         section_clauses: {},
         requirements: [],
         key_responsibilities: [],
@@ -676,7 +678,14 @@ export default function JobProfilesPage() {
     { value: 'responsibilities', label: 'Responsibilities', icon: UserCog },
     { value: 'fields', label: 'Job Profile Fields', icon: Database },
     { value: 'clauses', label: `Linked Clauses (${clauseSelections.length})`, icon: LinkIcon },
+    { value: 'design', label: 'Design', icon: Palette },
   ];
+
+  // DB column defaults to '{}' - merge with the engine's defaults so the
+  // Design tab and the preview always work with a complete theme set. Hoisted
+  // to component scope because both the editor panel and the preview panel
+  // (which sit in separate JSX scopes below) consume it.
+  const draftTheme: ContractThemeSettings = { ...DEFAULT_CONTRACT_THEME, ...(draft?.theme_settings || {}) };
 
   return (
     <div className="h-[calc(100vh-1rem)] w-full flex flex-col bg-slate-50/50 dark:bg-slate-950/50 rounded-xl overflow-hidden shadow-[0_2px_10px_-3px_rgba(55,107,174,0.15)] border border-slate-200 dark:border-slate-800">
@@ -746,14 +755,8 @@ export default function JobProfilesPage() {
           </div>
         </div>
 
-        {/* Right Side: Quick Links & Panel Toggles */}
+        {/* Right Side: Panel Toggles */}
         <div className="flex items-center gap-5 shrink-0">
-          <div className="hidden lg:flex items-center bg-slate-50 dark:bg-slate-900 p-1 rounded-full border border-slate-200 dark:border-slate-800/80 shadow-sm gap-1">
-            <Link href="/dashboard/employment-contracts" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"><FileSignature className="w-3.5 h-3.5" /> Contracts</Link>
-            <Link href="/dashboard/employment-contracts/clause-library" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"><BookText className="w-3.5 h-3.5" /> Clauses</Link>
-            <Link href="/dashboard/employment-contracts/placeholders" className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"><Braces className="w-3.5 h-3.5" /> Placeholders</Link>
-          </div>
-
           <div className="w-px h-6 bg-slate-200 dark:bg-slate-800 hidden md:block"></div>
 
           <div className="hidden md:flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-full border border-slate-200 dark:border-slate-800/80">
@@ -904,7 +907,6 @@ export default function JobProfilesPage() {
                                   </div>
                                   <p className="text-sm text-slate-500 font-medium truncate px-0.5 flex items-center gap-2">
                                     <span>{draft.department || scopeLabel(draft.scope)}</span>
-                                    {draft.job_level && <><span className="w-1 h-1 rounded-full bg-slate-300"></span><span>{draft.job_level}</span></>}
                                     {draft.employment_type && <><span className="w-1 h-1 rounded-full bg-slate-300"></span><span>{draft.employment_type}</span></>}
                                   </p>
                                 </div>
@@ -970,9 +972,29 @@ export default function JobProfilesPage() {
                             <ScrollArea className="flex-1 bg-slate-50/50 dark:bg-slate-950/30">
                               <div className="p-6 lg:p-8">
                                 <TabsContent value="overview" className="m-0 focus:outline-none">
-                                  <div className="max-w-4xl mx-auto space-y-6 lg:space-y-8">
-                                    <SectionPanel title="Profile Identity" description="The stable fact that identifies this role." icon={Briefcase} accent="blue">
-                                      <FormField label="Job Title"><Input value={draft.job_title || ''} onChange={(e) => updateDraft({ job_title: e.target.value })} className="h-10 text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm max-w-md" placeholder="e.g. Software Developer" /></FormField>
+                                  <div className="space-y-5">
+                                    <SectionPanel title="Profile Identity" description="The facts that define and match this role to an employee." icon={Briefcase} accent="blue">
+                                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                        <FormField label="Job Title"><Input value={draft.job_title || ''} onChange={(e) => updateDraft({ job_title: e.target.value })} className="h-10 text-sm bg-white dark:bg-slate-900 border-slate-200 shadow-sm" placeholder="e.g. Software Developer" /></FormField>
+                                        <FormField label="Department">
+                                          <SearchableSelect
+                                            value={draft.department || '__unset__'}
+                                            onChange={(v) => updateDraft({ department: v === '__unset__' ? null : v })}
+                                            placeholder="Select department"
+                                            searchPlaceholder="Search departments..."
+                                            options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(departmentOptions, draft.department).map((opt) => ({ value: opt, label: opt }))]}
+                                          />
+                                        </FormField>
+                                        <FormField label="Employment Type">
+                                          <SearchableSelect
+                                            value={draft.employment_type || '__unset__'}
+                                            onChange={(v) => updateDraft({ employment_type: v === '__unset__' ? null : v })}
+                                            placeholder="Select type"
+                                            searchPlaceholder="Search employment types..."
+                                            options={[{ value: '__unset__', label: 'Not set' }, ...withCurrentValue(EMPLOYMENT_TYPE_OPTIONS, draft.employment_type).map((opt) => ({ value: opt, label: opt }))]}
+                                          />
+                                        </FormField>
+                                      </div>
                                     </SectionPanel>
 
                                     {(() => {
@@ -981,7 +1003,8 @@ export default function JobProfilesPage() {
                                       const totalFields = settingsFields.length;
                                       const completedFields = settingsFields.filter((p) => !!(draft.settings || {})[p.key]).length;
                                       const responsibilitiesCount = (draft.key_responsibilities || []).length;
-                                      const formatDate = (iso?: string) => iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+                                      const equipmentCount = (draft.equipment || []).length;
+                                      const tagsCount = (draft.tags || []).length;
 
                                       const stats: { label: string; value: string; sub?: string; icon: typeof CheckCircle2; accent: string }[] = [
                                         {
@@ -1012,33 +1035,35 @@ export default function JobProfilesPage() {
                                           accent: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400',
                                         },
                                         {
-                                          label: 'Created',
-                                          value: formatDate(draft.created_at),
-                                          icon: FileText,
-                                          accent: 'bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+                                          label: 'Equipment',
+                                          value: String(equipmentCount),
+                                          sub: equipmentCount === 1 ? 'item listed' : 'items listed',
+                                          icon: Monitor,
+                                          accent: 'bg-teal-50 text-teal-600 dark:bg-teal-500/10 dark:text-teal-400',
                                         },
                                         {
-                                          label: 'Last Updated',
-                                          value: formatDate(draft.updated_at),
-                                          icon: FileText,
-                                          accent: 'bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+                                          label: 'Tags',
+                                          value: String(tagsCount),
+                                          sub: tagsCount === 1 ? 'item listed' : 'items listed',
+                                          icon: Tag,
+                                          accent: 'bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400',
                                         },
                                       ];
 
                                       return (
-                                        <SectionPanel title="At a Glance" description="Snapshot of how complete and up to date this profile is." icon={LayoutTemplate} accent="indigo">
-                                          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                        <SectionPanel title="At a Glance" description="Snapshot of how complete this profile is." icon={LayoutTemplate} accent="indigo">
+                                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                                             {stats.map((s) => {
                                               const Icon = s.icon;
                                               return (
-                                                <div key={s.label} className="group p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 flex flex-col gap-2.5 transition-all hover:shadow-[0_4px_14px_-6px_rgba(0,0,0,0.08)] hover:border-slate-300 dark:hover:border-slate-700">
-                                                  <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105", s.accent)}>
+                                                <div key={s.label} className="group p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 flex items-center gap-3 transition-all hover:shadow-[0_4px_14px_-6px_rgba(0,0,0,0.08)] hover:border-slate-300 dark:hover:border-slate-700">
+                                                  <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition-transform group-hover:scale-105", s.accent)}>
                                                     <Icon className="w-4.5 h-4.5" />
                                                   </div>
-                                                  <div>
-                                                    <p className="text-xl font-extrabold text-slate-800 dark:text-slate-100 leading-tight tracking-tight">{s.value}</p>
-                                                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-0.5">{s.label}</p>
-                                                    {s.sub && <p className="text-[11px] text-slate-400">{s.sub}</p>}
+                                                  <div className="min-w-0">
+                                                    <p className="text-lg font-extrabold text-slate-800 dark:text-slate-100 leading-tight tracking-tight">{s.value}</p>
+                                                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 truncate">{s.label}</p>
+                                                    {s.sub && <p className="text-[11px] text-slate-400 truncate">{s.sub}</p>}
                                                   </div>
                                                 </div>
                                               );
@@ -1051,9 +1076,17 @@ export default function JobProfilesPage() {
                                 </TabsContent>
 
                                 <TabsContent value="responsibilities" className="m-0 focus:outline-none">
-                                  <div className="max-w-4xl mx-auto space-y-6">
-                                    <SectionPanel title="Key Responsibilities" description="What this role is actually accountable for day to day." icon={UserCog} accent="amber">
-                                      <StringListEditor items={draft.key_responsibilities || []} onChange={(v) => updateDraft({ key_responsibilities: v })} placeholder="e.g. Maintain accurate financial records" />
+                                  <div className="space-y-5">
+                                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                                      <SectionPanel title="Key Responsibilities" description="What this role is actually accountable for day to day." icon={UserCog} accent="amber">
+                                        <StringListEditor items={draft.key_responsibilities || []} onChange={(v) => updateDraft({ key_responsibilities: v })} placeholder="e.g. Maintain accurate financial records" />
+                                      </SectionPanel>
+                                      <SectionPanel title="Equipment" description="Tools and equipment provided for this role." icon={Monitor} accent="emerald">
+                                        <StringListEditor items={draft.equipment || []} onChange={(v) => updateDraft({ equipment: v })} placeholder="e.g. Company laptop" />
+                                      </SectionPanel>
+                                    </div>
+                                    <SectionPanel title="Tags" description="Labels used to group and find this profile." icon={Tag} accent="blue">
+                                      <StringListEditor items={draft.tags || []} onChange={(v) => updateDraft({ tags: v })} placeholder="e.g. Finance" />
                                     </SectionPanel>
                                   </div>
                                 </TabsContent>
@@ -1069,7 +1102,7 @@ export default function JobProfilesPage() {
                                 placeholder hint text, so a fresh profile starts
                                 pre-populated. */}
                                 <TabsContent value="fields" className="m-0 focus:outline-none">
-                                  <div className="max-w-4xl mx-auto space-y-6 overflow-auto">
+                                  <div className="space-y-5 overflow-auto">
                                     {groupedSettingsFields.map((group) => (
                                       <SectionPanel key={group.label} title={group.label} description={group.description} icon={Sliders} accent="blue">
                                         <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
@@ -1300,6 +1333,19 @@ export default function JobProfilesPage() {
                                     </div>
                                   </div>
                                 </TabsContent>
+
+                                <TabsContent value="design" className="m-0 focus:outline-none">
+                                  <div className="space-y-5">
+                                    <SectionPanel
+                                      title="Document Design"
+                                      description="The theme, colours, fonts and header/branding this profile's contracts render with. Applied to the preview and used whenever this profile generates a contract."
+                                      icon={Palette}
+                                      accent="indigo"
+                                    >
+                                      <ContractThemeEditor variant="inline" settings={draftTheme} onChange={(s) => updateDraft({ theme_settings: s })} />
+                                    </SectionPanel>
+                                  </div>
+                                </TabsContent>
                               </div>
                             </ScrollArea>
                           </Tabs>
@@ -1346,6 +1392,7 @@ export default function JobProfilesPage() {
                       contractData={{ employee: sampleEmployee }}
                       selectedJobProfile={draft}
                       previewOnly
+                      defaultTheme={draftTheme}
                       className="flex flex-col h-full bg-slate-100/70 dark:bg-slate-950/70 relative"
                     />
                   ) : (
@@ -1366,7 +1413,7 @@ export default function JobProfilesPage() {
             </div>
           ) : (
             <ScrollArea className="flex-1">
-              <div className="max-w-4xl mx-auto p-6 space-y-6 lg:space-y-8">
+              <div className="p-5 space-y-5">
                 {/* Hero strip - quick-glance status of this company's EC config */}
                 <div className="rounded-2xl bg-gradient-to-br from-custom-blue to-[#2d5a94] p-6 md:p-7 text-white shadow-[0_8px_24px_-8px_rgba(55,107,174,0.45)] flex flex-col sm:flex-row sm:items-center gap-5 sm:gap-8">
                   <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center shrink-0">
@@ -1457,7 +1504,7 @@ export default function JobProfilesPage() {
                       />
                     </div>
                   </div>
-                  <div className="flex justify-end mt-6">
+                  <div className="flex justify-end mt-4">
                     <Button size="sm" onClick={handleSaveCompanyLists} disabled={savingCompanyLists} className="rounded-full">
                       {savingCompanyLists && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />} Save Lists
                     </Button>

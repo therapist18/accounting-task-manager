@@ -27,6 +27,7 @@ interface PlaceholderSourcesProps {
   highlightKeys?: string[];
   filterByKeys?: string[];
   refreshKey?: number;
+  fillHeight?: boolean;
 }
 
 type SortColumn = '#' | 'token' | 'group' | 'source' | 'entity' | 'linked' | 'clauses' | 'default';
@@ -44,7 +45,7 @@ const strategyLabel = (s: string) => s === 'merge' ? 'Merge' : 'Fallback';
 const StrategyIcon = ({ strategy }: { strategy: string }) =>
   strategy === 'merge' ? <Shuffle className="w-3 h-3" /> : <ListOrdered className="w-3 h-3" />;
 
-export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0 }: PlaceholderSourcesProps) {
+export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0, fillHeight = false }: PlaceholderSourcesProps) {
   const [placeholders, setPlaceholders] = useState<EcPlaceholder[]>([]);
   const [masterFields, setMasterFields] = useState<MasterFieldOption[]>([]);
   const [clauses, setClauses] = useState<EcClause[]>([]);
@@ -288,8 +289,8 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
   };
 
   return (
-    <div ref={sectionRef} className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-4">
-      <div className="flex items-center justify-between mb-3">
+    <div ref={sectionRef} className={cn("bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800", fillHeight ? "h-full flex flex-col overflow-hidden p-4" : "p-4")}>
+      <div className="flex items-center justify-between mb-3 shrink-0">
         <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Placeholders Used</p>
         <p className="text-xs text-slate-400">
           {filterByKeys
@@ -298,7 +299,7 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
         </p>
       </div>
 
-      <div className="relative mb-3">
+      <div className="relative mb-3 shrink-0">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
         <Input
           placeholder="Search placeholders..."
@@ -310,11 +311,11 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center items-center py-8">
+        <div className={cn("flex justify-center items-center", fillHeight ? "flex-1" : "py-8")}>
           <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
         </div>
       ) : sortedPlaceholders.length === 0 ? (
-        <p className="text-sm text-slate-500 text-center py-6">
+        <p className={cn("text-sm text-slate-500 text-center", fillHeight ? "flex-1 flex items-center justify-center" : "py-6")}>
           {filterByKeys && filterByKeys.length === 0
             ? 'No placeholders specified for this item.'
             : placeholders.length === 0
@@ -322,7 +323,7 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
             : 'No placeholders match your search.'}
         </p>
       ) : (
-        <div className="overflow-auto max-h-[560px] rounded-lg border border-slate-200 dark:border-slate-800">
+        <div className={cn("rounded-lg border border-slate-200 dark:border-slate-800", fillHeight ? "flex-1 min-h-0 overflow-auto" : "overflow-auto max-h-[560px]")}>
           <Table>
             <TableHeader className="bg-slate-50 dark:bg-slate-900">
               <TableRow>

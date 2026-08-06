@@ -1,4 +1,5 @@
 import supabase from '@/lib/supabase/client';
+import type { ContractThemeSettings } from './themeEngine';
 
 export type JobProfileScope = 'company' | 'department' | 'position';
 
@@ -23,6 +24,10 @@ export interface EcJobProfile {
   tags: string[];
   equipment: string[];
   settings: Record<string, any>;
+  // Document theme for contracts generated from this profile (subset of
+  // ContractThemeSettings - the DB column defaults to '{}', so merge with
+  // DEFAULT_CONTRACT_THEME before use).
+  theme_settings: Partial<ContractThemeSettings> | null;
   section_clauses: Record<string, string>;
   is_active: boolean;
   created_at: string;

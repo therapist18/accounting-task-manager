@@ -35,13 +35,13 @@ interface ContractEditorProps {
 }
 
 // Renders the specific source an admin configured for this placeholder
-// (settings_key/offer_field, or the linked master field's own name for
-// master_field placeholders - set via the Edit Source dialog in
-// PlaceholderSources.tsx) rather than just the generic source_kind category -
-// falls back to "Profile"/"Not linked" when that specific source hasn't been
-// set, since an unconfigured settings_cascade/offer placeholder still
-// resolves off whatever's in the selected Job Profile/Offer record by
-// default.
+// (settings_key for master_field/settings_cascade/job_profile, offer_field
+// for offer - set via the Edit Source dialog in PlaceholderSources.tsx)
+// rather than just the generic source_kind category. master_field falls back
+// to the linked master field's own name when settings_key hasn't been set,
+// and "Profile"/"Not linked" when there's nothing configured at all - an
+// unconfigured settings_cascade/offer placeholder still resolves off
+// whatever's in the selected Job Profile/Offer record by default.
 const getSourceLabel = (
   p: Pick<EcPlaceholder, 'source_kind' | 'settings_key' | 'offer_field' | 'master_field_id' | 'master_field_links'>,
   masterFields: Map<number, JobField>
@@ -50,7 +50,7 @@ const getSourceLabel = (
     case 'master_field': {
       const linkedId = p.master_field_links?.[0]?.master_field_id ?? p.master_field_id;
       const field = linkedId != null ? masterFields.get(Number(linkedId)) : undefined;
-      return field?.label || field?.field_key || 'Not linked';
+      return p.settings_key || field?.label || field?.field_key || 'Not linked';
     }
     case 'settings_cascade':
       return p.settings_key || 'Profile';

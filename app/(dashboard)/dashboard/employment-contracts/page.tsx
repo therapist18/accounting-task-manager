@@ -1,9 +1,8 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import Link from 'next/link';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2, BookText, Briefcase } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ContractsSidebar } from './components/ContractsSidebar';
 import { ContractEditor } from './components/ContractEditor';
@@ -75,23 +74,6 @@ export default function EmploymentContractsPage() {
               {collapsed.preview ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
             </button>
           </div>
-        </div>
-
-        <div className="hidden lg:flex items-center bg-slate-50 dark:bg-slate-900 p-1 rounded-full border border-slate-200 dark:border-slate-800/80 shadow-sm gap-1">
-          <Link
-            href="/dashboard/employment-contracts/clause-library"
-            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"
-          >
-            <BookText className="w-3.5 h-3.5" />
-            Clauses
-          </Link>
-          <Link
-            href="/dashboard/employment-contracts/job-profiles"
-            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-white dark:hover:bg-slate-800 rounded-full transition-all"
-          >
-            <Briefcase className="w-3.5 h-3.5" />
-            Job Profiles
-          </Link>
         </div>
       </div>
       

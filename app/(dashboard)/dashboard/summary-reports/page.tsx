@@ -20,11 +20,8 @@ import {
   computeStageDateInfo,
   parseDateSafe,
 } from "../reports/utils/reportStageLogic";
-import { HierarchyTabs } from "./components/HierarchyTabs";
-import { StatusTabs } from "./components/StatusTabs";
-import { PerspectiveTabs } from "./components/PerspectiveTabs";
+import { HierarchyTabs, StatusTabs, PerspectiveTabs, ColumnVisibilityDialog } from "./components/PageHeader";
 import { SummaryTable } from "./components/SummaryTable";
-import { ColumnVisibilityDialog } from "./components/ColumnVisibilityDialog";
 import { MILESTONE_STAGE_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS } from "./stageColumnConfig";
 
 const TERMINAL_STATUSES = ['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'];

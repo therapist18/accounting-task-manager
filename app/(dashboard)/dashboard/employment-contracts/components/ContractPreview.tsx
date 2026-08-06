@@ -104,9 +104,13 @@ interface ContractPreviewProps {
   selectedJobProfile: EcJobProfile | null;
   previewOnly?: boolean;
   className?: string;
+  // A theme to render with when there's no per-contract override - lets the
+  // Job Profiles preview (previewOnly) show the profile's saved Design tab
+  // theme live while it's being edited, without writing into contractData.
+  defaultTheme?: ContractThemeSettings | null;
 }
 
-export function ContractPreview({ contractData, setContractData, selectedJobProfile, previewOnly, className }: ContractPreviewProps) {
+export function ContractPreview({ contractData, setContractData, selectedJobProfile, previewOnly, className, defaultTheme }: ContractPreviewProps) {
   const employee = contractData?.employee;
   const offer: Partial<EmploymentOffer> | undefined = contractData?.offer;
   const companyId = employee?.companyId;
@@ -228,7 +232,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
       observer.disconnect();
       images.forEach(img => img.removeEventListener('load', measure));
     };
-  }, [themeOverride, showToc]);
+  }, [themeOverride, defaultTheme, showToc]);
 
   // Scroll-based page tracking + TOC anchor click interception
   useEffect(() => {
@@ -356,7 +360,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     });
   }, [clausesById, effectiveClauses, effectiveSettings, employeeValues, employee, showToc]);
 
-  const themeSettings: ContractThemeSettings = themeOverride || DEFAULT_CONTRACT_THEME;
+  const themeSettings: ContractThemeSettings = themeOverride || defaultTheme || DEFAULT_CONTRACT_THEME;
   const mergedValues = { ...effectiveSettings, ...employeeValues };
 
   const themedHtml = bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings), mergedValues) : '';
@@ -628,13 +632,15 @@ ${themeCss}
           >
             <List className="w-4 h-4" />
           </button>
-          <button
-            onClick={() => setThemePanelOpen(true)}
-            title="Customize theme"
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-          >
-            <Palette className="w-4 h-4" />
-          </button>
+          {!previewOnly && (
+            <button
+              onClick={() => setThemePanelOpen(true)}
+              title="Customize theme"
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            >
+              <Palette className="w-4 h-4" />
+            </button>
+          )}
           <button
             onClick={handleRefreshAll}
             disabled={isResolvingMasterFields || loadingContext}
