@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchCompanyEmployees, ContractEmployeeInfo } from '../utils/data';
-import { EcJobProfile, fetchJobProfiles, matchJobProfile } from '../utils/jobProfileData';
+import { EcJobProfile, fetchJobProfiles, fetchGlobalJobProfiles, matchJobProfile } from '../utils/jobProfileData';
 import { EmploymentOffer, fetchLatestOffer } from '../utils/employmentOfferData';
 import { resolveEffectiveSettings } from '../utils/clauseEngine';
 import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
@@ -104,13 +104,18 @@ export function ContractEditor({
       }
       setLoading(true);
 
-      const [emps, jobProfiles, companies] = await Promise.all([
+      const [emps, companyProfiles, globalProfiles, companies] = await Promise.all([
         fetchCompanyEmployees(companyId),
         fetchJobProfiles(companyId),
+        fetchGlobalJobProfiles(),
         fetchCompanies(),
       ]);
       const target = emps.find(e => String(e.individualId) === employeeId) || null;
       setEmployee(target);
+      // Companies with no position-scope profile of their own fall back to
+      // the Global/Generic set instead of showing an empty dropdown.
+      const hasOwnPositionProfiles = companyProfiles.some((p) => p.scope === 'position' && p.is_active);
+      const jobProfiles = hasOwnPositionProfiles ? companyProfiles : [...companyProfiles, ...globalProfiles];
       setProfiles(jobProfiles);
       setCompany(companies.find((c) => String(c.id) === String(companyId)) || null);
 

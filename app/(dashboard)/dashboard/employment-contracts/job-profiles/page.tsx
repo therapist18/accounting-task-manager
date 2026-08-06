@@ -26,7 +26,7 @@ import {
   Columns2, FileText, Database, ChevronDown, ShieldCheck, Laptop2,
   Users, Megaphone, Car, LayoutTemplate, UserCog, Link as LinkIcon, PlayCircle,
   Copy, Download, AlertCircle, CheckCircle2, ChevronRight, X, FileSignature, Check, ChevronsUpDown,
-  ChevronDownIcon, ChevronUpIcon, Sliders, Building2, Palette, Monitor, Tag,
+  ChevronDownIcon, ChevronUpIcon, Sliders, Building2, Monitor, Tag, RefreshCw,
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
@@ -41,7 +41,6 @@ import type { ContractEmployeeInfo } from '../utils/data';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
 import { DEFAULT_DEPARTMENT_OPTIONS, EMPLOYMENT_TYPE_OPTIONS, withCurrentValue } from '../utils/profileOptions';
 import { ContractPreview } from '../components/ContractPreview';
-import { ContractThemeEditor } from '../components/ContractThemePanel';
 import { DEFAULT_CONTRACT_THEME, type ContractThemeSettings } from '../utils/themeEngine';
 import { MasterFieldEditControl } from '../components/MasterFieldEditControl';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
@@ -276,6 +275,7 @@ export default function JobProfilesPage() {
 
   const [draft, setDraft] = useState<EcJobProfile | null>(null);
   const [saving, setSaving] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState('');
@@ -355,6 +355,39 @@ export default function JobProfilesPage() {
     if (!draft || !selectedProfile) return false;
     return JSON.stringify(draft) !== JSON.stringify(selectedProfile);
   }, [draft, selectedProfile]);
+
+  // Re-fetches everything the initial mount fetches (companies, clause
+  // library, job profiles) and re-syncs the open profile's draft, so data
+  // changed in another tab/browser shows up here too. Refusing to run while
+  // there are unsaved edits prevents the refresh from silently discarding
+  // them, and the toast confirms what happened either way.
+  const handleRefresh = async () => {
+    if (isRefreshing) return;
+    if (isDirty) {
+      toast({ title: 'Unsaved changes', description: 'Save your edits before refreshing to avoid losing them.', variant: 'destructive' });
+      return;
+    }
+    setIsRefreshing(true);
+    try {
+      const [comps, allClauses, allData] = await Promise.all([fetchCompanies(), fetchClauses(), fetchJobProfiles()]);
+      setCompanies(comps);
+      setClauses(allClauses);
+      setAllProfiles(allData);
+      setProfiles(selectedCompanyId && selectedCompanyId !== '__general__'
+        ? allData.filter((p) => String(p.company_id) === selectedCompanyId)
+        : allData);
+      if (selectedProfileId) {
+        const fresh = allData.find((p) => p.id === selectedProfileId) || null;
+        if (fresh) setDraft({ ...fresh });
+        else setSelectedProfileId(null);
+      }
+      toast({ title: 'Data refreshed', description: 'Companies, clauses and job profiles reloaded.' });
+    } catch {
+      toast({ title: 'Refresh failed', description: 'Something went wrong reloading the data.', variant: 'destructive' });
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const updateDraft = (patch: Partial<EcJobProfile>) => setDraft((prev) => (prev ? { ...prev, ...patch } : prev));
   const updateDraftSettings = (key: string, value: string) =>
@@ -678,13 +711,12 @@ export default function JobProfilesPage() {
     { value: 'responsibilities', label: 'Responsibilities', icon: UserCog },
     { value: 'fields', label: 'Job Profile Fields', icon: Database },
     { value: 'clauses', label: `Linked Clauses (${clauseSelections.length})`, icon: LinkIcon },
-    { value: 'design', label: 'Design', icon: Palette },
   ];
 
   // DB column defaults to '{}' - merge with the engine's defaults so the
-  // Design tab and the preview always work with a complete theme set. Hoisted
-  // to component scope because both the editor panel and the preview panel
-  // (which sit in separate JSX scopes below) consume it.
+  // preview always works with a complete theme set. Hoisted to component
+  // scope because both the theme sidebar panel and the preview panel (which
+  // sit in separate JSX scopes below) consume it.
   const draftTheme: ContractThemeSettings = { ...DEFAULT_CONTRACT_THEME, ...(draft?.theme_settings || {}) };
 
   return (
@@ -758,6 +790,19 @@ export default function JobProfilesPage() {
         {/* Right Side: Panel Toggles */}
         <div className="flex items-center gap-5 shrink-0">
           <div className="w-px h-6 bg-slate-200 dark:bg-slate-800 hidden md:block"></div>
+
+          {/* Refresh */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={isRefreshing || isLoading}
+            title="Reload companies, clauses and job profiles"
+            className="h-8 gap-1.5 text-xs shrink-0"
+          >
+            {isRefreshing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Refresh
+          </Button>
 
           <div className="hidden md:flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-full border border-slate-200 dark:border-slate-800/80">
             <button onClick={() => togglePanel('editor')} title={collapsed.editor ? 'Show profiles list' : 'Hide profiles list'} className={cn("p-1.5 rounded-full transition-all", collapsed.editor ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm dark:bg-slate-800 dark:text-blue-600")}>
@@ -1334,18 +1379,6 @@ export default function JobProfilesPage() {
                                   </div>
                                 </TabsContent>
 
-                                <TabsContent value="design" className="m-0 focus:outline-none">
-                                  <div className="space-y-5">
-                                    <SectionPanel
-                                      title="Document Design"
-                                      description="The theme, colours, fonts and header/branding this profile's contracts render with. Applied to the preview and used whenever this profile generates a contract."
-                                      icon={Palette}
-                                      accent="indigo"
-                                    >
-                                      <ContractThemeEditor variant="inline" settings={draftTheme} onChange={(s) => updateDraft({ theme_settings: s })} />
-                                    </SectionPanel>
-                                  </div>
-                                </TabsContent>
                               </div>
                             </ScrollArea>
                           </Tabs>
@@ -1393,6 +1426,7 @@ export default function JobProfilesPage() {
                       selectedJobProfile={draft}
                       previewOnly
                       defaultTheme={draftTheme}
+                      onThemeChange={(s) => updateDraft({ theme_settings: s })}
                       className="flex flex-col h-full bg-slate-100/70 dark:bg-slate-950/70 relative"
                     />
                   ) : (

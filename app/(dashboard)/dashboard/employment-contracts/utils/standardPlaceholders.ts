@@ -5,6 +5,20 @@ import type { EcJobProfile } from './jobProfileData';
 import type { EcPlaceholder } from './ecPlaceholders';
 import { buildStatutoryDeductionsTable, type StatutoryDeductionsBreakdown } from './statutoryDeductions';
 
+// Date columns come back from the DB as YYYY-MM-DD (or a full ISO
+// timestamp); contracts render them dd/mm/yyyy (Kenya's standard date
+// format). Applied to every resolved value after the final merge so offer
+// fields, master-field dates and per-contract overrides are all covered, not
+// just the hardcoded start_date/end_date. String-based rather than
+// new Date()-based so a midnight timestamp can never shift a day from
+// timezone math, and idempotent - a value already in dd/mm/yyyy (e.g. an
+// override the user typed) is left untouched.
+function formatDateToDDMMYYYY(value: string): string {
+  if (!value) return value;
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return iso ? `${iso[3]}/${iso[2]}/${iso[1]}` : value;
+}
+
 // Builds the full set of well-known placeholder tokens that clause content
 // may reference as {{token_name}}. Values come from five layers, merged in
 // precedence order (later wins on key collisions):
@@ -155,7 +169,10 @@ export function buildStandardPlaceholderValues(
   const defaults: Record<string, string> = { ...hardcoded, ...generic };
 
   const masterFieldOverlay = masterFieldValues || {};
-  return { ...defaults, ...masterFieldOverlay, ...placeholderOverrides };
+  const merged: Record<string, string> = { ...defaults, ...masterFieldOverlay, ...placeholderOverrides };
+  const formatted: Record<string, string> = {};
+  for (const [key, value] of Object.entries(merged)) formatted[key] = formatDateToDDMMYYYY(value);
+  return formatted;
 }
 
 // Benefit fields that are amounts (rendered "KES {value} per month" when the

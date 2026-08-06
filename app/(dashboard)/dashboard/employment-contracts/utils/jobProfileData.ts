@@ -6,7 +6,10 @@ export type JobProfileScope = 'company' | 'department' | 'position';
 export interface EcJobProfile {
   id: string;
   scope: JobProfileScope;
-  company_id: string;
+  // null = Global/Generic profile, usable by any company - falls back into
+  // a company's dropdown only when that company has no position-scope
+  // profiles of its own (see ContractEditor.tsx's loadData effect).
+  company_id: string | null;
   name: string;
   department: string | null;
   job_title: string | null;
@@ -48,6 +51,24 @@ export async function fetchJobProfiles(companyId?: string | number): Promise<EcJ
 
   if (error) {
     console.error('Error fetching job profiles:', error);
+    return [];
+  }
+  return (data || []) as EcJobProfile[];
+}
+
+// Global/Generic profiles only (company_id IS NULL) - the "General (No
+// Company)" workspace in the Job Profiles admin page, and the fallback set
+// ContractEditor reaches for when the selected company has no position-scope
+// profiles of its own.
+export async function fetchGlobalJobProfiles(): Promise<EcJobProfile[]> {
+  const { data, error } = await supabase
+    .from('ec_job_profiles')
+    .select('*')
+    .is('company_id', null)
+    .order('name', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching global job profiles:', error);
     return [];
   }
   return (data || []) as EcJobProfile[];

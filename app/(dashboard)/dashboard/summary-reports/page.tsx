@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Loader2, LayoutDashboard, Building2, Clock, GitCompare } from "lucide-react";
+import { Loader2, Building2, Clock, GitCompare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/hooks/use-toast";
@@ -20,7 +20,7 @@ import {
   computeStageDateInfo,
   parseDateSafe,
 } from "../reports/utils/reportStageLogic";
-import { HierarchyTabs, StatusTabs, PerspectiveTabs, ColumnVisibilityDialog } from "./components/PageHeader";
+import { StatusTabs, PerspectiveTabs, HierarchyTabs, ColumnVisibilityDialog, } from "./components/PageHeader";
 import { SummaryTable } from "./components/SummaryTable";
 import { MILESTONE_STAGE_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS } from "./stageColumnConfig";
 
@@ -54,7 +54,8 @@ export default function SummaryReportsPage() {
 
   const [activeDeptId, setActiveDeptId] = useState<string>("all");
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
-  const [activeClassId, setActiveClassId] = useState<string>("all");
+  const [activeClassIds, setActiveClassIds] = useState<string[]>([]);
+  const [activeSubClassIds, setActiveSubClassIds] = useState<string[]>([]);
   const [activeTaskStatus, setActiveTaskStatus] = useState<'all' | 'enquiry' | 'wip' | 'completed' | 'overdue'>('all');
 
   const [activePerspective, setActivePerspective] = useState<'all' | 'officers' | 'managers' | 'clients'>('all');
@@ -215,13 +216,20 @@ export default function SummaryReportsPage() {
     return true;
   }, [activeTaskStatus, isTaskOverdue]);
 
-  // ── Hierarchy scoping (dept → subdept → class) ──
-  const deptScopedTasks = useMemo(() => allTasks.filter(task => {
+  // ── Hierarchy scoping (dept → subdept) ──
+  const hierarchyScopedTasks = useMemo(() => allTasks.filter(task => {
     if (activeDeptId !== 'all' && task.department_id?.toString() !== activeDeptId) return false;
     if (activeSubDeptId !== 'all' && task.subdepartment_id?.toString() !== activeSubDeptId) return false;
-    if (activeClassId !== 'all' && task.class_id?.toString() !== activeClassId) return false;
     return true;
-  }), [allTasks, activeDeptId, activeSubDeptId, activeClassId]);
+  }), [allTasks, activeDeptId, activeSubDeptId]);
+
+  // + the Class / Sub-Class multiselect dropdowns. Kept on top of hierarchyScopedTasks so
+  // the dropdown badge counts below are never narrowed by the selection itself.
+  const deptScopedTasks = useMemo(() => hierarchyScopedTasks.filter(task => {
+    if (activeClassIds.length > 0 && !activeClassIds.includes(task.class_id?.toString())) return false;
+    if (activeSubClassIds.length > 0 && !activeSubClassIds.includes(task.subclass_id?.toString())) return false;
+    return true;
+  }), [hierarchyScopedTasks, activeClassIds, activeSubClassIds]);
 
   const tasksInActiveDept = useMemo(() => activeDeptId === 'all' ? [] : allTasks.filter(t => t.department_id?.toString() === activeDeptId), [allTasks, activeDeptId]);
   const tasksInActiveSubDept = useMemo(() => activeSubDeptId === 'all' ? [] : tasksInActiveDept.filter(t => t.subdepartment_id?.toString() === activeSubDeptId), [tasksInActiveDept, activeSubDeptId]);
@@ -239,13 +247,46 @@ export default function SummaryReportsPage() {
     return counts;
   }, [tasksInActiveDept, departments, activeDeptId]);
 
-  const classTaskCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: tasksInActiveSubDept.length };
-    const activeDepartment = departments.find((d: any) => d.id.toString() === activeDeptId);
-    const activeSubDepartment = (activeDepartment?.tm_subdepartments || []).find((s: any) => s.id.toString() === activeSubDeptId);
-    (activeSubDepartment?.classes || []).forEach((c: any) => { counts[c.id.toString()] = tasksInActiveSubDept.filter(t => t.class_id?.toString() === c.id.toString()).length; });
+  // Classes / Sub-Classes available within the current dept → subdept scope (deduped by id).
+  const availableClasses = useMemo(() => {
+    const map = new Map<string, any>();
+    const collect = (subDepts: any[]) => (subDepts || []).forEach((s: any) => (s.classes || []).forEach((c: any) => {
+      if (!map.has(c.id.toString())) map.set(c.id.toString(), { ...c, subdepartmentId: s.id, subDepartmentName: s.name });
+    }));
+    if (activeSubDeptId !== 'all') {
+      const sub = departments.find((d: any) => d.id.toString() === activeDeptId)?.tm_subdepartments?.find((s: any) => s.id.toString() === activeSubDeptId);
+      if (sub) collect([sub]);
+    } else if (activeDeptId !== 'all') {
+      collect(departments.find((d: any) => d.id.toString() === activeDeptId)?.tm_subdepartments || []);
+    } else {
+      departments.forEach((d: any) => collect(d.tm_subdepartments || []));
+    }
+    return Array.from(map.values());
+  }, [departments, activeDeptId, activeSubDeptId]);
+
+  // Sub-Classes follow the selected Class(es); with none selected they span every class in scope.
+  const availableSubClasses = useMemo(() => {
+    const map = new Map<string, any>();
+    const pool = activeClassIds.length > 0
+      ? availableClasses.filter((c: any) => activeClassIds.includes(c.id.toString()))
+      : availableClasses;
+    pool.forEach((c: any) => (c.subClasses || []).forEach((sc: any) => {
+      if (!map.has(sc.id.toString())) map.set(sc.id.toString(), { ...sc, classId: c.id, className: c.name });
+    }));
+    return Array.from(map.values());
+  }, [availableClasses, activeClassIds]);
+
+  const classCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    hierarchyScopedTasks.forEach((t: any) => { const cid = t.class_id?.toString(); if (cid) counts[cid] = (counts[cid] || 0) + 1; });
     return counts;
-  }, [tasksInActiveSubDept, departments, activeDeptId, activeSubDeptId]);
+  }, [hierarchyScopedTasks]);
+
+  const subClassCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    hierarchyScopedTasks.forEach((t: any) => { const sid = t.subclass_id?.toString(); if (sid) counts[sid] = (counts[sid] || 0) + 1; });
+    return counts;
+  }, [hierarchyScopedTasks]);
 
   // Task-status tab badges: totals per status, unaffected by which status tab is currently
   // selected (sourced from deptScopedTasks, not statusScopedTasks) so switching tabs never
@@ -377,69 +418,63 @@ export default function SummaryReportsPage() {
 
   return (
     <div className="flex flex-col flex-1 overflow-auto bg-slate-50">
-      {/* Title Bar — the one strong, unambiguous focal point at the top of the page */}
-      <div className="border-b border-slate-200 bg-white px-6 py-4 antialiased flex flex-col justify-center">
+      {/* Title Bar — matches ReportsHeader: the title alone is the focal point, with a
+          breadcrumb under it. */}
+      <div className="border-b border-slate-200 bg-white px-8 py-5 antialiased flex flex-col justify-center">
         <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0 flex items-center gap-3">
-            <span className="h-10 w-10 rounded-xl bg-custom-blue text-white shadow-sm shrink-0 flex items-center justify-center">
-              <LayoutDashboard className="h-5 w-5" />
-            </span>
-            <div className="min-w-0 flex flex-col gap-0.5">
-              <h1 className="text-xl font-black text-slate-900 tracking-tight truncate leading-none">
-                Summary Reports Dashboard
-              </h1>
-              <div className="flex items-center text-sm text-slate-500 font-semibold gap-1">
-                <span className="text-blue-600 font-bold">{activeDepartment?.name || "All Departments"}</span>
-                <span className="text-slate-300 mx-0.5">/</span>
-                <span className="truncate text-slate-500">{breadcrumbSubtext}</span>
-              </div>
+          <div className="min-w-0 flex flex-col gap-1.5">
+            <h1 className="text-[22px] font-bold text-slate-900 uppercase tracking-wide truncate leading-none">
+              Summary Reports Dashboard
+            </h1>
+            <div className="flex items-center text-sm text-slate-500 font-semibold gap-1">
+              <Building2 className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+              <span className="text-blue-600 font-bold">{activeDepartment?.name || "All Departments"}</span>
+              <span className="text-slate-300 mx-0.5">/</span>
+              <span className="truncate text-slate-500">{breadcrumbSubtext}</span>
             </div>
           </div>
 
-          {/* Secondary controls — deliberately smaller and ghost-styled (no border, tint only
-              when active) so they recede behind the title instead of competing with it. */}
-          <div className="flex items-center gap-1 shrink-0">
+          {/* Secondary controls — same ghost-styled rounded-full toggles as ReportsHeader. */}
+          <div className="flex items-center gap-2.5 shrink-0">
             <ColumnVisibilityDialog visibleColumnIds={visibleColumnIds} setVisibleColumnIds={setVisibleColumnIds} />
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={() => setShowTime((v) => !v)}
               className={cn(
-                "h-9 px-3 rounded-lg text-sm font-bold gap-1.5 transition-all shrink-0",
-                showTime ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-100"
+                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+                showTime ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
               )}
             >
               <Clock className="h-3.5 w-3.5" />
-              Time
+              {showTime ? "Hide Time" : "Show Time"}
             </Button>
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={() => setShowDelta((v) => !v)}
               className={cn(
-                "h-9 px-3 rounded-lg text-sm font-bold gap-1.5 transition-all shrink-0",
-                showDelta ? "bg-violet-50 text-violet-700" : "text-slate-500 hover:bg-slate-100"
+                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+                showDelta ? "bg-violet-50 border-violet-300 text-violet-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
               )}
             >
               <GitCompare className="h-3.5 w-3.5" />
-              Δ
+              {showDelta ? "Hide Δ" : "Show Δ"}
             </Button>
           </div>
         </div>
       </div>
 
-      {/* Scope card — Department → Sub-Department → Class → Status grouped as one visual
-          unit instead of four independent full-width bars, per feedback: this is the single
-          biggest legibility fix on the page. Depth reads via color/weight (solid Department
-          tabs → lighter breadcrumb Sub-Department/Class → colored Status ghost tabs), not by
-          stacking more borders. */}
+      {/* Scope card — Department → Sub-Department tabs grouped as one visual unit, with
+          Class / Sub-Class searchable multiselect dropdowns in the same card. */}
       <div className="mx-6 mt-4 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <HierarchyTabs
           departments={departments}
           activeDeptId={activeDeptId} setActiveDeptId={setActiveDeptId}
           activeSubDeptId={activeSubDeptId} setActiveSubDeptId={setActiveSubDeptId}
-          activeClassId={activeClassId} setActiveClassId={setActiveClassId}
-          deptTaskCounts={deptTaskCounts} subDeptTaskCounts={subDeptTaskCounts} classTaskCounts={classTaskCounts}
+          deptTaskCounts={deptTaskCounts} subDeptTaskCounts={subDeptTaskCounts}
+          availableClasses={availableClasses} activeClassIds={activeClassIds} setActiveClassIds={setActiveClassIds} classCounts={classCounts}
+          availableSubClasses={availableSubClasses} activeSubClassIds={activeSubClassIds} setActiveSubClassIds={setActiveSubClassIds} subClassCounts={subClassCounts}
         />
         <StatusTabs activeTaskStatus={activeTaskStatus} setActiveTaskStatus={setActiveTaskStatus} counts={taskStatusCounts} />
       </div>

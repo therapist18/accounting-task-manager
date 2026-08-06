@@ -1,9 +1,9 @@
 // @ts-nocheck
 "use client";
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ExternalLink, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, LayoutGrid, Rows3, Clock, ChevronLeft, ChevronRight } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { formatDateCell } from "../../reports/components/reportCellRenderers";
@@ -53,6 +53,8 @@ const STICKY_OFFSETS = {
 };
 
 export type TaskListSortConfig = { key: string; direction: 'asc' | 'desc' } | null;
+
+const TRANSFUSED_COLUMNS_PER_PAGE = 8;
 
 const Th = ({ children, sortKey, left, shadowEdge, className, sortConfig, onSort }: {
   children: React.ReactNode;
@@ -132,9 +134,16 @@ export function TaskListTable({
 }) {
   const [sortConfig, setSortConfig] = useState<TaskListSortConfig>(null);
 
+  // "Show time / hide time" in the date cells, and the Rows / Transposed view switch.
+  const [showTime, setShowTime] = useState(true);
+  const [isTransposed, setIsTransposed] = useState(false);
+  const [transposedPage, setTransposedPage] = useState(1);
+
   const handleSort = useCallback((key: string) => {
     setSortConfig(cur => cur?.key === key ? { key, direction: cur.direction === 'asc' ? 'desc' : 'asc' } : { key, direction: 'asc' });
   }, []);
+
+  // Transposed view paginates task columns so a wide job history stays usable.
 
   // Shared between the "On Time?" cell and the sort value so both stay in lockstep.
   const getOnTimeStatus = useCallback((task: any): 'on_time' | 'late' | null => {
@@ -197,6 +206,129 @@ export function TaskListTable({
     });
   }, [tasks, sortConfig, getSortableValue]);
 
+  // Transposed view paginates task columns so a wide job history stays usable.
+  const transposedTotalPages = Math.max(1, Math.ceil(sortedTasks.length / TRANSFUSED_COLUMNS_PER_PAGE));
+  const transposedPageSafe = Math.min(transposedPage, transposedTotalPages);
+  const transposedTasks = useMemo(
+    () => sortedTasks.slice((transposedPageSafe - 1) * TRANSFUSED_COLUMNS_PER_PAGE, transposedPageSafe * TRANSFUSED_COLUMNS_PER_PAGE),
+    [sortedTasks, transposedPageSafe]
+  );
+
+  useEffect(() => { setTransposedPage(1); }, [isTransposed]);
+
+  // Pre-resolved per-task view for the transposed (columns = tasks, rows = fields) layout,
+  // mirroring the per-row derivation the standard table does inline so both stay in lockstep.
+  const taskViews = useMemo(() => {
+    const map = new Map<string | number, any>();
+    sortedTasks.forEach((task) => {
+      const taskStages = stagesByDept.get(task.department_id?.toString()) || [];
+      const department = departments.find((d: any) => d.id.toString() === task.department_id?.toString());
+      const subdepartment = department?.tm_subdepartments?.find((s: any) => s.id.toString() === task.subdepartment_id?.toString());
+      const classItem = subdepartment?.classes?.find((c: any) => c.id.toString() === task.class_id?.toString());
+      const subClassItem = classItem?.subClasses?.find((sc: any) => sc.id.toString() === task.subclass_id?.toString());
+      const enhancedTask = enhancedTasksData?.get(task.id?.toString()) || task;
+      map.set(task.id, {
+        id: task.id,
+        jobDescription: task.job_description || null,
+        companyName: companies.get(task.company_id)?.name || task.company_name || null,
+        department: department?.name || null,
+        subdepartment: subdepartment?.name || null,
+        class: classItem?.name || null,
+        subclass: subClassItem?.name || null,
+        status: task.status,
+        statusBadge: getStatusBadge(task.status),
+        currentStage: getCanonicalCurrentStage(task, taskStages, departments)?.name || null,
+        duration: enhancedTask.duration || task.duration || null,
+        applicationType: enhancedTask.renewal_status || task.renewal_status || null,
+        registered: task.date_initiated || task.created_at || null,
+        reqSent: resolveMilestoneDate(task, REQ_SENT_STAGE_ID),
+        confirmed: resolveMilestoneDate(task, CONFIRMED_STAGE_ID),
+        completed: COMPLETED_STATUSES.includes(task.status) ? getLastDatedStage(task, taskStages, departments) : null,
+        onTime: getOnTimeStatus(task),
+      });
+    });
+    return map;
+  }, [sortedTasks, departments, stagesByDept, companies, enhancedTasksData, getOnTimeStatus]);
+
+  const transposedFields = useMemo(() => {
+    const fields = [
+      { key: 'job_description', label: 'Job Description' },
+      ...(showCompanyColumn ? [{ key: 'company', label: 'Company' }] : []),
+      { key: 'department', label: 'Department' },
+      { key: 'subdepartment', label: 'Sub-Department' },
+      { key: 'class', label: 'Class' },
+      { key: 'subclass', label: 'Sub Class' },
+      { key: 'status', label: 'Status' },
+      { key: 'current_stage', label: 'Current Stage' },
+      { key: 'duration', label: 'Duration' },
+      { key: 'application_type', label: 'Application Type' },
+      { key: 'registered', label: 'Registered' },
+      { key: 'req_sent', label: 'Req Sent' },
+      { key: 'confirmed', label: 'Confirmed' },
+      { key: 'completed', label: 'Completed' },
+      { key: 'on_time', label: 'On Time?' },
+      { key: 'open', label: 'Open' },
+    ];
+    return fields;
+  }, [showCompanyColumn]);
+
+  const renderTransposedCell = useCallback((view: any, key: string) => {
+    switch (key) {
+      case 'job_description':
+        return view.jobDescription ? <span className="text-slate-900 font-semibold whitespace-normal">{view.jobDescription}</span> : null;
+      case 'company': return view.companyName || null;
+      case 'department': return view.department || null;
+      case 'subdepartment': return view.subdepartment || null;
+      case 'class': return view.class || null;
+      case 'subclass': return view.subclass || null;
+      case 'status': {
+        const b = view.statusBadge;
+        return (
+          <span className={cn("inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full", b.bg, b.text)}>
+            <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", b.dot)} />
+            {b.label}
+          </span>
+        );
+      }
+      case 'current_stage': return view.currentStage || null;
+      case 'duration': return view.duration || null;
+      case 'application_type': return view.applicationType || null;
+      case 'registered': return formatDateCell(view.registered, showTime);
+      case 'req_sent': return formatDateCell(view.reqSent, showTime);
+      case 'confirmed': return formatDateCell(view.confirmed, showTime);
+      case 'completed': return view.completed ? formatDateCell(view.completed, showTime) : null;
+      case 'on_time':
+        if (view.onTime === 'on_time') {
+          return (
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" /> On Time
+            </span>
+          );
+        }
+        if (view.onTime === 'late') {
+          return (
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full bg-rose-50 text-rose-600">
+              <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" /> Late
+            </span>
+          );
+        }
+        return null;
+      case 'open':
+        return (
+          <Link
+            href={`/dashboard/tasks/${view.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center h-7 w-7 rounded-lg text-slate-400 hover:text-custom-blue hover:bg-blue-50 transition-colors"
+            title="Open in Job Workspace"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+          </Link>
+        );
+      default: return null;
+    }
+  }, [showTime]);
+
   if (!tasks.length) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center bg-white rounded-xl border border-slate-200">
@@ -209,7 +341,106 @@ export function TaskListTable({
   // scrolling past it reads as a "page edge", not a seam between two pinned columns.
 
   return (
-    <div className="rounded-xl border border-slate-200 shadow-sm overflow-auto max-h-[calc(100vh-340px)] custom-scrollbar">
+    <>
+      <div className="flex items-center justify-end gap-2 mb-2">
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-full border border-slate-200">
+          <button
+            onClick={() => setIsTransposed(false)}
+            className={cn(
+              "px-3 h-7 text-xs font-bold rounded-full transition-all flex items-center gap-1.5",
+              !isTransposed ? "bg-white text-custom-blue shadow-sm" : "text-slate-500 hover:text-slate-900"
+            )}
+          >
+            <Rows3 className="h-3 w-3" /> Rows
+          </button>
+          <button
+            onClick={() => setIsTransposed(true)}
+            className={cn(
+              "px-3 h-7 text-xs font-bold rounded-full transition-all flex items-center gap-1.5",
+              isTransposed ? "bg-white text-custom-blue shadow-sm" : "text-slate-500 hover:text-slate-900"
+            )}
+          >
+            <LayoutGrid className="h-3 w-3" /> Transposed
+          </button>
+        </div>
+        <div className="h-5 w-px bg-slate-200" />
+        <button
+          onClick={() => setShowTime(s => !s)}
+          title={showTime ? "Hide time in date cells" : "Show time in date cells"}
+          className={cn(
+            "h-7 px-3 text-xs font-bold rounded-full border transition-all flex items-center gap-1.5",
+            showTime ? "bg-white text-custom-blue shadow-sm border-slate-200" : "bg-slate-50 text-slate-400 hover:text-slate-700 border-transparent"
+          )}
+        >
+          <Clock className="h-3 w-3" />
+          {showTime ? 'Time shown' : 'Date only'}
+        </button>
+      </div>
+
+      {isTransposed ? (
+        <div className="rounded-xl border border-slate-200 shadow-sm overflow-auto max-h-[calc(100vh-340px)] custom-scrollbar">
+          <Table className="border-separate border-spacing-0">
+            <TableHeader className="sticky top-0 z-40">
+              <TableRow className="hover:bg-transparent border-0">
+                <Th sortConfig={sortConfig} left={0} className="w-14 min-w-[56px] max-w-[56px] text-center">#</Th>
+                <Th sortConfig={sortConfig} left={56} className="w-48 min-w-[192px] max-w-[192px]">Field</Th>
+                {transposedTasks.map(task => (
+                  <Th key={task.id} sortConfig={sortConfig} className="w-52 min-w-[208px] max-w-[208px]">
+                    <span className="truncate">#{task.id}</span>
+                    <Link
+                      href={`/dashboard/tasks/${task.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-white/70 hover:text-white transition-colors"
+                      title="Open in Job Workspace"
+                    >
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                    </Link>
+                  </Th>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {transposedFields.map((field, fi) => (
+                <TableRow key={field.key} className={cn("group border-0 transition-colors", fi % 2 === 0 ? "bg-white" : "bg-slate-100/50", "hover:bg-blue-50/50")}>
+                  <Td idx={fi} left={0} className="w-14 min-w-[56px] max-w-[56px] text-center">{fi + 1}</Td>
+                  <Td idx={fi} left={56} className="w-48 min-w-[192px] max-w-[192px] font-semibold text-slate-600">{field.label}</Td>
+                  {transposedTasks.map(task => (
+                    <Td idx={fi} key={task.id} className="w-52 min-w-[208px] max-w-[208px] whitespace-normal align-top">
+                      {renderTransposedCell(taskViews.get(task.id), field.key) ?? <span className="text-slate-300 font-normal">—</span>}
+                    </Td>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          {sortedTasks.length > TRANSFUSED_COLUMNS_PER_PAGE && (
+            <div className="sticky bottom-0 z-40 flex items-center justify-between px-4 py-2.5 border-t border-slate-200 bg-slate-50/95">
+              <span className="text-xs font-bold text-slate-500">
+                Showing {transposedTasks.length} of {sortedTasks.length} tasks
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setTransposedPage(Math.max(1, transposedPageSafe - 1))}
+                  disabled={transposedPageSafe <= 1}
+                  className="h-7 w-7 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-slate-900 disabled:opacity-40 flex items-center justify-center"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+                <span className="px-3 text-xs font-bold text-slate-700">{transposedPageSafe} / {transposedTotalPages}</span>
+                <button
+                  onClick={() => setTransposedPage(Math.min(transposedTotalPages, transposedPageSafe + 1))}
+                  disabled={transposedPageSafe >= transposedTotalPages}
+                  className="h-7 w-7 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-slate-900 disabled:opacity-40 flex items-center justify-center"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-slate-200 shadow-sm overflow-auto max-h-[calc(100vh-340px)] custom-scrollbar">
       <Table className="border-separate border-spacing-0 min-w-full">
         <TableHeader className="sticky top-0 z-40">
           <TableRow className="hover:bg-transparent border-0">
@@ -272,8 +503,8 @@ export function TaskListTable({
 
             return (
               <TableRow key={task.id} className={cn("group border-0 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "hover:bg-blue-50/50")}>
-                <Td idx={idx} left={STICKY_OFFSETS.index} className="text-center">{idx + 1}</Td>
-                <Td idx={idx} primary left={STICKY_OFFSETS.id}>{task.id}</Td>
+                <Td idx={idx} left={STICKY_OFFSETS.index} className="w-12 min-w-12 max-w-12 text-center">{idx + 1}</Td>
+                <Td idx={idx} primary left={STICKY_OFFSETS.id} className="w-28 min-w-[112px] max-w-[112px]">{task.id}</Td>
                 <Td
                   idx={idx}
                   primary
@@ -301,10 +532,10 @@ export function TaskListTable({
                 <Td idx={idx}>{currentStageName}</Td>
                 <Td idx={idx}>{duration}</Td>
                 <Td idx={idx}>{applicationType}</Td>
-                <Td idx={idx}>{formatDateCell(registered, true)}</Td>
-                <Td idx={idx}>{formatDateCell(reqSentRaw, true)}</Td>
-                <Td idx={idx}>{formatDateCell(confirmedRaw, true)}</Td>
-                <Td idx={idx}>{completedRaw ? formatDateCell(completedRaw, true) : null}</Td>
+                <Td idx={idx}>{formatDateCell(registered, showTime)}</Td>
+                <Td idx={idx}>{formatDateCell(reqSentRaw, showTime)}</Td>
+                <Td idx={idx}>{formatDateCell(confirmedRaw, showTime)}</Td>
+                <Td idx={idx}>{completedRaw ? formatDateCell(completedRaw, showTime) : null}</Td>
                 <Td idx={idx}>
                   {onTime === 'on_time' ? (
                     <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
@@ -330,8 +561,10 @@ export function TaskListTable({
               </TableRow>
             );
           })}
-        </TableBody>
-      </Table>
-    </div>
+          </TableBody>
+        </Table>
+      </div>
+      )}
+    </>
   );
 }

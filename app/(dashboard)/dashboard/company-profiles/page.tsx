@@ -343,7 +343,7 @@ export default function CompanyProfilesPage() {
           onExpand={() => setCollapsed(prev => ({ ...prev, roster: false }))}
         >
           {collapsed.roster ? (
-            <div className="h-full w-full flex flex-col items-center gap-2 pt-2 bg-white border-r border-slate-200">
+            <div className="h-full w-full flex flex-col items-center gap-3 pt-2 bg-white border-r border-slate-200">
               <button
                 onClick={() => togglePanel('roster')}
                 title="Show roster panel"
@@ -351,6 +351,12 @@ export default function CompanyProfilesPage() {
               >
                 <PanelLeftOpen className="w-4 h-4" />
               </button>
+              <div className="flex flex-col items-center gap-1.5 text-slate-400">
+                {viewMode === 'company' ? <Building2 className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                <span className="text-[9px] font-bold text-slate-400 uppercase [writing-mode:vertical-lr]">
+                  {viewMode === 'company' ? 'Companies' : 'People'}
+                </span>
+              </div>
             </div>
           ) : (
             <div className="h-full flex flex-col bg-white border-r border-slate-200">
@@ -415,7 +421,7 @@ export default function CompanyProfilesPage() {
           onExpand={() => setCollapsed(prev => ({ ...prev, detail: false }))}
         >
           {collapsed.detail ? (
-            <div className="h-full w-full flex flex-col items-center gap-2 pt-2 bg-white border-r border-slate-200">
+            <div className="h-full w-full flex flex-col items-center gap-3 pt-2 bg-white border-r border-slate-200">
               <button
                 onClick={() => togglePanel('detail')}
                 title="Show detail panel"
@@ -423,6 +429,10 @@ export default function CompanyProfilesPage() {
               >
                 <ChevronsRight className="w-4 h-4" />
               </button>
+              <div className="flex flex-col items-center gap-1.5 text-slate-400">
+                {viewMode === 'company' ? <Briefcase className="w-4 h-4" /> : <Building2 className="w-4 h-4" />}
+                <span className="text-[9px] font-bold text-slate-400 uppercase [writing-mode:vertical-lr]">Details</span>
+              </div>
             </div>
           ) : viewMode === 'company' && selectedCompany ? (
             <div className="h-full flex flex-col bg-white border-r border-slate-200 overflow-y-auto custom-scrollbar">

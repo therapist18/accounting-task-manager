@@ -108,9 +108,14 @@ interface ContractPreviewProps {
   // Job Profiles preview (previewOnly) show the profile's saved Design tab
   // theme live while it's being edited, without writing into contractData.
   defaultTheme?: ContractThemeSettings | null;
+  // Lets the Job Profiles preview route the sidebar theme panel's edits back
+  // into the profile draft (theme_settings) instead of only the local
+  // per-contract override, so the design editor stays in sync with the EC
+  // module's (same sidebar panel, same persistence path).
+  onThemeChange?: (settings: ContractThemeSettings) => void;
 }
 
-export function ContractPreview({ contractData, setContractData, selectedJobProfile, previewOnly, className, defaultTheme }: ContractPreviewProps) {
+export function ContractPreview({ contractData, setContractData, selectedJobProfile, previewOnly, className, defaultTheme, onThemeChange }: ContractPreviewProps) {
   const employee = contractData?.employee;
   const offer: Partial<EmploymentOffer> | undefined = contractData?.offer;
   const companyId = employee?.companyId;
@@ -195,10 +200,12 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   useEffect(() => { loadContext(); }, [loadContext]);
 
   // Reset the live theme customization whenever we switch to a different
-  // employee's contract, preloading whatever theme was saved on it last time.
+  // employee's contract or job profile, preloading whatever theme was saved
+  // on it last time (for a fresh contract that's null, so the effective theme
+  // falls through to the selected profile's own theme_settings).
   useEffect(() => {
     setThemeOverride(contractData?.metadata?.themeSettings || null);
-  }, [employee?.individualId]);
+  }, [employee?.individualId, selectedJobProfile?.id]);
 
   // Track the scroll container's box size for the fit/fill sizing modes.
   useEffect(() => {
@@ -211,28 +218,6 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-
-  // Track natural unscaled height for pagination math
-  useEffect(() => {
-    const el = contentMeasureRef.current;
-    if (!el) return;
-    
-    const measure = () => {
-      setTimeout(() => setContentHeightPx(el.scrollHeight), 50);
-    };
-    
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    
-    const images = el.querySelectorAll('img');
-    images.forEach(img => img.addEventListener('load', measure));
-    
-    return () => {
-      observer.disconnect();
-      images.forEach(img => img.removeEventListener('load', measure));
-    };
-  }, [themeOverride, defaultTheme, showToc]);
 
   // Scroll-based page tracking + TOC anchor click interception
   useEffect(() => {
@@ -312,14 +297,22 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   // The toolbar's refresh button used to only re-run refreshMasterFieldValues,
   // leaving clauses/company/signatory/payroll figures stale until the next
   // company or employee switch remounted those effects - re-fetch
-  // everything the initial load fetches, not just master fields.
+  // everything the initial load fetches, not just master fields, and tell the
+  // user the refresh finished.
   const handleRefreshAll = useCallback(async () => {
-    await Promise.all([
-      refreshMasterFieldValues(),
-      loadContext(),
-      loadSignatoryName(),
-      loadPayrollStatutoryLine(),
-    ]);
+    try {
+      await Promise.all([
+        refreshMasterFieldValues(),
+        loadContext(),
+        loadSignatoryName(),
+        loadPayrollStatutoryLine(),
+      ]);
+      toast.success('Contract data refreshed', {
+        description: 'Clauses, company, signatory, payroll figures and master fields reloaded.',
+      });
+    } catch {
+      toast.error('Refresh failed', { description: 'Something went wrong reloading the contract data.' });
+    }
   }, [refreshMasterFieldValues, loadContext, loadSignatoryName, loadPayrollStatutoryLine]);
 
   const employeeValues = useMemo(
@@ -360,10 +353,39 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     });
   }, [clausesById, effectiveClauses, effectiveSettings, employeeValues, employee, showToc]);
 
-  const themeSettings: ContractThemeSettings = themeOverride || defaultTheme || DEFAULT_CONTRACT_THEME;
+  const themeSettings: ContractThemeSettings = themeOverride || defaultTheme || { ...DEFAULT_CONTRACT_THEME, ...(selectedJobProfile?.theme_settings || {}) };
   const mergedValues = { ...effectiveSettings, ...employeeValues };
 
   const themedHtml = bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings), mergedValues) : '';
+
+  // Track natural unscaled height for pagination math. themedHtml is in the
+  // deps so any content change that alters the layout - loading a profile's
+  // saved theme (which only flows in through the themeSettings fallback, not
+  // through themeOverride/defaultTheme), picking an employee/profile in the
+  // first place, typing in the editor - re-runs the measurement. Without it,
+  // the observer was never attached when a profile was first selected (the
+  // effect bailed on a null ref at mount), so pagination stayed stuck at one
+  // page until the theme panel happened to flip themeOverride.
+  useEffect(() => {
+    const el = contentMeasureRef.current;
+    if (!el) return;
+
+    const measure = () => {
+      setTimeout(() => setContentHeightPx(el.scrollHeight), 50);
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+
+    const images = el.querySelectorAll('img');
+    images.forEach(img => img.addEventListener('load', measure));
+
+    return () => {
+      observer.disconnect();
+      images.forEach(img => img.removeEventListener('load', measure));
+    };
+  }, [themeOverride, defaultTheme, showToc, themedHtml]);
   // Renamed id="section-x"/href="#section-x" to a "pdf-section-x" namespace,
   // distinct from the live on-screen preview's own id="section-x" elements
   // (which stay mounted, just display:none via print:hidden, during
@@ -380,7 +402,10 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     : '';
   const wordSafeHtml = exportBodyHtml ? replacePlaceholders(applyThemeToHtml(exportBodyHtml, themeSettings, { wordSafe: true }), mergedValues) : '';
 
-  const updateThemeSettings = (settings: ContractThemeSettings) => setThemeOverride(settings);
+  const updateThemeSettings = (settings: ContractThemeSettings) => {
+    setThemeOverride(settings);
+    onThemeChange?.(settings);
+  };
 
   const buildOutput = (): { blob: Blob; fileName: string } | null => {
     if (!employee || !wordSafeHtml) return null;
@@ -566,11 +591,12 @@ ${themeCss}
   <>
     <div className={cn(className || "flex flex-col h-full bg-slate-100/50 dark:bg-slate-900 shadow-inner overflow-hidden flex-1 lg:min-w-[600px] relative", "print:hidden")}>
 
-      {/* Sleek Glassy Toolbar */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2.5 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200/60 dark:border-slate-700/60 shadow-lg shadow-slate-200/20 dark:shadow-black/20 rounded-2xl z-20 flex items-center gap-4 transition-all">
-        <div className="flex items-center gap-2">
+      {/* Docked Toolbar */}
+      <div className="shrink-0 flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200/70 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur z-20">
+        {/* Left: Zoom + Sizing */}
+        <div className="flex items-center gap-1.5 min-w-0">
           {/* Zoom Controls */}
-          <div className="flex items-center h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden">
+          <div className="flex items-center h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden shadow-sm shrink-0">
             <button
               onClick={() => setManualZoom((z) => z - 10)}
               disabled={sizingMode === 'manual' && zoomPct <= 40}
@@ -579,7 +605,7 @@ ${themeCss}
             >
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
-            <span className="text-xs font-medium text-slate-600 dark:text-slate-300 w-10 text-center tabular-nums select-none">
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-300 w-10 text-center tabular-nums select-none border-x border-slate-200 dark:border-slate-700">
               {Math.round(zoomRatio * 100)}%
             </span>
             <button
@@ -593,7 +619,7 @@ ${themeCss}
           </div>
 
           {/* Sizing Mode: Fit width / Fill height */}
-          <div className="flex items-center h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden">
+          <div className="flex items-center h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden shadow-sm shrink-0">
             <button
               onClick={() => setSizingMode('fit')}
               title="Fit page to width"
@@ -617,14 +643,13 @@ ${themeCss}
           </div>
         </div>
 
-        <div className="h-5 w-px bg-slate-200 dark:bg-slate-700" />
-
-        <div className="flex items-center gap-1.5">
+        {/* Right: Toggles + Export */}
+        <div className="flex items-center gap-1.5 min-w-0">
           <button
             onClick={() => setShowToc((v) => !v)}
             title="Toggle table of contents"
             className={cn(
-              "w-8 h-8 flex items-center justify-center rounded-lg transition-colors",
+              "w-8 h-8 flex items-center justify-center rounded-lg transition-colors shrink-0",
               showToc
                 ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
                 : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -632,34 +657,32 @@ ${themeCss}
           >
             <List className="w-4 h-4" />
           </button>
-          {!previewOnly && (
-            <button
-              onClick={() => setThemePanelOpen(true)}
-              title="Customize theme"
-              className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              <Palette className="w-4 h-4" />
-            </button>
-          )}
+          {/* Theme sidebar panel - shared by both modules so profile design
+              and per-contract customization stay synchronized. */}
+          <button
+            onClick={() => setThemePanelOpen(true)}
+            title="Customize theme"
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+          >
+            <Palette className="w-4 h-4" />
+          </button>
           <button
             onClick={handleRefreshAll}
             disabled={isResolvingMasterFields || loadingContext}
             title="Refresh everything (clauses, company, signatory, payroll figures, master fields)"
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50 shrink-0"
           >
             <RefreshCw className={cn("w-4 h-4", (isResolvingMasterFields || loadingContext) && "animate-spin")} />
           </button>
-        </div>
 
-        <div className="h-5 w-px bg-slate-200 dark:bg-slate-700" />
+          <div className="h-5 w-px bg-slate-200 dark:bg-slate-700 shrink-0" />
 
-        <div className="flex items-center gap-2">
           {/* Export menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 disabled={!hasOutput || loadingContext}
-                className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
+                className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors shrink-0"
               >
                 <Download className="w-3.5 h-3.5" />
                 Export
@@ -680,7 +703,7 @@ ${themeCss}
           {!previewOnly && (
             <Button
               size="sm"
-              className="h-8 px-4 text-xs font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md rounded-lg"
+              className="h-8 px-4 text-xs font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md rounded-lg shrink-0"
               onClick={handleSaveToDb}
               disabled={!hasOutput || loadingContext || isSaving}
             >
@@ -694,7 +717,7 @@ ${themeCss}
       {/* Main Preview Area - Scrollable */}
       <div 
         ref={scrollContainerRef}
-        className="flex-1 overflow-auto bg-slate-100/50 dark:bg-slate-950/50 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700 pt-16"
+        className="flex-1 overflow-auto bg-slate-200/50 dark:bg-slate-950/60 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700"
       >
         {!hasOutput && !loadingContext ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-400">
@@ -706,7 +729,7 @@ ${themeCss}
             <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
           </div>
         ) : (
-          <div className="py-12 px-4 flex flex-col items-center min-h-full">
+          <div className="py-8 px-6 flex flex-col items-center min-h-full">
             {/* Scaled wrapper */}
             <div
               className="relative shrink-0 shadow-2xl shadow-slate-300/30 dark:shadow-black/40 transition-transform duration-200"
@@ -743,26 +766,28 @@ ${themeCss}
         )}
       </div>
 
-      {/* Sticky Pagination Controls - Fixed to the bottom */}
+      {/* Docked Pagination Footer */}
       {hasOutput && !loadingContext && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white/90 dark:bg-slate-900/90 backdrop-blur border border-slate-200 dark:border-slate-800 rounded-full py-1.5 px-4 flex items-center justify-center gap-4 text-xs text-slate-600 dark:text-slate-300 font-medium z-10 shadow-lg shadow-slate-200/20 dark:shadow-black/20">
-          <div className="flex items-center gap-0.5">
-            <button onClick={() => scrollToPage(1)} disabled={currentPage <= 1} className="p-1 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
-              <ChevronsLeft className="w-3.5 h-3.5" />
+        <div className="shrink-0 flex items-center justify-center gap-2.5 px-4 py-2 border-t border-slate-200/70 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur z-10">
+          <div className="flex items-center h-8 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+            <button onClick={() => scrollToPage(1)} disabled={currentPage <= 1} title="First page" className="w-8 h-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors border-r border-slate-100 dark:border-slate-800">
+              <ChevronsLeft className="w-4 h-4" />
             </button>
-            <button onClick={() => scrollToPage(currentPage - 1)} disabled={currentPage <= 1} className="p-1 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
-              <ChevronLeft className="w-3.5 h-3.5" />
+            <button onClick={() => scrollToPage(currentPage - 1)} disabled={currentPage <= 1} title="Previous page" className="w-8 h-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+              <ChevronLeft className="w-4 h-4" />
             </button>
           </div>
-          
-          <span className="tabular-nums min-w-[70px] text-center font-semibold">Page {currentPage} / {totalPages}</span>
-          
-          <div className="flex items-center gap-0.5">
-            <button onClick={() => scrollToPage(currentPage + 1)} disabled={currentPage >= totalPages} className="p-1 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
-              <ChevronRight className="w-3.5 h-3.5" />
+
+          <span className="text-xs font-medium text-slate-600 dark:text-slate-300 tabular-nums">
+            Page <span className="text-slate-900 dark:text-white font-bold">{currentPage}</span> / {totalPages}
+          </span>
+
+          <div className="flex items-center h-8 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+            <button onClick={() => scrollToPage(currentPage + 1)} disabled={currentPage >= totalPages} title="Next page" className="w-8 h-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+              <ChevronRight className="w-4 h-4" />
             </button>
-            <button onClick={() => scrollToPage(totalPages)} disabled={currentPage >= totalPages} className="p-1 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
-              <ChevronsRight className="w-3.5 h-3.5" />
+            <button onClick={() => scrollToPage(totalPages)} disabled={currentPage >= totalPages} title="Last page" className="w-8 h-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors border-l border-slate-100 dark:border-slate-800">
+              <ChevronsRight className="w-4 h-4" />
             </button>
           </div>
         </div>
