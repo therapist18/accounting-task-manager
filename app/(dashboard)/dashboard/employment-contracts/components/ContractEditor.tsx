@@ -302,7 +302,7 @@ export function ContractEditor({
             onChange={handleProfileChange}
             placeholder="Select a job profile..."
             searchPlaceholder="Search profiles..."
-            options={positionProfiles.map((p) => ({ value: p.id, label: p.name }))}
+            options={positionProfiles.map((p) => ({ value: p.id, label: p.company_id ? p.name : `${p.name} (Generic)` }))}
           />
         </div>
       </div>
