@@ -12,6 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -282,6 +283,11 @@ export default function JobProfilesPage() {
   const [createDepartment, setCreateDepartment] = useState('');
   const [creating, setCreating] = useState(false);
 
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyTargets, setCopyTargets] = useState<Set<string>>(new Set());
+  const [copySearch, setCopySearch] = useState('');
+  const [copying, setCopying] = useState(false);
+
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
   const editorPanelRef = useRef<ImperativePanelHandle>(null);
   const detailPanelRef = useRef<ImperativePanelHandle>(null);
@@ -510,18 +516,54 @@ export default function JobProfilesPage() {
     updateDraftSectionClauses(() => ({}));
   };
 
-  const handleDuplicate = async () => {
+  // Opens the destination picker for copying the selected profile - starts
+  // with nothing checked so the user always makes an explicit choice.
+  const openCopyDialog = () => {
     if (!selectedProfile) return;
+    setCopyTargets(new Set());
+    setCopySearch('');
+    setCopyOpen(true);
+  };
+
+  const toggleCopyTarget = (id: string) => {
+    setCopyTargets((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleConfirmCopy = async () => {
+    if (!selectedProfile || copyTargets.size === 0) return;
+    setCopying(true);
     try {
       const { id, created_at, updated_at, ...rest } = selectedProfile;
-      const created = await createJobProfile({ ...rest, name: `${selectedProfile.name} (Copy)` });
-      if (created) {
-        await loadProfiles(selectedCompanyId);
-        setSelectedProfileId(created.id);
-        toast({ title: 'Profile duplicated' });
-      }
+      const targets = Array.from(copyTargets);
+      const created = await Promise.all(
+        targets.map((targetId) =>
+          createJobProfile({
+            ...rest,
+            company_id: targetId === '__general__' ? null : targetId,
+            // A copy landing back in the same workspace it came from needs a
+            // distinct name so it doesn't look identical in the list; a copy
+            // moving to a different company/Global can keep the original name.
+            name: targetId === String(selectedProfile.company_id ?? '__general__')
+              ? `${selectedProfile.name} (Copy)`
+              : selectedProfile.name,
+          })
+        )
+      );
+      const succeeded = created.filter((p): p is EcJobProfile => !!p);
+      await loadProfiles(selectedCompanyId);
+      if (succeeded.length === 1) setSelectedProfileId(succeeded[0].id);
+      setCopyOpen(false);
+      toast({
+        title: succeeded.length > 1 ? `Copied to ${succeeded.length} destinations` : 'Profile copied',
+      });
     } catch (err: any) {
-      toast({ title: 'Error', description: err.message || 'Failed to duplicate profile', variant: 'destructive' });
+      toast({ title: 'Error', description: err.message || 'Failed to copy profile', variant: 'destructive' });
+    } finally {
+      setCopying(false);
     }
   };
 
@@ -980,8 +1022,8 @@ export default function JobProfilesPage() {
                                     </Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end" className="rounded-xl shadow-lg border-slate-200">
-                                    <DropdownMenuItem className="rounded-lg cursor-pointer text-sm font-medium" onClick={handleDuplicate}>
-                                      <Copy className="h-4 w-4 mr-2 text-slate-400" /> Duplicate Profile
+                                    <DropdownMenuItem className="rounded-lg cursor-pointer text-sm font-medium" onClick={openCopyDialog}>
+                                      <Copy className="h-4 w-4 mr-2 text-slate-400" /> Copy Profile To...
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem className="rounded-lg cursor-pointer text-sm font-medium text-red-600 focus:text-red-600 focus:bg-red-50" onClick={() => setDeletingId(selectedProfile.id)}>
@@ -1620,6 +1662,64 @@ export default function JobProfilesPage() {
           <div className="flex justify-end gap-3 pt-8">
             <Button variant="ghost" onClick={() => setCreateOpen(false)} className="rounded-full font-semibold text-slate-600 hover:bg-slate-100">Cancel</Button>
             <Button onClick={handleCreate} disabled={creating} className="rounded-full font-semibold bg-custom-blue hover:bg-[#2d5a94] text-white shadow-sm px-6">{creating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Create Profile</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={copyOpen} onOpenChange={setCopyOpen}>
+        <DialogContent className="max-w-md rounded-2xl p-6 shadow-xl border-slate-200 flex flex-col max-h-[80vh]">
+          <DialogTitle className="text-lg font-bold text-slate-900 dark:text-slate-100">
+            Copy "{selectedProfile?.name}" To...
+          </DialogTitle>
+          <p className="text-sm text-slate-500 -mt-3">Select one or more destinations. A copy is created in each.</p>
+
+          <div className="relative shadow-sm rounded-full shrink-0 mt-2">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <Input
+              placeholder="Search companies..."
+              className="pl-9 h-9 rounded-full text-sm bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+              value={copySearch}
+              onChange={(e) => setCopySearch(e.target.value)}
+            />
+          </div>
+
+          <ScrollArea className="flex-1 -mx-2 px-2 my-2 border border-slate-200 dark:border-slate-800 rounded-xl">
+            <div className="flex flex-col p-1.5">
+              {'general (no company)'.includes(copySearch.toLowerCase()) && (
+                <label
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                  onClick={() => toggleCopyTarget('__general__')}
+                >
+                  <Checkbox checked={copyTargets.has('__general__')} />
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">General (No Company)</span>
+                  <Badge variant="secondary" className="ml-auto text-[10px] uppercase tracking-wide">Global</Badge>
+                </label>
+              )}
+              {companies
+                .filter((c) => c.company_name.toLowerCase().includes(copySearch.toLowerCase()))
+                .map((c) => (
+                  <label
+                    key={c.id}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                    onClick={() => toggleCopyTarget(String(c.id))}
+                  >
+                    <Checkbox checked={copyTargets.has(String(c.id))} />
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{c.company_name}</span>
+                  </label>
+                ))}
+            </div>
+          </ScrollArea>
+
+          <div className="flex justify-between items-center gap-3 pt-2 shrink-0">
+            <span className="text-xs text-slate-500 font-medium">
+              {copyTargets.size} selected
+            </span>
+            <div className="flex gap-3">
+              <Button variant="ghost" onClick={() => setCopyOpen(false)} className="rounded-full font-semibold text-slate-600 hover:bg-slate-100">Cancel</Button>
+              <Button onClick={handleConfirmCopy} disabled={copying || copyTargets.size === 0} className="rounded-full font-semibold bg-custom-blue hover:bg-[#2d5a94] text-white shadow-sm px-6">
+                {copying ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Copy Profile
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

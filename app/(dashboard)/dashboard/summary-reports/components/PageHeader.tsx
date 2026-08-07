@@ -9,10 +9,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { SUMMARY_COLUMNS } from "../stageColumnConfig";
 
 // ── Shared UI: PillTrack ──
+// Updated to match the "Grouped View Toggles" from the target design (e.g. Overview / Transposed)
 export interface PillTrackItem {
   id: string;
   label: string;
@@ -33,7 +35,7 @@ export function PillTrack({
 }) {
   return (
     <div className={cn(
-      "inline-flex items-center gap-0.5 bg-slate-100 p-1 rounded-full",
+      "inline-flex items-center gap-1 bg-slate-100 p-1 rounded-full border border-slate-200 shrink-0",
       wrap && "flex-wrap"
     )}>
       {items.map(item => {
@@ -45,8 +47,10 @@ export function PillTrack({
             onClick={() => onValueChange(item.id)}
             className={cn(
               "font-bold rounded-full transition-all flex items-center shrink-0",
-              size === 'sm' ? "h-7 px-3 text-xs gap-1" : "h-8 px-4 text-sm gap-1.5",
-              isActive ? cn(item.activeBg || "bg-custom-blue", "text-white shadow-sm") : "text-slate-500 hover:text-slate-800 hover:bg-slate-200/50"
+              size === 'sm' ? "h-7 px-3 text-xs gap-1.5" : "h-8 px-4 text-sm gap-2",
+              isActive 
+                ? cn(item.activeBg || "bg-custom-blue", "text-white shadow-sm") 
+                : "text-slate-500 hover:text-slate-900 hover:bg-slate-200/50"
             )}
           >
             {Icon ? (
@@ -57,9 +61,9 @@ export function PillTrack({
             {item.label}
             {typeof item.count === 'number' && item.count > 0 && (
               <span className={cn(
-                "font-black tabular-nums tracking-tight",
-                size === 'sm' ? "text-[10px]" : "text-[11px]",
-                isActive ? "text-white/70" : "text-slate-400"
+                "font-black tabular-nums tracking-tight px-1.5 py-0.5 rounded-full font-medium",
+                size === 'sm' ? "text-[10px]" : "text-sm",
+                isActive ? "bg-white/20 text-white" : "bg-slate-200/50 text-slate-400"
               )}>
                 {item.count}
               </span>
@@ -94,38 +98,41 @@ function MultiSelectSearchableDropdown({
       <PopoverTrigger asChild>
         <Button
           variant="outline"
-          size="sm"
           className={cn(
-            "h-9 px-4 rounded-full text-sm font-bold gap-2 border transition-all shrink-0",
-            accentActive
-              ? "bg-custom-blue border-custom-blue text-white hover:bg-[#2d5a94] hover:text-white shadow-sm"
-              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            "h-10 px-5 rounded-full border-blue-500 text-sm font-semibold text-blue-600 bg-white hover:bg-blue-50 shrink-0",
+            accentActive && "bg-custom-blue border-custom-blue text-white hover:bg-[#2d5a94] hover:text-white shadow-sm"
           )}
         >
           {label}
           {selectedIds.length > 0 && (
-            <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-white text-slate-900 shadow-sm text-xs font-black tabular-nums">
+            <span className={cn(
+              "ml-2 h-5 min-w-5 flex items-center justify-center rounded-full text-xs font-black tabular-nums px-1.5",
+              accentActive ? "bg-white/20 text-white" : "bg-blue-100 text-blue-700"
+            )}>
               {selectedIds.length}
             </span>
           )}
-          <ChevronsUpDown className={cn("h-3.5 w-3.5", accentActive ? "opacity-80" : "opacity-40")} />
+          <ChevronsUpDown className={cn("ml-2 h-3.5 w-3.5", accentActive ? "opacity-60" : "opacity-40")} />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-0 rounded-2xl shadow-2xl border-slate-200" align="end">
-        <Command className="rounded-2xl" shouldFilter={false}>
-          <CommandInput placeholder={searchPlaceholder || `Search ${label.toLowerCase()}...`} value={search} onValueChange={setSearch} className="h-10 border-none focus:ring-0" />
-          <CommandList className="max-h-[240px] overflow-y-auto custom-scrollbar">
-            <CommandEmpty className="py-6 text-center text-sm text-slate-500">No options found.</CommandEmpty>
+      <PopoverContent className="w-72 p-2 rounded-2xl shadow-2xl border-slate-200" align="end">
+        <div className="flex items-center justify-between mb-2 px-3 py-1">
+          <span className="text-sm font-black text-slate-900 uppercase tracking-tight">Select {label}</span>
+        </div>
+        <Command className="rounded-xl" shouldFilter={false}>
+          <CommandInput placeholder={searchPlaceholder || `Search ${label.toLowerCase()}...`} value={search} onValueChange={setSearch} className="h-10 border-none focus:ring-0 text-sm" />
+          <CommandList className="max-h-[240px] overflow-y-auto custom-scrollbar mt-1">
+            <CommandEmpty className="py-6 text-center text-sm font-medium text-slate-500">No options found.</CommandEmpty>
             <CommandGroup>
               {filtered.map((it: any) => {
                 const id = it.id.toString();
                 const isSelected = selectedIds.includes(id);
                 return (
-                  <CommandItem key={id} value={id} onSelect={() => onToggle(id)} className="cursor-pointer rounded-xl mx-1 my-0.5">
-                    <Check className={cn("mr-2 h-4 w-4 shrink-0 transition-opacity", isSelected ? "opacity-100 text-blue-600" : "opacity-0")} />
-                    <span className="flex-1 truncate text-sm font-medium">{it.name}</span>
+                  <CommandItem key={id} value={id} onSelect={() => onToggle(id)} className="cursor-pointer rounded-lg mx-1 my-0.5 px-3 py-2.5 aria-selected:bg-slate-50 transition-colors">
+                    <Check className={cn("mr-3 h-4 w-4 shrink-0 transition-opacity", isSelected ? "opacity-100 text-blue-600" : "opacity-0")} />
+                    <span className={cn("flex-1 text-sm font-semibold truncate", isSelected ? "text-slate-900" : "text-slate-600")}>{it.name}</span>
                     {typeof counts[id] === 'number' && counts[id] > 0 && (
-                      <span className="ml-2 shrink-0 text-[11px] font-black tabular-nums h-5 min-w-5 flex items-center justify-center px-1.5 rounded-full bg-slate-100 text-slate-500">
+                      <span className="ml-2 shrink-0 text-xs font-black tabular-nums h-5 min-w-5 flex items-center justify-center px-1.5 rounded-full bg-slate-100 text-slate-500">
                         {counts[id]}
                       </span>
                     )}
@@ -136,11 +143,10 @@ function MultiSelectSearchableDropdown({
           </CommandList>
         </Command>
         {onClear && selectedIds.length > 0 && (
-          <div className="p-2 border-t border-slate-100 bg-slate-50 rounded-b-2xl">
+          <div className="mt-2 p-1 border-t border-slate-100">
             <Button
               variant="ghost"
-              size="sm"
-              className="w-full h-8 rounded-xl text-xs font-bold text-slate-500 hover:text-red-600 hover:bg-red-50"
+              className="w-full h-9 rounded-xl text-xs font-bold text-slate-500 hover:text-red-600 hover:bg-red-50"
               onClick={() => { onClear(); setSearch(""); }}
             >
               Clear {label} Filters
@@ -190,8 +196,8 @@ export function HierarchyTabs({
   const hasClasses = availableClasses.length > 0 || availableSubClasses.length > 0;
 
   return (
-    <div className="flex flex-col bg-slate-50/50">
-      <div className="p-4 space-y-3">
+    <div className="flex flex-col border-b border-slate-200 antialiased bg-white">
+      <div className="px-8 py-3 flex flex-col gap-3">
         {/* Level 1: Departments */}
         <div className="flex items-center gap-2">
           <PillTrack
@@ -208,7 +214,7 @@ export function HierarchyTabs({
         {(hasSubDepts || hasClasses) && (
           <div className="flex items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2 duration-200">
             
-            <div className="flex items-center gap-2 min-w-0 flex-1">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
               {hasSubDepts && (
                 <>
                   <CornerDownRight className="h-4 w-4 text-slate-300 shrink-0 ml-4" />
@@ -233,7 +239,7 @@ export function HierarchyTabs({
                   <Layers className="h-3.5 w-3.5" />
                   <span className="text-[11px] font-black uppercase tracking-widest">Categorization</span>
                 </div>
-                <div className="h-4 w-px bg-slate-200 mx-1" />
+                <div className="h-6 w-px bg-slate-200 mx-1" />
                 {availableClasses.length > 0 && (
                   <MultiSelectSearchableDropdown
                     label="Classes"
@@ -268,34 +274,123 @@ export function HierarchyTabs({
 }
 
 // ── Task-Status Tabs ──
-export function StatusTabs({ activeTaskStatus, setActiveTaskStatus, counts = {} }: any) {
+// Updated to match the specific `StatusFilterBar` blocky tabs aesthetic
+export function StatusTabs({
+  activeTaskStatus, setActiveTaskStatus, counts = {},
+  activePerspective, setActivePerspective,
+  allCount, officersCount, managersCount, clientsCount,
+  officerFilterMode, setOfficerFilterMode,
+  refreshData, loading,
+}: any) {
   const STATUS_ITEMS = [
-    { id: 'all', label: 'All Applications', activeBg: 'bg-custom-blue', dot: 'bg-blue-400' },
-    { id: 'enquiry', label: 'Enquiry', activeBg: 'bg-slate-600', dot: 'bg-slate-400' },
-    { id: 'wip', label: 'WIP', activeBg: 'bg-amber-500', dot: 'bg-amber-400' },
-    { id: 'completed', label: 'Completed', activeBg: 'bg-emerald-600', dot: 'bg-emerald-400' },
-    { id: 'overdue', label: 'Overdue', activeBg: 'bg-rose-600', dot: 'bg-rose-400' },
+    { id: 'all', label: 'All Applications' },
+    { id: 'enquiry', label: 'Enquiry' },
+    { id: 'wip', label: 'WIP' },
+    { id: 'completed', label: 'Completed' },
+    { id: 'overdue', label: 'Overdue' },
+  ];
+
+  const perspectiveCounts = { all: allCount || 0, officers: officersCount || 0, managers: managersCount || 0, clients: clientsCount || 0 };
+
+  const PERSPECTIVES = [
+    { id: 'all', label: 'Overview', activeBg: 'bg-custom-blue', activeText: 'text-white' },
+    { id: 'officers', label: 'Officers', activeBg: 'bg-sky-600', activeText: 'text-white' },
+    { id: 'managers', label: 'Managers', activeBg: 'bg-violet-500', activeText: 'text-white' },
+    { id: 'clients', label: 'Clients', activeBg: 'bg-emerald-500', activeText: 'text-white' }
   ];
 
   return (
-    <div className="px-5 py-3 bg-white">
-      <PillTrack
-        value={activeTaskStatus}
-        onValueChange={setActiveTaskStatus}
-        items={STATUS_ITEMS.map(s => ({ ...s, count: counts[s.id] ?? 0 }))}
-      />
+    <div className="px-8 py-2 flex items-center justify-between gap-4 border-b border-slate-200 bg-white antialiased">
+      <div className="flex gap-1.5 overflow-x-auto custom-scrollbar">
+        {STATUS_ITEMS.map(tab => {
+          const isActive = activeTaskStatus === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTaskStatus(tab.id)}
+              className={cn(
+                "h-8 px-4 text-sm font-semibold rounded-full transition-all flex items-center gap-1.5",
+                isActive
+                  ? "bg-custom-blue text-white shadow-sm"
+                  : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+              )}
+            >
+              {tab.label}
+              <span className={cn(
+                "px-1.5 py-0.5 rounded-full text-xs font-bold tabular-nums",
+                isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-400"
+              )}>
+                {counts[tab.id] || 0}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {setActivePerspective && (
+        <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-0.5 bg-slate-100 p-1 rounded-full border border-slate-200 shrink-0">
+            {PERSPECTIVES.map(p => (
+              <button
+                key={p.id}
+                onClick={() => setActivePerspective(p.id)}
+                className={cn(
+                  "h-8 px-4 text-sm font-bold rounded-full transition-all flex items-center gap-2",
+                  activePerspective === p.id
+                    ? `${p.activeBg} ${p.activeText} shadow-sm`
+                    : "text-slate-500 hover:text-slate-800"
+                )}
+              >
+                {p.label}
+                <span className={cn(
+                  "text-sm font-black tabular-nums px-1.5 py-0.5 rounded-full font-medium",
+                  activePerspective === p.id ? `bg-white/20 ${p.activeText}` : "text-slate-400"
+                )}>
+                  {perspectiveCounts[p.id]}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Mode Selector — officers only. Managers have no working history mode (manager
+              filtering is always gated to "at a BCL stage right now"), matching ReportsPage's
+              PersonFilterStrip mode selector. */}
+          {activePerspective === 'officers' && setOfficerFilterMode && (
+            <Select value={officerFilterMode} onValueChange={setOfficerFilterMode}>
+              <SelectTrigger className="w-44 h-10 bg-white border-slate-300 rounded-full text-sm font-bold shadow-sm shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="rounded-2xl">
+                <SelectItem value="current">Current Assignments</SelectItem>
+                <SelectItem value="history">Historical Activity</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+
+          {refreshData && (
+            <Button
+              variant="outline"
+              onClick={refreshData}
+              disabled={loading}
+              className="h-10 px-5 rounded-full border-slate-200 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 shrink-0"
+            >
+              {loading ? <Loader2 className="h-4 w-4 mr-2 text-slate-400 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-2 text-slate-400" />}
+              {loading ? "Refreshing..." : "Refresh"}
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 // ── Perspective & Search Controls ──
+// Updated to heavily mimic the "PersonFilterStrip" layout and style
 export function PerspectiveTabs({
-  activePerspective, setActivePerspective,
-  allCount, officersCount, managersCount, clientsCount,
+  activePerspective,
   availableOfficers = [], activeOfficerId, setActiveOfficerId, officerCounts = {},
   availableTaskManagers = [], activeManagerId, setActiveManagerId, managerCounts = {},
   searchQuery, setSearchQuery,
-  refreshData, loading,
 }: any) {
   const isOfficer = activePerspective === 'officers';
   const isManager = activePerspective === 'managers';
@@ -305,93 +400,92 @@ export function PerspectiveTabs({
   const currentActive = isOfficer ? activeOfficerId : activeManagerId;
   const setTab = isOfficer ? setActiveOfficerId : setActiveManagerId;
   const counts = isOfficer ? officerCounts : managerCounts;
-  const personAccent = isOfficer ? 'bg-custom-blue' : 'bg-violet-600';
-
-  const PERSPECTIVES = [
-    { id: 'all', label: 'Overview', activeBg: 'bg-custom-blue' },
-    { id: 'officers', label: 'Officers', activeBg: 'bg-amber-500' },
-    { id: 'managers', label: 'Managers', activeBg: 'bg-violet-500' },
-    { id: 'clients', label: 'Clients', activeBg: 'bg-emerald-500' },
-  ];
 
   return (
-    <div className="antialiased flex flex-col bg-white">
-      {/* Tier 1: Toolbar Row */}
-      <div className="px-5 py-4 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-        <div className="relative group w-full lg:w-[380px] shrink-0">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+    <div className="border-b border-slate-200 antialiased flex flex-col bg-white">
+      {/* Search + Assignee Sub-tabs Row */}
+      <div className="px-8 py-3 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+
+        {/* Left: Global Search */}
+        <div className="relative group w-full lg:w-[320px] shrink-0">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input
             placeholder="Search company, applicant, sponsor..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full h-11 pl-11 pr-10 bg-slate-50 hover:bg-white border-slate-200 hover:border-slate-300 rounded-full text-sm font-medium focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400 shadow-sm"
+            className="w-full h-10 pl-11 pr-10 bg-white border-slate-300 rounded-full text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1.5 rounded-full hover:bg-slate-100 transition-colors">
-              <X className="h-3.5 w-3.5" />
+            <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors">
+              <X className="h-4 w-4" />
             </button>
           )}
         </div>
 
-        <div className="flex items-center gap-3 overflow-x-auto custom-scrollbar pb-2 lg:pb-0 w-full lg:w-auto">
-          <PillTrack
-            value={activePerspective}
-            onValueChange={setActivePerspective}
-            items={PERSPECTIVES.map(p => ({
-              ...p,
-              count: { all: allCount, officers: officersCount, managers: managersCount, clients: clientsCount }[p.id] || 0
-            }))}
-          />
+        {/* Right: Assignee Sub-tabs (Officers/Managers) */}
+        {isPersonView && (
+          <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto custom-scrollbar pb-2 lg:pb-0 w-full lg:w-auto lg:justify-end">
+            <div className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-black uppercase font-bold mr-1 shrink-0",
+              isOfficer ? "bg-sky-50 text-sky-600 border border-sky-100" : "bg-violet-50 text-violet-600 border border-violet-100"
+            )}>
+              {isOfficer ? <Shield className="h-3 w-3" /> : <User className="h-3 w-3" />}
+              {isOfficer ? "Officers" : "Managers"}
+            </div>
 
-          {refreshData && (
-            <>
-              <div className="h-6 w-px bg-slate-200 shrink-0" />
-              <Button
-                variant="outline"
-                onClick={refreshData}
-                disabled={loading}
-                className="h-10 px-5 rounded-full border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 shrink-0 shadow-sm"
-              >
-                {loading ? <Loader2 className="h-4 w-4 mr-2 text-slate-400 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-2 text-slate-400" />}
-                {loading ? "Refreshing" : "Refresh"}
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
+            <button
+              onClick={() => setTab('all')}
+              className={cn(
+                "h-10 px-6 py-2 rounded-full text-sm font-bold transition-all border flex items-center gap-1.5 shrink-0",
+                currentActive === 'all'
+                  ? (isOfficer ? "bg-sky-600 border-sky-600 text-white shadow-sm" : "bg-violet-600 border-violet-600 text-white shadow-sm")
+                  : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+              )}
+            >
+              All Personnel
+              <span className={cn(
+                "text-sm font-black tabular-nums font-medium",
+                currentActive === 'all' ? "text-white/60" : "text-slate-400"
+              )}>
+                {counts.all ?? 0}
+              </span>
+            </button>
 
-      {/* Tier 1.5: Assignee Pills Banner */}
-      {isPersonView && (
-        <div className="px-5 py-3.5 flex flex-wrap items-center gap-3 bg-slate-50/50">
-          <div className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider shrink-0 shadow-sm",
-            isOfficer ? "bg-blue-100/60 text-blue-700" : "bg-violet-100/60 text-violet-700"
-          )}>
-            {isOfficer ? <Shield className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
-            {isOfficer ? "Officer Scope" : "Manager Scope"}
+            {currentData.map((p: any) => {
+              const isActive = currentActive === p.id.toString();
+              const displayName = p.displayName || p.full_name || p.name || `User ${p.id}`;
+              const count = counts[p.id.toString()] || 0;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => setTab(isActive ? 'all' : p.id.toString())}
+                  className={cn(
+                    "h-10 px-6 py-2 rounded-full text-sm font-bold transition-all border flex items-center gap-1.5 shrink-0",
+                    isActive
+                      ? (isOfficer ? "bg-sky-600 border-sky-600 text-white shadow-sm" : "bg-violet-600 border-violet-600 text-white shadow-sm")
+                      : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                  )}
+                >
+                  {displayName}
+                  {count > 0 && (
+                    <span className={cn(
+                      "text-sm font-black tabular-nums font-medium px-1.5 py-0.5 rounded-full",
+                      isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                    )}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
           </div>
-          
-          <PillTrack
-            size="sm"
-            value={currentActive}
-            onValueChange={(v) => setTab(v === currentActive ? 'all' : v)}
-            items={[
-              { id: 'all', label: 'All Personnel', count: counts.all ?? 0, activeBg: personAccent },
-              ...currentData.map((p: any) => ({
-                id: p.id.toString(),
-                label: p.displayName || p.full_name || p.name || `User ${p.id}`,
-                count: counts[p.id.toString()] || 0,
-                activeBg: personAccent,
-              })),
-            ]}
-          />
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
 
-// ── Column Visibility Helper (If Needed) ──
+// ── Column Visibility Helper ──
 export function ColumnVisibilityDialog({ visibleColumnIds, setVisibleColumnIds }: any) {
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -407,24 +501,24 @@ export function ColumnVisibilityDialog({ visibleColumnIds, setVisibleColumnIds }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-700 bg-white hover:bg-slate-50 shrink-0 shadow-sm">
+        <Button variant="outline" size="sm" className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 shrink-0 transition-all">
           <Eye className="h-3.5 w-3.5" /> Columns
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-md max-h-[80vh] flex flex-col rounded-2xl">
+      <DialogContent className="sm:max-w-md max-h-[80vh] flex flex-col rounded-2xl">
         <DialogHeader>
           <DialogTitle className="text-lg font-black text-slate-900">Manage Columns</DialogTitle>
           <div className="relative mt-2">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <Input placeholder="Search columns..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 h-10 rounded-xl" />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Input placeholder="Search columns..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 h-10 rounded-full border-slate-300 text-sm font-medium focus:ring-1 focus:ring-blue-500" />
           </div>
         </DialogHeader>
-        <div className="flex-grow overflow-y-auto pr-2 mt-4 custom-scrollbar">
-          <div className="space-y-1.5 p-1">
+        <div className="flex-grow overflow-y-auto pr-2 mt-3 custom-scrollbar">
+          <div className="space-y-2 py-1">
             {filteredColumns.map(col => (
-              <label key={col.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-transparent hover:bg-slate-50 hover:border-slate-200 cursor-pointer transition-all">
+              <label key={col.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
                 <Checkbox id={`summary-col-${col.id}`} checked={visibleColumnIds.includes(col.id)} onCheckedChange={(checked) => handleToggle(col.id, checked === true)} />
-                <span className="text-sm font-semibold text-slate-700 flex-1 truncate">{col.label}</span>
+                <span className="text-sm font-bold text-slate-800 flex-1 truncate">{col.label}</span>
               </label>
             ))}
           </div>

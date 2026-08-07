@@ -19,7 +19,7 @@ const DEFAULT_COL_WIDTH = 170;
 const INDEX_COL_WIDTH = 48;
 const DELTA_COL_WIDTH = 62;
 
-const resolveMilestoneDate = (task: any, stageId: string): string | null => {
+export const resolveMilestoneDate = (task: any, stageId: string): string | null => {
   const stageData = task?.stages?.[stageId];
   return stageData?.date || stageData?.completedAt || null;
 };
@@ -31,7 +31,7 @@ const getSponsorName = (task: any): string | null => {
   return sponsor?.name || null;
 };
 
-const resolveFieldValue = (colId: string, task: any, companies: Map<number, any>, enhancedTasksData: Map<string, any>): any => {
+export const resolveFieldValue = (colId: string, task: any, companies: Map<number, any>, enhancedTasksData: Map<string, any>): any => {
   const enhancedTask = enhancedTasksData?.get(task.id?.toString()) || task;
   switch (colId) {
     case 'company': return companies.get(task.company_id)?.name || task.company_name || null;

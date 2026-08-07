@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Loader2, Building2, Clock, GitCompare } from "lucide-react";
+import { Loader2, Building2, Clock, GitCompare, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/hooks/use-toast";
@@ -22,7 +22,8 @@ import {
 } from "../reports/utils/reportStageLogic";
 import { StatusTabs, PerspectiveTabs, HierarchyTabs, ColumnVisibilityDialog, } from "./components/PageHeader";
 import { SummaryTable } from "./components/SummaryTable";
-import { MILESTONE_STAGE_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS } from "./stageColumnConfig";
+import { MILESTONE_STAGE_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS, SUMMARY_COLUMNS } from "./stageColumnConfig";
+import { exportSummaryReportToExcel } from "./utils/exportSummary";
 
 const TERMINAL_STATUSES = ['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'];
 const COMPLETED_STATUSES = ['write_up_completed', 'endorsed', 'completed'];
@@ -59,6 +60,7 @@ export default function SummaryReportsPage() {
   const [activeTaskStatus, setActiveTaskStatus] = useState<'all' | 'enquiry' | 'wip' | 'completed' | 'overdue'>('all');
 
   const [activePerspective, setActivePerspective] = useState<'all' | 'officers' | 'managers' | 'clients'>('all');
+  const [officerFilterMode, setOfficerFilterMode] = useState<'current' | 'history'>('current');
   const [activeOfficerId, setActiveOfficerId] = useState<string>("all");
   const [activeManagerId, setActiveManagerId] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -70,55 +72,76 @@ export default function SummaryReportsPage() {
   const loadAllData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const depts = await fetchDepartments();
+      // Departments and companies don't depend on each other — fetch both up front in
+      // parallel instead of chaining them, since fetchTasks/fetchStages/getAllUserData all
+      // need depts (and fetchTasks additionally needs comps).
+      const [depts, comps] = await Promise.all([fetchDepartments(), fetchCompanies()]);
       setDepartments(depts);
-
-      const comps = await fetchCompanies();
       setCompanies(comps);
 
-      const unifiedUserData = await userService.getAllUserData({ payrollAccess: true }, depts);
+      // fetchTasks() internally re-fetches the ENTIRE tm_class_requirements table (plus a
+      // reference-documents lookup) on every call, on top of its own tm_tasks query — calling
+      // it once per department (the old per-dept Promise.all) multiplied ALL of that work by
+      // the department count, which is what was actually slow (visible in the network panel
+      // as N near-identical tm_tasks/tm_class_requirements round trips). fetchStages needs no
+      // network call at all — it just reads the already-fetched `depts` payload — so it's fine
+      // to keep per-department. tasks fetch happens exactly once for the whole company here,
+      // then gets grouped by department client-side downstream via job_level.department_id.
+      const [unifiedUserData, allTasksData, stagesResults, docs, kycFields] = await Promise.all([
+        userService.getAllUserData({ payrollAccess: true }, depts),
+        fetchTasks(undefined, undefined, comps),
+        Promise.all(depts.map(async (d: any) => ({
+          deptId: d.id.toString(),
+          stages: (await fetchStages(d.id.toString(), depts)) || [],
+        }))),
+        fetchAllDocuments(),
+        fetchAllKycFields(),
+      ]);
+
       setUnifiedOfficers(unifiedUserData.officers || []);
       setUnifiedManagers(unifiedUserData.managers || []);
       setUnifiedAssistants(unifiedUserData.assistants || []);
+      setAllDocuments(docs);
+      setKycDocuments(kycFields?.kycDocsMap || new Map());
 
-      const results = await Promise.all(depts.map(async (d: any) => {
-        const deptId = d.id.toString();
-        const [tasksData, stagesData] = await Promise.all([
-          fetchTasks(deptId, undefined, comps),
-          fetchStages(deptId, depts),
-        ]);
-        return { deptId, tasks: Array.isArray(tasksData) ? tasksData : [], stages: stagesData || [] };
-      }));
-
-      const newAllTasks: any[] = [];
+      const newAllTasks = Array.isArray(allTasksData) ? allTasksData : [];
       const newStagesByDept = new Map<string, any[]>();
-      results.forEach(r => {
-        newAllTasks.push(...r.tasks);
-        newStagesByDept.set(r.deptId, r.stages);
-      });
+      stagesResults.forEach((r: any) => newStagesByDept.set(r.deptId, r.stages));
       setAllTasks(newAllTasks);
       setStagesByDept(newStagesByDept);
 
-      const [docs, kycFields, { enhancedTasksData: enhancedMap }] = await Promise.all([
-        fetchAllDocuments(),
-        fetchAllKycFields(),
-        enhanceTasksWithIndividualData(newAllTasks),
-      ]);
-      setAllDocuments(docs);
-      setKycDocuments(kycFields?.kycDocsMap || new Map());
+      const { enhancedTasksData: enhancedMap } = await enhanceTasksWithIndividualData(newAllTasks);
       setEnhancedTasksData(enhancedMap);
 
       // Expected total time per job level (tm_class_requirements.expected_total_time_minutes),
       // same source ReportsPage's "Expected Time" column reads from — fetched here across
       // every unique job level actually present in the loaded tasks, since this page spans
       // every department at once rather than one department at a time.
+      //
+      // A `.in('job_level', [...])` bulk query was tried here to replace the old one-round-trip-
+      // per-job-level loop, but PostgREST's `in.(...)` list syntax doesn't escape the internal
+      // double-quotes of a JSON-string element, so it broke on every payload ("invalid input
+      // syntax for type json"). tm_class_requirements is small (a handful of KB, already fetched
+      // whole elsewhere on this page via fetchTasks's internal requirements lookup — same
+      // `select=*` pattern), so instead fetch it once, unfiltered, and match client-side. This
+      // also sidesteps jsonb equality being type-strict (some rows store class_id as a number,
+      // others as a string for the same class) by canonicalizing every id to a string before
+      // comparing, which the old per-row `.eq()` didn't do either.
+      const canonicalJobLevelKey = (jl: any) => JSON.stringify({
+        department_id: jl?.department_id != null ? String(jl.department_id) : null,
+        subdepartment_id: jl?.subdepartment_id != null ? String(jl.subdepartment_id) : null,
+        class_id: jl?.class_id != null ? String(jl.class_id) : null,
+        subclass_id: jl?.subclass_id != null ? String(jl.subclass_id) : null,
+        level: jl?.level != null ? Number(jl.level) : 1,
+      });
+
       const jobLevels = new Map<string, any>();
       newAllTasks.forEach((task: any) => {
         const key = buildJobLevelKey(task);
         if (!jobLevels.has(key)) {
           const jl = task.job_level || {};
           jobLevels.set(key, {
-            department_id: Number(jl.department_id || task.department_id),
+            department_id: jl.department_id || task.department_id,
             subdepartment_id: jl.subdepartment_id || null,
             class_id: jl.class_id || null,
             subclass_id: jl.subclass_id || null,
@@ -126,17 +149,23 @@ export default function SummaryReportsPage() {
           });
         }
       });
+
       const newExpectedTimeMap = new Map<string, number>();
-      await Promise.all(Array.from(jobLevels.entries()).map(async ([key, jobLevel]) => {
-        const { data, error } = await supabase
-          .from('tm_class_requirements')
-          .select('expected_total_time_minutes')
-          .eq('job_level', JSON.stringify(jobLevel))
-          .maybeSingle();
-        if (!error && typeof data?.expected_total_time_minutes === 'number') {
-          newExpectedTimeMap.set(key, data.expected_total_time_minutes);
-        }
-      }));
+      const { data: requirementRows, error: requirementsErr } = await supabase
+        .from('tm_class_requirements')
+        .select('job_level, expected_total_time_minutes');
+      if (!requirementsErr && requirementRows) {
+        const byCanonicalKey = new Map<string, number>();
+        requirementRows.forEach((row: any) => {
+          if (typeof row.expected_total_time_minutes === 'number') {
+            byCanonicalKey.set(canonicalJobLevelKey(row.job_level), row.expected_total_time_minutes);
+          }
+        });
+        jobLevels.forEach((jobLevel, key) => {
+          const minutes = byCanonicalKey.get(canonicalJobLevelKey(jobLevel));
+          if (typeof minutes === 'number') newExpectedTimeMap.set(key, minutes);
+        });
+      }
       setExpectedTimeByJobLevel(newExpectedTimeMap);
     } catch (err) {
       toast({ title: "Error", description: "Could not load summary reports data.", variant: "destructive" });
@@ -304,8 +333,12 @@ export default function SummaryReportsPage() {
   const statusScopedTasks = useMemo(() => deptScopedTasks.filter(matchesActiveTaskStatus), [deptScopedTasks, matchesActiveTaskStatus]);
 
   // ── Perspective scoping (Officers / Managers / Clients) ──
+  // "All Departments" has no single department to scope assignments to — every officer/
+  // manager in the system is fair game there, so fall back to the full unified lists instead
+  // of an empty array (previously left the sub-tabs empty whenever no department was picked,
+  // which is the default state on page load).
   const availableOfficers = useMemo(() => {
-    if (activeDeptId === 'all') return [];
+    if (activeDeptId === 'all') return unifiedOfficers;
     const allUsers = [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants];
     const departmentUsers = userService.getDepartmentUsers(allUsers, activeDeptId, activeSubDeptId !== 'all' ? activeSubDeptId : undefined);
     const allowedIds = new Set(departmentUsers.officers.map((o: any) => o.id));
@@ -313,26 +346,33 @@ export default function SummaryReportsPage() {
   }, [activeDeptId, activeSubDeptId, unifiedOfficers, unifiedManagers, unifiedAssistants]);
 
   const availableTaskManagers = useMemo(() => {
-    if (activeDeptId === 'all') return [];
+    if (activeDeptId === 'all') return unifiedManagers;
     const departmentUsers = userService.getDepartmentUsers([...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants], activeDeptId, activeSubDeptId !== 'all' ? activeSubDeptId : undefined);
     const allowedIds = new Set(departmentUsers.managers.map((m: any) => m.id));
     return unifiedManagers.filter((m: any) => allowedIds.has(m.id));
   }, [activeDeptId, activeSubDeptId, unifiedOfficers, unifiedManagers, unifiedAssistants]);
 
-  const officersCount = useMemo(() => statusScopedTasks.filter(t => !!getCurrentOfficerStageForTask(t)).length, [statusScopedTasks, getCurrentOfficerStageForTask]);
-  const managersCount = useMemo(() => statusScopedTasks.filter(t => getCanonicalCurrentStageForTask(t)?.follow_up?.toLowerCase() === 'bcl').length, [statusScopedTasks, getCanonicalCurrentStageForTask]);
-  const clientsCount = useMemo(() => statusScopedTasks.filter(t => isTaskWithClientForTask(t)).length, [statusScopedTasks, isTaskWithClientForTask]);
-
+  // 'current' = tasks actually AT an officer stage right now. 'history' = every officer ever
+  // attached to any of the task's officer-follow_up stages, with no gate on the task's current
+  // stage — same current/history split as ReportsPage's PersonFilterStrip mode selector.
   const officerCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 };
-    const pool = statusScopedTasks.filter(t => getCurrentOfficerStageForTask(t) !== null);
+    const pool = officerFilterMode === 'current'
+      ? statusScopedTasks.filter(t => getCurrentOfficerStageForTask(t) !== null)
+      : statusScopedTasks;
     availableOfficers.forEach((o: any) => {
-      const c = pool.filter(t => getStageOfficerIdsForTask(t, 'current').includes(o.id.toString())).length;
+      const c = pool.filter(t => getStageOfficerIdsForTask(t, officerFilterMode).includes(o.id.toString())).length;
       counts[o.id.toString()] = c;
       counts.all += c;
     });
+    const unallocated = pool.filter(t => getStageOfficerIdsForTask(t, officerFilterMode).length === 0).length;
+    counts.all += unallocated;
     return counts;
-  }, [statusScopedTasks, availableOfficers, getCurrentOfficerStageForTask, getStageOfficerIdsForTask]);
+  }, [statusScopedTasks, availableOfficers, getCurrentOfficerStageForTask, getStageOfficerIdsForTask, officerFilterMode]);
+
+  const officersCount = officerCounts.all;
+  const managersCount = useMemo(() => statusScopedTasks.filter(t => getCanonicalCurrentStageForTask(t)?.follow_up?.toLowerCase() === 'bcl').length, [statusScopedTasks, getCanonicalCurrentStageForTask]);
+  const clientsCount = useMemo(() => statusScopedTasks.filter(t => isTaskWithClientForTask(t)).length, [statusScopedTasks, isTaskWithClientForTask]);
 
   const managerCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 };
@@ -347,9 +387,15 @@ export default function SummaryReportsPage() {
 
   const perspectiveScopedTasks = useMemo(() => statusScopedTasks.filter(task => {
     if (activePerspective === 'officers') {
-      const officerStage = getCurrentOfficerStageForTask(task);
-      if (!officerStage) return false;
-      if (activeOfficerId !== 'all' && !getStageOfficerIdsForTask(task, 'current').includes(activeOfficerId)) return false;
+      // Same current/history split as ReportsPage's tasksByFilters: 'current' is gated to
+      // tasks AT an officer stage right now; 'history' has no such gate — a task can have
+      // moved on to BCL/Client while still counting toward an officer's completed history.
+      if (officerFilterMode === 'current') {
+        if (!getCurrentOfficerStageForTask(task)) return false;
+        if (activeOfficerId !== 'all' && !getStageOfficerIdsForTask(task, 'current').includes(activeOfficerId)) return false;
+      } else {
+        if (activeOfficerId !== 'all' && !getStageOfficerIdsForTask(task, 'history').includes(activeOfficerId)) return false;
+      }
     }
     if (activePerspective === 'managers') {
       if (getCanonicalCurrentStageForTask(task)?.follow_up?.toLowerCase() !== 'bcl') return false;
@@ -357,7 +403,7 @@ export default function SummaryReportsPage() {
     }
     if (activePerspective === 'clients' && !isTaskWithClientForTask(task)) return false;
     return true;
-  }), [statusScopedTasks, activePerspective, activeOfficerId, activeManagerId, getCurrentOfficerStageForTask, getStageOfficerIdsForTask, getCanonicalCurrentStageForTask, isTaskWithClientForTask]);
+  }), [statusScopedTasks, activePerspective, activeOfficerId, activeManagerId, officerFilterMode, getCurrentOfficerStageForTask, getStageOfficerIdsForTask, getCanonicalCurrentStageForTask, isTaskWithClientForTask]);
 
   const searchedTasks = useMemo(() => {
     if (!searchQuery) return perspectiveScopedTasks;
@@ -401,6 +447,22 @@ export default function SummaryReportsPage() {
     });
   }, [searchedTasks, sortConfig, getSortableValue]);
 
+  // Exports exactly what's currently on screen — same filtered/sorted rows and visible
+  // columns as the SummaryTable, via the shared cell-resolution helpers it uses.
+  const handleExport = useCallback(() => {
+    const visibleColumns = SUMMARY_COLUMNS.filter(c => visibleColumnIds.includes(c.id));
+    exportSummaryReportToExcel({
+      tasks: sortedTasks,
+      columns: visibleColumns,
+      companies,
+      enhancedTasksData,
+      getExpectedMinutesForTask,
+      getActualTimeInfoForTask,
+      showTime,
+      scopeName: departments.find((d: any) => d.id.toString() === activeDeptId)?.name,
+    });
+  }, [sortedTasks, visibleColumnIds, companies, enhancedTasksData, getExpectedMinutesForTask, getActualTimeInfoForTask, showTime, departments, activeDeptId]);
+
   if (loading) {
     return (
       <div className="flex-1 p-8 bg-slate-100 flex items-center justify-center min-h-screen">
@@ -418,19 +480,22 @@ export default function SummaryReportsPage() {
 
   return (
     <div className="flex flex-col flex-1 overflow-auto bg-slate-50">
-      {/* Title Bar — matches ReportsHeader: the title alone is the focal point, with a
-          breadcrumb under it. */}
-      <div className="border-b border-slate-200 bg-white px-8 py-5 antialiased flex flex-col justify-center">
+      {/* Title Bar — the title is the first thing on the page and is sized/weighted to read
+          as such; an accent bar gives it an anchor instead of relying on size alone. */}
+      <div className="border-b border-slate-200 bg-white px-8 py-6 antialiased flex flex-col justify-center">
         <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0 flex flex-col gap-1.5">
-            <h1 className="text-[22px] font-bold text-slate-900 uppercase tracking-wide truncate leading-none">
-              Summary Reports Dashboard
-            </h1>
-            <div className="flex items-center text-sm text-slate-500 font-semibold gap-1">
-              <Building2 className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-              <span className="text-blue-600 font-bold">{activeDepartment?.name || "All Departments"}</span>
-              <span className="text-slate-300 mx-0.5">/</span>
-              <span className="truncate text-slate-500">{breadcrumbSubtext}</span>
+          <div className="min-w-0 flex items-center gap-4">
+            <span className="h-9 w-1.5 rounded-full bg-custom-blue shrink-0" />
+            <div className="min-w-0 flex flex-col gap-1.5">
+              <h1 className="text-[28px] font-black text-slate-900 uppercase tracking-tight truncate leading-none">
+                Summary Reports Dashboard
+              </h1>
+              <div className="flex items-center text-sm text-slate-500 font-semibold gap-1">
+                <Building2 className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                <span className="text-blue-600 font-bold">{activeDepartment?.name || "All Departments"}</span>
+                <span className="text-slate-300 mx-0.5">/</span>
+                <span className="truncate text-slate-500">{breadcrumbSubtext}</span>
+              </div>
             </div>
           </div>
 
@@ -461,35 +526,44 @@ export default function SummaryReportsPage() {
               <GitCompare className="h-3.5 w-3.5" />
               {showDelta ? "Hide Δ" : "Show Δ"}
             </Button>
+            <div className="h-6 w-px bg-slate-200 mx-1" />
+            <Button
+              size="sm"
+              onClick={handleExport}
+              className="h-9 px-4 rounded-full text-sm font-bold gap-2 text-white hover:bg-[#2d5a94] shadow-sm"
+              style={{ backgroundColor: '#376bae' }}
+            >
+              <FileDown className="h-3.5 w-3.5" />
+              Export
+            </Button>
           </div>
         </div>
       </div>
 
-      {/* Scope card — Department → Sub-Department tabs grouped as one visual unit, with
-          Class / Sub-Class searchable multiselect dropdowns in the same card. */}
-      <div className="mx-6 mt-4 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <HierarchyTabs
-          departments={departments}
-          activeDeptId={activeDeptId} setActiveDeptId={setActiveDeptId}
-          activeSubDeptId={activeSubDeptId} setActiveSubDeptId={setActiveSubDeptId}
-          deptTaskCounts={deptTaskCounts} subDeptTaskCounts={subDeptTaskCounts}
-          availableClasses={availableClasses} activeClassIds={activeClassIds} setActiveClassIds={setActiveClassIds} classCounts={classCounts}
-          availableSubClasses={availableSubClasses} activeSubClassIds={activeSubClassIds} setActiveSubClassIds={setActiveSubClassIds} subClassCounts={subClassCounts}
-        />
-        <StatusTabs activeTaskStatus={activeTaskStatus} setActiveTaskStatus={setActiveTaskStatus} counts={taskStatusCounts} />
-      </div>
-
-      {/* View card — perspective switcher + search, a separate concern from Scope/Status */}
-      <div className="mx-6 mt-3 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <PerspectiveTabs
-          activePerspective={activePerspective} setActivePerspective={setActivePerspective}
-          allCount={statusScopedTasks.length} officersCount={officersCount} managersCount={managersCount} clientsCount={clientsCount}
-          availableOfficers={availableOfficers} activeOfficerId={activeOfficerId} setActiveOfficerId={setActiveOfficerId} officerCounts={officerCounts}
-          availableTaskManagers={availableTaskManagers} activeManagerId={activeManagerId} setActiveManagerId={setActiveManagerId} managerCounts={managerCounts}
-          searchQuery={searchQuery} setSearchQuery={setSearchQuery}
-          refreshData={handleRefresh} loading={isRefreshing}
-        />
-      </div>
+      {/* Scope + Status + Perspective controls — flat, stacked directly under the title bar
+          (no per-section card/shadow), matching ReportsPage's header stack. Each row carries
+          its own border-b as the only separator. */}
+      <HierarchyTabs
+        departments={departments}
+        activeDeptId={activeDeptId} setActiveDeptId={setActiveDeptId}
+        activeSubDeptId={activeSubDeptId} setActiveSubDeptId={setActiveSubDeptId}
+        deptTaskCounts={deptTaskCounts} subDeptTaskCounts={subDeptTaskCounts}
+        availableClasses={availableClasses} activeClassIds={activeClassIds} setActiveClassIds={setActiveClassIds} classCounts={classCounts}
+        availableSubClasses={availableSubClasses} activeSubClassIds={activeSubClassIds} setActiveSubClassIds={setActiveSubClassIds} subClassCounts={subClassCounts}
+      />
+      <StatusTabs
+        activeTaskStatus={activeTaskStatus} setActiveTaskStatus={setActiveTaskStatus} counts={taskStatusCounts}
+        activePerspective={activePerspective} setActivePerspective={setActivePerspective}
+        allCount={statusScopedTasks.length} officersCount={officersCount} managersCount={managersCount} clientsCount={clientsCount}
+        officerFilterMode={officerFilterMode} setOfficerFilterMode={setOfficerFilterMode}
+        refreshData={handleRefresh} loading={isRefreshing}
+      />
+      <PerspectiveTabs
+        activePerspective={activePerspective}
+        availableOfficers={availableOfficers} activeOfficerId={activeOfficerId} setActiveOfficerId={setActiveOfficerId} officerCounts={officerCounts}
+        availableTaskManagers={availableTaskManagers} activeManagerId={activeManagerId} setActiveManagerId={setActiveManagerId} managerCounts={managerCounts}
+        searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+      />
 
       <SummaryTable
         tasks={sortedTasks} companies={companies} departments={departments}
