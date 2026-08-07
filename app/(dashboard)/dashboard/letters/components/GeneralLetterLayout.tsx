@@ -61,7 +61,7 @@ function legacyResolveIndividualPhone(individual: Individual, fallback = ''): st
 
 // ── Footer designs ──────────────────────────────────────────────────────────
 
-interface FooterProps {
+export interface FooterProps {
     entityName?: string;
     regNumber?: string;
     kraPin?: string;
@@ -69,7 +69,7 @@ interface FooterProps {
     theme: LetterTheme;
 }
 
-function LetterFooter({ entityName, regNumber, kraPin, theme }: FooterProps) {
+export function LetterFooter({ entityName, regNumber, kraPin, theme }: FooterProps) {
     const baseWrap = "px-10 py-4 border-t";
 
     if (theme === 'dark-teal') {

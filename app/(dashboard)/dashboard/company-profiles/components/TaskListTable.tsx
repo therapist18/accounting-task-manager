@@ -169,13 +169,14 @@ const Th = ({ children, sortKey, left, shadowEdge, className, sortConfig, onSort
   );
 };
 
-const Td = ({ children, idx, primary, left, shadowEdge, className }: {
+const Td = ({ children, idx, primary, left, shadowEdge, className, missingType = 'dash' }: {
   children?: React.ReactNode;
   idx: number;
   primary?: boolean;
   left?: number;
   shadowEdge?: boolean;
   className?: string;
+  missingType?: 'dash' | 'missing' | 'na';
 }) => (
   <TableCell className={cn(
     "px-4 py-2.5 border-r border-b border-slate-200 text-sm whitespace-nowrap",
@@ -186,7 +187,13 @@ const Td = ({ children, idx, primary, left, shadowEdge, className }: {
     shadowEdge && "shadow-[2px_0_4px_rgba(0,0,0,0.03)]",
     className
   )} style={left != null ? { left } : undefined}>
-    {children ?? <span className="text-slate-300 font-normal">—</span>}
+    {children ?? (
+      missingType === 'na'
+        ? <span className="text-xs font-bold uppercase tracking-wide text-slate-400">N/A</span>
+        : missingType === 'missing'
+          ? <span className="text-sm font-bold text-red-600">Missing</span>
+          : <span className="text-slate-300 font-normal">—</span>
+    )}
   </TableCell>
 );
 
@@ -311,6 +318,8 @@ export function TaskListTable({
         subdepartment: subdepartment?.name || null,
         class: classItem?.name || null,
         subclass: subClassItem?.name || null,
+        classApplicable: (task.job_level?.class_id ?? task.class_id) != null,
+        subclassApplicable: (task.job_level?.subclass_id ?? task.subclass_id) != null,
         status: task.status,
         statusBadge: getStatusBadge(task.status),
         currentStage: getCanonicalCurrentStage(task, taskStages, departments)?.name || null,
@@ -499,11 +508,18 @@ export function TaskListTable({
                 <TableRow key={field.key} className={cn("group border-0 transition-colors", fi % 2 === 0 ? "bg-white" : "bg-slate-100/50", "hover:bg-blue-50/50")}>
                   <Td idx={fi} left={0} className="w-14 min-w-[56px] max-w-[56px] text-center">{fi + 1}</Td>
                   <Td idx={fi} left={56} className="w-48 min-w-[192px] max-w-[192px] font-semibold text-slate-600">{field.label}</Td>
-                  {transposedTasks.map(task => (
-                    <Td idx={fi} key={task.id} className="w-52 min-w-[208px] max-w-[208px] whitespace-normal align-top">
-                      {renderTransposedCell(taskViews.get(task.id), field.key) ?? <span className="text-slate-300 font-normal">—</span>}
-                    </Td>
-                  ))}
+                  {transposedTasks.map(task => {
+                    const view = taskViews.get(task.id);
+                    const rendered = renderTransposedCell(view, field.key);
+                    const missingType = rendered != null ? 'dash' : (
+                      (field.key === 'class' && !view?.classApplicable) || (field.key === 'subclass' && !view?.subclassApplicable) ? 'na' : 'missing'
+                    );
+                    return (
+                      <Td idx={fi} key={task.id} className="w-52 min-w-[208px] max-w-[208px] whitespace-normal align-top" missingType={missingType}>
+                        {rendered}
+                      </Td>
+                    );
+                  })}
                 </TableRow>
               ))}
             </TableBody>
@@ -590,6 +606,8 @@ export function TaskListTable({
             const subdepartment = department?.tm_subdepartments?.find((s: any) => s.id.toString() === task.subdepartment_id?.toString());
             const classItem = subdepartment?.classes?.find((c: any) => c.id.toString() === task.class_id?.toString());
             const subClassItem = classItem?.subClasses?.find((sc: any) => sc.id.toString() === task.subclass_id?.toString());
+            const hasClass = (task.job_level?.class_id ?? task.class_id) != null;
+            const hasSubClass = (task.job_level?.subclass_id ?? task.subclass_id) != null;
 
             const enhancedTask = enhancedTasksData?.get(task.id?.toString()) || task;
             const duration = enhancedTask.duration || task.duration || null;
@@ -619,52 +637,53 @@ export function TaskListTable({
                   left={STICKY_OFFSETS.jobDescription}
                   shadowEdge={!showCompanyColumn}
                   className="whitespace-normal min-w-[220px] max-w-[220px]"
+                  missingType="missing"
                 >
                   {task.job_description}
                 </Td>
                 {showCompanyColumn && (
-                  <Td idx={idx} left={STICKY_OFFSETS.company} shadowEdge className="min-w-[160px] max-w-[160px]">
+                  <Td idx={idx} left={STICKY_OFFSETS.company} shadowEdge className="min-w-[160px] max-w-[160px]" missingType="missing">
                     {company?.name || task.company_name}
                   </Td>
                 )}
-                <Td idx={idx}>{task.applicant_name}</Td>
-                <Td idx={idx}>{companyPrefix && companyPrefix !== 'N/A' ? companyPrefix : null}</Td>
-                <Td idx={idx}>{sponsorName}</Td>
-                <Td idx={idx}>{department?.name}</Td>
-                <Td idx={idx}>{subdepartment?.name}</Td>
-                <Td idx={idx}>{classItem?.name}</Td>
-                <Td idx={idx}>{subClassItem?.name}</Td>
+                <Td idx={idx} missingType="missing">{task.applicant_name}</Td>
+                <Td idx={idx} missingType="missing">{companyPrefix && companyPrefix !== 'N/A' ? companyPrefix : null}</Td>
+                <Td idx={idx} missingType="missing">{sponsorName}</Td>
+                <Td idx={idx} missingType="missing">{department?.name}</Td>
+                <Td idx={idx} missingType="missing">{subdepartment?.name}</Td>
+                <Td idx={idx} missingType={classItem?.name ? 'dash' : (hasClass ? 'missing' : 'na')}>{classItem?.name}</Td>
+                <Td idx={idx} missingType={subClassItem?.name ? 'dash' : (hasSubClass ? 'missing' : 'na')}>{subClassItem?.name}</Td>
                 <Td idx={idx}>
                   <span className={cn("inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full", badge.bg, badge.text)}>
                     <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", badge.dot)} />
                     {badge.label}
                   </span>
                 </Td>
-                <Td idx={idx}>{currentStageName}</Td>
-                <Td idx={idx}>{duration}</Td>
-                <Td idx={idx}>{applicationType}</Td>
-                <Td idx={idx}>{formatDateCell(registeredRaw, showTime)}</Td>
-                <Td idx={idx}>{formatDateCell(confirmedRaw, showTime)}</Td>
-                <Td idx={idx}>{formatDateCell(reqSentRaw, showTime)}</Td>
-                <Td idx={idx}>{formatDateCell(reqReceivedCompletedRaw, showTime)}</Td>
-                <Td idx={idx}>
+                <Td idx={idx} missingType="missing">{currentStageName}</Td>
+                <Td idx={idx} missingType="missing">{duration}</Td>
+                <Td idx={idx} missingType="missing">{applicationType}</Td>
+                <Td idx={idx} missingType="missing">{registeredRaw ? formatDateCell(registeredRaw, showTime) : null}</Td>
+                <Td idx={idx} missingType="missing">{confirmedRaw ? formatDateCell(confirmedRaw, showTime) : null}</Td>
+                <Td idx={idx} missingType="missing">{reqSentRaw ? formatDateCell(reqSentRaw, showTime) : null}</Td>
+                <Td idx={idx} missingType="missing">{reqReceivedCompletedRaw ? formatDateCell(reqReceivedCompletedRaw, showTime) : null}</Td>
+                <Td idx={idx} missingType="missing">
                   {promisedTimeResolution?.minutes
                     ? <PromisedTimeCell display={formatEstimatedMins(promisedTimeResolution.minutes)} resolution={promisedTimeResolution} />
                     : null}
                 </Td>
-                <Td idx={idx}>{plannedExecution ? formatDateCell(plannedExecution.toISOString(), showTime) : null}</Td>
-                <Td idx={idx}>
+                <Td idx={idx} missingType="missing">{plannedExecution ? formatDateCell(plannedExecution.toISOString(), showTime) : null}</Td>
+                <Td idx={idx} missingType="missing">
                   {actualExecutionInfo
                     ? (actualExecutionInfo.isOverdue
                       ? <ActualTimeCell display={`${actualExecutionInfo.diffDays}d`} exceededMinutes={actualExecutionInfo.exceededMinutes} />
                       : `${actualExecutionInfo.diffDays}d`)
                     : null}
                 </Td>
-                <Td idx={idx}>
+                <Td idx={idx} missingType="missing">
                   {actualExecutionInfo?.deltaMinutes != null ? <DeltaCell minutes={actualExecutionInfo.deltaMinutes} /> : null}
                 </Td>
-                <Td idx={idx}>{stagesTimeExpected > 0 ? formatEstimatedMins(stagesTimeExpected) : null}</Td>
-                <Td idx={idx}>{completedRaw ? formatDateCell(completedRaw, showTime) : null}</Td>
+                <Td idx={idx} missingType="missing">{stagesTimeExpected > 0 ? formatEstimatedMins(stagesTimeExpected) : null}</Td>
+                <Td idx={idx} missingType="missing">{completedRaw ? formatDateCell(completedRaw, showTime) : null}</Td>
                 <TableCell className={cn("px-4 py-2.5 border-b border-slate-200 text-center", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "group-hover:bg-blue-50/50")}>
                   <Link
                     href={`/dashboard/tasks/${task.id}`}

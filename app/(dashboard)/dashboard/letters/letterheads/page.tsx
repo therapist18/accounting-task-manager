@@ -7,12 +7,14 @@ import { DEFAULT_CATEGORY_FILTERS, type FilterState } from '@/app/generic-compon
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Upload, FileText, Trash2, Edit, Star, Download, Eye } from 'lucide-react';
+import { Upload, FileText, Trash2, Edit, Star, Download, Eye, Wand2, Loader2 } from 'lucide-react';
 import { useToast } from '@/lib/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
 import { LetterheadUploadDialog } from '../components/LetterheadUploadDialog';
 import { LetterheadEditDialog } from '../components/LetterheadEditDialog';
 import { LetterheadPreviewDialog } from '../components/LetterheadPreviewDialog';
+import { LetterheadBuilderDialog } from '../components/LetterheadBuilderDialog';
+import { downloadLetterheadWord, downloadLetterheadPdf } from '../utils/letterheadDownload';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,6 +47,8 @@ export default function LetterheadsPage() {
   const [loading, setLoading] = useState(true);
   const [companiesLoading, setCompaniesLoading] = useState(true);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [builderDialogOpen, setBuilderDialogOpen] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -203,6 +207,31 @@ export default function LetterheadsPage() {
     fetchLetterheads(parseInt(activeCompanyId));
   };
 
+  const handleBuilderSuccess = () => {
+    setBuilderDialogOpen(false);
+    fetchLetterheads(parseInt(activeCompanyId));
+  };
+
+  const handleDownload = async (letterhead: Letterhead, format: 'word' | 'pdf') => {
+    setDownloadingId(`${letterhead.id}-${format}`);
+    try {
+      if (format === 'word') {
+        await downloadLetterheadWord(letterhead.file_path, letterhead.file_name);
+      } else {
+        await downloadLetterheadPdf(letterhead.file_path, letterhead.file_name);
+      }
+    } catch (error) {
+      console.error('Error downloading letterhead:', error);
+      toast({
+        title: 'Error',
+        description: `Failed to download letterhead as ${format === 'word' ? 'Word' : 'PDF'}`,
+        variant: 'destructive',
+      });
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
   const handleEditSuccess = () => {
     setEditDialogOpen(false);
     setSelectedLetterhead(null);
@@ -270,13 +299,23 @@ export default function LetterheadsPage() {
                 </Badge>
               )}
             </div>
-            <Button
-              onClick={() => setUploadDialogOpen(true)}
-              disabled={!activeCompanyId}
-            >
-              <Upload className="mr-2 h-4 w-4" />
-              Upload Letterhead
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setBuilderDialogOpen(true)}
+                disabled={!activeCompanyId}
+              >
+                <Wand2 className="mr-2 h-4 w-4" />
+                Build Letterhead
+              </Button>
+              <Button
+                onClick={() => setUploadDialogOpen(true)}
+                disabled={!activeCompanyId}
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                Upload Letterhead
+              </Button>
+            </div>
           </div>
 
           {!activeCompanyId ? (
@@ -299,10 +338,16 @@ export default function LetterheadsPage() {
                 <p className="text-muted-foreground text-center mb-4">
                   No letterheads found for {activeCompany?.company_name}.
                 </p>
-                <Button onClick={() => setUploadDialogOpen(true)}>
-                  <Upload className="mr-2 h-4 w-4" />
-                  Upload First Letterhead
-                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={() => setBuilderDialogOpen(true)}>
+                    <Wand2 className="mr-2 h-4 w-4" />
+                    Build One
+                  </Button>
+                  <Button onClick={() => setUploadDialogOpen(true)}>
+                    <Upload className="mr-2 h-4 w-4" />
+                    Upload First Letterhead
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ) : (
@@ -374,6 +419,32 @@ export default function LetterheadsPage() {
                         <Button
                           variant="outline"
                           size="sm"
+                          onClick={() => handleDownload(letterhead, 'word')}
+                          disabled={downloadingId === `${letterhead.id}-word`}
+                          className="flex-1"
+                        >
+                          {downloadingId === `${letterhead.id}-word`
+                            ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                            : <Download className="h-4 w-4 mr-1" />}
+                          Word
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDownload(letterhead, 'pdf')}
+                          disabled={downloadingId === `${letterhead.id}-pdf`}
+                          className="flex-1"
+                        >
+                          {downloadingId === `${letterhead.id}-pdf`
+                            ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                            : <Download className="h-4 w-4 mr-1" />}
+                          PDF
+                        </Button>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
                           onClick={() => handleEdit(letterhead)}
                           className="flex-1"
                         >
@@ -402,6 +473,13 @@ export default function LetterheadsPage() {
         open={uploadDialogOpen}
         onOpenChange={setUploadDialogOpen}
         onSuccess={handleUploadSuccess}
+        preselectedCompanyId={activeCompanyId}
+      />
+
+      <LetterheadBuilderDialog
+        open={builderDialogOpen}
+        onOpenChange={setBuilderDialogOpen}
+        onSuccess={handleBuilderSuccess}
         preselectedCompanyId={activeCompanyId}
       />
 

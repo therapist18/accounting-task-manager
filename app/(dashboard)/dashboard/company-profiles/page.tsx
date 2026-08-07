@@ -374,9 +374,9 @@ export default function CompanyProfilesPage() {
             floating expand toggle at the top-right. */}
         <ResizablePanel
           ref={rosterPanelRef}
-          defaultSize={22}
-          minSize={17}
-          maxSize={36}
+          defaultSize={20}
+          minSize={14}
+          maxSize={45}
           collapsible
           collapsedSize={3}
           onCollapse={() => setCollapsed(prev => ({ ...prev, roster: true }))}
@@ -444,7 +444,10 @@ export default function CompanyProfilesPage() {
           )}
         </ResizablePanel>
 
-        <ResizableHandle withHandle />
+        <ResizableHandle
+          withHandle
+          className="w-1.5 bg-slate-200 border-none transition-colors hover:bg-custom-blue/60 data-[resize-handle-state=drag]:bg-custom-blue"
+        />
 
         {/* MIDDLE: what to look at — Company-Level Tasks / People (Company mode),
             or which companies this person has tasks under (Individual mode). Always
@@ -573,7 +576,10 @@ export default function CompanyProfilesPage() {
           )}
         </ResizablePanel>
 
-        <ResizableHandle withHandle />
+        <ResizableHandle
+          withHandle
+          className="w-1.5 bg-slate-200 border-none transition-colors hover:bg-custom-blue/60 data-[resize-handle-state=drag]:bg-custom-blue"
+        />
 
         {/* RIGHT: main content — the table */}
         <ResizablePanel defaultSize={58} minSize={35}>

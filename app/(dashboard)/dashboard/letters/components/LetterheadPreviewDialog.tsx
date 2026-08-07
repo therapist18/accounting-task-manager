@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, Download, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import * as mammoth from 'mammoth';
+import { printHtmlAsPdf } from '../utils/printExport';
 
 interface LetterheadPreviewDialogProps {
   open: boolean;
@@ -27,6 +28,7 @@ export function LetterheadPreviewDialog({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [htmlContent, setHtmlContent] = useState<string>('');
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -129,6 +131,18 @@ export function LetterheadPreviewDialog({
     }
   };
 
+  const handleDownloadPdf = async () => {
+    if (!htmlContent) return;
+    setDownloadingPdf(true);
+    try {
+      await printHtmlAsPdf(htmlContent);
+    } catch (err) {
+      console.error('Error printing PDF:', err);
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
@@ -147,7 +161,16 @@ export function LetterheadPreviewDialog({
                 onClick={handleDownload}
               >
                 <Download className="h-4 w-4 mr-2" />
-                Download
+                Word
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadPdf}
+                disabled={downloadingPdf || !htmlContent}
+              >
+                {downloadingPdf ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+                PDF
               </Button>
             </div>
           </div>

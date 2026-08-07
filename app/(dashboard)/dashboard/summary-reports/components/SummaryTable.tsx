@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client";
 
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useReactTable, getCoreRowModel, type ColumnDef, type ColumnSizingState } from "@tanstack/react-table";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -165,6 +165,21 @@ export function SummaryTable({
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
 
+  // Group (sub-department) headers pin directly beneath the sticky column header instead of
+  // just being a divider line — measured (not hardcoded) so it stays correct if the header
+  // row's height ever changes (column label wrapping, font tweaks, etc.).
+  const headerRowRef = useRef<HTMLTableRowElement>(null);
+  const [groupHeaderTop, setGroupHeaderTop] = useState(40);
+  useEffect(() => {
+    const measure = () => {
+      const h = headerRowRef.current?.getBoundingClientRect().height;
+      if (h) setGroupHeaderTop(h);
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
   // ── Column sizing (tanstack react-table, resizable columns) ──
   const columnDefs = useMemo<ColumnDef<any>[]>(() => [
     { id: '__index__', size: INDEX_COL_WIDTH, enableResizing: false },
@@ -312,7 +327,7 @@ export function SummaryTable({
             </colgroup>
 
             <TableHeader className="sticky top-0 z-40">
-              <TableRow className="hover:bg-transparent border-0">
+              <TableRow ref={headerRowRef} className="hover:bg-transparent border-0">
                 <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-2.5 px-2 bg-custom-blue">
                   <span className="text-[10px] font-semibold text-white uppercase tracking-wider">#</span>
                 </TableHead>
@@ -409,15 +424,24 @@ export function SummaryTable({
                   if (item.type === 'section') {
                     return (
                       <TableRow key={`section-${item.name}`} className="border-0 hover:bg-transparent">
-                        <TableCell className="sticky left-0 z-30 border-r border-b border-slate-200 py-2 px-2 bg-blue-50/60 text-center">
-                          <Layers className="h-3.5 w-3.5 text-slate-400 mx-auto shrink-0" />
+                        <TableCell
+                          className="sticky left-0 z-30 bg-white border-r border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2 px-2 text-center"
+                          style={{ top: groupHeaderTop }}
+                        >
+                          <Layers className="h-3 w-3 text-custom-blue/60 mx-auto shrink-0" />
                         </TableCell>
-                        <TableCell colSpan={interleavedColumns.length} className="px-4 py-2 border-b border-slate-200 bg-blue-50/60">
+                        <TableCell
+                          colSpan={interleavedColumns.length}
+                          className="sticky z-30 bg-white px-4 py-2 border-t-2 border-t-custom-blue border-b border-b-slate-200"
+                          style={{ top: groupHeaderTop }}
+                        >
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold uppercase tracking-wide text-slate-600 truncate">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-custom-blue whitespace-nowrap">
                               {item.name === 'N/A' ? 'Unassigned' : item.name}
                             </span>
-                            <span className="text-xs font-medium text-slate-400 tabular-nums shrink-0">· {item.count}</span>
+                            <span className="text-[11px] font-semibold text-slate-400 tabular-nums whitespace-nowrap">
+                              · {item.count}
+                            </span>
                           </div>
                         </TableCell>
                       </TableRow>

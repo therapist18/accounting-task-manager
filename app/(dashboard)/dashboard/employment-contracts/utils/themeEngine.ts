@@ -378,7 +378,7 @@ const THEME_HEADERS: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
       <div style="font-size: 24px; font-weight: 300; color: ${accentColor};">01</div>
     </div>`,
   letterhead: ({ primaryColor, accentColor }) => `
-    <div style="text-align: center; border-top: 6px solid ${primaryColor}; border-bottom: 2px solid ${accentColor}; padding: 32px 0; margin-bottom: 48px; font-family: 'Calibri', Arial, sans-serif; background: #fafaf9;">
+    <div style="text-align: center; border-top: 6px solid ${primaryColor}; border-bottom: 2px solid ${accentColor}; padding: 32px 0; margin-bottom: 20px; font-family: 'Calibri', Arial, sans-serif; background: #fafaf9;">
       <div style="font-size: 32px; font-weight: 800; color: ${primaryColor}; letter-spacing: 0.1em;">{{company_name}}</div>
       <div style="font-size: 11px; font-weight: 700; color: #6b7280; letter-spacing: 0.25em; text-transform: uppercase; margin-top: 12px;">Official Corporate Correspondence</div>
     </div>`,

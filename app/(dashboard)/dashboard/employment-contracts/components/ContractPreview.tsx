@@ -159,17 +159,35 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const PAGE_HEIGHT_PX = 1123; // Standard A4 height at 96dpi
   const [zoomPct, setZoomPct] = useState(80);
   const manualZoomRatio = zoomPct / 100;
-  const [sizingMode, setSizingMode] = useState<'manual' | 'fit' | 'fill'>('manual');
+  // Defaults to "fit" (scaled to the panel's width) rather than a fixed manual 80% - a fixed
+  // percentage looks right at one panel width and leaves the page either swimming in dead
+  // gray space or overflowing at any other, whereas fit-to-width is what actually makes the
+  // page read as filling its frame on first load, matching how a document preview should
+  // look. Still switches to 'manual' the moment the user touches +/-/pinch zoom (see
+  // setManualZoom below), so this is purely about the first-load default.
+  const [sizingMode, setSizingMode] = useState<'manual' | 'fit' | 'fill'>('fit');
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
-  const FIT_PADDING_PX = 64;
+  // Must equal the canvas wrapper's own px-6/py-8 padding below (24px/32px per side) - these
+  // used to be one guessed FIT_PADDING_PX=64 shared by both the width and height math, which
+  // didn't match either real padding (48px total horizontally, 64px total vertically) and
+  // over-reserved margin on top of what was actually being rendered, leaving extra
+  // unaccounted white space around the page beyond the real px-6/py-8 gutter.
+  const PAGE_GUTTER_X_PX = 24 * 2; // px-6
+  const PAGE_GUTTER_Y_PX = 32 * 2; // py-8
   const zoomRatio = useMemo(() => {
-    if (sizingMode === 'fit' && containerSize.width > 0) return Math.max(0.1, (containerSize.width - FIT_PADDING_PX) / PAGE_WIDTH_PX);
-    if (sizingMode === 'fill' && containerSize.height > 0) return Math.max(0.1, (containerSize.height - FIT_PADDING_PX) / PAGE_HEIGHT_PX);
+    if (sizingMode === 'fit' && containerSize.width > 0) return Math.max(0.1, (containerSize.width - PAGE_GUTTER_X_PX) / PAGE_WIDTH_PX);
+    if (sizingMode === 'fill' && containerSize.height > 0) return Math.max(0.1, (containerSize.height - PAGE_GUTTER_Y_PX) / PAGE_HEIGHT_PX);
     return manualZoomRatio;
   }, [sizingMode, containerSize, manualZoomRatio]);
+  // Leaving Fit/Fill via the zoom +/- buttons must continue from the ratio actually on
+  // screen, not from the stale `zoomPct` state - Fit/Fill compute zoomRatio independently
+  // and never write it back into zoomPct, so zoomPct sits frozen at whatever it was before
+  // Fit/Fill was turned on (e.g. the initial 80). Stepping from that stale base instead of
+  // the visible ~95-97% used to jump the page straight down to 70% on the very first click.
   const setManualZoom = (updater: (z: number) => number) => {
+    const base = sizingMode === 'manual' ? zoomPct : Math.round(zoomRatio * 100);
     setSizingMode('manual');
-    setZoomPct((z) => Math.min(150, Math.max(40, updater(z))));
+    setZoomPct(Math.min(150, Math.max(40, updater(base))));
   };
   const [contentHeightPx, setContentHeightPx] = useState(0);
 
@@ -472,12 +490,14 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     // CSS and the named @page region below instead of falling back to a
     // generic unstyled import. @page WordSection1 + div.page:WordSection1
     // is Word's own mechanism for page size/margins on HTML-sourced
-    // documents - 1in matches the PDF export's page margin (see the
-    // .ec-print-area print stylesheet) so both formats agree. The theme
-    // wrapper's own inline padding/max-width (from applyThemeToHtml) is
-    // zeroed here for the same reason it is for print: @page already
-    // supplies the page margin, so leaving both in would double it on the
-    // first page.
+    // documents - 0.5in matches the PDF export's page margin (see the
+    // .ec-print-area print stylesheet) so both formats agree, and both in
+    // turn match the on-screen preview's own single 48px (0.5in) gutter
+    // (applyThemeToHtml's .contract-theme-X padding - see the Contract
+    // content comment above). The theme wrapper's own inline padding/
+    // max-width (from applyThemeToHtml) is zeroed here for the same reason
+    // it is for print: @page already supplies the page margin, so leaving
+    // both in would double it on the first page.
     const htmlDoc = `<!doctype html>
 <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
 <head>
@@ -493,7 +513,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
 <![endif]-->
 <style>
 ${themeCss}
-  @page WordSection1 { size: 8.5in 11.7in; margin: 1in; mso-page-orientation: portrait; }
+  @page WordSection1 { size: 8.5in 11.7in; margin: 0.5in; mso-page-orientation: portrait; }
   div.WordSection1 { page: WordSection1; }
   div.WordSection1 [class^="contract-theme-"] { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }
 </style>
@@ -756,8 +776,15 @@ ${themeCss}
                   </div>
                 ))}
 
-                {/* Contract content */}
-                <div className="p-12 text-[14.5px] leading-relaxed relative z-0">
+                {/* Contract content. No outer padding here - applyThemeToHtml's
+                    .contract-theme-X wrapper already carries its own 48px
+                    padding (see themeEngine.ts), and both the print and Word
+                    export paths already rely on that being the only page
+                    margin (zeroing it out and supplying their own via @page).
+                    An outer p-12 here just stacked a second, redundant 48px
+                    on top of it for the on-screen preview only, doubling the
+                    margin to 96px on every side. */}
+                <div className="text-[14.5px] leading-relaxed relative z-0">
                   <div dangerouslySetInnerHTML={{ __html: themedHtml }} />
                 </div>
               </div>
@@ -809,7 +836,9 @@ ${themeCss}
           className="bg-white"
           style={{ width: PAGE_WIDTH_PX }}
         >
-          <div className="p-12 text-[14.5px] leading-relaxed">
+          {/* Must stay padding-identical to the visible canvas copy above -
+              this is what pagination height is measured from. */}
+          <div className="text-[14.5px] leading-relaxed">
             <div dangerouslySetInnerHTML={{ __html: themedHtml }} />
           </div>
         </div>
@@ -834,18 +863,24 @@ ${themeCss}
       <>
         <style>{`
           @media print {
-            /* Standard 1in page margin (same value used for the Word
-               export's @page WordSection1, so both formats agree) - lets
-               the browser's print engine put a consistent gap at the top
-               and bottom of every physical page, which is what actually
-               makes multi-page breaks look deliberate instead of content
-               being cut off flush against the page edge. Previously this
-               was margin:0, relying solely on applyThemeToHtml's one-time
-               48px padding around the whole flowing document - since that
-               padding only wraps the start/end of the content, not each
-               page, every page after the first began right at the very top
-               edge with zero breathing room. */
-            @page { size: A4; margin: 1in; }
+            /* 0.5in (48px) page margin - matches the Word export's @page
+               WordSection1 margin below, and both match the on-screen
+               preview's own single 48px gutter (applyThemeToHtml's
+               .contract-theme-X padding), so what you see in the preview,
+               the PDF, and the Word doc all agree. This used to be 1in,
+               which was fine as a standalone value but ran noticeably wider
+               than the (correctly tighter) on-screen preview once that was
+               fixed to stop doubling its own padding - lets the browser's
+               print engine put a consistent gap at the top and bottom of
+               every physical page, which is what actually makes multi-page
+               breaks look deliberate instead of content being cut off flush
+               against the page edge. Before that, this was margin:0,
+               relying solely on applyThemeToHtml's one-time 48px padding
+               around the whole flowing document - since that padding only
+               wraps the start/end of the content, not each page, every page
+               after the first began right at the very top edge with zero
+               breathing room. */
+            @page { size: A4; margin: 0.5in; }
             html, body { margin: 0; height: auto !important; overflow: visible !important; }
             body > * { visibility: hidden !important; }
             .ec-print-area, .ec-print-area * { visibility: visible !important; }

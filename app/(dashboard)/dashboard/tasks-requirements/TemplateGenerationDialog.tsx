@@ -4816,18 +4816,13 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         setIsGenerating(true);
         try {
             const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_${formatDate(new Date(), 'YYYYMMDD')}`;
-            const renderData = await prepareRenderData(formData);
 
-            // Pre-convert any remaining HTTP image URLs to base64 before docxtemplater renders
-            const imageConversionPromises = Object.entries(renderData).map(async ([key, value]) => {
-                if (typeof value === 'string' && (value.startsWith('http') || value.startsWith('blob:'))) {
-                    const b64 = await fetchImageAsBase64(value);
-                    if (b64) renderData[key] = b64;
-                }
-            });
-            await Promise.all(imageConversionPromises);
-
-            // ── HTML template with letterhead: merge content into company .docx letterhead ──
+            // ── HTML template with letterhead: verify a default letterhead exists
+            // BEFORE doing any rendering work - a company with none should get an
+            // immediate, unmistakable toast telling them to go create one, not a
+            // click that silently produces nothing after chewing through the
+            // render pipeline.
+            let letterheadRecord: { id: string; file_path: string } | null = null;
             if (!isWordTemplate && selectedTemplate?.use_letterhead) {
                 const companyId = companyIdForAssociates;
                 if (!companyId) {
@@ -4844,22 +4839,9 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                     .maybeSingle();
 
                 if (lhQueryError || !letterheads) {
-                    toast({ title: "Error", description: "No default letterhead found for this company. Please set a default letterhead in the Letterheads page.", variant: "destructive" });
+                    toast({ title: "No letterhead found", description: "This company doesn't have a default letterhead yet. Create one on the Letterheads page, then try downloading again.", variant: "destructive" });
                     return;
                 }
-
-                const { data: fileData, error: downloadError } = await supabase.storage
-                    .from('letterheads')
-                    .download(letterheads.file_path);
-
-                if (downloadError || !fileData) {
-                    toast({ title: "Error", description: "Failed to download letterhead file from storage", variant: "destructive" });
-                    return;
-                }
-
-                const lhBuffer = await fileData.arrayBuffer();
-
-                const htmlContent = selectedTemplate.content || '';
 
                 // PDF is intentionally not offered for letterhead templates (see the disabled
                 // "PDF" menu item below): the letterhead's background graphics are floating/
@@ -4870,6 +4852,34 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                     toast({ title: "PDF not available", description: "Letterhead templates can only be downloaded as Word for now. Download the Word doc and convert it to PDF yourself.", variant: "destructive" });
                     return;
                 }
+
+                letterheadRecord = letterheads;
+            }
+
+            const renderData = await prepareRenderData(formData);
+
+            // Pre-convert any remaining HTTP image URLs to base64 before docxtemplater renders
+            const imageConversionPromises = Object.entries(renderData).map(async ([key, value]) => {
+                if (typeof value === 'string' && (value.startsWith('http') || value.startsWith('blob:'))) {
+                    const b64 = await fetchImageAsBase64(value);
+                    if (b64) renderData[key] = b64;
+                }
+            });
+            await Promise.all(imageConversionPromises);
+
+            // ── HTML template with letterhead: merge content into company .docx letterhead ──
+            if (letterheadRecord) {
+                const { data: fileData, error: downloadError } = await supabase.storage
+                    .from('letterheads')
+                    .download(letterheadRecord.file_path);
+
+                if (downloadError || !fileData) {
+                    toast({ title: "Error", description: "Failed to download letterhead file from storage", variant: "destructive" });
+                    return;
+                }
+
+                const lhBuffer = await fileData.arrayBuffer();
+                const htmlContent = selectedTemplate.content || '';
 
                 // Splice real OOXML (bold/italic/underline + embedded images) into the
                 // letterhead's {BODY} paragraph, preserving header/footer/logo.
