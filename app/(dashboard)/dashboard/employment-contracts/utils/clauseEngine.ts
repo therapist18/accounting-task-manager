@@ -197,7 +197,8 @@ export function assembleContractHtml({
   }
 
   // ── Sections ──
-  const sections = orderedSections.map((section) => {
+  const sectionHtml: Record<string, string> = {};
+  for (const section of orderedSections) {
     const clauseId = effectiveClauses[section.key];
     const clause = clauseId ? clausesById[clauseId] : undefined;
     const n = numMap[section.key];
@@ -208,8 +209,10 @@ export function assembleContractHtml({
     const dataAttr = `data-section="${section.key}"`;
 
     if (!clause) {
-      if (hideMissingClauses) return '';
-      return `<section ${idAttr} class="${cls}" ${dataAttr}><p class="cs-missing-clause">[No clause configured for "${section.title}"]</p></section>`;
+      sectionHtml[section.key] = hideMissingClauses
+        ? ''
+        : `<section ${idAttr} class="${cls}" ${dataAttr}><p class="cs-missing-clause">[No clause configured for "${section.title}"]</p></section>`;
+      continue;
     }
 
     const renderedContent = replacePlaceholders(clause.content, mergedValues);
@@ -230,8 +233,17 @@ export function assembleContractHtml({
       body = renderedContent.replace(/(<h[1-3][^>]*>)([^<]*)/, `$1${n}. $2`);
     }
 
-    return `<section ${idAttr} class="${cls}" ${dataAttr}>${body}</section>`;
-  });
+    sectionHtml[section.key] = `<section ${idAttr} class="${cls}" ${dataAttr}>${body}</section>`;
+  }
 
-  return toc + sections.join('\n');
+  // The Contract Heading always leads the document, ahead of the Table of
+  // Contents - the ToC lists the sections that follow it, so it reads oddly
+  // sitting above the title itself.
+  const headingHtml = sectionHtml['heading'] || '';
+  const bodyHtml = orderedSections
+    .filter((s) => s.key !== 'heading')
+    .map((s) => sectionHtml[s.key])
+    .join('\n');
+
+  return headingHtml + toc + bodyHtml;
 }

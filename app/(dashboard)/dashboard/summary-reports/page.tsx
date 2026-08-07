@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/hooks/use-toast";
 import { fetchDepartments } from "../departments/departments/database";
-import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields } from "../tasks/utils/taskManagerData";
+import { fetchTasks, fetchStages, fetchCompanies } from "../tasks/utils/taskManagerData";
 import { enhanceTasksWithIndividualData } from "../tasks/overall-view/tableUtils";
 import { userService } from "@/lib/shared-user-assignment-service";
 import { supabase } from "@/lib/supabase/client";
@@ -17,26 +17,23 @@ import {
   getStageOfficerIds,
   isTaskWithClient,
   isStageApplicableToTask,
-  computeStageDateInfo,
   parseDateSafe,
 } from "../reports/utils/reportStageLogic";
 import { StatusTabs, PerspectiveTabs, HierarchyTabs, ColumnVisibilityDialog, } from "./components/PageHeader";
 import { SummaryTable } from "./components/SummaryTable";
 import { MILESTONE_STAGE_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS, SUMMARY_COLUMNS } from "./stageColumnConfig";
 import { exportSummaryReportToExcel } from "./utils/exportSummary";
+import {
+  buildJobLevelKey,
+  getApplicationTypeForTask as getApplicationTypeForTaskShared,
+  getPromisedTimeResolution,
+  getReqReceivedCompletedDate,
+  getPlannedExecutionDate,
+  getActualExecutionInfo,
+} from "./utils/executionMath";
 
 const TERMINAL_STATUSES = ['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'];
 const COMPLETED_STATUSES = ['write_up_completed', 'endorsed', 'completed'];
-
-const buildJobLevelKey = (task: any, fallbackDeptId?: string) => {
-  const jl = task.job_level || {};
-  return JSON.stringify({
-    department_id: Number(jl.department_id || task.department_id || fallbackDeptId),
-    subdepartment_id: jl.subdepartment_id || null,
-    class_id: jl.class_id || null,
-    subclass_id: jl.subclass_id || null,
-  });
-};
 
 export default function SummaryReportsPage() {
   const [loading, setLoading] = useState(true);
@@ -48,10 +45,13 @@ export default function SummaryReportsPage() {
   const [unifiedOfficers, setUnifiedOfficers] = useState<any[]>([]);
   const [unifiedManagers, setUnifiedManagers] = useState<any[]>([]);
   const [unifiedAssistants, setUnifiedAssistants] = useState<any[]>([]);
-  const [allDocuments, setAllDocuments] = useState<any[]>([]);
-  const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map());
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
   const [expectedTimeByJobLevel, setExpectedTimeByJobLevel] = useState<Map<string, number>>(new Map());
+  // Promised Time (Stages module) per job level — defaultMinutes is the fallback, conditions
+  // let a job level give a different Promised Time per Application Type value.
+  const [promisedTimeByJobLevel, setPromisedTimeByJobLevel] = useState<
+    Map<string, { defaultMinutes: number | null; conditions: { value: string; minutes: number }[] }>
+  >(new Map());
 
   const [activeDeptId, setActiveDeptId] = useState<string>("all");
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
@@ -87,22 +87,18 @@ export default function SummaryReportsPage() {
       // network call at all — it just reads the already-fetched `depts` payload — so it's fine
       // to keep per-department. tasks fetch happens exactly once for the whole company here,
       // then gets grouped by department client-side downstream via job_level.department_id.
-      const [unifiedUserData, allTasksData, stagesResults, docs, kycFields] = await Promise.all([
+      const [unifiedUserData, allTasksData, stagesResults] = await Promise.all([
         userService.getAllUserData({ payrollAccess: true }, depts),
         fetchTasks(undefined, undefined, comps),
         Promise.all(depts.map(async (d: any) => ({
           deptId: d.id.toString(),
           stages: (await fetchStages(d.id.toString(), depts)) || [],
         }))),
-        fetchAllDocuments(),
-        fetchAllKycFields(),
       ]);
 
       setUnifiedOfficers(unifiedUserData.officers || []);
       setUnifiedManagers(unifiedUserData.managers || []);
       setUnifiedAssistants(unifiedUserData.assistants || []);
-      setAllDocuments(docs);
-      setKycDocuments(kycFields?.kycDocsMap || new Map());
 
       const newAllTasks = Array.isArray(allTasksData) ? allTasksData : [];
       const newStagesByDept = new Map<string, any[]>();
@@ -151,22 +147,33 @@ export default function SummaryReportsPage() {
       });
 
       const newExpectedTimeMap = new Map<string, number>();
+      const newPromisedTimeMap = new Map<string, { defaultMinutes: number | null; conditions: { value: string; minutes: number }[] }>();
+      // Same single-fetch-then-match pattern as above, extended to also pull Promised Time
+      // (default + conditions) off the same rows — one query covers both derived-time columns.
       const { data: requirementRows, error: requirementsErr } = await supabase
         .from('tm_class_requirements')
-        .select('job_level, expected_total_time_minutes');
+        .select('job_level, expected_total_time_minutes, promised_time');
       if (!requirementsErr && requirementRows) {
-        const byCanonicalKey = new Map<string, number>();
+        const byCanonicalKey = new Map<string, any>();
         requirementRows.forEach((row: any) => {
-          if (typeof row.expected_total_time_minutes === 'number') {
-            byCanonicalKey.set(canonicalJobLevelKey(row.job_level), row.expected_total_time_minutes);
-          }
+          byCanonicalKey.set(canonicalJobLevelKey(row.job_level), row);
         });
         jobLevels.forEach((jobLevel, key) => {
-          const minutes = byCanonicalKey.get(canonicalJobLevelKey(jobLevel));
-          if (typeof minutes === 'number') newExpectedTimeMap.set(key, minutes);
+          const row = byCanonicalKey.get(canonicalJobLevelKey(jobLevel));
+          if (!row) return;
+          if (typeof row.expected_total_time_minutes === 'number') newExpectedTimeMap.set(key, row.expected_total_time_minutes);
+          const pt = row.promised_time || {};
+          const hasDefault = typeof pt.defaultMinutes === 'number';
+          const conditions = Array.isArray(pt.conditions)
+            ? pt.conditions.filter((c: any) => c && typeof c.value === 'string' && typeof c.minutes === 'number')
+            : [];
+          if (hasDefault || conditions.length > 0) {
+            newPromisedTimeMap.set(key, { defaultMinutes: hasDefault ? pt.defaultMinutes : null, conditions });
+          }
         });
       }
       setExpectedTimeByJobLevel(newExpectedTimeMap);
+      setPromisedTimeByJobLevel(newPromisedTimeMap);
     } catch (err) {
       toast({ title: "Error", description: "Could not load summary reports data.", variant: "destructive" });
     } finally {
@@ -191,13 +198,17 @@ export default function SummaryReportsPage() {
   const getCurrentOfficerStageForTask = useCallback((task: any) => getCurrentOfficerStage(task, getTaskStages(task), departments), [getTaskStages, departments]);
   const getStageOfficerIdsForTask = useCallback((task: any, mode: 'current' | 'history' = 'current') => getStageOfficerIds(task, getTaskStages(task), mode, departments), [getTaskStages, departments]);
   const isTaskWithClientForTask = useCallback((task: any) => isTaskWithClient(task, getTaskStages(task), departments), [getTaskStages, departments]);
-  const computeStageDateInfoForTask = useCallback((task: any, stage: any, col: any) =>
-    computeStageDateInfo(task, stage, col, { stages: getTaskStages(task), allDocuments, kycDocuments }),
-    [getTaskStages, allDocuments, kycDocuments]);
 
-  // ── Expected / Actual total time — same source & math as ReportsPage's "Expected Time" /
-  // "Actual Time Taken" columns, reused here for the Planned/Actual Execution columns and
-  // for the Overdue(Delayed) status tab. ──
+  // Same "highest completed index, then next applicable stage" algorithm ReportsPage's
+  // visible "Current Stage Follow-Up" column uses (getCurrentStageStatus in
+  // tasks/overall-view/tableUtils.tsx) — this page already computes it via
+  // getCanonicalCurrentStageForTask for the Officers/Managers/Clients perspective tabs, just
+  // never exposed the stage's own name as a column until now.
+  const getCurrentStageNameForTask = useCallback((task: any) => getCanonicalCurrentStageForTask(task)?.name || null, [getCanonicalCurrentStageForTask]);
+
+  // "Stages Time Expected" — sum of applicable stage.estimated_time (the Stages module's
+  // "Overall Expected Time"). Purely informational now; no longer feeds Planned/Actual
+  // Execution or the Overdue status tab — those are anchored on Promised Time instead.
   const getExpectedMinutesForTask = useCallback((task: any) => {
     const stored = expectedTimeByJobLevel.get(buildJobLevelKey(task));
     if (typeof stored === 'number') return stored;
@@ -208,27 +219,24 @@ export default function SummaryReportsPage() {
     return total;
   }, [expectedTimeByJobLevel, getTaskStages, departments]);
 
-  // Returns null if there's no first stage / no effective start date yet; otherwise
-  // { diffDays, expectedMinutes, isOverdue, exceededMinutes }.
-  const getActualTimeInfoForTask = useCallback((task: any) => {
-    const applicableStagesSorted = [...getTaskStages(task)]
-      .filter((s: any) => isStageApplicableToTask(s, task, departments))
-      .sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
-    const firstStage = applicableStagesSorted[0];
-    if (!firstStage) return null;
+  // Promised/Planned/Actual Execution math lives in utils/executionMath.ts — shared with
+  // Company Profiles (and any future task-list page) so the same task can't show two
+  // different Promised Times or overdue statuses depending on which page you're looking at.
+  const getApplicationTypeForTask = useCallback((task: any) => getApplicationTypeForTaskShared(task, enhancedTasksData), [enhancedTasksData]);
 
-    const info = computeStageDateInfoForTask(task, firstStage, { stageId: firstStage.id, hasDate: true, fields: [] });
-    if (info.isSkipped || !info.effectiveDateValue) return null;
+  const getPromisedTimeResolutionForTask = useCallback((task: any) => getPromisedTimeResolution(task, promisedTimeByJobLevel, enhancedTasksData), [promisedTimeByJobLevel, enhancedTasksData]);
 
-    const startDate = parseDateSafe(info.effectiveDateValue);
-    if (!startDate) return null;
+  const getPromisedMinutesForTask = useCallback((task: any): number | null => getPromisedTimeResolutionForTask(task).minutes, [getPromisedTimeResolutionForTask]);
 
-    const diffDays = Math.max(0, Math.floor((Date.now() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
-    const actualMinutes = diffDays * 24 * 60;
-    const expectedMinutes = getExpectedMinutesForTask(task);
-    const isOverdue = expectedMinutes > 0 && actualMinutes > expectedMinutes;
-    return { diffDays, expectedMinutes, actualMinutes, isOverdue, exceededMinutes: isOverdue ? actualMinutes - expectedMinutes : 0 };
-  }, [getTaskStages, departments, computeStageDateInfoForTask, getExpectedMinutesForTask]);
+  const getReqReceivedCompletedDateForTask = useCallback((task: any): Date | null => getReqReceivedCompletedDate(task), []);
+
+  const getPlannedExecutionDateForTask = useCallback((task: any): Date | null =>
+    getPlannedExecutionDate(getReqReceivedCompletedDateForTask(task), getPromisedMinutesForTask(task)),
+    [getReqReceivedCompletedDateForTask, getPromisedMinutesForTask]);
+
+  const getActualTimeInfoForTask = useCallback((task: any) =>
+    getActualExecutionInfo(getReqReceivedCompletedDateForTask(task), getPromisedMinutesForTask(task)),
+    [getReqReceivedCompletedDateForTask, getPromisedMinutesForTask]);
 
   const isTaskOverdue = useCallback((task: any) => {
     if (TERMINAL_STATUSES.includes(task.status)) return false;
@@ -420,8 +428,12 @@ export default function SummaryReportsPage() {
     if (columnId === 'applicant') return (task.applicant_name || '').toLowerCase();
     if (columnId === 'job_description') return (task.job_description || '').toLowerCase();
     if (columnId === 'company_prefix' || columnId === 'sponsor_name' || columnId === 'application_type' || columnId === 'duration') return '';
-    if (columnId === 'planned_execution') return getExpectedMinutesForTask(task);
+    if (columnId === 'current_stage') return (getCurrentStageNameForTask(task) || '').toLowerCase();
+    if (columnId === 'promised_time') return getPromisedMinutesForTask(task) ?? 0;
+    if (columnId === 'planned_execution') return getPlannedExecutionDateForTask(task)?.getTime() ?? 0;
     if (columnId === 'actual_execution') return getActualTimeInfoForTask(task)?.actualMinutes ?? 0;
+    if (columnId === 'execution_delta') return getActualTimeInfoForTask(task)?.deltaMinutes ?? 0;
+    if (columnId === 'stages_time_expected') return getExpectedMinutesForTask(task);
     const milestone = MILESTONE_STAGE_COLUMNS.find(c => c.key === columnId);
     if (milestone) {
       const stageData = task.stages?.[milestone.stageId];
@@ -430,7 +442,7 @@ export default function SummaryReportsPage() {
       return parsed ? parsed.getTime() : 0;
     }
     return '';
-  }, [companies, getExpectedMinutesForTask, getActualTimeInfoForTask]);
+  }, [companies, getExpectedMinutesForTask, getActualTimeInfoForTask, getPromisedMinutesForTask, getPlannedExecutionDateForTask, getCurrentStageNameForTask]);
 
   const handleSort = useCallback((columnId: string) => {
     setSortConfig(cur => cur?.key === columnId ? { key: columnId, direction: cur.direction === 'asc' ? 'desc' : 'asc' } : { key: columnId, direction: 'asc' });
@@ -455,13 +467,17 @@ export default function SummaryReportsPage() {
       tasks: sortedTasks,
       columns: visibleColumns,
       companies,
+      departments,
       enhancedTasksData,
       getExpectedMinutesForTask,
       getActualTimeInfoForTask,
+      getPromisedMinutesForTask,
+      getPlannedExecutionDateForTask,
+      getCurrentStageNameForTask,
       showTime,
       scopeName: departments.find((d: any) => d.id.toString() === activeDeptId)?.name,
     });
-  }, [sortedTasks, visibleColumnIds, companies, enhancedTasksData, getExpectedMinutesForTask, getActualTimeInfoForTask, showTime, departments, activeDeptId]);
+  }, [sortedTasks, visibleColumnIds, companies, enhancedTasksData, getExpectedMinutesForTask, getActualTimeInfoForTask, getPromisedMinutesForTask, getPlannedExecutionDateForTask, getCurrentStageNameForTask, showTime, departments, activeDeptId]);
 
   if (loading) {
     return (
@@ -499,7 +515,7 @@ export default function SummaryReportsPage() {
             </div>
           </div>
 
-          {/* Secondary controls — same ghost-styled rounded-full toggles as ReportsHeader. */}
+          {/* Secondary controls — normal squared buttons matching the tab design above. */}
           <div className="flex items-center gap-2.5 shrink-0">
             <ColumnVisibilityDialog visibleColumnIds={visibleColumnIds} setVisibleColumnIds={setVisibleColumnIds} />
             <Button
@@ -507,8 +523,8 @@ export default function SummaryReportsPage() {
               size="sm"
               onClick={() => setShowTime((v) => !v)}
               className={cn(
-                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
-                showTime ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                "h-9 px-4 rounded-md text-sm font-bold gap-2 transition-all",
+                showTime ? "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue" : "border-slate-200 text-slate-600 hover:bg-slate-50"
               )}
             >
               <Clock className="h-3.5 w-3.5" />
@@ -519,8 +535,8 @@ export default function SummaryReportsPage() {
               size="sm"
               onClick={() => setShowDelta((v) => !v)}
               className={cn(
-                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
-                showDelta ? "bg-violet-50 border-violet-300 text-violet-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                "h-9 px-4 rounded-md text-sm font-bold gap-2 transition-all",
+                showDelta ? "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue" : "border-slate-200 text-slate-600 hover:bg-slate-50"
               )}
             >
               <GitCompare className="h-3.5 w-3.5" />
@@ -530,7 +546,7 @@ export default function SummaryReportsPage() {
             <Button
               size="sm"
               onClick={handleExport}
-              className="h-9 px-4 rounded-full text-sm font-bold gap-2 text-white hover:bg-[#2d5a94] shadow-sm"
+              className="h-9 px-4 rounded-md text-sm font-bold gap-2 text-white hover:bg-[#2d5a94] shadow-sm"
               style={{ backgroundColor: '#376bae' }}
             >
               <FileDown className="h-3.5 w-3.5" />
@@ -572,6 +588,10 @@ export default function SummaryReportsPage() {
         enhancedTasksData={enhancedTasksData}
         getExpectedMinutesForTask={getExpectedMinutesForTask}
         getActualTimeInfoForTask={getActualTimeInfoForTask}
+        getPromisedMinutesForTask={getPromisedMinutesForTask}
+        getPromisedTimeResolutionForTask={getPromisedTimeResolutionForTask}
+        getPlannedExecutionDateForTask={getPlannedExecutionDateForTask}
+        getCurrentStageNameForTask={getCurrentStageNameForTask}
         visibleColumnIds={visibleColumnIds}
       />
     </div>

@@ -12,7 +12,7 @@ import { differenceInDays } from "date-fns";
 import { cn } from "@/lib/utils";
 import { formatDateCell, formatEstimatedMins } from "../../reports/components/reportCellRenderers";
 import { parseDateSafe } from "../../reports/utils/reportStageLogic";
-import { getSubDepartmentDisplay, getCompanyPrefixFromParticipants } from "../../tasks/overall-view/tableUtils";
+import { getSubDepartmentDisplay, getClassDisplay, getSubClassDisplay, getCompanyPrefixFromParticipants, getSponsorName } from "../../tasks/overall-view/tableUtils";
 import { SUMMARY_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS } from "../stageColumnConfig";
 
 const DEFAULT_COL_WIDTH = 170;
@@ -24,14 +24,7 @@ export const resolveMilestoneDate = (task: any, stageId: string): string | null 
   return stageData?.date || stageData?.completedAt || null;
 };
 
-const getSponsorName = (task: any): string | null => {
-  const sponsor = task?.participants_details?.find((p: any) =>
-    (Array.isArray(p.role) && p.role.includes('sponsor')) || p.role === 'sponsor'
-  );
-  return sponsor?.name || null;
-};
-
-export const resolveFieldValue = (colId: string, task: any, companies: Map<number, any>, enhancedTasksData: Map<string, any>): any => {
+export const resolveFieldValue = (colId: string, task: any, companies: Map<number, any>, enhancedTasksData: Map<string, any>, departments: any[] = []): any => {
   const enhancedTask = enhancedTasksData?.get(task.id?.toString()) || task;
   switch (colId) {
     case 'company': return companies.get(task.company_id)?.name || task.company_name || null;
@@ -44,11 +37,25 @@ export const resolveFieldValue = (colId: string, task: any, companies: Map<numbe
     case 'sponsor_name': return getSponsorName(task);
     case 'application_type': return enhancedTask.renewal_status || task.renewal_status || null;
     case 'duration': return enhancedTask.duration || task.duration || null;
+    case 'subdepartment': {
+      const v = getSubDepartmentDisplay(task, departments);
+      return v && v !== 'N/A' ? v : null;
+    }
+    case 'class_name': {
+      const v = getClassDisplay(task, departments);
+      return v && v !== 'N/A' ? v : null;
+    }
+    case 'subclass_name': {
+      const v = getSubClassDisplay(task, departments);
+      return v && v !== 'N/A' ? v : null;
+    }
     default: return null;
   }
 };
 
 // Mirrors reportCellRenderers.tsx's "Overdue actual time" cell (red text + exceeded badge).
+// exceededMinutes is measured against Promised Time, not the stage-derived Expected Time —
+// see getActualTimeInfoForTask in page.tsx.
 const ActualTimeCell = ({ display, exceededMinutes }: { display: string; exceededMinutes: number }) => (
   <TooltipProvider delayDuration={200}>
     <Tooltip>
@@ -62,8 +69,54 @@ const ActualTimeCell = ({ display, exceededMinutes }: { display: string; exceede
         </div>
       </TooltipTrigger>
       <TooltipContent side="top" className="bg-red-50 border-red-200 text-red-900 text-xs shadow-lg rounded-lg px-3 py-2 z-[9999]">
-        <p className="font-bold">Exceeds Expected Time</p>
+        <p className="font-bold">Exceeds Promised Time</p>
         <p>Over by {formatEstimatedMins(exceededMinutes)}</p>
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);
+
+// "Δ vs Promised" cell — Actual Execution minus Promised Time. Red/over-running when
+// positive, emerald/ahead-of-schedule when negative, neutral at exactly zero.
+const DeltaCell = ({ minutes }: { minutes: number }) => {
+  if (minutes === 0) return <span className="text-sm font-semibold text-slate-400">On time</span>;
+  const isOver = minutes > 0;
+  return (
+    <span className={cn("text-sm font-bold tabular-nums", isOver ? "text-red-600" : "text-emerald-600")}>
+      {isOver ? '+' : '−'}{formatEstimatedMins(Math.abs(minutes))}
+    </span>
+  );
+};
+
+// Promised Time cell — a dotted-underline hint plus tooltip explaining *why* this task got
+// this particular value: two tasks at the same job level can legitimately show different
+// Promised Times (different Application Types matching different conditions, or one
+// matching a condition while the other falls to the default), and without this the
+// difference just looks like a data error.
+const PromisedTimeCell = ({ display, resolution }: { display: string; resolution: { source: 'condition' | 'default' | 'none'; applicationType: string | null; matchedValue?: string } }) => (
+  <TooltipProvider delayDuration={200}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="text-sm font-bold text-amber-800 tabular-nums cursor-default underline decoration-dotted decoration-amber-300 underline-offset-4">
+          {display}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="bg-slate-900 text-white border-none text-xs shadow-xl rounded-lg px-3 py-2 z-[9999] max-w-[240px]">
+        {resolution.source === 'condition' ? (
+          <>
+            <p className="font-bold">Condition matched</p>
+            <p>Application Type "{resolution.matchedValue}" has its own Promised Time for this job level.</p>
+          </>
+        ) : (
+          <>
+            <p className="font-bold">Default Promised Time</p>
+            <p>
+              {resolution.applicationType
+                ? `No condition set for Application Type "${resolution.applicationType}" at this job level — using the default.`
+                : "This job level's default Promised Time (no Application Type conditions apply)."}
+            </p>
+          </>
+        )}
       </TooltipContent>
     </Tooltip>
   </TooltipProvider>
@@ -87,6 +140,8 @@ export function SummaryTable({
   sortConfig, handleSort,
   enhancedTasksData,
   getExpectedMinutesForTask, getActualTimeInfoForTask,
+  getPromisedMinutesForTask, getPromisedTimeResolutionForTask, getPlannedExecutionDateForTask,
+  getCurrentStageNameForTask,
   visibleColumnIds = DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS,
 }: {
   tasks: any[];
@@ -98,7 +153,11 @@ export function SummaryTable({
   handleSort?: (columnId: string) => void;
   enhancedTasksData?: Map<string, any>;
   getExpectedMinutesForTask?: (task: any) => number;
-  getActualTimeInfoForTask?: (task: any) => { diffDays: number; isOverdue: boolean; exceededMinutes: number } | null;
+  getActualTimeInfoForTask?: (task: any) => { diffDays: number; isOverdue: boolean; exceededMinutes: number; promisedMinutes: number | null; deltaMinutes: number | null } | null;
+  getPromisedMinutesForTask?: (task: any) => number | null;
+  getPromisedTimeResolutionForTask?: (task: any) => { minutes: number | null; source: 'condition' | 'default' | 'none'; applicationType: string | null; matchedValue?: string };
+  getPlannedExecutionDateForTask?: (task: any) => Date | null;
+  getCurrentStageNameForTask?: (task: any) => string | null;
   visibleColumnIds?: string[];
 }) {
   const columns = useMemo(() => SUMMARY_COLUMNS.filter(c => visibleColumnIds.includes(c.id)), [visibleColumnIds]);
@@ -209,17 +268,32 @@ export function SummaryTable({
   }, [subDeptGroups]);
 
   const resolveCellValue = (col: any, task: any): React.ReactNode => {
-    if (col.type === 'field') return resolveFieldValue(col.id, task, companies, enhancedTasksData);
+    if (col.id === 'current_stage') return getCurrentStageNameForTask?.(task) ?? null;
+    if (col.type === 'field') return resolveFieldValue(col.id, task, companies, enhancedTasksData, departments);
     if (col.type === 'computed_time') {
+      if (col.id === 'promised_time') {
+        const resolution = getPromisedTimeResolutionForTask?.(task);
+        if (!resolution?.minutes) return null;
+        return <PromisedTimeCell display={formatEstimatedMins(resolution.minutes)} resolution={resolution} />;
+      }
       if (col.id === 'planned_execution') {
-        const minutes = getExpectedMinutesForTask?.(task) ?? 0;
-        return minutes > 0 ? formatEstimatedMins(minutes) : null;
+        const date = getPlannedExecutionDateForTask?.(task);
+        return date ? formatDateCell(date.toISOString(), showTime) : null;
       }
       if (col.id === 'actual_execution') {
         const info = getActualTimeInfoForTask?.(task);
         if (!info) return null;
         const display = `${info.diffDays}d`;
         return info.isOverdue ? <ActualTimeCell display={display} exceededMinutes={info.exceededMinutes} /> : display;
+      }
+      if (col.id === 'execution_delta') {
+        const info = getActualTimeInfoForTask?.(task);
+        if (!info || info.deltaMinutes == null) return null;
+        return <DeltaCell minutes={info.deltaMinutes} />;
+      }
+      if (col.id === 'stages_time_expected') {
+        const minutes = getExpectedMinutesForTask?.(task) ?? 0;
+        return minutes > 0 ? formatEstimatedMins(minutes) : null;
       }
     }
     return null;
@@ -228,7 +302,7 @@ export function SummaryTable({
   return (
     <div className="flex flex-col flex-1 antialiased bg-slate-50 px-6 pb-6">
       <div className="relative overflow-hidden rounded-xl border border-slate-200 shadow-sm mt-3">
-        <div className="overflow-auto max-h-[calc(100vh-360px)] custom-scrollbar">
+        <div className="overflow-auto max-h-[calc(100vh-300px)] custom-scrollbar">
           <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
             <colgroup>
               <col style={{ width: INDEX_COL_WIDTH }} />
@@ -335,15 +409,15 @@ export function SummaryTable({
                   if (item.type === 'section') {
                     return (
                       <TableRow key={`section-${item.name}`} className="border-0 hover:bg-transparent">
-                        <TableCell className="sticky left-0 z-30 border-r border-b border-slate-200 py-2.5 px-2 bg-slate-100/80 text-center">
-                          <Layers className="h-4 w-4 text-slate-500 mx-auto shrink-0" />
+                        <TableCell className="sticky left-0 z-30 border-r border-b border-slate-200 py-2 px-2 bg-blue-50/60 text-center">
+                          <Layers className="h-3.5 w-3.5 text-slate-400 mx-auto shrink-0" />
                         </TableCell>
-                        <TableCell colSpan={interleavedColumns.length} className="px-4 py-2 border-b border-slate-200 bg-slate-100/80">
+                        <TableCell colSpan={interleavedColumns.length} className="px-4 py-2 border-b border-slate-200 bg-blue-50/60">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold uppercase tracking-wider text-slate-700">
+                            <span className="text-xs font-semibold uppercase tracking-wide text-slate-600 truncate">
                               {item.name === 'N/A' ? 'Unassigned' : item.name}
                             </span>
-                            <span className="text-sm font-semibold text-slate-500">({item.count})</span>
+                            <span className="text-xs font-medium text-slate-400 tabular-nums shrink-0">· {item.count}</span>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -413,10 +487,18 @@ export function SummaryTable({
 
                         const isSticky = !!col.sticky;
                         const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
-                        const value: React.ReactNode = col.type === 'milestone'
-                          ? formatDateCell(milestoneDates[col.milestone.key], showTime)
-                          : resolveCellValue(col, task);
+                        let value: React.ReactNode;
+                        if (col.type === 'milestone') {
+                          value = formatDateCell(milestoneDates[col.milestone.key], showTime);
+                        } else {
+                          value = resolveCellValue(col, task);
+                        }
                         const isEmpty = value === null || value === undefined || value === '—';
+                        // Class/Sub-Class are optional levels below Sub-Department — a task
+                        // sitting at the subdepartment level simply doesn't have one, which
+                        // isn't missing data, so it gets a neutral "N/A" instead of the red
+                        // "Missing" flag every other empty cell gets.
+                        const isNotApplicableColumn = col.id === 'class_name' || col.id === 'subclass_name';
 
                         return (
                           <TableCell
@@ -432,7 +514,11 @@ export function SummaryTable({
                             )}
                             style={isSticky ? { left: `${left}px` } : undefined}
                           >
-                            {isEmpty ? <span className="text-slate-300">—</span> : value}
+                            {isEmpty
+                              ? (isNotApplicableColumn
+                                ? <span className="text-slate-400">N/A</span>
+                                : <span className="text-red-500 font-bold text-xs uppercase tracking-wide">Missing</span>)
+                              : value}
                           </TableCell>
                         );
                       })}

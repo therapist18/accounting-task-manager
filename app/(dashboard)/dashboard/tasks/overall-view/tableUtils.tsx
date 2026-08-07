@@ -218,6 +218,41 @@ export const getSubDepartmentDisplay = (task: any, departments: any[]): string =
   }
 };
 
+// Class/Sub-Class are optional levels below Sub-Department — a task may sit at the
+// subdepartment level with neither set, so both return 'N/A' rather than a fabricated
+// name whenever the id isn't present on the job level.
+export const getClassDisplay = (task: any, departments: any[]): string => {
+  const jobLevel = task.job_level;
+  if (!jobLevel?.class_id && !task.class_id) return 'N/A';
+
+  try {
+    const department = departments.find(d => d.id == (jobLevel?.department_id ?? task.department_id));
+    const subdepartment = department?.tm_subdepartments?.find((sd: any) => sd.id == (jobLevel?.subdepartment_id ?? task.subdepartment_id));
+    const classId = jobLevel?.class_id ?? task.class_id;
+    const cls = subdepartment?.classes?.find((c: any) => c.id == classId);
+    return cls?.name || `Class ${classId}`;
+  } catch (error) {
+    return 'N/A';
+  }
+};
+
+export const getSubClassDisplay = (task: any, departments: any[]): string => {
+  const jobLevel = task.job_level;
+  if (!jobLevel?.subclass_id && !task.subclass_id) return 'N/A';
+
+  try {
+    const department = departments.find(d => d.id == (jobLevel?.department_id ?? task.department_id));
+    const subdepartment = department?.tm_subdepartments?.find((sd: any) => sd.id == (jobLevel?.subdepartment_id ?? task.subdepartment_id));
+    const classId = jobLevel?.class_id ?? task.class_id;
+    const subclassId = jobLevel?.subclass_id ?? task.subclass_id;
+    const cls = subdepartment?.classes?.find((c: any) => c.id == classId);
+    const subCls = cls?.subClasses?.find((sc: any) => sc.id == subclassId);
+    return subCls?.name || `Sub-Class ${subclassId}`;
+  } catch (error) {
+    return 'N/A';
+  }
+};
+
 export const getJobLevelDisplay = (task: any, departments: any[]): string => {
   const jobLevel = task.job_level;
   if (!jobLevel) return 'N/A';
@@ -300,6 +335,16 @@ export const getCompanyPrefixFromParticipants = (task: any, companies?: Map<numb
   }
 
   return 'N/A';
+};
+
+// Shared with SummaryTable.tsx and company-profiles' TaskListTable.tsx — a single
+// definition so "Sponsor Name" always means the same participant lookup everywhere it's
+// shown, rather than two hand-copied versions that could quietly drift apart.
+export const getSponsorName = (task: any): string | null => {
+  const sponsor = task?.participants_details?.find((p: any) =>
+    (Array.isArray(p.role) && p.role.includes('sponsor')) || p.role === 'sponsor'
+  );
+  return sponsor?.name || null;
 };
 
 export const getStaffFromParticipants = (

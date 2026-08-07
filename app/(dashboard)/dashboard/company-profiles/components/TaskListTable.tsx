@@ -3,17 +3,26 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, LayoutGrid, Rows3, Clock, ChevronLeft, ChevronRight } from "lucide-react";
+import { ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, LayoutGrid, Rows3, Clock, ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { formatDateCell } from "../../reports/components/reportCellRenderers";
+import { formatDateCell, formatEstimatedMins } from "../../reports/components/reportCellRenderers";
 import { getCanonicalCurrentStage, isStageApplicableToTask, parseDateSafe } from "../../reports/utils/reportStageLogic";
 import { MILESTONE_STAGE_COLUMNS } from "../../summary-reports/stageColumnConfig";
+import { getCompanyPrefixFromParticipants, getSponsorName } from "../../tasks/overall-view/tableUtils";
 
 const COMPLETED_STATUSES = ['write_up_completed', 'endorsed', 'completed'];
 
-const REQ_SENT_STAGE_ID = MILESTONE_STAGE_COLUMNS.find(c => c.key === 'quotes_req_sent')?.stageId;
+// Same milestone stage ids Summary Reports Dashboard's columns resolve from — deliberately
+// NOT task.date_initiated/created_at for "Enquiry Date" (that used to be this column's
+// source, and it could show a different date than Summary Reports' Enquiry Date for the
+// exact same task, which is exactly the kind of cross-page inconsistency this table is
+// meant to avoid).
+const ENQUIRY_STAGE_ID = MILESTONE_STAGE_COLUMNS.find(c => c.key === 'registered')?.stageId;
 const CONFIRMED_STAGE_ID = MILESTONE_STAGE_COLUMNS.find(c => c.key === 'confirmed')?.stageId;
+const REQ_SENT_STAGE_ID = MILESTONE_STAGE_COLUMNS.find(c => c.key === 'quotes_req_sent')?.stageId;
+const REQ_RECEIVED_COMPLETED_STAGE_ID = MILESTONE_STAGE_COLUMNS.find(c => c.key === 'req_received_completed')?.stageId;
 
 // Same semantic palette as StatusTabs/PillTrack on the Summary Reports Dashboard, so a task's
 // status reads consistently wherever it's shown across the app.
@@ -31,7 +40,9 @@ const resolveMilestoneDate = (task: any, stageId?: string): string | null => {
 };
 
 // "Completed" = the most advanced applicable stage that actually has a date, not necessarily
-// the literal last stage in the list (which may not be reached yet).
+// the literal last stage in the list (which may not be reached yet). Distinct from Actual
+// Execution below — this is "when did anything last happen on this task", not measured
+// against Promised Time.
 function getLastDatedStage(task: any, stages: any[], departments: any[]): string | null {
   const applicable = [...stages].filter(s => isStageApplicableToTask(s, task, departments)).sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
   for (let i = applicable.length - 1; i >= 0; i--) {
@@ -41,6 +52,71 @@ function getLastDatedStage(task: any, stages: any[], departments: any[]): string
   }
   return null;
 }
+
+// Mirrors SummaryTable.tsx's ActualTimeCell — red text + exceeded badge when a task has run
+// past its Promised Time.
+const ActualTimeCell = ({ display, exceededMinutes }: { display: string; exceededMinutes: number }) => (
+  <TooltipProvider delayDuration={200}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex items-center gap-1 cursor-default select-none">
+          <span className="text-sm font-bold text-red-600 tabular-nums">{display}</span>
+          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-red-500 bg-red-50 border border-red-200 rounded px-1 py-0.5">
+            <AlertTriangle className="h-2.5 w-2.5" />
+            {formatEstimatedMins(exceededMinutes)}
+          </span>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="bg-red-50 border-red-200 text-red-900 text-xs shadow-lg rounded-lg px-3 py-2 z-[9999]">
+        <p className="font-bold">Exceeds Promised Time</p>
+        <p>Over by {formatEstimatedMins(exceededMinutes)}</p>
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);
+
+// Mirrors SummaryTable.tsx's DeltaCell — Actual Execution minus Promised Time.
+const DeltaCell = ({ minutes }: { minutes: number }) => {
+  if (minutes === 0) return <span className="text-sm font-semibold text-slate-400">On time</span>;
+  const isOver = minutes > 0;
+  return (
+    <span className={cn("text-sm font-bold tabular-nums", isOver ? "text-red-600" : "text-emerald-600")}>
+      {isOver ? '+' : '−'}{formatEstimatedMins(Math.abs(minutes))}
+    </span>
+  );
+};
+
+// Mirrors SummaryTable.tsx's PromisedTimeCell — explains *why* this task got this particular
+// Promised Time (which Application Type condition matched, or the job-level default), so two
+// tasks at the same job level showing different numbers don't read as a data error.
+const PromisedTimeCell = ({ display, resolution }: { display: string; resolution: { source: 'condition' | 'default' | 'none'; applicationType: string | null; matchedValue?: string } }) => (
+  <TooltipProvider delayDuration={200}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="text-sm font-bold text-amber-800 tabular-nums cursor-default underline decoration-dotted decoration-amber-300 underline-offset-4">
+          {display}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="bg-slate-900 text-white border-none text-xs shadow-xl rounded-lg px-3 py-2 z-[9999] max-w-[240px]">
+        {resolution.source === 'condition' ? (
+          <>
+            <p className="font-bold">Condition matched</p>
+            <p>Application Type "{resolution.matchedValue}" has its own Promised Time for this job level.</p>
+          </>
+        ) : (
+          <>
+            <p className="font-bold">Default Promised Time</p>
+            <p>
+              {resolution.applicationType
+                ? `No condition set for Application Type "${resolution.applicationType}" at this job level — using the default.`
+                : "This job level's default Promised Time (no Application Type conditions apply)."}
+            </p>
+          </>
+        )}
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);
 
 // Sticky-column geometry (px). The `left` offsets for # / Task ID / Job Description / Company
 // must line up between the header row and every body row for the pinning to hold.
@@ -116,10 +192,16 @@ const Td = ({ children, idx, primary, left, shadowEdge, className }: {
 
 // Task list card reused for both a company's direct (company-level applicant) tasks and an
 // individual's full job history — same table chrome as SummaryTable.tsx (sticky
-// bg-custom-blue header, zebra rows, rounded-xl card) so it reads as part of the same system.
+// bg-custom-blue header, zebra rows, rounded-xl card), and as of this column set, the exact
+// same columns/values as the Summary Reports Dashboard table (Applicant/Company Prefix/
+// Sponsor/Promised Time/Planned & Actual Execution/Δ vs Promised/Stages Time Expected —
+// resolved via the same shared getters in company-profiles/page.tsx, which delegate to
+// summary-reports/utils/executionMath.ts) — so a task can't show conflicting information
+// depending on which page you're looking at it from.
 export function TaskListTable({
   tasks, departments, stagesByDept, companies,
   enhancedTasksData, getExpectedMinutesForTask,
+  getPromisedTimeResolutionForTask, getPlannedExecutionDateForTask, getActualTimeInfoForTask,
   showCompanyColumn = false,
   emptyLabel = "No tasks found",
 }: {
@@ -129,6 +211,9 @@ export function TaskListTable({
   companies: Map<number, { name: string; prefix: string }>;
   enhancedTasksData?: Map<string, any>;
   getExpectedMinutesForTask?: (task: any) => number;
+  getPromisedTimeResolutionForTask?: (task: any) => { minutes: number | null; source: 'condition' | 'default' | 'none'; applicationType: string | null; matchedValue?: string };
+  getPlannedExecutionDateForTask?: (task: any) => Date | null;
+  getActualTimeInfoForTask?: (task: any) => { diffDays: number; isOverdue: boolean; exceededMinutes: number; deltaMinutes: number | null } | null;
   showCompanyColumn?: boolean;
   emptyLabel?: string;
 }) {
@@ -143,23 +228,6 @@ export function TaskListTable({
     setSortConfig(cur => cur?.key === key ? { key, direction: cur.direction === 'asc' ? 'desc' : 'asc' } : { key, direction: 'asc' });
   }, []);
 
-  // Transposed view paginates task columns so a wide job history stays usable.
-
-  // Shared between the "On Time?" cell and the sort value so both stay in lockstep.
-  const getOnTimeStatus = useCallback((task: any): 'on_time' | 'late' | null => {
-    const taskStages = stagesByDept.get(task.department_id?.toString()) || [];
-    if (!COMPLETED_STATUSES.includes(task.status)) return null;
-    const registered = task.date_initiated || task.created_at || null;
-    const completedRaw = getLastDatedStage(task, taskStages, departments);
-    if (!completedRaw || !registered || !getExpectedMinutesForTask) return null;
-    const start = parseDateSafe(registered);
-    const end = parseDateSafe(completedRaw);
-    const expectedMinutes = getExpectedMinutesForTask(task);
-    if (!start || !end || expectedMinutes <= 0) return null;
-    const elapsedMinutes = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 60000));
-    return elapsedMinutes <= expectedMinutes ? 'on_time' : 'late';
-  }, [stagesByDept, departments, getExpectedMinutesForTask]);
-
   const getSortableValue = useCallback((task: any, key: string): any => {
     const taskStages = stagesByDept.get(task.department_id?.toString()) || [];
     const department = departments.find((d: any) => d.id.toString() === task.department_id?.toString());
@@ -171,6 +239,9 @@ export function TaskListTable({
       case 'id': return task.id ?? 0;
       case 'job_description': return (task.job_description || '').toLowerCase();
       case 'company': return (companies.get(task.company_id)?.name || task.company_name || '').toLowerCase();
+      case 'applicant': return (task.applicant_name || '').toLowerCase();
+      case 'company_prefix': return getCompanyPrefixFromParticipants(task, companies).toLowerCase();
+      case 'sponsor_name': return (getSponsorName(task) || '').toLowerCase();
       case 'department': return (department?.name || '').toLowerCase();
       case 'subdepartment': return (subdepartment?.name || '').toLowerCase();
       case 'class': return (classItem?.name || '').toLowerCase();
@@ -179,20 +250,22 @@ export function TaskListTable({
       case 'current_stage': return (getCanonicalCurrentStage(task, taskStages, departments)?.name || '').toLowerCase();
       case 'duration': return (enhancedTask.duration || task.duration || '').toLowerCase();
       case 'application_type': return (enhancedTask.renewal_status || task.renewal_status || '').toLowerCase();
-      case 'registered': return parseDateSafe(task.date_initiated || task.created_at)?.getTime() || 0;
-      case 'req_sent': return parseDateSafe(resolveMilestoneDate(task, REQ_SENT_STAGE_ID))?.getTime() || 0;
+      case 'registered': return parseDateSafe(resolveMilestoneDate(task, ENQUIRY_STAGE_ID))?.getTime() || 0;
       case 'confirmed': return parseDateSafe(resolveMilestoneDate(task, CONFIRMED_STAGE_ID))?.getTime() || 0;
+      case 'req_sent': return parseDateSafe(resolveMilestoneDate(task, REQ_SENT_STAGE_ID))?.getTime() || 0;
+      case 'req_received_completed': return parseDateSafe(resolveMilestoneDate(task, REQ_RECEIVED_COMPLETED_STAGE_ID))?.getTime() || 0;
+      case 'promised_time': return getPromisedTimeResolutionForTask?.(task)?.minutes ?? 0;
+      case 'planned_execution': return getPlannedExecutionDateForTask?.(task)?.getTime() ?? 0;
+      case 'actual_execution': return getActualTimeInfoForTask?.(task)?.actualMinutes ?? 0;
+      case 'execution_delta': return getActualTimeInfoForTask?.(task)?.deltaMinutes ?? 0;
+      case 'stages_time_expected': return getExpectedMinutesForTask?.(task) ?? 0;
       case 'completed': {
         if (!COMPLETED_STATUSES.includes(task.status)) return 0;
         return parseDateSafe(getLastDatedStage(task, taskStages, departments))?.getTime() || 0;
       }
-      case 'on_time': {
-        const v = getOnTimeStatus(task);
-        return v === 'late' ? 1 : v === 'on_time' ? 2 : 0;
-      }
       default: return '';
     }
-  }, [departments, stagesByDept, companies, enhancedTasksData, getOnTimeStatus]);
+  }, [departments, stagesByDept, companies, enhancedTasksData, getPromisedTimeResolutionForTask, getPlannedExecutionDateForTask, getActualTimeInfoForTask, getExpectedMinutesForTask]);
 
   const sortedTasks = useMemo(() => {
     if (!sortConfig) return tasks;
@@ -231,6 +304,9 @@ export function TaskListTable({
         id: task.id,
         jobDescription: task.job_description || null,
         companyName: companies.get(task.company_id)?.name || task.company_name || null,
+        applicantName: task.applicant_name || null,
+        companyPrefix: getCompanyPrefixFromParticipants(task, companies),
+        sponsorName: getSponsorName(task),
         department: department?.name || null,
         subdepartment: subdepartment?.name || null,
         class: classItem?.name || null,
@@ -240,20 +316,27 @@ export function TaskListTable({
         currentStage: getCanonicalCurrentStage(task, taskStages, departments)?.name || null,
         duration: enhancedTask.duration || task.duration || null,
         applicationType: enhancedTask.renewal_status || task.renewal_status || null,
-        registered: task.date_initiated || task.created_at || null,
-        reqSent: resolveMilestoneDate(task, REQ_SENT_STAGE_ID),
+        registered: resolveMilestoneDate(task, ENQUIRY_STAGE_ID),
         confirmed: resolveMilestoneDate(task, CONFIRMED_STAGE_ID),
+        reqSent: resolveMilestoneDate(task, REQ_SENT_STAGE_ID),
+        reqReceivedCompleted: resolveMilestoneDate(task, REQ_RECEIVED_COMPLETED_STAGE_ID),
+        promisedTimeResolution: getPromisedTimeResolutionForTask?.(task) ?? null,
+        plannedExecution: getPlannedExecutionDateForTask?.(task) ?? null,
+        actualExecutionInfo: getActualTimeInfoForTask?.(task) ?? null,
+        stagesTimeExpected: getExpectedMinutesForTask?.(task) ?? 0,
         completed: COMPLETED_STATUSES.includes(task.status) ? getLastDatedStage(task, taskStages, departments) : null,
-        onTime: getOnTimeStatus(task),
       });
     });
     return map;
-  }, [sortedTasks, departments, stagesByDept, companies, enhancedTasksData, getOnTimeStatus]);
+  }, [sortedTasks, departments, stagesByDept, companies, enhancedTasksData, getPromisedTimeResolutionForTask, getPlannedExecutionDateForTask, getActualTimeInfoForTask, getExpectedMinutesForTask]);
 
   const transposedFields = useMemo(() => {
     const fields = [
       { key: 'job_description', label: 'Job Description' },
       ...(showCompanyColumn ? [{ key: 'company', label: 'Company' }] : []),
+      { key: 'applicant', label: 'Applicant Name' },
+      { key: 'company_prefix', label: 'Company Prefix' },
+      { key: 'sponsor_name', label: 'Sponsor Name' },
       { key: 'department', label: 'Department' },
       { key: 'subdepartment', label: 'Sub-Department' },
       { key: 'class', label: 'Class' },
@@ -262,11 +345,16 @@ export function TaskListTable({
       { key: 'current_stage', label: 'Current Stage Name' },
       { key: 'duration', label: 'Duration' },
       { key: 'application_type', label: 'Application Type' },
-      { key: 'registered', label: 'Registered Date' },
-      { key: 'req_sent', label: 'Req Sent Date' },
+      { key: 'registered', label: 'Enquiry Date' },
       { key: 'confirmed', label: 'Confirmed Date' },
-      { key: 'completed', label: 'Completed Date' },
-      { key: 'on_time', label: 'On Time?' },
+      { key: 'req_sent', label: 'Bill(Quote) Raised & Req. Checklist Sent' },
+      { key: 'req_received_completed', label: 'Req. Received & Completed Date' },
+      { key: 'promised_time', label: 'Promised Time' },
+      { key: 'planned_execution', label: 'Planned Execution' },
+      { key: 'actual_execution', label: 'Actual Execution' },
+      { key: 'execution_delta', label: 'Δ vs Promised' },
+      { key: 'stages_time_expected', label: 'Stages Time Expected' },
+      { key: 'completed', label: 'Last Activity Date' },
       { key: 'open', label: 'Open' },
     ];
     return fields;
@@ -277,6 +365,9 @@ export function TaskListTable({
       case 'job_description':
         return view.jobDescription ? <span className="text-slate-900 font-semibold whitespace-normal">{view.jobDescription}</span> : null;
       case 'company': return view.companyName || null;
+      case 'applicant': return view.applicantName || null;
+      case 'company_prefix': return view.companyPrefix && view.companyPrefix !== 'N/A' ? view.companyPrefix : null;
+      case 'sponsor_name': return view.sponsorName || null;
       case 'department': return view.department || null;
       case 'subdepartment': return view.subdepartment || null;
       case 'class': return view.class || null;
@@ -294,25 +385,28 @@ export function TaskListTable({
       case 'duration': return view.duration || null;
       case 'application_type': return view.applicationType || null;
       case 'registered': return formatDateCell(view.registered, showTime);
-      case 'req_sent': return formatDateCell(view.reqSent, showTime);
       case 'confirmed': return formatDateCell(view.confirmed, showTime);
+      case 'req_sent': return formatDateCell(view.reqSent, showTime);
+      case 'req_received_completed': return formatDateCell(view.reqReceivedCompleted, showTime);
+      case 'promised_time': {
+        const r = view.promisedTimeResolution;
+        if (!r?.minutes) return null;
+        return <PromisedTimeCell display={formatEstimatedMins(r.minutes)} resolution={r} />;
+      }
+      case 'planned_execution': return view.plannedExecution ? formatDateCell(view.plannedExecution.toISOString(), showTime) : null;
+      case 'actual_execution': {
+        const info = view.actualExecutionInfo;
+        if (!info) return null;
+        const display = `${info.diffDays}d`;
+        return info.isOverdue ? <ActualTimeCell display={display} exceededMinutes={info.exceededMinutes} /> : display;
+      }
+      case 'execution_delta': {
+        const info = view.actualExecutionInfo;
+        if (!info || info.deltaMinutes == null) return null;
+        return <DeltaCell minutes={info.deltaMinutes} />;
+      }
+      case 'stages_time_expected': return view.stagesTimeExpected > 0 ? formatEstimatedMins(view.stagesTimeExpected) : null;
       case 'completed': return view.completed ? formatDateCell(view.completed, showTime) : null;
-      case 'on_time':
-        if (view.onTime === 'on_time') {
-          return (
-            <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" /> On Time
-            </span>
-          );
-        }
-        if (view.onTime === 'late') {
-          return (
-            <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full bg-rose-50 text-rose-600">
-              <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" /> Late
-            </span>
-          );
-        }
-        return null;
       case 'open':
         return (
           <Link
@@ -461,6 +555,9 @@ export function TaskListTable({
                 Company
               </Th>
             )}
+            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="applicant">Applicant Name</Th>
+            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="company_prefix">Company Prefix</Th>
+            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="sponsor_name">Sponsor Name</Th>
             <Th sortConfig={sortConfig} onSort={handleSort} sortKey="department">Department</Th>
             <Th sortConfig={sortConfig} onSort={handleSort} sortKey="subdepartment">Sub-Department</Th>
             <Th sortConfig={sortConfig} onSort={handleSort} sortKey="class">Class</Th>
@@ -469,11 +566,16 @@ export function TaskListTable({
             <Th sortConfig={sortConfig} onSort={handleSort} sortKey="current_stage">Current Stage</Th>
             <Th sortConfig={sortConfig} onSort={handleSort} sortKey="duration">Duration</Th>
             <Th sortConfig={sortConfig} onSort={handleSort} sortKey="application_type">Application Type</Th>
-            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="registered">Registered</Th>
-            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="req_sent">Req Sent</Th>
+            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="registered">Enquiry Date</Th>
             <Th sortConfig={sortConfig} onSort={handleSort} sortKey="confirmed">Confirmed</Th>
-            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="completed">Completed</Th>
-            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="on_time">On Time?</Th>
+            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="req_sent">Req Sent</Th>
+            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="req_received_completed">Req. Received & Completed</Th>
+            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="promised_time">Promised Time</Th>
+            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="planned_execution">Planned Execution</Th>
+            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="actual_execution">Actual Execution</Th>
+            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="execution_delta">Δ vs Promised</Th>
+            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="stages_time_expected">Stages Time Expected</Th>
+            <Th sortConfig={sortConfig} onSort={handleSort} sortKey="completed">Last Activity</Th>
             <Th sortConfig={sortConfig} onSort={handleSort}>Open</Th>
           </TableRow>
         </TableHeader>
@@ -483,7 +585,6 @@ export function TaskListTable({
             const taskStages = stagesByDept.get(task.department_id?.toString()) || [];
             const currentStageName = getCanonicalCurrentStage(task, taskStages, departments)?.name || null;
             const company = companies.get(task.company_id);
-            const registered = task.date_initiated || task.created_at || null;
 
             const department = departments.find((d: any) => d.id.toString() === task.department_id?.toString());
             const subdepartment = department?.tm_subdepartments?.find((s: any) => s.id.toString() === task.subdepartment_id?.toString());
@@ -493,13 +594,20 @@ export function TaskListTable({
             const enhancedTask = enhancedTasksData?.get(task.id?.toString()) || task;
             const duration = enhancedTask.duration || task.duration || null;
             const applicationType = enhancedTask.renewal_status || task.renewal_status || null;
+            const companyPrefix = getCompanyPrefixFromParticipants(task, companies);
+            const sponsorName = getSponsorName(task);
 
-            const reqSentRaw = resolveMilestoneDate(task, REQ_SENT_STAGE_ID);
+            const registeredRaw = resolveMilestoneDate(task, ENQUIRY_STAGE_ID);
             const confirmedRaw = resolveMilestoneDate(task, CONFIRMED_STAGE_ID);
+            const reqSentRaw = resolveMilestoneDate(task, REQ_SENT_STAGE_ID);
+            const reqReceivedCompletedRaw = resolveMilestoneDate(task, REQ_RECEIVED_COMPLETED_STAGE_ID);
             const isCompleted = COMPLETED_STATUSES.includes(task.status);
             const completedRaw = isCompleted ? getLastDatedStage(task, taskStages, departments) : null;
 
-            const onTime = getOnTimeStatus(task);
+            const promisedTimeResolution = getPromisedTimeResolutionForTask?.(task) ?? null;
+            const plannedExecution = getPlannedExecutionDateForTask?.(task) ?? null;
+            const actualExecutionInfo = getActualTimeInfoForTask?.(task) ?? null;
+            const stagesTimeExpected = getExpectedMinutesForTask?.(task) ?? 0;
 
             return (
               <TableRow key={task.id} className={cn("group border-0 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "hover:bg-blue-50/50")}>
@@ -519,6 +627,9 @@ export function TaskListTable({
                     {company?.name || task.company_name}
                   </Td>
                 )}
+                <Td idx={idx}>{task.applicant_name}</Td>
+                <Td idx={idx}>{companyPrefix && companyPrefix !== 'N/A' ? companyPrefix : null}</Td>
+                <Td idx={idx}>{sponsorName}</Td>
                 <Td idx={idx}>{department?.name}</Td>
                 <Td idx={idx}>{subdepartment?.name}</Td>
                 <Td idx={idx}>{classItem?.name}</Td>
@@ -532,21 +643,28 @@ export function TaskListTable({
                 <Td idx={idx}>{currentStageName}</Td>
                 <Td idx={idx}>{duration}</Td>
                 <Td idx={idx}>{applicationType}</Td>
-                <Td idx={idx}>{formatDateCell(registered, showTime)}</Td>
-                <Td idx={idx}>{formatDateCell(reqSentRaw, showTime)}</Td>
+                <Td idx={idx}>{formatDateCell(registeredRaw, showTime)}</Td>
                 <Td idx={idx}>{formatDateCell(confirmedRaw, showTime)}</Td>
-                <Td idx={idx}>{completedRaw ? formatDateCell(completedRaw, showTime) : null}</Td>
+                <Td idx={idx}>{formatDateCell(reqSentRaw, showTime)}</Td>
+                <Td idx={idx}>{formatDateCell(reqReceivedCompletedRaw, showTime)}</Td>
                 <Td idx={idx}>
-                  {onTime === 'on_time' ? (
-                    <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" /> On Time
-                    </span>
-                  ) : onTime === 'late' ? (
-                    <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full bg-rose-50 text-rose-600">
-                      <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" /> Late
-                    </span>
-                  ) : null}
+                  {promisedTimeResolution?.minutes
+                    ? <PromisedTimeCell display={formatEstimatedMins(promisedTimeResolution.minutes)} resolution={promisedTimeResolution} />
+                    : null}
                 </Td>
+                <Td idx={idx}>{plannedExecution ? formatDateCell(plannedExecution.toISOString(), showTime) : null}</Td>
+                <Td idx={idx}>
+                  {actualExecutionInfo
+                    ? (actualExecutionInfo.isOverdue
+                      ? <ActualTimeCell display={`${actualExecutionInfo.diffDays}d`} exceededMinutes={actualExecutionInfo.exceededMinutes} />
+                      : `${actualExecutionInfo.diffDays}d`)
+                    : null}
+                </Td>
+                <Td idx={idx}>
+                  {actualExecutionInfo?.deltaMinutes != null ? <DeltaCell minutes={actualExecutionInfo.deltaMinutes} /> : null}
+                </Td>
+                <Td idx={idx}>{stagesTimeExpected > 0 ? formatEstimatedMins(stagesTimeExpected) : null}</Td>
+                <Td idx={idx}>{completedRaw ? formatDateCell(completedRaw, showTime) : null}</Td>
                 <TableCell className={cn("px-4 py-2.5 border-b border-slate-200 text-center", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "group-hover:bg-blue-50/50")}>
                   <Link
                     href={`/dashboard/tasks/${task.id}`}

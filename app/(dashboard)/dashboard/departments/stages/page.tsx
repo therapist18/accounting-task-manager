@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw, Trash2, Zap, Settings, Users, Link2, ArrowDownCircle } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { supabase } from "@/lib/supabase/client"
@@ -73,6 +75,12 @@ const minutesToTimeString = (minutes: number | null): string => {
   return parts.join(" ") || "0m"
 }
 
+// Promised Time — id-based key, mirrors buildLeafEntitiesRaw's leaf identity (subdept/class/
+// subclass ids), never a filtered-array position. Kept as a pure top-level function (no
+// closure over component state) so it never needs to appear in a dependency array.
+const promisedTimeKey = (subdeptId: number, classId: number | string | null, subclassId: number | string | null) =>
+  `${subdeptId}:${classId ?? "null"}:${subclassId ?? "null"}`
+
 const sortByOrder = <T extends { order?: number; order_num?: number }>(items: T[]): T[] => {
   return [...items].sort((a, b) => (a.order || a.order_num || 0) - (b.order || b.order_num || 0))
 }
@@ -108,6 +116,17 @@ export default function Stages() {
   }>({ officers: [], managers: [], assistants: [], allUsers: [] })
   const [standardPage, setStandardPage] = useState(1)
   const [standardPageSize, setStandardPageSize] = useState(25)
+  // Promised Time: manually entered per job level (subdept/class/subclass leaf), keyed by
+  // `${subdeptId}:${classId ?? 'null'}:${subclassId ?? 'null'}` — plain id-based keys, not
+  // array positions, so this stays correct regardless of entity-visibility filtering.
+  // `defaultMinutes` applies when the task's Application Type doesn't match any condition;
+  // `conditions` lets staff give a different Promised Time per Application Type value
+  // (Renewal/New/whatever they type in) — Summary Reports resolves the task's own
+  // application_type against these to pick the right Promised Time.
+  const [promisedTimeByJobLevel, setPromisedTimeByJobLevel] = useState<
+    Map<string, { defaultMinutes: number | null; conditions: { value: string; minutes: number }[] }>
+  >(new Map())
+  const [savingPromisedTimeKey, setSavingPromisedTimeKey] = useState<string | null>(null)
 
   const getEntityAutomation = (stage: Stage, entityKey: string) => {
     if (!stage.documents) return null;
@@ -750,6 +769,8 @@ export default function Stages() {
       subdeptId: number
       classIndex?: number
       subclassIndex?: number
+      classId?: number | string | null
+      subclassId?: number | string | null
       path: string
       default_display: boolean // Add this property
     }> = []
@@ -776,6 +797,12 @@ export default function Stages() {
               type: "class",
               subdeptId: subdept.id,
               classIndex: clsIndex,
+              // Stable id, captured from the already-filtered entity itself — the
+              // fix consumers should use to locate this class in the RAW/unfiltered
+              // data instead of reusing this filtered-array position as an index
+              // into it (that mismatch is what silently mutated the wrong class
+              // whenever entity-visibility filters hid rows above it).
+              classId: cls.id ?? null,
               path: `${subdept.name} → ${cls.name}`,
               default_display: cls.default_display === true, // Include default_display
             })
@@ -788,6 +815,8 @@ export default function Stages() {
                 subdeptId: subdept.id,
                 classIndex: clsIndex,
                 subclassIndex: subClsIndex,
+                classId: cls.id ?? null,
+                subclassId: subCls.id ?? null,
                 path: `${subdept.name} → ${cls.name} → ${subCls.name}`,
                 default_display: subCls.default_display === true, // Include default_display
               })
@@ -954,8 +983,8 @@ export default function Stages() {
     subdeptId: number,
     stageId: string,
     shouldAllocate: boolean,
-    classIndex: number | null = null,
-    subclassIndex: number | null = null,
+    classId: number | string | null = null,
+    subclassId: number | string | null = null,
   ) => {
     try {
       const currentDept = getCurrentDepartment()
@@ -966,10 +995,15 @@ export default function Stages() {
       let className = ""
       const stageName = currentDept.stages.find((s) => s.id === stageId)?.name || "this stage"
 
-      if (classIndex !== null && subclassIndex !== null) {
-        // Handle subclass allocation
+      if (classId !== null && subclassId !== null) {
+        // Handle subclass allocation. Always locate the class/subclass by their stable id
+        // within the RAW (unfiltered) subdepartment — never by a positional index, since
+        // any caller's index could be a position within an entity-visibility-filtered list
+        // that doesn't line up with this raw array once rows above it are hidden.
         const subdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
-        if (!subdept?.classes?.[classIndex]?.subClasses?.[subclassIndex]) {
+        const rawClass = subdept?.classes?.find((c: any) => c.id === classId)
+        const rawSubClass = rawClass?.subClasses?.find((sc: any) => sc.id === subclassId)
+        if (!subdept || !rawClass || !rawSubClass) {
           toast({
             title: "Error",
             description: "Subclass not found",
@@ -979,20 +1013,19 @@ export default function Stages() {
         }
 
         subdeptName = subdept.name
-        className = subdept.classes[classIndex].name
-        const subclassName = subdept.classes[classIndex].subClasses[subclassIndex].name
+        className = rawClass.name
 
         const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
-        if (!updatedClasses[classIndex].subClasses[subclassIndex].stages) {
-          updatedClasses[classIndex].subClasses[subclassIndex].stages = []
+        const updatedClass = updatedClasses.find((c: any) => c.id === classId)
+        const updatedSubClass = updatedClass.subClasses.find((sc: any) => sc.id === subclassId)
+        if (!updatedSubClass.stages) {
+          updatedSubClass.stages = []
         }
 
-        let stageAllocation = updatedClasses[classIndex].subClasses[subclassIndex].stages.find(
-          (s: any) => s.stage_id === stageId,
-        )
+        let stageAllocation = updatedSubClass.stages.find((s: any) => s.stage_id === stageId)
         if (!stageAllocation) {
           stageAllocation = { stage_id: stageId, applicable: true, display: true }
-          updatedClasses[classIndex].subClasses[subclassIndex].stages.push(stageAllocation)
+          updatedSubClass.stages.push(stageAllocation)
         }
 
         stageAllocation.applicable = shouldAllocate
@@ -1003,19 +1036,19 @@ export default function Stages() {
         updateData = { classes: updatedClasses }
 
         // Update parent class and subdepartment stages as well
-        if (!updatedClasses[classIndex].stages) {
-          updatedClasses[classIndex].stages = []
+        if (!updatedClass.stages) {
+          updatedClass.stages = []
         }
 
-        let classStageAllocation = updatedClasses[classIndex].stages.find((s: any) => s.stage_id === stageId)
+        let classStageAllocation = updatedClass.stages.find((s: any) => s.stage_id === stageId)
         if (!classStageAllocation) {
           classStageAllocation = { stage_id: stageId, applicable: true, display: true }
-          updatedClasses[classIndex].stages.push(classStageAllocation)
+          updatedClass.stages.push(classStageAllocation)
         }
 
         classStageAllocation.applicable =
           shouldAllocate ||
-          updatedClasses[classIndex].subClasses?.some((sc: any) =>
+          updatedClass.subClasses?.some((sc: any) =>
             sc.stages?.some((s: any) => s.stage_id === stageId && s.applicable),
           )
 
@@ -1029,10 +1062,11 @@ export default function Stages() {
         subdeptStageAllocation.applicable =
           shouldAllocate || subdeptStages.some((s) => s.stage_id === stageId && s.applicable)
         updateData.stages = subdeptStages
-      } else if (classIndex !== null) {
-        // Handle class allocation
+      } else if (classId !== null) {
+        // Handle class allocation — same id-based lookup as above.
         const subdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
-        if (!subdept?.classes?.[classIndex]) {
+        const rawClass = subdept?.classes?.find((c: any) => c.id === classId)
+        if (!subdept || !rawClass) {
           toast({
             title: "Error",
             description: "Class not found",
@@ -1042,17 +1076,18 @@ export default function Stages() {
         }
 
         subdeptName = subdept.name
-        className = subdept.classes[classIndex].name
+        className = rawClass.name
 
         const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
-        if (!updatedClasses[classIndex].stages) {
-          updatedClasses[classIndex].stages = []
+        const updatedClass = updatedClasses.find((c: any) => c.id === classId)
+        if (!updatedClass.stages) {
+          updatedClass.stages = []
         }
 
-        let stageAllocation = updatedClasses[classIndex].stages.find((s: any) => s.stage_id === stageId)
+        let stageAllocation = updatedClass.stages.find((s: any) => s.stage_id === stageId)
         if (!stageAllocation) {
           stageAllocation = { stage_id: stageId, applicable: true, display: true }
-          updatedClasses[classIndex].stages.push(stageAllocation)
+          updatedClass.stages.push(stageAllocation)
         }
 
         stageAllocation.applicable = shouldAllocate
@@ -1129,19 +1164,20 @@ export default function Stages() {
               dept.subdepartments?.map((subdept) => {
                 if (subdept.id !== subdeptId) return subdept
 
-                if (classIndex !== null && subclassIndex !== null) {
+                if (classId !== null && subclassId !== null) {
                   // Update subclass
                   const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
-                  if (!updatedClasses[classIndex].subClasses[subclassIndex].stages) {
-                    updatedClasses[classIndex].subClasses[subclassIndex].stages = []
+                  const updatedClass = updatedClasses.find((c: any) => c.id === classId)
+                  const updatedSubClass = updatedClass?.subClasses?.find((sc: any) => sc.id === subclassId)
+                  if (!updatedClass || !updatedSubClass) return subdept
+                  if (!updatedSubClass.stages) {
+                    updatedSubClass.stages = []
                   }
 
-                  let stageAllocation = updatedClasses[classIndex].subClasses[subclassIndex].stages.find(
-                    (s: any) => s.stage_id === stageId,
-                  )
+                  let stageAllocation = updatedSubClass.stages.find((s: any) => s.stage_id === stageId)
                   if (!stageAllocation) {
                     stageAllocation = { stage_id: stageId, applicable: true, display: true }
-                    updatedClasses[classIndex].subClasses[subclassIndex].stages.push(stageAllocation)
+                    updatedSubClass.stages.push(stageAllocation)
                   }
 
                   stageAllocation.applicable = shouldAllocate
@@ -1153,17 +1189,19 @@ export default function Stages() {
                     ...subdept,
                     classes: updatedClasses,
                   }
-                } else if (classIndex !== null) {
+                } else if (classId !== null) {
                   // Update class
                   const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
-                  if (!updatedClasses[classIndex].stages) {
-                    updatedClasses[classIndex].stages = []
+                  const updatedClass = updatedClasses.find((c: any) => c.id === classId)
+                  if (!updatedClass) return subdept
+                  if (!updatedClass.stages) {
+                    updatedClass.stages = []
                   }
 
-                  let stageAllocation = updatedClasses[classIndex].stages.find((s: any) => s.stage_id === stageId)
+                  let stageAllocation = updatedClass.stages.find((s: any) => s.stage_id === stageId)
                   if (!stageAllocation) {
                     stageAllocation = { stage_id: stageId, applicable: true, display: true }
-                    updatedClasses[classIndex].stages.push(stageAllocation)
+                    updatedClass.stages.push(stageAllocation)
                   }
 
                   stageAllocation.applicable = shouldAllocate
@@ -1228,8 +1266,8 @@ export default function Stages() {
     subdeptId: number,
     stageId: string,
     checked: boolean,
-    classIndex: number | null = null,
-    subclassIndex: number | null = null,
+    classId: number | string | null = null,
+    subclassId: number | string | null = null,
   ) => {
     try {
       const currentDept = getCurrentDepartment()
@@ -1240,10 +1278,14 @@ export default function Stages() {
       let className = ""
       const stageName = currentDept.stages.find((s) => s.id === stageId)?.name || "this stage"
 
-      if (classIndex !== null && subclassIndex !== null) {
-        // Handle subclass display toggle
+      if (classId !== null && subclassId !== null) {
+        // Handle subclass display toggle. Same id-based lookup into the RAW/unfiltered
+        // data as handleAllocationChange — see the comment there for why this can't be a
+        // positional index sourced from an entity-visibility-filtered render list.
         const subdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
-        if (!subdept?.classes?.[classIndex]?.subClasses?.[subclassIndex]) {
+        const rawClass = subdept?.classes?.find((c: any) => c.id === classId)
+        const rawSubClass = rawClass?.subClasses?.find((sc: any) => sc.id === subclassId)
+        if (!subdept || !rawClass || !rawSubClass) {
           toast({
             title: "Error",
             description: "Subclass not found",
@@ -1253,28 +1295,28 @@ export default function Stages() {
         }
 
         subdeptName = subdept.name
-        className = subdept.classes[classIndex].name
-        const subclassName = subdept.classes[classIndex].subClasses[subclassIndex].name
+        className = rawClass.name
 
         const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
-        if (!updatedClasses[classIndex].subClasses[subclassIndex].stages) {
-          updatedClasses[classIndex].subClasses[subclassIndex].stages = []
+        const updatedClass = updatedClasses.find((c: any) => c.id === classId)
+        const updatedSubClass = updatedClass.subClasses.find((sc: any) => sc.id === subclassId)
+        if (!updatedSubClass.stages) {
+          updatedSubClass.stages = []
         }
 
-        let stageAllocation = updatedClasses[classIndex].subClasses[subclassIndex].stages.find(
-          (s: any) => s.stage_id === stageId,
-        )
+        let stageAllocation = updatedSubClass.stages.find((s: any) => s.stage_id === stageId)
         if (!stageAllocation) {
           stageAllocation = { stage_id: stageId, applicable: true, display: true }
-          updatedClasses[classIndex].subClasses[subclassIndex].stages.push(stageAllocation)
+          updatedSubClass.stages.push(stageAllocation)
         }
 
         stageAllocation.display = checked
         updateData = { classes: updatedClasses }
-      } else if (classIndex !== null) {
+      } else if (classId !== null) {
         // Handle class display toggle
         const subdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
-        if (!subdept?.classes?.[classIndex]) {
+        const rawClass = subdept?.classes?.find((c: any) => c.id === classId)
+        if (!subdept || !rawClass) {
           toast({
             title: "Error",
             description: "Class not found",
@@ -1284,17 +1326,18 @@ export default function Stages() {
         }
 
         subdeptName = subdept.name
-        className = subdept.classes[classIndex].name
+        className = rawClass.name
 
         const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
-        if (!updatedClasses[classIndex].stages) {
-          updatedClasses[classIndex].stages = []
+        const updatedClass = updatedClasses.find((c: any) => c.id === classId)
+        if (!updatedClass.stages) {
+          updatedClass.stages = []
         }
 
-        let stageAllocation = updatedClasses[classIndex].stages.find((s: any) => s.stage_id === stageId)
+        let stageAllocation = updatedClass.stages.find((s: any) => s.stage_id === stageId)
         if (!stageAllocation) {
           stageAllocation = { stage_id: stageId, applicable: true, display: true }
-          updatedClasses[classIndex].stages.push(stageAllocation)
+          updatedClass.stages.push(stageAllocation)
         }
 
         stageAllocation.display = checked
@@ -1350,18 +1393,19 @@ export default function Stages() {
               dept.subdepartments?.map((subdept) => {
                 if (subdept.id !== subdeptId) return subdept
 
-                if (classIndex !== null && subclassIndex !== null) {
-                  const updatedClasses = [...(subdept.classes || [])]
-                  if (!updatedClasses[classIndex].subClasses[subclassIndex].stages) {
-                    updatedClasses[classIndex].subClasses[subclassIndex].stages = []
+                if (classId !== null && subclassId !== null) {
+                  const updatedClasses = JSON.parse(JSON.stringify(subdept.classes || []))
+                  const updatedClass = updatedClasses.find((c: any) => c.id === classId)
+                  const updatedSubClass = updatedClass?.subClasses?.find((sc: any) => sc.id === subclassId)
+                  if (!updatedClass || !updatedSubClass) return subdept
+                  if (!updatedSubClass.stages) {
+                    updatedSubClass.stages = []
                   }
 
-                  let stageAllocation = updatedClasses[classIndex].subClasses[subclassIndex].stages.find(
-                    (s: any) => s.stage_id === stageId,
-                  )
+                  let stageAllocation = updatedSubClass.stages.find((s: any) => s.stage_id === stageId)
                   if (!stageAllocation) {
                     stageAllocation = { stage_id: stageId, applicable: true, display: true }
-                    updatedClasses[classIndex].subClasses[subclassIndex].stages.push(stageAllocation)
+                    updatedSubClass.stages.push(stageAllocation)
                   }
 
                   stageAllocation.display = checked
@@ -1370,16 +1414,18 @@ export default function Stages() {
                     ...subdept,
                     classes: updatedClasses,
                   }
-                } else if (classIndex !== null) {
-                  const updatedClasses = [...(subdept.classes || [])]
-                  if (!updatedClasses[classIndex].stages) {
-                    updatedClasses[classIndex].stages = []
+                } else if (classId !== null) {
+                  const updatedClasses = JSON.parse(JSON.stringify(subdept.classes || []))
+                  const updatedClass = updatedClasses.find((c: any) => c.id === classId)
+                  if (!updatedClass) return subdept
+                  if (!updatedClass.stages) {
+                    updatedClass.stages = []
                   }
 
-                  let stageAllocation = updatedClasses[classIndex].stages.find((s: any) => s.stage_id === stageId)
+                  let stageAllocation = updatedClass.stages.find((s: any) => s.stage_id === stageId)
                   if (!stageAllocation) {
                     stageAllocation = { stage_id: stageId, applicable: true, display: true }
-                    updatedClasses[classIndex].stages.push(stageAllocation)
+                    updatedClass.stages.push(stageAllocation)
                   }
 
                   stageAllocation.display = checked
@@ -1916,6 +1962,312 @@ export default function Stages() {
     }
   }
 
+  // Load every stored Promised Time for the active department whenever it changes —
+  // unlike Overall Expected Time, this value isn't derivable from stages, so it has to be
+  // read back from tm_class_requirements rather than recomputed client-side.
+  useEffect(() => {
+    if (!activeTab) return
+    let cancelled = false
+
+    const loadPromisedTimes = async () => {
+      const { data, error } = await supabase
+        .from("tm_class_requirements")
+        .select("job_level, promised_time")
+        .eq("job_level->>department_id", String(activeTab))
+
+      if (cancelled) return
+      if (error) {
+        console.error("Error loading promised times:", error)
+        return
+      }
+
+      const map = new Map<string, { defaultMinutes: number | null; conditions: { value: string; minutes: number }[] }>()
+      ;(data || []).forEach((row: any) => {
+        const jl = row.job_level || {}
+        if (jl.subdepartment_id == null) return
+        const pt = row.promised_time || {}
+        const hasDefault = typeof pt.defaultMinutes === "number"
+        const conditions = Array.isArray(pt.conditions)
+          ? pt.conditions.filter((c: any) => c && typeof c.value === "string" && typeof c.minutes === "number")
+          : []
+        if (!hasDefault && conditions.length === 0) return
+        map.set(promisedTimeKey(Number(jl.subdepartment_id), jl.class_id ?? null, jl.subclass_id ?? null), {
+          defaultMinutes: hasDefault ? pt.defaultMinutes : null,
+          conditions,
+        })
+      })
+      setPromisedTimeByJobLevel(map)
+    }
+
+    loadPromisedTimes()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab])
+
+  // Persists one leaf's Promised Time. `leaf` always carries the entity's real database
+  // ids (never a filtered-array index — see getLeafEntities/getProcessedSubdepartments),
+  // so this writes to the same job level the user is actually looking at regardless of
+  // which entity-visibility filters happen to be active.
+  //
+  // Wrapped in useCallback (stable identity as long as activeTab doesn't change) because
+  // PromisedTimeCell below depends on it and is itself memoized — see that component's
+  // comment for why an unstable identity here would matter.
+  const savePromisedTime = useCallback(async (
+    leaf: { subdeptId: number; classId: number | string | null; subclassId: number | string | null; level: number },
+    value: { defaultMinutes: number | null; conditions: { value: string; minutes: number }[] },
+  ) => {
+    const key = promisedTimeKey(leaf.subdeptId, leaf.classId, leaf.subclassId)
+    setSavingPromisedTimeKey(key)
+    try {
+      const jobLevel = {
+        department_id: Number(activeTab),
+        subdepartment_id: Number(leaf.subdeptId),
+        class_id: leaf.classId != null ? leaf.classId : null,
+        subclass_id: leaf.subclassId != null ? leaf.subclassId : null,
+        level: leaf.level,
+      }
+
+      const { data: existingRows, error: fetchError } = await supabase
+        .from("tm_class_requirements")
+        .select("id, job_level")
+        .eq("job_level->>department_id", String(activeTab))
+        .eq("job_level->>subdepartment_id", String(leaf.subdeptId))
+      if (fetchError) throw fetchError
+
+      const keyPart = (v: any) => (v === null || v === undefined ? "null" : String(v))
+      const existing = (existingRows || []).find((row: any) => {
+        const jl = row.job_level || {}
+        return keyPart(jl.class_id) === keyPart(jobLevel.class_id) && keyPart(jl.subclass_id) === keyPart(jobLevel.subclass_id)
+      })
+
+      const payload = { promised_time: value }
+
+      if (existing) {
+        const { error } = await supabase
+          .from("tm_class_requirements")
+          .update({ ...payload, updated_at: new Date().toISOString() })
+          .eq("id", existing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase
+          .from("tm_class_requirements")
+          .insert({ job_level: jobLevel, ...payload, created_at: new Date().toISOString() })
+        if (error) throw error
+      }
+
+      setPromisedTimeByJobLevel((prev) => {
+        const next = new Map(prev)
+        next.set(key, value)
+        return next
+      })
+
+      toast({ title: "Success", description: "Promised time saved." })
+    } catch (err) {
+      console.error("Error saving promised time:", err)
+      toast({
+        title: "Error",
+        description: "Failed to save promised time. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setSavingPromisedTimeKey(null)
+    }
+  }, [activeTab])
+
+  // Inline-editable "Promised Time" cell for a single leaf job level (subdept/class/subclass
+  // with no children). Popover form mirrors EditStageDialog's days/hours/minutes inputs for
+  // estimated_time, so entering a promised time uses the same UX as entering a stage duration.
+  //
+  // Wrapped in useCallback so its identity stays stable across unrelated re-renders of this
+  // (very large, frequently-re-rendering) page. Without this, every row-expand, filter toggle,
+  // or search keystroke elsewhere on the page would redefine PromisedTimeCell as a "new"
+  // component type, and React would unmount+remount every instance of it — silently closing
+  // any open popover and discarding whatever days/hours/minutes the user had half-typed.
+  // (Same reasoning as DocumentDisplay above, which uses the same pattern.)
+  const PromisedTimeCell = useCallback(({
+    leaf,
+  }: {
+    leaf: { subdeptId: number; classId: number | string | null; subclassId: number | string | null; level: number }
+  }) => {
+    const key = promisedTimeKey(leaf.subdeptId, leaf.classId, leaf.subclassId)
+    const stored = promisedTimeByJobLevel.get(key)
+    const isSaving = savingPromisedTimeKey === key
+    const [open, setOpen] = useState(false)
+    // Default (fallback) Promised Time, as day/hour/minute inputs.
+    const [days, setDays] = useState(0)
+    const [hours, setHours] = useState(0)
+    const [mins, setMins] = useState(0)
+    // Per-Application-Type overrides — each row is its own day/hour/minute triple, so the
+    // draft state is a flat array rather than reusing storedMinutes-style totals directly.
+    const [conditions, setConditions] = useState<{ value: string; days: number; hours: number; mins: number }[]>([])
+
+    const handleOpenChange = (next: boolean) => {
+      if (next) {
+        const total = stored?.defaultMinutes || 0
+        setDays(Math.floor(total / (24 * 60)))
+        setHours(Math.floor((total % (24 * 60)) / 60))
+        setMins(total % 60)
+        setConditions(
+          (stored?.conditions || []).map((c) => ({
+            value: c.value,
+            days: Math.floor(c.minutes / (24 * 60)),
+            hours: Math.floor((c.minutes % (24 * 60)) / 60),
+            mins: c.minutes % 60,
+          })),
+        )
+      }
+      setOpen(next)
+    }
+
+    const updateCondition = (index: number, patch: Partial<{ value: string; days: number; hours: number; mins: number }>) => {
+      setConditions((prev) => prev.map((c, i) => (i === index ? { ...c, ...patch } : c)))
+    }
+
+    const removeCondition = (index: number) => {
+      setConditions((prev) => prev.filter((_, i) => i !== index))
+    }
+
+    const addCondition = () => {
+      setConditions((prev) => [...prev, { value: "", days: 0, hours: 0, mins: 0 }])
+    }
+
+    const handleSave = async () => {
+      const defaultMinutes = days * 24 * 60 + hours * 60 + mins
+      const resolvedConditions = conditions
+        .filter((c) => c.value.trim() !== "")
+        .map((c) => ({ value: c.value.trim(), minutes: c.days * 24 * 60 + c.hours * 60 + c.mins }))
+      await savePromisedTime(leaf, { defaultMinutes: defaultMinutes > 0 ? defaultMinutes : null, conditions: resolvedConditions })
+      setOpen(false)
+    }
+
+    const conditionCount = stored?.conditions?.length || 0
+
+    return (
+      <Popover open={open} onOpenChange={handleOpenChange}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              "w-full h-full px-2 py-1.5 text-sm font-semibold rounded transition-colors text-center flex items-center justify-center gap-1.5",
+              stored?.defaultMinutes ? "text-emerald-700 hover:bg-emerald-50" : "text-slate-400 italic hover:bg-slate-100",
+            )}
+          >
+            {stored?.defaultMinutes ? minutesToTimeString(stored.defaultMinutes) : "Set time"}
+            {conditionCount > 0 && (
+              <span className="not-italic text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                +{conditionCount}
+              </span>
+            )}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-96 p-3" align="center">
+          <div className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Default Promised Time</div>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <Input
+                type="number"
+                min="0"
+                value={days}
+                onChange={(e) => setDays(parseInt(e.target.value) || 0)}
+                className="h-8 text-center text-sm"
+              />
+              <Label className="block text-center text-[10px] text-muted-foreground mt-1">Days</Label>
+            </div>
+            <div>
+              <Input
+                type="number"
+                min="0"
+                max="23"
+                value={hours}
+                onChange={(e) => setHours(Math.min(23, parseInt(e.target.value) || 0))}
+                className="h-8 text-center text-sm"
+              />
+              <Label className="block text-center text-[10px] text-muted-foreground mt-1">Hours</Label>
+            </div>
+            <div>
+              <Input
+                type="number"
+                min="0"
+                max="59"
+                value={mins}
+                onChange={(e) => setMins(Math.min(59, parseInt(e.target.value) || 0))}
+                className="h-8 text-center text-sm"
+              />
+              <Label className="block text-center text-[10px] text-muted-foreground mt-1">Mins</Label>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between mt-4 mb-2">
+            <div className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+              Conditions (by Application Type)
+            </div>
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-blue-600 hover:bg-blue-50" onClick={addCondition}>
+              <Plus className="h-3 w-3 mr-1" /> Add
+            </Button>
+          </div>
+
+          {conditions.length === 0 ? (
+            <p className="text-xs text-slate-400 italic mb-1">
+              No conditions — every task at this job level uses the default above.
+            </p>
+          ) : (
+            <div className="space-y-2 mb-1">
+              {conditions.map((c, i) => (
+                <div key={i} className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg p-1.5">
+                  <Input
+                    placeholder="e.g. Renewal"
+                    value={c.value}
+                    onChange={(e) => updateCondition(i, { value: e.target.value })}
+                    className="h-7 text-xs flex-1 min-w-0"
+                  />
+                  <Input
+                    type="number"
+                    min="0"
+                    value={c.days}
+                    onChange={(e) => updateCondition(i, { days: parseInt(e.target.value) || 0 })}
+                    className="h-7 w-12 text-center text-xs px-1"
+                    title="Days"
+                  />
+                  <Input
+                    type="number"
+                    min="0"
+                    max="23"
+                    value={c.hours}
+                    onChange={(e) => updateCondition(i, { hours: Math.min(23, parseInt(e.target.value) || 0) })}
+                    className="h-7 w-12 text-center text-xs px-1"
+                    title="Hours"
+                  />
+                  <Input
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={c.mins}
+                    onChange={(e) => updateCondition(i, { mins: Math.min(59, parseInt(e.target.value) || 0) })}
+                    className="h-7 w-12 text-center text-xs px-1"
+                    title="Minutes"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0 text-red-500 hover:bg-red-50"
+                    onClick={() => removeCondition(i)}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <Button size="sm" className="w-full mt-3 h-8 text-xs" onClick={handleSave} disabled={isSaving}>
+            {isSaving ? "Saving..." : "Save"}
+          </Button>
+        </PopoverContent>
+      </Popover>
+    )
+  }, [promisedTimeByJobLevel, savingPromisedTimeKey, savePromisedTime])
+
   // Effect to fetch all KYC documents
   useEffect(() => {
     const fetchAllKycDocuments = async () => {
@@ -2447,19 +2799,20 @@ export default function Stages() {
     const subdept = processedSubdepartments.find((sd) => sd.id === entity.subdeptId);
     if (!subdept) return { applicable: true, display: true };
 
+    // Resolve directly by the entity's own stable classId/subclassId (captured in
+    // getLeafEntities off the already-filtered class/subclass), never by re-indexing
+    // into currentDept's raw/unfiltered arrays with a position that was only ever valid
+    // within the filtered list — that mismatch used to return the wrong class/subclass
+    // (or throw, when the index ran past the raw array's length) whenever entity-visibility
+    // filters hid any rows above the one being read.
     if (entity.type === "subdepartment") {
       stageAllocation = subdept.stages?.find((s) => s.stage_id === stage.id);
-    } else if (entity.type === "class" && entity.classIndex !== undefined) {
-      const originalSubdept = currentDept.subdepartments.find(sd => sd.id === entity.subdeptId);
-      const originalClass = originalSubdept?.classes?.[entity.classIndex];
-      const processedClass = subdept.classes.find(c => c.id === originalClass.id);
+    } else if (entity.type === "class" && entity.classId != null) {
+      const processedClass = subdept.classes?.find((c) => c.id === entity.classId);
       stageAllocation = processedClass?.stages?.find((s) => s.stage_id === stage.id);
-    } else if (entity.type === "subclass" && entity.classIndex !== undefined && entity.subclassIndex !== undefined) {
-      const originalSubdept = currentDept.subdepartments.find(sd => sd.id === entity.subdeptId);
-      const originalClass = originalSubdept?.classes?.[entity.classIndex];
-      const originalSubClass = originalClass?.subClasses?.[entity.subclassIndex];
-      const processedClass = subdept.classes.find(c => c.id === originalClass.id);
-      const processedSubClass = processedClass?.subClasses?.find(sc => sc.id === originalSubClass.id);
+    } else if (entity.type === "subclass" && entity.classId != null && entity.subclassId != null) {
+      const processedClass = subdept.classes?.find((c) => c.id === entity.classId);
+      const processedSubClass = processedClass?.subClasses?.find((sc) => sc.id === entity.subclassId);
       stageAllocation = processedSubClass?.stages?.find((s) => s.stage_id === stage.id);
     }
 
@@ -2885,7 +3238,7 @@ export default function Stages() {
                             {/* Status Select */}
                             <Select
                               value={allocation.applicable ? "applicable" : "not-applicable"}
-                              onValueChange={(val) => handleAllocationChange(entity.subdeptId, stage.id, val === "applicable", entity.classIndex, entity.subclassIndex)}
+                              onValueChange={(val) => handleAllocationChange(entity.subdeptId, stage.id, val === "applicable", entity.classId ?? null, entity.subclassId ?? null)}
                             >
                               <SelectTrigger className="h-7 border-0 shadow-none text-xs bg-transparent hover:bg-gray-200/50">
                                 <SelectValue />
@@ -2929,8 +3282,8 @@ export default function Stages() {
                                   entity.subdeptId,
                                   stage.id,
                                   checked as boolean,
-                                  entity.classIndex,
-                                  entity.subclassIndex,
+                                  entity.classId ?? null,
+                                  entity.subclassId ?? null,
                                 )
                               }
                               disabled={!allocation.applicable}
@@ -2984,18 +3337,24 @@ export default function Stages() {
       standardPage * standardPageSize,
     )
 
-    // The "Overall Expected Time" column sits between Entity and Stage Name, so every
-    // sticky-left offset that used to start at Stage Name shifts right by its width (w-32).
+    // The "Overall Expected Time" and "Promised Time" columns sit between Entity and Stage
+    // Name (in that order), so every sticky-left offset that used to start at Stage Name
+    // shifts right by both their widths (w-32 each).
     const expectedTimeLeftClass = columnVisibility.index && columnVisibility.entity
       ? "left-80"
       : columnVisibility.index || columnVisibility.entity
         ? "left-64"
         : "left-0"
-    const stageNameLeftClass = columnVisibility.index && columnVisibility.entity
+    const promisedTimeLeftClass = columnVisibility.index && columnVisibility.entity
       ? "left-[28rem]"
       : columnVisibility.index || columnVisibility.entity
         ? "left-96"
         : "left-32"
+    const stageNameLeftClass = columnVisibility.index && columnVisibility.entity
+      ? "left-[36rem]"
+      : columnVisibility.index || columnVisibility.entity
+        ? "left-[32rem]"
+        : "left-64"
 
     return (
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
@@ -3032,6 +3391,12 @@ export default function Stages() {
                   rowSpan={headerRowCount}
                 >
                   Overall Expected Time
+                </TableHead>
+                <TableHead
+                  className={cn("sticky bg-blue-700 border-r-2 border-blue-500 font-bold w-32 z-40 text-white text-center", promisedTimeLeftClass)}
+                  rowSpan={headerRowCount}
+                >
+                  Promised Time
                 </TableHead>
                 {columnVisibility.stageName && (
                   <TableHead
@@ -3382,6 +3747,13 @@ export default function Stages() {
                           ),
                         )}
                     </TableCell>
+                    <TableCell className={cn("sticky bg-slate-100 border-r-2 border-slate-300 text-center text-sm z-10 p-0", promisedTimeLeftClass)}>
+                      {hasClasses ? (
+                        <span className="text-slate-400">-</span>
+                      ) : (
+                        <PromisedTimeCell leaf={{ subdeptId: subdept.id, classId: null, subclassId: null, level: 2 }} />
+                      )}
+                    </TableCell>
                     {columnVisibility.stageName && (
                       <TableCell
                         className={cn("sticky bg-slate-100 border-r-2 border-slate-300 text-center text-sm z-10", stageNameLeftClass)}
@@ -3517,6 +3889,13 @@ export default function Stages() {
                               ),
                             )}
                         </TableCell>
+                        <TableCell className={cn("sticky bg-gray-50 border-r-2 border-gray-200 text-center text-sm z-10 p-0", promisedTimeLeftClass)}>
+                          {hasSubClasses ? (
+                            <span className="text-slate-400">-</span>
+                          ) : (
+                            <PromisedTimeCell leaf={{ subdeptId: subdept.id, classId: cls.id, subclassId: null, level: 3 }} />
+                          )}
+                        </TableCell>
                         {columnVisibility.stageName && (
                           <TableCell
                             className={cn("sticky bg-gray-50 border-r-2 border-gray-200 text-center text-sm z-10", stageNameLeftClass)}
@@ -3540,7 +3919,7 @@ export default function Stages() {
                                       <Select
                                         value={hasAllocation ? "applicable" : "not-applicable"}
                                         onValueChange={(value) =>
-                                          handleAllocationChange(subdept.id, stage.id, value === "applicable", clsIndex)
+                                          handleAllocationChange(subdept.id, stage.id, value === "applicable", cls.id)
                                         }
                                       >
                                         <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-gray-200/50">
@@ -3573,7 +3952,7 @@ export default function Stages() {
                                       <Checkbox
                                         checked={hasDisplay}
                                         onCheckedChange={(checked) =>
-                                          handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex)
+                                          handleDisplayToggle(subdept.id, stage.id, checked as boolean, cls.id)
                                         }
                                         disabled={!hasAllocation}
                                         className="h-4 w-4 text-blue-500"
@@ -3624,6 +4003,9 @@ export default function Stages() {
                                 ),
                               )}
                             </TableCell>
+                            <TableCell className={cn("sticky bg-white border-r-2 border-gray-200 text-center text-sm z-10 p-0", promisedTimeLeftClass)}>
+                              <PromisedTimeCell leaf={{ subdeptId: subdept.id, classId: cls.id, subclassId: subCls.id, level: 4 }} />
+                            </TableCell>
                             {columnVisibility.stageName && (
                               <TableCell
                                 className={cn("sticky bg-white border-r-2 border-gray-200 text-center text-sm z-10", stageNameLeftClass)}
@@ -3650,8 +4032,8 @@ export default function Stages() {
                                               subdept.id,
                                               stage.id,
                                               value === "applicable",
-                                              clsIndex,
-                                              subClsIndex,
+                                              cls.id,
+                                              subCls.id,
                                             )
                                           }
                                         >
@@ -3689,8 +4071,8 @@ export default function Stages() {
                                               subdept.id,
                                               stage.id,
                                               checked as boolean,
-                                              clsIndex,
-                                              subClsIndex,
+                                              cls.id,
+                                              subCls.id,
                                             )
                                           }
                                           disabled={!hasAllocation}

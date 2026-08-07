@@ -10,18 +10,23 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { SUMMARY_COLUMNS } from "../stageColumnConfig";
 
-// ── Shared UI: PillTrack ──
-// Updated to match the "Grouped View Toggles" from the target design (e.g. Overview / Transposed)
+// ── Shared UI: Standard Tabs (replaces the old pill-style toggles) ──
+// Matches the bordered, squared-off tab look used across the app (e.g. bcl-task-diary).
+const TAB_LIST_CLASS = "bg-white border border-slate-200 p-1 h-auto rounded-md";
+const TAB_TRIGGER_CLASS = "group gap-1.5 rounded-md px-3.5 text-sm font-semibold text-slate-600 hover:text-slate-900 data-[state=active]:bg-custom-blue data-[state=active]:text-white data-[state=active]:shadow-none";
+const COUNT_BADGE_CLASS = "font-bold tabular-nums px-1.5 py-0.5 rounded-md text-xs bg-slate-100 text-slate-500 group-data-[state=active]:bg-white/20 group-data-[state=active]:text-white";
+
 export interface PillTrackItem {
   id: string;
   label: string;
   count?: number;
   icon?: React.ComponentType<{ className?: string }>;
-  activeBg?: string; 
-  dot?: string; 
+  activeBg?: string;
+  dot?: string;
 }
 
 export function PillTrack({
@@ -34,44 +39,35 @@ export function PillTrack({
   wrap?: boolean;
 }) {
   return (
-    <div className={cn(
-      "inline-flex items-center gap-1 bg-slate-100 p-1 rounded-full border border-slate-200 shrink-0",
-      wrap && "flex-wrap"
-    )}>
-      {items.map(item => {
-        const isActive = value === item.id;
-        const Icon = item.icon;
-        return (
-          <button
-            key={item.id}
-            onClick={() => onValueChange(item.id)}
-            className={cn(
-              "font-bold rounded-full transition-all flex items-center shrink-0",
-              size === 'sm' ? "h-7 px-3 text-xs gap-1.5" : "h-8 px-4 text-sm gap-2",
-              isActive 
-                ? cn(item.activeBg || "bg-custom-blue", "text-white shadow-sm") 
-                : "text-slate-500 hover:text-slate-900 hover:bg-slate-200/50"
-            )}
-          >
-            {Icon ? (
-              <Icon className={cn(size === 'sm' ? "h-3 w-3" : "h-3.5 w-3.5", isActive ? "text-white" : "text-slate-400")} />
-            ) : item.dot ? (
-              <span className={cn("h-2 w-2 rounded-full shrink-0 shadow-sm", isActive ? "bg-white" : item.dot)} />
-            ) : null}
-            {item.label}
-            {typeof item.count === 'number' && item.count > 0 && (
-              <span className={cn(
-                "font-black tabular-nums tracking-tight px-1.5 py-0.5 rounded-full font-medium",
-                size === 'sm' ? "text-[10px]" : "text-sm",
-                isActive ? "bg-white/20 text-white" : "bg-slate-200/50 text-slate-400"
-              )}>
-                {item.count}
-              </span>
-            )}
-          </button>
-        );
-      })}
-    </div>
+    <Tabs value={value} onValueChange={onValueChange} className="shrink-0">
+      <TabsList className={cn(TAB_LIST_CLASS, wrap && "flex-wrap")}>
+        {items.map(item => {
+          const Icon = item.icon;
+          return (
+            <TabsTrigger
+              key={item.id}
+              value={item.id}
+              className={cn(
+                TAB_TRIGGER_CLASS,
+                size === 'sm' ? "h-7 px-3 text-xs" : "h-8 px-4"
+              )}
+            >
+              {Icon ? (
+                <Icon className={cn(size === 'sm' ? "h-3 w-3" : "h-3.5 w-3.5", "text-slate-400 group-data-[state=active]:text-white")} />
+              ) : item.dot ? (
+                <span className={cn("h-2 w-2 rounded-full shrink-0", item.dot)} />
+              ) : null}
+              {item.label}
+              {typeof item.count === 'number' && item.count > 0 && (
+                <span className={COUNT_BADGE_CLASS}>
+                  {item.count}
+                </span>
+              )}
+            </TabsTrigger>
+          );
+        })}
+      </TabsList>
+    </Tabs>
   );
 }
 
@@ -99,7 +95,7 @@ function MultiSelectSearchableDropdown({
         <Button
           variant="outline"
           className={cn(
-            "h-10 px-5 rounded-full border-blue-500 text-sm font-semibold text-blue-600 bg-white hover:bg-blue-50 shrink-0",
+            "h-10 px-5 rounded-md border-blue-500 text-sm font-semibold text-blue-600 bg-white hover:bg-blue-50 shrink-0",
             accentActive && "bg-custom-blue border-custom-blue text-white hover:bg-[#2d5a94] hover:text-white shadow-sm"
           )}
         >
@@ -146,7 +142,7 @@ function MultiSelectSearchableDropdown({
           <div className="mt-2 p-1 border-t border-slate-100">
             <Button
               variant="ghost"
-              className="w-full h-9 rounded-xl text-xs font-bold text-slate-500 hover:text-red-600 hover:bg-red-50"
+              className="w-full h-9 rounded-md text-xs font-bold text-slate-500 hover:text-red-600 hover:bg-red-50"
               onClick={() => { onClear(); setSearch(""); }}
             >
               Clear {label} Filters
@@ -293,71 +289,50 @@ export function StatusTabs({
   const perspectiveCounts = { all: allCount || 0, officers: officersCount || 0, managers: managersCount || 0, clients: clientsCount || 0 };
 
   const PERSPECTIVES = [
-    { id: 'all', label: 'Overview', activeBg: 'bg-custom-blue', activeText: 'text-white' },
-    { id: 'officers', label: 'Officers', activeBg: 'bg-custom-blue', activeText: 'text-white' },
-    { id: 'managers', label: 'Managers', activeBg: 'bg-custom-blue', activeText: 'text-white' },
-    { id: 'clients', label: 'Clients', activeBg: 'bg-custom-blue', activeText: 'text-white' }
+    { id: 'all', label: 'Overview' },
+    { id: 'officers', label: 'Officers' },
+    { id: 'managers', label: 'Managers' },
+    { id: 'clients', label: 'Clients' },
   ];
 
   return (
     <div className="px-8 py-2 flex items-center justify-between gap-4 border-b border-slate-200 bg-white antialiased">
-      <div className="flex gap-1.5 overflow-x-auto custom-scrollbar">
-        {STATUS_ITEMS.map(tab => {
-          const isActive = activeTaskStatus === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTaskStatus(tab.id)}
-              className={cn(
-                "h-8 px-4 text-sm font-semibold rounded-full transition-all flex items-center gap-1.5",
-                isActive
-                  ? "bg-custom-blue text-white shadow-sm"
-                  : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
-              )}
-            >
-              {tab.label}
-              <span className={cn(
-                "px-1.5 py-0.5 rounded-full text-xs font-bold tabular-nums",
-                isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-400"
-              )}>
-                {counts[tab.id] || 0}
-              </span>
-            </button>
-          );
-        })}
+      <div className="overflow-x-auto custom-scrollbar shrink-0 min-w-0">
+        <Tabs value={activeTaskStatus} onValueChange={setActiveTaskStatus}>
+          <TabsList className={TAB_LIST_CLASS}>
+            {STATUS_ITEMS.map(tab => (
+              <TabsTrigger key={tab.id} value={tab.id} className={cn(TAB_TRIGGER_CLASS, "h-8")}>
+                {tab.label}
+                <span className={COUNT_BADGE_CLASS}>
+                  {counts[tab.id] || 0}
+                </span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
       </div>
 
       {setActivePerspective && (
         <div className="flex items-center gap-2.5 shrink-0">
-          <div className="flex items-center gap-1.5 shrink-0">
-            {PERSPECTIVES.map(p => (
-              <button
-                key={p.id}
-                onClick={() => setActivePerspective(p.id)}
-                className={cn(
-                  "h-8 px-4 text-sm font-semibold rounded-full transition-all flex items-center gap-1.5",
-                  activePerspective === p.id
-                    ? `${p.activeBg} ${p.activeText} shadow-sm`
-                    : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
-                )}
-              >
-                {p.label}
-                <span className={cn(
-                  "px-1.5 py-0.5 rounded-full text-xs font-bold tabular-nums",
-                  activePerspective === p.id ? `bg-white/20 ${p.activeText}` : "bg-slate-100 text-slate-400"
-                )}>
-                  {perspectiveCounts[p.id]}
-                </span>
-              </button>
-            ))}
-          </div>
+          <Tabs value={activePerspective} onValueChange={setActivePerspective}>
+            <TabsList className={TAB_LIST_CLASS}>
+              {PERSPECTIVES.map(p => (
+                <TabsTrigger key={p.id} value={p.id} className={cn(TAB_TRIGGER_CLASS, "h-8")}>
+                  {p.label}
+                  <span className={COUNT_BADGE_CLASS}>
+                    {perspectiveCounts[p.id]}
+                  </span>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
 
           {/* Mode Selector — officers only. Managers have no working history mode (manager
               filtering is always gated to "at a BCL stage right now"), matching ReportsPage's
               PersonFilterStrip mode selector. */}
           {activePerspective === 'officers' && setOfficerFilterMode && (
             <Select value={officerFilterMode} onValueChange={setOfficerFilterMode}>
-              <SelectTrigger className="w-44 h-10 bg-white border-slate-300 rounded-full text-sm font-bold shadow-sm shrink-0">
+              <SelectTrigger className="w-44 h-10 bg-white border-slate-300 rounded-md text-sm font-bold shadow-sm shrink-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="rounded-2xl">
@@ -372,7 +347,7 @@ export function StatusTabs({
               variant="outline"
               onClick={refreshData}
               disabled={loading}
-              className="h-10 px-5 rounded-full border-slate-200 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 shrink-0"
+              className="h-10 px-5 rounded-md border-slate-200 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 shrink-0"
             >
               {loading ? <Loader2 className="h-4 w-4 mr-2 text-slate-400 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-2 text-slate-400" />}
               {loading ? "Refreshing..." : "Refresh"}
@@ -413,10 +388,10 @@ export function PerspectiveTabs({
             placeholder="Search company, applicant, sponsor..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full h-10 pl-11 pr-10 bg-white border-slate-300 rounded-full text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
+            className="w-full h-10 pl-11 pr-10 bg-white border-slate-300 rounded-md text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors">
+            <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100 transition-colors">
               <X className="h-4 w-4" />
             </button>
           )}
@@ -424,53 +399,31 @@ export function PerspectiveTabs({
 
         {/* Right: Assignee Sub-tabs (Officers/Managers) */}
         {isPersonView && (
-          <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto custom-scrollbar pb-2 lg:pb-0 w-full lg:w-auto lg:justify-end">
-            <button
-              onClick={() => setTab('all')}
-              className={cn(
-                "h-10 px-6 py-2 rounded-full text-sm font-bold transition-all border flex items-center gap-1.5 shrink-0",
-                currentActive === 'all'
-                  ? "bg-custom-blue border-custom-blue text-white shadow-sm"
-                  : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-              )}
-            >
-              <User className="h-4 w-4" /> Personnel
-              <span className={cn(
-                "text-sm font-black tabular-nums font-medium px-1.5 py-0.5 rounded-full",
-                currentActive === 'all' ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
-              )}>
-                {counts.all ?? 0}
-              </span>
-            </button>
+          <Tabs value={currentActive} onValueChange={setTab} className="w-full lg:w-auto">
+            <TabsList className={cn(TAB_LIST_CLASS, "flex-wrap lg:flex-nowrap overflow-x-auto custom-scrollbar")}>
+              <TabsTrigger value="all" className={cn(TAB_TRIGGER_CLASS, "h-9")}>
+                <User className="h-4 w-4 text-slate-400 group-data-[state=active]:text-white" /> Personnel
+                <span className={COUNT_BADGE_CLASS}>
+                  {counts.all ?? 0}
+                </span>
+              </TabsTrigger>
 
-            {currentData.map((p: any) => {
-              const isActive = currentActive === p.id.toString();
-              const displayName = p.displayName || p.full_name || p.name || `User ${p.id}`;
-              const count = counts[p.id.toString()] || 0;
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => setTab(isActive ? 'all' : p.id.toString())}
-                  className={cn(
-                    "h-10 px-6 py-2 rounded-full text-sm font-bold transition-all border flex items-center gap-1.5 shrink-0",
-                    isActive
-                      ? "bg-custom-blue border-custom-blue text-white shadow-sm"
-                      : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                  )}
-                >
-                  {displayName}
-                  {count > 0 && (
-                    <span className={cn(
-                      "text-sm font-black tabular-nums font-medium px-1.5 py-0.5 rounded-full",
-                      isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
-                    )}>
-                      {count}
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
+              {currentData.map((p: any) => {
+                const displayName = p.displayName || p.full_name || p.name || `User ${p.id}`;
+                const count = counts[p.id.toString()] || 0;
+                return (
+                  <TabsTrigger key={p.id} value={p.id.toString()} className={cn(TAB_TRIGGER_CLASS, "h-9")}>
+                    {displayName}
+                    {count > 0 && (
+                      <span className={COUNT_BADGE_CLASS}>
+                        {count}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
+          </Tabs>
         )}
       </div>
     </div>
@@ -493,7 +446,7 @@ export function ColumnVisibilityDialog({ visibleColumnIds, setVisibleColumnIds }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 shrink-0 transition-all">
+        <Button variant="outline" size="sm" className="h-9 px-4 rounded-md text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 shrink-0 transition-all">
           <Eye className="h-3.5 w-3.5" /> Columns
         </Button>
       </DialogTrigger>
@@ -502,7 +455,7 @@ export function ColumnVisibilityDialog({ visibleColumnIds, setVisibleColumnIds }
           <DialogTitle className="text-lg font-black text-slate-900">Manage Columns</DialogTitle>
           <div className="relative mt-2">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <Input placeholder="Search columns..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 h-10 rounded-full border-slate-300 text-sm font-medium focus:ring-1 focus:ring-blue-500" />
+            <Input placeholder="Search columns..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 h-10 rounded-md border-slate-300 text-sm font-medium focus:ring-1 focus:ring-blue-500" />
           </div>
         </DialogHeader>
         <div className="flex-grow overflow-y-auto pr-2 mt-3 custom-scrollbar">

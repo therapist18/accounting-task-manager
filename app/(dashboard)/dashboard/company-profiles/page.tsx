@@ -20,16 +20,14 @@ import { IndividualSidebar } from "./components/IndividualSidebar";
 import { TaskListTable } from "./components/TaskListTable";
 import { CountBadge, applySortAndFilter, type SortMode, type FilterMode } from "./components/RosterListShared";
 import { PillTrack } from "../summary-reports/components/PageHeader";
-
-const buildJobLevelKey = (task: any) => {
-  const jl = task.job_level || {};
-  return JSON.stringify({
-    department_id: Number(jl.department_id || task.department_id),
-    subdepartment_id: jl.subdepartment_id || null,
-    class_id: jl.class_id || null,
-    subclass_id: jl.subclass_id || null,
-  });
-};
+import {
+  buildJobLevelKey,
+  getApplicationTypeForTask as getApplicationTypeForTaskShared,
+  getPromisedTimeResolution,
+  getReqReceivedCompletedDate,
+  getPlannedExecutionDate,
+  getActualExecutionInfo,
+} from "../summary-reports/utils/executionMath";
 
 export default function CompanyProfilesPage() {
   const [loading, setLoading] = useState(true);
@@ -50,6 +48,11 @@ export default function CompanyProfilesPage() {
   const [stagesByDept, setStagesByDept] = useState<Map<string, any[]>>(new Map());
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
   const [expectedTimeByJobLevel, setExpectedTimeByJobLevel] = useState<Map<string, number>>(new Map());
+  // Promised Time (Stages module) per job level — same shape/source Summary Reports Dashboard
+  // uses, so a task shows the identical Promised Time/Planned/Actual Execution on both pages.
+  const [promisedTimeByJobLevel, setPromisedTimeByJobLevel] = useState<
+    Map<string, { defaultMinutes: number | null; conditions: { value: string; minutes: number }[] }>
+  >(new Map());
 
   const [viewMode, setViewMode] = useState<'company' | 'individual'>('company');
 
@@ -114,15 +117,19 @@ export default function CompanyProfilesPage() {
       const { enhancedTasksData: enhancedMap } = await enhanceTasksWithIndividualData(newAllTasks);
       setEnhancedTasksData(enhancedMap);
 
-      // Expected total time per job level — same source as Summary Reports Dashboard's
-      // "Expected Time" column, used here to judge whether a completed task ran on time.
+      // Stages Time Expected + Promised Time per job level — same source Summary Reports
+      // Dashboard uses. One bulk fetch + client-side match (not one round trip per unique
+      // job level, which is what this used to do — see the identical fix + explanation in
+      // summary-reports/page.tsx's loadAllData) matched by a type-tolerant canonical key,
+      // since some tm_class_requirements rows store class_id as a number and others as a
+      // string for the same class.
       const jobLevels = new Map<string, any>();
       newAllTasks.forEach((task: any) => {
         const key = buildJobLevelKey(task);
         if (!jobLevels.has(key)) {
           const jl = task.job_level || {};
           jobLevels.set(key, {
-            department_id: Number(jl.department_id || task.department_id),
+            department_id: jl.department_id || task.department_id,
             subdepartment_id: jl.subdepartment_id || null,
             class_id: jl.class_id || null,
             subclass_id: jl.subclass_id || null,
@@ -130,18 +137,39 @@ export default function CompanyProfilesPage() {
           });
         }
       });
+
+      const canonicalJobLevelKey = (jl: any) => JSON.stringify({
+        department_id: jl?.department_id != null ? String(jl.department_id) : null,
+        subdepartment_id: jl?.subdepartment_id != null ? String(jl.subdepartment_id) : null,
+        class_id: jl?.class_id != null ? String(jl.class_id) : null,
+        subclass_id: jl?.subclass_id != null ? String(jl.subclass_id) : null,
+        level: jl?.level != null ? Number(jl.level) : 1,
+      });
+
       const newExpectedTimeMap = new Map<string, number>();
-      await Promise.all(Array.from(jobLevels.entries()).map(async ([key, jobLevel]) => {
-        const { data, error } = await supabase
-          .from('tm_class_requirements')
-          .select('expected_total_time_minutes')
-          .eq('job_level', JSON.stringify(jobLevel))
-          .maybeSingle();
-        if (!error && typeof data?.expected_total_time_minutes === 'number') {
-          newExpectedTimeMap.set(key, data.expected_total_time_minutes);
-        }
-      }));
+      const newPromisedTimeMap = new Map<string, { defaultMinutes: number | null; conditions: { value: string; minutes: number }[] }>();
+      const { data: requirementRows, error: requirementsErr } = await supabase
+        .from('tm_class_requirements')
+        .select('job_level, expected_total_time_minutes, promised_time');
+      if (!requirementsErr && requirementRows) {
+        const byCanonicalKey = new Map<string, any>();
+        requirementRows.forEach((row: any) => { byCanonicalKey.set(canonicalJobLevelKey(row.job_level), row); });
+        jobLevels.forEach((jobLevel, key) => {
+          const row = byCanonicalKey.get(canonicalJobLevelKey(jobLevel));
+          if (!row) return;
+          if (typeof row.expected_total_time_minutes === 'number') newExpectedTimeMap.set(key, row.expected_total_time_minutes);
+          const pt = row.promised_time || {};
+          const hasDefault = typeof pt.defaultMinutes === 'number';
+          const conditions = Array.isArray(pt.conditions)
+            ? pt.conditions.filter((c: any) => c && typeof c.value === 'string' && typeof c.minutes === 'number')
+            : [];
+          if (hasDefault || conditions.length > 0) {
+            newPromisedTimeMap.set(key, { defaultMinutes: hasDefault ? pt.defaultMinutes : null, conditions });
+          }
+        });
+      }
       setExpectedTimeByJobLevel(newExpectedTimeMap);
+      setPromisedTimeByJobLevel(newPromisedTimeMap);
     } catch (err) {
       toast({ title: "Error", description: "Could not load company profiles data.", variant: "destructive" });
     } finally {
@@ -168,6 +196,18 @@ export default function CompanyProfilesPage() {
     });
     return total;
   }, [expectedTimeByJobLevel, getTaskStages, departments]);
+
+  // Promised/Planned/Actual Execution — same shared math Summary Reports Dashboard uses
+  // (utils/executionMath.ts), so a task can't show a different Promised Time or overdue
+  // status depending on which page you're looking at it from.
+  const getPromisedTimeResolutionForTask = useCallback((task: any) => getPromisedTimeResolution(task, promisedTimeByJobLevel, enhancedTasksData), [promisedTimeByJobLevel, enhancedTasksData]);
+  const getPromisedMinutesForTask = useCallback((task: any): number | null => getPromisedTimeResolutionForTask(task).minutes, [getPromisedTimeResolutionForTask]);
+  const getPlannedExecutionDateForTask = useCallback((task: any): Date | null =>
+    getPlannedExecutionDate(getReqReceivedCompletedDate(task), getPromisedMinutesForTask(task)),
+    [getPromisedMinutesForTask]);
+  const getActualTimeInfoForTask = useCallback((task: any) =>
+    getActualExecutionInfo(getReqReceivedCompletedDate(task), getPromisedMinutesForTask(task)),
+    [getPromisedMinutesForTask]);
 
   // ── Company roster (every company, 0-task ones included) ──
   const companiesBase = useMemo(() => {
@@ -603,6 +643,9 @@ export default function CompanyProfilesPage() {
                       companies={companies}
                       enhancedTasksData={enhancedTasksData}
                       getExpectedMinutesForTask={getExpectedMinutesForTask}
+                      getPromisedTimeResolutionForTask={getPromisedTimeResolutionForTask}
+                      getPlannedExecutionDateForTask={getPlannedExecutionDateForTask}
+                      getActualTimeInfoForTask={getActualTimeInfoForTask}
                       showCompanyColumn
                       emptyLabel="No jobs found for this individual."
                     />
@@ -621,6 +664,9 @@ export default function CompanyProfilesPage() {
                       companies={companies}
                       enhancedTasksData={enhancedTasksData}
                       getExpectedMinutesForTask={getExpectedMinutesForTask}
+                      getPromisedTimeResolutionForTask={getPromisedTimeResolutionForTask}
+                      getPlannedExecutionDateForTask={getPlannedExecutionDateForTask}
+                      getActualTimeInfoForTask={getActualTimeInfoForTask}
                       emptyLabel="No company-level tasks (e.g. licences) for this company."
                     />
                   </div>
