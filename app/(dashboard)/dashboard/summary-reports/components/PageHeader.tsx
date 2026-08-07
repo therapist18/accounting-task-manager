@@ -294,9 +294,9 @@ export function StatusTabs({
 
   const PERSPECTIVES = [
     { id: 'all', label: 'Overview', activeBg: 'bg-custom-blue', activeText: 'text-white' },
-    { id: 'officers', label: 'Officers', activeBg: 'bg-sky-600', activeText: 'text-white' },
-    { id: 'managers', label: 'Managers', activeBg: 'bg-violet-500', activeText: 'text-white' },
-    { id: 'clients', label: 'Clients', activeBg: 'bg-emerald-500', activeText: 'text-white' }
+    { id: 'officers', label: 'Officers', activeBg: 'bg-custom-blue', activeText: 'text-white' },
+    { id: 'managers', label: 'Managers', activeBg: 'bg-custom-blue', activeText: 'text-white' },
+    { id: 'clients', label: 'Clients', activeBg: 'bg-custom-blue', activeText: 'text-white' }
   ];
 
   return (
@@ -329,22 +329,22 @@ export function StatusTabs({
 
       {setActivePerspective && (
         <div className="flex items-center gap-2.5 shrink-0">
-          <div className="flex items-center gap-0.5 bg-slate-100 p-1 rounded-full border border-slate-200 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             {PERSPECTIVES.map(p => (
               <button
                 key={p.id}
                 onClick={() => setActivePerspective(p.id)}
                 className={cn(
-                  "h-8 px-4 text-sm font-bold rounded-full transition-all flex items-center gap-2",
+                  "h-8 px-4 text-sm font-semibold rounded-full transition-all flex items-center gap-1.5",
                   activePerspective === p.id
                     ? `${p.activeBg} ${p.activeText} shadow-sm`
-                    : "text-slate-500 hover:text-slate-800"
+                    : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
                 )}
               >
                 {p.label}
                 <span className={cn(
-                  "text-sm font-black tabular-nums px-1.5 py-0.5 rounded-full font-medium",
-                  activePerspective === p.id ? `bg-white/20 ${p.activeText}` : "text-slate-400"
+                  "px-1.5 py-0.5 rounded-full text-xs font-bold tabular-nums",
+                  activePerspective === p.id ? `bg-white/20 ${p.activeText}` : "bg-slate-100 text-slate-400"
                 )}>
                   {perspectiveCounts[p.id]}
                 </span>
@@ -425,27 +425,19 @@ export function PerspectiveTabs({
         {/* Right: Assignee Sub-tabs (Officers/Managers) */}
         {isPersonView && (
           <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto custom-scrollbar pb-2 lg:pb-0 w-full lg:w-auto lg:justify-end">
-            <div className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-black uppercase font-bold mr-1 shrink-0",
-              isOfficer ? "bg-sky-50 text-sky-600 border border-sky-100" : "bg-violet-50 text-violet-600 border border-violet-100"
-            )}>
-              {isOfficer ? <Shield className="h-3 w-3" /> : <User className="h-3 w-3" />}
-              {isOfficer ? "Officers" : "Managers"}
-            </div>
-
             <button
               onClick={() => setTab('all')}
               className={cn(
                 "h-10 px-6 py-2 rounded-full text-sm font-bold transition-all border flex items-center gap-1.5 shrink-0",
                 currentActive === 'all'
-                  ? (isOfficer ? "bg-sky-600 border-sky-600 text-white shadow-sm" : "bg-violet-600 border-violet-600 text-white shadow-sm")
+                  ? "bg-custom-blue border-custom-blue text-white shadow-sm"
                   : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
               )}
             >
-              All Personnel
+              <User className="h-4 w-4" /> Personnel
               <span className={cn(
-                "text-sm font-black tabular-nums font-medium",
-                currentActive === 'all' ? "text-white/60" : "text-slate-400"
+                "text-sm font-black tabular-nums font-medium px-1.5 py-0.5 rounded-full",
+                currentActive === 'all' ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
               )}>
                 {counts.all ?? 0}
               </span>
@@ -462,7 +454,7 @@ export function PerspectiveTabs({
                   className={cn(
                     "h-10 px-6 py-2 rounded-full text-sm font-bold transition-all border flex items-center gap-1.5 shrink-0",
                     isActive
-                      ? (isOfficer ? "bg-sky-600 border-sky-600 text-white shadow-sm" : "bg-violet-600 border-violet-600 text-white shadow-sm")
+                      ? "bg-custom-blue border-custom-blue text-white shadow-sm"
                       : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
                   )}
                 >

@@ -335,15 +335,15 @@ export function SummaryTable({
                   if (item.type === 'section') {
                     return (
                       <TableRow key={`section-${item.name}`} className="border-0 hover:bg-transparent">
-                        <TableCell className="sticky left-0 z-30 border-r border-b-2 border-t border-slate-300 py-2.5 px-2 bg-slate-100/80 text-center">
-                          <Layers className="h-3.5 w-3.5 text-slate-500 mx-auto shrink-0" />
+                        <TableCell className="sticky left-0 z-30 border-r border-b border-slate-200 py-2.5 px-2 bg-slate-100/80 text-center">
+                          <Layers className="h-4 w-4 text-slate-500 mx-auto shrink-0" />
                         </TableCell>
-                        <TableCell colSpan={interleavedColumns.length} className="px-4 py-2 border-b-2 border-t border-slate-300 bg-slate-100/80">
+                        <TableCell colSpan={interleavedColumns.length} className="px-4 py-2 border-b border-slate-200 bg-slate-100/80">
                           <div className="flex items-center gap-2">
-                            <span className="text-[11px] font-bold uppercase tracking-widest text-slate-600">
+                            <span className="text-sm font-bold uppercase tracking-wider text-slate-700">
                               {item.name === 'N/A' ? 'Unassigned' : item.name}
                             </span>
-                            <span className="text-[10px] font-medium text-slate-400 ml-1">({item.count})</span>
+                            <span className="text-sm font-semibold text-slate-500">({item.count})</span>
                           </div>
                         </TableCell>
                       </TableRow>

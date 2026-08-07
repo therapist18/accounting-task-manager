@@ -491,8 +491,8 @@ export default function SummaryReportsPage() {
                 Summary Reports Dashboard
               </h1>
               <div className="flex items-center text-sm text-slate-500 font-semibold gap-1">
-                <Building2 className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-                <span className="text-blue-600 font-bold">{activeDepartment?.name || "All Departments"}</span>
+                <Building2 className="h-3.5 w-3.5 shrink-0" style={{ color: '#376bae' }} />
+                <span className="font-bold" style={{ color: '#376bae' }}>{activeDepartment?.name || "All Departments"}</span>
                 <span className="text-slate-300 mx-0.5">/</span>
                 <span className="truncate text-slate-500">{breadcrumbSubtext}</span>
               </div>

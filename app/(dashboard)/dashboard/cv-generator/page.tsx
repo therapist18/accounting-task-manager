@@ -2434,26 +2434,27 @@ export default function CVGeneratorPage() {
     return (
       <div className="flex flex-col h-screen overflow-hidden bg-[#FAFAFC] text-slate-800 font-sans">
         {/* Portal Header */}
-        <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-lg bg-custom-blue flex items-center justify-center">
+        <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="h-9 w-9 rounded-lg bg-custom-blue flex items-center justify-center shrink-0">
               <FileText className="h-4 w-4 text-white" />
             </div>
-            <div className="text-left">
-              <h1 className="text-sm font-bold text-slate-900">AI Client Review Portal</h1>
-              <p className="text-sm text-slate-500">Collaboration &amp; Verification</p>
+            <div className="text-left min-w-0">
+              <h1 className="text-sm font-bold text-slate-900 truncate">AI Client Review Portal</h1>
+              <p className="text-sm text-slate-500 hidden sm:block">Collaboration &amp; Verification</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm bg-blue-50 text-custom-blue border border-blue-100 px-2 py-0.5 rounded-full font-semibold">Verification Active</span>
-            <Button size="sm" variant="outline" onClick={() => { setWorkflowStep('collaboration'); setClientEdits(null); }} className="text-xs border-slate-200 text-slate-650 h-8">
-              Exit to Recruiter View
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            <span className="hidden sm:inline-flex text-sm bg-blue-50 text-custom-blue border border-blue-100 px-2 py-0.5 rounded-full font-semibold">Verification Active</span>
+            <Button size="sm" variant="outline" onClick={() => { setWorkflowStep('collaboration'); setClientEdits(null); }} className="text-xs border-slate-200 text-slate-650 h-8 px-2 sm:px-3">
+              <span className="sm:hidden">Exit</span>
+              <span className="hidden sm:inline">Exit to Recruiter View</span>
             </Button>
           </div>
         </div>
 
         {/* Subtitle bar */}
-        <div className="bg-slate-50 border-b border-slate-200 px-6 py-2 shrink-0">
+        <div className="bg-slate-50 border-b border-slate-200 px-4 sm:px-6 py-2 shrink-0">
           <p className="text-xs text-slate-500">Please review your details and fill in any missing information below. This helps us prepare the best possible CV for you.</p>
         </div>
 
@@ -2494,9 +2495,9 @@ export default function CVGeneratorPage() {
                   <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-5 space-y-3">
                     <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><ImagePlus className="h-4 w-4 text-amber-500" /> Professional Photo Required</h4>
                     <p className="text-xs text-slate-500 leading-relaxed">Please upload a passport-sized photo with a <strong>plain white background</strong>.</p>
-                    <div className="flex items-center gap-3">
-                      {clientEdits.personalInfo?.photoUrl && <img src={clientEdits.personalInfo.photoUrl} className="h-14 w-14 rounded-lg object-cover border border-slate-200" alt="Preview" />}
-                      <Input type="file" accept="image/*" className="text-xs h-9 bg-white" onChange={(e) => {
+                    <div className="flex flex-wrap items-center gap-3">
+                      {clientEdits.personalInfo?.photoUrl && <img src={clientEdits.personalInfo.photoUrl} className="h-14 w-14 rounded-lg object-cover border border-slate-200 shrink-0" alt="Preview" />}
+                      <Input type="file" accept="image/*" className="text-xs h-9 bg-white flex-1 min-w-[180px]" onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) { const reader = new FileReader(); reader.onload = () => handleClientPersonalInfoChange('photoUrl', reader.result as string); reader.readAsDataURL(file); }
                       }} />
@@ -2548,7 +2549,7 @@ export default function CVGeneratorPage() {
                       return (
                         <div key={idx} className="space-y-2">
                           <span className="text-xs font-semibold text-slate-700">{exp.company} — {exp.role}</span>
-                          <div className="grid grid-cols-2 gap-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             {sNeed && <div className="space-y-1"><Label className="text-xs text-slate-500">Start Date</Label><Input placeholder="e.g. Jan 2021" value={exp.startDate || ''} onChange={(e) => { const updated = [...clientEdits.experience]; updated[idx] = { ...updated[idx], startDate: e.target.value }; setClientEdits((prev: any) => ({ ...prev, experience: updated })); }} className="h-9 text-xs" /></div>}
                             {eNeed && <div className="space-y-1"><Label className="text-xs text-slate-500">End Date</Label><Input placeholder="e.g. Dec 2023 or Present" value={exp.endDate || ''} onChange={(e) => { const updated = [...clientEdits.experience]; updated[idx] = { ...updated[idx], endDate: e.target.value }; setClientEdits((prev: any) => ({ ...prev, experience: updated })); }} className="h-9 text-xs" /></div>}
                           </div>
@@ -2635,7 +2636,7 @@ export default function CVGeneratorPage() {
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
                     <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><GraduationCap className="h-4 w-4 text-blue-500" /> Education Background</h4>
                     <p className="text-xs text-slate-500">Please provide your highest qualification details.</p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-1.5">
                         <Label className="text-xs font-bold text-slate-500 uppercase">Degree / Certificate</Label>
                         <Input placeholder="e.g. Bachelor of Commerce" className="h-9 text-xs" onChange={(e) => {
@@ -2689,7 +2690,7 @@ export default function CVGeneratorPage() {
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
                     <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Globe className="h-4 w-4 text-slate-500" /> Languages</h4>
                     <p className="text-xs text-slate-500">Which languages do you speak? Select all that apply.</p>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {['English', 'Swahili', 'French', 'German', 'Hindi', 'Arabic', 'Spanish', 'Mandarin'].map(lang => {
                         const isChecked = (clientEdits.languages || []).some((l: any) => l.language === lang);
                         return (
@@ -2723,7 +2724,7 @@ export default function CVGeneratorPage() {
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
                     <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><MessageSquare className="h-4 w-4 text-slate-500" /> Professional References</h4>
                     <p className="text-xs text-slate-500">Please provide at least one professional reference (former manager, colleague, or client).</p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-1.5">
                         <Label className="text-xs font-bold text-slate-500 uppercase">Reference Name</Label>
                         <Input placeholder="e.g. John Kamau" className="h-9 text-xs" onChange={(e) => {
@@ -2795,31 +2796,12 @@ export default function CVGeneratorPage() {
                   </div>
                 )}
 
-                {/* ── Languages ── */}
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Globe className="h-4 w-4 text-slate-500" /> Languages Spoken</h4>
-                  <div className="grid grid-cols-3 gap-2">
-                    {['English', 'Swahili', 'French', 'German', 'Hindi', 'Arabic'].map(lang => {
-                      const isChecked = (clientEdits.languages || []).some((l: any) => l.language === lang);
-                      return (
-                        <label key={lang} className="flex items-center gap-2 text-xs font-semibold cursor-pointer text-slate-700">
-                          <Checkbox checked={isChecked} onCheckedChange={(checked) => {
-                            if (checked) { const langs = clientEdits.languages || []; if (!langs.some((l: any) => l.language === lang)) setClientEdits((prev: any) => ({ ...prev, languages: [...langs, { language: lang, proficiency: lang === 'English' ? 'Professional' : 'Basic' }] })); }
-                            else setClientEdits((prev: any) => ({ ...prev, languages: (prev.languages || []).filter((l: any) => l.language !== lang) }));
-                          }} />
-                          {lang}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
                 {/* ── Personal Details ── */}
                 {(missingNationality || missingDOB || missingMaritalStatus) && (
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
                     <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><User className="h-4 w-4 text-slate-500" /> Personal Details</h4>
                     <p className="text-xs text-slate-500">Please provide your personal details.</p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-1.5">
                         <Label className="text-xs font-bold text-slate-500 uppercase">Nationality</Label>
                         <Input placeholder="e.g. Kenyan" value={clientEdits.personalDetails?.nationality || ''} onChange={(e) => handleClientPersonalDetailsChange('nationality', e.target.value)} className="h-9 text-xs" />
@@ -2840,7 +2822,7 @@ export default function CVGeneratorPage() {
                 {collabTargetCountry === 'kenya' && initiallyMissingSections.initiallyNonKenyan && (
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
                     <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Globe className="h-4 w-4 text-custom-blue" /> Kenya / East Africa Details</h4>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-1.5">
                         <Label className="text-xs font-bold text-slate-500 uppercase">Work Permit Status</Label>
                         <Select value={clientEdits.personalDetails?.kenyaStatus || ''} onValueChange={(val) => handleClientPersonalDetailsChange('kenyaStatus', val)}>
