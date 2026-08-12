@@ -1,6 +1,7 @@
 // @ts-nocheck
 // Builds a themed, standalone company letterhead .docx (header + footer only,
-// no letter body) matching one of the 4 GeneralLetterLayout themes. The body
+// no letter body) matching one of the general-letter theme engine's 8
+// presets (see utils/letterThemeEngine.ts). The body
 // contains a single `{BODY}` paragraph so the file plugs straight into both
 // existing letterhead-consumption pipelines already in this codebase:
 //   - letters/utils/letterheadMerge.ts (docxtemplater `{BODY}` tag)
@@ -13,10 +14,10 @@ import {
     Table, TableRow, TableCell, WidthType, BorderStyle,
     Header, Footer, ImageRun,
 } from 'docx';
-import type { LetterTheme } from '../components/GeneralLetterLayout';
+import { wordHeaderPalette, wordFooterPalette, type GeneralLetterThemeSettings } from './letterThemeEngine';
 
 export interface LetterheadBuildOptions {
-    theme: LetterTheme;
+    themeSettings: GeneralLetterThemeSettings;
     entityName: string;
     addressLine1?: string;
     addressLine2?: string;
@@ -33,13 +34,6 @@ const SIDE_MARGIN = 1280;
 const CONTENT_WIDTH = PAGE_WIDTH - SIDE_MARGIN * 2;
 
 const SLATE_900 = '0F172A';
-const SLATE_500 = '64748B';
-const BLUE_600 = '2563EB';
-const TEAL_400 = '2DD4BF';
-const VIOLET_700 = '6D28D9';
-const INDIGO_600 = '4F46E5';
-const STONE_900 = '1C1917';
-const STONE_500 = '78716C';
 const FONT = 'Times New Roman';
 
 const safeUpper = (v?: string) => (v ?? '').toUpperCase();
@@ -48,13 +42,6 @@ const noBorderSet = () => {
     const b = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
     return { top: b, bottom: b, left: b, right: b };
 };
-
-function themePalette(theme: LetterTheme) {
-    if (theme === 'dark-teal') return { bg: SLATE_900, title: 'FFFFFF', accent: TEAL_400, meta: 'CBD5E1', line: TEAL_400 };
-    if (theme === 'bold-violet') return { bg: VIOLET_700, title: 'FFFFFF', accent: 'DDD6FE', meta: 'EDE9FE', line: INDIGO_600 };
-    if (theme === 'classic-serif') return { bg: 'FFFFFF', title: STONE_900, accent: STONE_500, meta: STONE_500, line: STONE_900 };
-    return { bg: 'FFFFFF', title: SLATE_900, accent: BLUE_600, meta: SLATE_500, line: BLUE_600 }; // corporate-blue
-}
 
 // ─── Image helper ───────────────────────────────────────────────────────────
 
@@ -80,8 +67,8 @@ export async function fetchImageBytesForLetterhead(url: string): Promise<{ data:
 // ─── Header / Footer builders ───────────────────────────────────────────────
 
 function buildLetterheadHeader(opts: LetterheadBuildOptions): Header {
-    const { theme, entityName, addressLine1 = '', addressLine2 = '', phone = '', email = '', logo } = opts;
-    const palette = themePalette(theme);
+    const { themeSettings, entityName, addressLine1 = '', addressLine2 = '', phone = '', email = '', logo } = opts;
+    const palette = wordHeaderPalette(themeSettings);
 
     const logoCellWidth = logo ? 1600 : 0;
     const leftW = logo ? 4400 : 6000;
@@ -143,11 +130,8 @@ function buildLetterheadHeader(opts: LetterheadBuildOptions): Header {
 }
 
 function buildLetterheadFooter(opts: LetterheadBuildOptions): Footer {
-    const { theme, entityName, kraPin = '', regNumber = '', addressLine1 = '', addressLine2 = '' } = opts;
-    const palette = themePalette(theme);
-    const bg = theme === 'dark-teal' ? SLATE_900 : theme === 'bold-violet' ? VIOLET_700 : 'FFFFFF';
-    const text = theme === 'dark-teal' || theme === 'bold-violet' ? 'FFFFFF' : theme === 'classic-serif' ? STONE_500 : SLATE_500;
-    const accent = theme === 'dark-teal' ? TEAL_400 : theme === 'bold-violet' ? 'DDD6FE' : theme === 'classic-serif' ? STONE_900 : BLUE_600;
+    const { themeSettings, entityName, kraPin = '', regNumber = '', addressLine1 = '', addressLine2 = '' } = opts;
+    const { bg, text, accent } = wordFooterPalette(themeSettings);
     const address = [addressLine1, addressLine2].filter(Boolean).join(', ');
 
     return new Footer({

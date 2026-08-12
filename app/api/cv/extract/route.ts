@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { API_KEYS } from '@/lib/apiKeys';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import mammoth from 'mammoth';
+
+const DOCX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 type EnhancementLevel = "none" | "light" | "professional" | "executive";
 
@@ -111,10 +114,21 @@ export async function POST(request: Request) {
       Return only the JSON object. Do not include markdown, code fences, or explanations.
     `;
 
+    // Gemini's inlineData only accepts a limited set of MIME types (PDF, images,
+    // plain text, audio/video) — DOCX isn't one of them, so extract its text
+    // ourselves and send that as a text part instead of the raw file bytes.
+    let cvContentPart: string | { inlineData: { data: string; mimeType: string } };
+    if (mimeType === DOCX_MIME_TYPE) {
+      const { value: docxText } = await mammoth.extractRawText({ buffer: Buffer.from(fileBase64, 'base64') });
+      cvContentPart = docxText;
+    } else {
+      cvContentPart = { inlineData: { data: fileBase64, mimeType: mimeType || 'application/pdf' } };
+    }
+
     console.log('[CV Extractor] Stage 1: Extracting raw data...');
     const extractionResult = await model.generateContent([
       extractionPrompt,
-      { inlineData: { data: fileBase64, mimeType: mimeType || 'application/pdf' } }
+      cvContentPart
     ]);
     const extractedJson = JSON.parse(extractionResult.response.text());
     console.log('[CV Extractor] Stage 1 complete.');

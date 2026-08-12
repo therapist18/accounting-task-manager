@@ -2,7 +2,7 @@
 
 import { Document, Packer, Paragraph, TextRun, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun, UnderlineType, Header, Footer, } from 'docx';
 import { saveAs } from 'file-saver';
-import type { LetterTheme } from '../components/GeneralLetterLayout';
+import { wordHeaderPalette, wordFooterPalette, DEFAULT_GENERAL_LETTER_THEME, type GeneralLetterThemeSettings } from './letterThemeEngine';
 import {
     getBclContactDetails,
     resolveCompanyGeneralEmail,
@@ -70,7 +70,7 @@ export interface ExportOptions {
     downloadBlob?: (blob: Blob, filename: string) => void;
     individualIdInfo?: IndividualIdInfo | null;
     kraPin?: string;
-    theme?: LetterTheme;
+    themeSettings?: GeneralLetterThemeSettings;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -84,12 +84,7 @@ const SLATE_900 = '0F172A';
 const SLATE_700 = '334155';
 const SLATE_500 = '64748B';
 const SLATE_200 = 'E2E8F0';
-const TEAL_400 = '2DD4BF';
 const BLUE_600 = '2563EB';
-const VIOLET_700 = '6D28D9';
-const INDIGO_600 = '4F46E5';
-const STONE_900 = '1C1917';
-const STONE_500 = '78716C';
 const FONT = 'Times New Roman';
 
 // ─── Image helpers ────────────────────────────────────────────────────────────
@@ -184,7 +179,7 @@ function buildKRAWordHeader(opts: ExportOptions): Header {
 
 // ─── General Word Header section ──────────────────────────────────────────────
 function buildGeneralWordHeader(opts: ExportOptions): Header {
-    const { tab, selectedCompany, selectedIndividual, email, phone, reference, theme = 'corporate-blue' } = opts;
+    const { tab, selectedCompany, selectedIndividual, email, phone, reference, themeSettings } = opts;
     const bclContact = getBclContactDetails();
     const entityName = tab === 'companies'
         ? (selectedCompany?.company_name ?? '')
@@ -196,13 +191,9 @@ function buildGeneralWordHeader(opts: ExportOptions): Header {
         ? resolveCompanyPhone(selectedCompany, phone)
         : resolveIndividualPhone(selectedIndividual, phone);
 
-    const palette = theme === 'dark-teal'
-        ? { bg: SLATE_900, title: 'FFFFFF', accent: TEAL_400, meta: 'CBD5E1', line: TEAL_400 }
-        : theme === 'bold-violet'
-            ? { bg: VIOLET_700, title: 'FFFFFF', accent: 'DDD6FE', meta: 'EDE9FE', line: INDIGO_600 }
-            : theme === 'classic-serif'
-                ? { bg: 'FFFFFF', title: STONE_900, accent: STONE_500, meta: STONE_500, line: STONE_900 }
-                : { bg: 'FFFFFF', title: SLATE_900, accent: BLUE_600, meta: SLATE_500, line: BLUE_600 };
+    // Same palette decisions as GeneralLetterLayout.tsx's CSS - see
+    // letterThemeEngine.ts's wordHeaderPalette.
+    const palette = wordHeaderPalette(themeSettings || DEFAULT_GENERAL_LETTER_THEME, SLATE_900, BLUE_600);
 
     const leftW = 6000;
     const rightW = CONTENT_WIDTH - leftW;
@@ -262,7 +253,7 @@ function buildGeneralWordHeader(opts: ExportOptions): Header {
 }
 
 function buildGeneralWordFooter(opts: ExportOptions): Footer {
-    const { tab, selectedCompany, selectedIndividual, reference, theme = 'corporate-blue', kraPin: kraPinProp = '' } = opts;
+    const { tab, selectedCompany, selectedIndividual, reference, themeSettings, kraPin: kraPinProp = '' } = opts;
     const bclContact = getBclContactDetails();
     const entityName = tab === 'companies'
         ? (selectedCompany?.company_name ?? '')
@@ -271,9 +262,10 @@ function buildGeneralWordFooter(opts: ExportOptions): Footer {
     const kraPin = tab === 'companies'
         ? resolveCompanyKraPin(selectedCompany, kraPinProp)
         : resolveIndividualKraPin(selectedIndividual, kraPinProp);
-    const bg = theme === 'dark-teal' ? SLATE_900 : theme === 'bold-violet' ? VIOLET_700 : 'FFFFFF';
-    const text = theme === 'dark-teal' || theme === 'bold-violet' ? 'FFFFFF' : theme === 'classic-serif' ? STONE_500 : SLATE_500;
-    const accent = theme === 'dark-teal' ? TEAL_400 : theme === 'bold-violet' ? 'DDD6FE' : theme === 'classic-serif' ? STONE_900 : BLUE_600;
+
+    // Same palette decisions as GeneralLetterLayout.tsx's CSS - see
+    // letterThemeEngine.ts's wordFooterPalette.
+    const { bg, text, accent } = wordFooterPalette(themeSettings || DEFAULT_GENERAL_LETTER_THEME, SLATE_900, BLUE_600);
 
     return new Footer({
         children: [

@@ -595,7 +595,7 @@ ${themeCss}
 
   if (!employee || !selectedJobProfile) {
     return (
-      <div className={className || "flex flex-col items-center justify-center h-full text-slate-500 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm mx-5 mb-5 lg:ml-0 lg:flex-1 lg:min-w-[600px]"}>
+      <div className={className || "flex flex-col items-center justify-center h-full w-full min-w-0 text-slate-500 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm"}>
         <FileWarning className="w-12 h-12 mb-4 text-slate-300 dark:text-slate-700" />
         <h3 className="text-base font-medium text-slate-700 dark:text-slate-300">
           {!employee ? 'No Employee Selected' : 'No Job Profile Selected'}
@@ -609,7 +609,7 @@ ${themeCss}
 
   return (
   <>
-    <div className={cn(className || "flex flex-col h-full bg-slate-100/50 dark:bg-slate-900 shadow-inner overflow-hidden flex-1 lg:min-w-[600px] relative", "print:hidden")}>
+    <div className={cn(className || "flex flex-col h-full w-full min-w-0 bg-slate-100/50 dark:bg-slate-900 shadow-inner overflow-hidden relative", "print:hidden")}>
 
       {/* Docked Toolbar */}
       <div className="shrink-0 flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200/70 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur z-20">

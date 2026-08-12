@@ -1,4 +1,5 @@
 import React from 'react';
+import { Mail, Phone, MapPin } from 'lucide-react';
 import { cn } from "@/lib/utils";
 import type { Company } from '../../companies/database';
 import type { Individual } from '../../individuals/database';
@@ -38,32 +39,45 @@ export function KRALetterLayout({
     kraPin: kraPinProp = ''
 }: KRALetterLayoutProps) {
     const bclContact = getBclContactDetails();
+    const entityName = tab === 'companies' ? selectedCompany?.company_name : selectedIndividual?.full_name;
     const displayEmail = tab === 'companies'
         ? resolveCompanyKraEmail(selectedCompany, email)
         : resolveIndividualEmail(selectedIndividual, email);
     const kraPin = tab === 'companies'
         ? resolveCompanyKraPin(selectedCompany, kraPinProp)
         : resolveIndividualKraPin(selectedIndividual, kraPinProp);
+    const regNumber = tab === 'companies' ? (selectedCompany?.registration_number || '') : '';
+    const footerLine = [regNumber && `Reg. No. ${regNumber}`, 'Nairobi, Kenya', 'Confidential']
+        .filter(Boolean)
+        .join('   •   ');
 
     return (
         <div className="text-[14px] text-slate-800 leading-relaxed">
-            <div className="border-b-[3px] border-slate-900 pb-10 mb-6 text-center">
-                <h2 className="text-3xl font-black text-slate-900 uppercase mb-3">
-                    {tab === 'companies' ? selectedCompany?.company_name : selectedIndividual?.full_name}
+            <div className="text-center mb-10">
+                <h2 className="font-serif text-[26px] font-bold text-slate-900 uppercase tracking-[0.5px] mb-3">
+                    {entityName}
                 </h2>
-                <div className="text-[11px] font-bold text-slate-700 space-y-2 uppercase tracking-wider leading-relaxed">
-                    <p className="flex justify-center gap-6">
-                        <span className="flex items-center gap-1">
-                            EMAIL: {displayEmail}
-                        </span>
-                        <span className="flex items-center gap-1">MOBILE NO: {bclContact.phone}</span>
-                    </p>
-                    <p>{bclContact.address.toUpperCase()}</p>
-                    {kraPin && <p>KRA PIN: {kraPin}</p>}
+                <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
+                    <span className="flex items-center gap-1.5">
+                        <Mail className="w-3 h-3 text-slate-400" /> {displayEmail}
+                    </span>
+                    <span className="text-slate-300">|</span>
+                    <span className="flex items-center gap-1.5">
+                        <Phone className="w-3 h-3 text-slate-400" /> {bclContact.phone}
+                    </span>
+                    <span className="text-slate-300">|</span>
+                    <span className="flex items-center gap-1.5">
+                        <MapPin className="w-3 h-3 text-slate-400" /> {bclContact.address.toUpperCase()}
+                    </span>
                 </div>
+                {kraPin && (
+                    <p className="mt-2.5 text-[11px] font-bold text-slate-700 tracking-wider">KRA PIN: {kraPin}</p>
+                )}
+                <div className="mt-5 h-[3px] bg-slate-900" />
+                <div className="mt-[3px] h-[1px] bg-slate-300" />
             </div>
 
-            <div className="mb-6 text-right text-[13px] font-semibold">
+            <div className="mb-6 text-right text-[13px] font-semibold text-slate-700">
                 {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
             </div>
 
@@ -109,6 +123,19 @@ export function KRALetterLayout({
                             {individualIdInfo.label}: {individualIdInfo.value}
                         </div>
                     )}
+                </div>
+            </div>
+
+            {/* Bleeds to the page edge against the paperRef wrapper's own p-16
+                padding (see letters/page.tsx), matching the flanking-line
+                footer band motif of the sample letterhead designs. */}
+            <div className="mt-14 -mx-16 -mb-16 px-16 py-4 bg-slate-100 border-t border-slate-200">
+                <div className="flex items-center justify-center gap-4">
+                    <span className="h-px flex-1 max-w-[140px] bg-slate-300" />
+                    <span className="text-[10px] font-semibold uppercase tracking-[2.5px] text-slate-500 text-center whitespace-nowrap">
+                        {footerLine}
+                    </span>
+                    <span className="h-px flex-1 max-w-[140px] bg-slate-300" />
                 </div>
             </div>
         </div>

@@ -51,6 +51,7 @@ export function Navbar() {
     : "U"
   return (
     <header className="flex h-16 shrink-0 items-center gap-2 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-white/10 px-4 shadow-sm">
+      <SidebarTrigger className="md:hidden text-slate-600 dark:text-white/80 hover:bg-slate-100 dark:hover:bg-white/10" />
       <div className="flex flex-1 items-center gap-2">
         <div className="relative flex-1 max-w-md group">
           <div className="absolute inset-0 bg-gradient-to-r from-blue-100 to-transparent dark:from-blue-900/20 dark:to-transparent rounded-lg blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>

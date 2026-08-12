@@ -6,7 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { AppWindow, BarChart3, BookOpen, Calendar, CheckSquare, ChevronDown, ChevronRight, Database, FileText, HelpCircle, LayoutDashboard, LogOut, Mail, Moon, PanelLeftClose, PanelLeftOpen, PlusCircle, Search, Settings, Settings2, Sun, Users } from "lucide-react";
+import { AppWindow, BarChart3, BookOpen, Calendar, CheckSquare, ChevronDown, ChevronRight, Database, FileText, HelpCircle, LayoutDashboard, LogOut, Mail, Moon, PanelLeftClose, PanelLeftOpen, PlusCircle, Search, Settings, Settings2, Sun, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -262,7 +262,7 @@ const AppSidebar = () => {
     const router = useRouter();
     const { theme, setTheme } = useTheme();
     const [mounted, setMounted] = useState(false);
-    const { isMobileOpen, setIsMobileOpen } = useSidebar();
+    const { openMobile, setOpenMobile, isMobile } = useSidebar();
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [isSigningOut, setIsSigningOut] = useState(false);
@@ -270,6 +270,26 @@ const AppSidebar = () => {
     const { user, loading } = useCurrentUser();
 
     useEffect(() => setMounted(true), []);
+
+    // Collapse-to-icon mode only makes sense for the persistent desktop sidebar;
+    // never leave it applied when we fall back into the mobile off-canvas drawer.
+    useEffect(() => {
+        if (isMobile && isCollapsed) setIsCollapsed(false);
+    }, [isMobile]);
+
+    // Close the mobile drawer whenever the route changes.
+    useEffect(() => {
+        setOpenMobile(false);
+    }, [pathname]);
+
+    // Lock background scroll while the mobile drawer is open.
+    useEffect(() => {
+        if (!isMobile) return;
+        document.body.style.overflow = openMobile ? "hidden" : "";
+        return () => {
+            document.body.style.overflow = "";
+        };
+    }, [isMobile, openMobile]);
 
     const toggleTheme = () => setTheme(theme === "dark" ? "light" : "dark");
 
@@ -316,9 +336,9 @@ const AppSidebar = () => {
         <TooltipProvider delayDuration={100}>
             <aside
                 className={cn(
-                    "fixed inset-y-0 left-0 z-40 flex h-screen flex-col bg-gradient-to-b from-[#376bae] to-[#1a365d] text-white transition-all duration-300 ease-in-out lg:sticky lg:top-0 shadow-xl border-r border-[#1a365d]/50",
+                    "fixed inset-y-0 left-0 z-40 flex h-screen flex-col bg-gradient-to-b from-[#376bae] to-[#1a365d] text-white transition-all duration-300 ease-in-out md:sticky md:top-0 shadow-xl border-r border-[#1a365d]/50",
                     isCollapsed ? "w-[70px]" : "w-[240px]",
-                    isMobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+                    openMobile ? "translate-x-0" : "-translate-x-full md:translate-x-0"
                 )}
             >
                 {/* Header Section */}
@@ -355,17 +375,19 @@ const AppSidebar = () => {
                             )}
                         </div>
 
-                        {/* Collapse Toggle Button */}
+                        {/* Collapse Toggle Button (desktop) / Close Button (mobile) */}
                         <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => setIsCollapsed(!isCollapsed)}
+                            onClick={() => (isMobile ? setOpenMobile(false) : setIsCollapsed(!isCollapsed))}
                             className={cn(
                                 "shrink-0 text-white hover:bg-white/20 hover:text-white transition-colors",
                                 isCollapsed ? "h-10 w-10" : "h-8 w-8"
                             )}
                         >
-                            {isCollapsed ? (
+                            {isMobile ? (
+                                <X className="h-5 w-5" />
+                            ) : isCollapsed ? (
                                 <PanelLeftOpen className="h-5 w-5" />
                             ) : (
                                 <PanelLeftClose className="h-5 w-5" />
@@ -499,8 +521,8 @@ const AppSidebar = () => {
                 </div>
             )}
 
-            {isMobileOpen && (
-                <div className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm lg:hidden" onClick={() => setIsMobileOpen(false)} />
+            {openMobile && (
+                <div className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm md:hidden" onClick={() => setOpenMobile(false)} />
             )}
         </TooltipProvider>
     );

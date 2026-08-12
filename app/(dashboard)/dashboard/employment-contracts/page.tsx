@@ -35,7 +35,8 @@ export default function EmploymentContractsPage() {
   };
 
   return (
-    <div className="max-h-[100vh] w-full overflow-hidden bg-[#f3f4f6] dark:bg-[#0a0a0a] flex flex-col shadow-sm">
+    <div className="h-screen w-full overflow-hidden bg-[#f3f4f6] dark:bg-[#0a0a0a] flex flex-col shadow-sm">
+      {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shrink-0 z-10 shadow-sm relative">
         <div className="flex items-center gap-6">
           <h1 className="text-xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
@@ -77,70 +78,92 @@ export default function EmploymentContractsPage() {
         </div>
       </div>
       
-      <PanelGroup direction="horizontal" className="h-full w-full">
-        {/* LEFT PANEL: Hierarchy (Companies -> Employees) */}
-        <Panel
-          ref={sidebarPanelRef}
-          defaultSize={20}
-          minSize={15}
-          maxSize={30}
-          collapsible
-          collapsedSize={0}
-          onCollapse={() => setCollapsed(prev => ({ ...prev, sidebar: true }))}
-          onExpand={() => setCollapsed(prev => ({ ...prev, sidebar: false }))}
-          className="bg-white/50 dark:bg-slate-900/50 flex flex-col z-10 overflow-auto"
+      {/* 
+        flex-1 min-h-0 is crucial here. It forces the wrapper to never expand 
+        beyond available height, keeping panel scrolling entirely contained.
+      */}
+      <div className="flex-1 min-h-0 w-full relative">
+        <PanelGroup 
+          direction="horizontal" 
+          autoSaveId="contracts-workspace-layout"
+          className="h-full w-full"
         >
-          <ContractsSidebar
-            selectedCompanyId={selectedCompanyId}
-            selectedEmployeeId={selectedEmployeeId}
-            onSelectEmployee={handleEmployeeSelect}
-            onCompanySelect={setSelectedCompanyId}
-          />
-        </Panel>
+          {/* LEFT PANEL: Hierarchy (Companies -> Employees) */}
+          <Panel
+            ref={sidebarPanelRef}
+            id="sidebar"
+            order={1}
+            defaultSize={20}
+            minSize={15}
+            maxSize={30}
+            collapsible
+            collapsedSize={0}
+            onCollapse={() => setCollapsed(prev => ({ ...prev, sidebar: true }))}
+            onExpand={() => setCollapsed(prev => ({ ...prev, sidebar: false }))}
+            className="bg-white/50 dark:bg-slate-900/50 flex flex-col z-10 overflow-hidden"
+          >
+            <ContractsSidebar
+              selectedCompanyId={selectedCompanyId}
+              selectedEmployeeId={selectedEmployeeId}
+              onSelectEmployee={handleEmployeeSelect}
+              onCompanySelect={setSelectedCompanyId}
+            />
+          </Panel>
 
-        <PanelResizeHandle className="w-1.5 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-20" />
+          {/* RESIZE HANDLE 1 */}
+          <PanelResizeHandle className="relative flex w-2 items-center justify-center group outline-none cursor-col-resize z-20">
+            <div className="h-full w-[2px] bg-slate-200/50 dark:bg-slate-800/50 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500 dark:group-hover:bg-blue-500 dark:group-active:bg-blue-600 delay-75" />
+          </PanelResizeHandle>
 
-        {/* CENTER PANEL: Configuration & Form */}
-        <Panel
-          ref={editorPanelRef}
-          defaultSize={40}
-          minSize={30}
-          collapsible
-          collapsedSize={0}
-          onCollapse={() => setCollapsed(prev => ({ ...prev, editor: true }))}
-          onExpand={() => setCollapsed(prev => ({ ...prev, editor: false }))}
-          className="bg-slate-50 dark:bg-slate-950 flex flex-col z-10 !overflow-auto shadow-[0_0_15px_rgba(0,0,0,0.02)]"
-        >
-          <ContractEditor
-            companyId={selectedCompanyId}
-            employeeId={selectedEmployeeId}
-            contractData={contractData}
-            setContractData={setContractData}
-            selectedJobProfile={selectedJobProfile}
-            setSelectedJobProfile={setSelectedJobProfile}
-          />
-        </Panel>
+          {/* CENTER PANEL: Configuration & Form */}
+          <Panel
+            ref={editorPanelRef}
+            id="editor"
+            order={2}
+            defaultSize={40}
+            minSize={25}
+            collapsible
+            collapsedSize={0}
+            onCollapse={() => setCollapsed(prev => ({ ...prev, editor: true }))}
+            onExpand={() => setCollapsed(prev => ({ ...prev, editor: false }))}
+            className="bg-slate-50 dark:bg-slate-950 flex flex-col z-10 overflow-hidden shadow-[0_0_15px_rgba(0,0,0,0.02)]"
+          >
+            <ContractEditor
+              companyId={selectedCompanyId}
+              employeeId={selectedEmployeeId}
+              contractData={contractData}
+              setContractData={setContractData}
+              selectedJobProfile={selectedJobProfile}
+              setSelectedJobProfile={setSelectedJobProfile}
+            />
+          </Panel>
 
-        <PanelResizeHandle className="w-1.5 bg-slate-200/50 dark:bg-slate-800/50 hover:bg-blue-400 dark:hover:bg-blue-500 transition-colors cursor-col-resize z-20" />
+          {/* RESIZE HANDLE 2 */}
+          <PanelResizeHandle className="relative flex w-2 items-center justify-center group outline-none cursor-col-resize z-20">
+            <div className="h-full w-[2px] bg-slate-200/50 dark:bg-slate-800/50 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500 dark:group-hover:bg-blue-500 dark:group-active:bg-blue-600 delay-75" />
+          </PanelResizeHandle>
 
-        {/* RIGHT PANEL: Live Document Preview */}
-        <Panel
-          ref={previewPanelRef}
-          defaultSize={40}
-          minSize={30}
-          collapsible
-          collapsedSize={0}
-          onCollapse={() => setCollapsed(prev => ({ ...prev, preview: true }))}
-          onExpand={() => setCollapsed(prev => ({ ...prev, preview: false }))}
-          className="bg-slate-100/80 dark:bg-slate-900/80 flex flex-col z-10 !overflow-auto"
-        >
-          <ContractPreview
-            contractData={contractData}
-            setContractData={setContractData}
-            selectedJobProfile={selectedJobProfile}
-          />
-        </Panel>
-      </PanelGroup>
+          {/* RIGHT PANEL: Live Document Preview */}
+          <Panel
+            ref={previewPanelRef}
+            id="preview"
+            order={3}
+            defaultSize={40}
+            minSize={25}
+            collapsible
+            collapsedSize={0}
+            onCollapse={() => setCollapsed(prev => ({ ...prev, preview: true }))}
+            onExpand={() => setCollapsed(prev => ({ ...prev, preview: false }))}
+            className="bg-slate-100/80 dark:bg-slate-900/80 flex flex-col z-10 overflow-hidden"
+          >
+            <ContractPreview
+              contractData={contractData}
+              setContractData={setContractData}
+              selectedJobProfile={selectedJobProfile}
+            />
+          </Panel>
+        </PanelGroup>
+      </div>
     </div>
   );
 }

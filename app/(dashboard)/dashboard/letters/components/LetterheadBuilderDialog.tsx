@@ -16,7 +16,8 @@ import { Loader2, Save, Download, FileText, Image as ImageIcon, X } from 'lucide
 import { fetchCompanies, type Company } from '../../companies/database';
 import { supabase } from '@/lib/supabase/client';
 import { LetterheadThemePreview } from './LetterheadThemePreview';
-import type { LetterTheme } from './GeneralLetterLayout';
+import { ContractThemeEditor } from '../../employment-contracts/components/ContractThemePanel';
+import { DEFAULT_GENERAL_LETTER_THEME, type GeneralLetterThemeSettings } from '../utils/letterThemeEngine';
 import {
   resolveCompanyGeneralEmail,
   resolveCompanyPhone,
@@ -26,13 +27,6 @@ import {
 import { fetchCompanyLogoUrl } from '../utils/companyLogo';
 import { buildLetterheadDocxBlob, fetchImageBytesForLetterhead } from '../utils/letterheadThemeBuilder';
 import { saveAs } from 'file-saver';
-
-const THEMES: { value: LetterTheme; label: string; swatch: string }[] = [
-  { value: 'dark-teal', label: 'Dark Teal', swatch: 'bg-slate-900' },
-  { value: 'corporate-blue', label: 'Corporate Blue', swatch: 'bg-blue-700' },
-  { value: 'bold-violet', label: 'Bold Violet', swatch: 'bg-gradient-to-r from-violet-700 to-indigo-600' },
-  { value: 'classic-serif', label: 'Classic Serif', swatch: 'bg-stone-900' },
-];
 
 type LogoMode = 'none' | 'company' | 'upload';
 
@@ -46,7 +40,7 @@ interface LetterheadBuilderDialogProps {
 export function LetterheadBuilderDialog({ open, onOpenChange, onSuccess, preselectedCompanyId }: LetterheadBuilderDialogProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
-  const [theme, setTheme] = useState<LetterTheme>('dark-teal');
+  const [themeSettings, setThemeSettings] = useState<GeneralLetterThemeSettings>(DEFAULT_GENERAL_LETTER_THEME);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [isDefault, setIsDefault] = useState(false);
@@ -122,7 +116,7 @@ export function LetterheadBuilderDialog({ open, onOpenChange, onSuccess, presele
   const buildBlob = async (): Promise<Blob> => {
     const logo = logoMode === 'none' || !logoUrl ? null : await fetchImageBytesForLetterhead(logoUrl);
     return buildLetterheadDocxBlob({
-      theme, entityName, addressLine1, addressLine2, phone, email, kraPin, regNumber, logo,
+      themeSettings, entityName, addressLine1, addressLine2, phone, email, kraPin, regNumber, logo,
     });
   };
 
@@ -247,21 +241,11 @@ export function LetterheadBuilderDialog({ open, onOpenChange, onSuccess, presele
 
               <div className="space-y-2">
                 <Label>Theme</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {THEMES.map((t) => (
-                    <button
-                      key={t.value}
-                      type="button"
-                      onClick={() => setTheme(t.value)}
-                      className={cn(
-                        'flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
-                        theme === t.value ? 'border-primary ring-1 ring-primary' : 'border-border hover:bg-muted'
-                      )}
-                    >
-                      <span className={cn('w-4 h-4 rounded-full shrink-0', t.swatch)} />
-                      {t.label}
-                    </button>
-                  ))}
+                {/* Same 8-preset editor (Theme/Color/Font/Header tabs) as the
+                    live letter composer's theme panel - see
+                    utils/letterThemeEngine.ts. */}
+                <div className="rounded-lg border border-border overflow-hidden">
+                  <ContractThemeEditor settings={themeSettings} onChange={setThemeSettings} variant="inline" />
                 </div>
               </div>
 
@@ -343,7 +327,7 @@ export function LetterheadBuilderDialog({ open, onOpenChange, onSuccess, presele
           <div className="min-h-0 overflow-auto bg-muted/30 rounded-xl p-8 flex items-start justify-center">
             <div id="letterhead-builder-preview" className="w-full max-w-2xl bg-white">
               <LetterheadThemePreview
-                theme={theme}
+                themeSettings={themeSettings}
                 entityName={entityName}
                 addressLine1={addressLine1}
                 addressLine2={addressLine2}
@@ -405,7 +389,7 @@ export function LetterheadBuilderDialog({ open, onOpenChange, onSuccess, presele
           `}</style>
           <div className="hidden print:block lh-print-area bg-white text-black">
             <LetterheadThemePreview
-              theme={theme}
+              themeSettings={themeSettings}
               entityName={entityName}
               addressLine1={addressLine1}
               addressLine2={addressLine2}
