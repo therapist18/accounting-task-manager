@@ -116,7 +116,9 @@
       "WebFetch(domain:supabase.com)",
       "WebFetch(domain:github.com)",
       "Bash(npm run *)",
-      "Bash(echo \"EXIT:$?\")"
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(npx tsx *)",
+      "Bash(tail -40 /tmp/dev.log)"
     ],
     "additionalDirectories": [
       "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals"

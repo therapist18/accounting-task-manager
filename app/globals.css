@@ -205,12 +205,13 @@ body {
    from the theme's own padding) but any CV that spilled onto a second page
    had that second page's content flush against the physical page edge - the
    exact multi-page margin bug already diagnosed and fixed for Employment
-   Contracts (see ContractPreview.tsx's own @page comment). 0.35in matches
-   the DOCX export's page margin (cvDocxExporter.ts, 500 twips = 0.347in) so
-   the two download formats read as consistent with each other; the only
-   trade-off is page 1 ends up with a bit more top whitespace than later
-   pages (theme padding + this margin, both apply there) - a minor cosmetic
-   overlap, not a visible defect, and far preferable to a bare page edge. */
+   Contracts (see ContractPreview.tsx's own @page comment). The Word .doc
+   export (lib/documentExport.ts buildWordDocBlob) supplies its own 0.5in
+   @page margin, a minor cosmetic difference from this 0.35in PDF margin;
+   the only trade-off here is page 1 ends up with a bit more top whitespace
+   than later pages (theme padding + this margin, both apply there) - a minor
+   cosmetic overlap, not a visible defect, and far preferable to a bare page
+   edge. */
 @page {
   size: A4;
   margin: 0.35in;
