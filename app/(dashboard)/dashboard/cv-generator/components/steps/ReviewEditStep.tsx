@@ -44,7 +44,6 @@ interface ReviewEditStepProps {
   companyOptions: ComboOption[];
   handleCreateCompany: (label: string) => Promise<string>;
   selectedLayout: string;
-  setSelectedLayout: (layout: string) => void;
   cvSettings: any;
   previewRef: React.RefObject<HTMLDivElement>;
 }
@@ -71,7 +70,6 @@ export function ReviewEditStep({
   companyOptions,
   handleCreateCompany,
   selectedLayout,
-  setSelectedLayout,
   cvSettings,
   previewRef,
 }: ReviewEditStepProps) {
@@ -210,9 +208,7 @@ export function ReviewEditStep({
           cvData={cvData}
           cvSettings={cvSettings}
           selectedLayout={selectedLayout}
-          setSelectedLayout={setSelectedLayout}
           previewRef={previewRef}
-          showThemeSwitcher
           title="Live Preview"
         />
       </Panel>

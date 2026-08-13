@@ -15,20 +15,11 @@ import { CVLayout } from "./cv-designs";
 const PAGE_WIDTH_PX = 794;
 const PAGE_HEIGHT_PX = 1123;
 
-const CV_THEMES: { key: string; label: string }[] = [
-  { key: "theme1", label: "Classic" },
-  { key: "theme2", label: "Modern" },
-  { key: "theme3", label: "Minimal" },
-  { key: "theme4", label: "Executive" },
-];
-
 interface CvPreviewPanelProps {
   cvData: any;
   cvSettings: any;
   selectedLayout: string;
-  setSelectedLayout?: (layout: string) => void;
   previewRef: React.RefObject<HTMLDivElement>;
-  showThemeSwitcher?: boolean;
   title?: string;
 }
 
@@ -36,9 +27,7 @@ export function CvPreviewPanel({
   cvData,
   cvSettings,
   selectedLayout,
-  setSelectedLayout,
   previewRef,
-  showThemeSwitcher = false,
   title = "Live Preview",
 }: CvPreviewPanelProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -184,24 +173,6 @@ export function CvPreviewPanel({
             </button>
           </div>
         </div>
-
-        {/* Right: CV theme switcher (optional) */}
-        {showThemeSwitcher && setSelectedLayout && (
-          <div className="flex gap-0.5 bg-slate-100 rounded-lg p-0.5 shrink-0">
-            {CV_THEMES.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setSelectedLayout(t.key)}
-                className={cn(
-                  "text-xs font-semibold px-2 py-1 rounded-md transition-all",
-                  selectedLayout === t.key ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Main Preview Area - Scrollable */}

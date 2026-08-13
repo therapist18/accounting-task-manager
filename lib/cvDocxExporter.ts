@@ -392,13 +392,19 @@ function buildSidebarLayout(cvData: any, primaryColor: string, accentColor: stri
           new TableCell({
             width: { size: 30, type: WidthType.PERCENTAGE },
             shading: { type: ShadingType.CLEAR, color: "auto", fill: primaryColor },
-            margins: { top: 200, bottom: 200, left: 160, right: 160 },
+            // Matches the live preview's sidebar padding (theme1: p-[20px_15px],
+            // theme5: p-5/20px) - was 200/160 twips (~13/11px), noticeably
+            // tighter than the ~20/15px the sidebar actually renders at.
+            margins: { top: 280, bottom: 280, left: 220, right: 220 },
             verticalAlign: VerticalAlign.TOP,
             children: sidebarChildren,
           }),
           new TableCell({
             width: { size: 70, type: WidthType.PERCENTAGE },
-            margins: { top: 200, bottom: 200, left: 260, right: 200 },
+            // Matches the live preview's main-column padding (theme1: p-8/32px,
+            // theme5: p-6/24px) - was 200/260/200 twips (~13-17px), noticeably
+            // tighter than the ~24-32px the main column actually renders at.
+            margins: { top: 360, bottom: 360, left: 420, right: 360 },
             verticalAlign: VerticalAlign.TOP,
             children: mainChildren,
           }),
@@ -565,6 +571,27 @@ function buildBannerLayout(cvData: any, primaryColor: string, accentColor: strin
 // generic, unbranded layout.
 const SIDEBAR_THEMES = new Set(["theme1", "theme5"]);
 
+// Page margins (in twips - twentieths of a point, 1440/inch, so 15 twips per
+// CSS px at 96dpi) matched to each theme's actual on-screen/PDF padding in
+// cv-designs.tsx, instead of one flat value applied to every theme regardless
+// of what it actually looks like. Sidebar themes (theme1/theme5) get a
+// smaller, uniform page margin because their color sidebar is meant to bleed
+// close to the page edge in the live preview - the extra breathing room
+// around the main column comes from that TableCell's own margins below, not
+// the page margin. Single-column/banner themes use their real header/body
+// padding directly. Falls back to the old flat 500 (~0.35in) for any
+// unrecognized layout key.
+const THEME_PAGE_MARGINS_TWIPS: Record<string, { top: number; bottom: number; left: number; right: number }> = {
+  theme1: { top: 350, bottom: 350, left: 300, right: 300 },   // sidebar bleed (p-[20px_15px]); main content is p-8
+  theme2: { top: 480, bottom: 480, left: 480, right: 480 },   // header/body both p-8 (32px)
+  theme3: { top: 600, bottom: 600, left: 900, right: 900 },   // padding: 40px 60px
+  theme4: { top: 480, bottom: 300, left: 480, right: 480 },   // header/body p-8 (32px), declaration footer pb-4 (16px)
+  theme5: { top: 350, bottom: 350, left: 300, right: 300 },   // sidebar bleed (p-5); main content is p-6
+  theme6: { top: 480, bottom: 300, left: 600, right: 600 },   // px-10 (40px) sides, header pt-8/footer pb-4
+  theme7: { top: 420, bottom: 300, left: 600, right: 600 },   // px-10 (40px) sides, header py-7/footer pb-4
+};
+const DEFAULT_PAGE_MARGIN_TWIPS = { top: 500, bottom: 500, left: 500, right: 500 };
+
 export async function exportToDocx(
   cvData: any,
   cvSettings?: { primaryColor?: string; accentColor?: string; showPhoto?: boolean },
@@ -581,10 +608,12 @@ export async function exportToDocx(
     ? buildSidebarLayout(cvData, primaryColor, accentColor, photoImageRun)
     : buildBannerLayout(cvData, primaryColor, accentColor, photoImageRun);
 
+  const pageMargin = THEME_PAGE_MARGINS_TWIPS[selectedLayout || "theme1"] || DEFAULT_PAGE_MARGIN_TWIPS;
+
   const doc = new Document({
     sections: [
       {
-        properties: { page: { margin: { top: 500, bottom: 500, left: 500, right: 500 } } },
+        properties: { page: { margin: pageMargin } },
         children,
       },
     ],

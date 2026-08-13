@@ -46,6 +46,13 @@ import { calculateStageDate } from './utils/dateUtils'
 import { fetchUserAssignmentData, hasJobLevelAccess, getOfficerDisplayName, userService } from "@/lib/shared-user-assignment-service"
 import { cn } from "@/lib/utils"
 
+// Same terminal-status list summary-reports/page.tsx uses to scope its Department/Sub-department
+// tab counts to the "live pipeline" — tasks that are still enquiry/WIP, not already wrapped up.
+// tm_tasks is fetched per-department here (not all-at-once like Summary Reports), so counts for
+// departments/sub-departments other than the currently active one can't be derived from the
+// `tasks` state — they're fetched separately as a lightweight { job_level, status } scan.
+const TERMINAL_STATUSES = ['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'];
+
 export default function DepartmentTasksManager({ error, onTaskAction, handleStageStatusSave, onTaskUpdate, getCurrentRequirements, initialSearchTerm, initialDeptId, initialSubDeptId }: DepartmentTasksManagerProps) {
   const [departments, setDepartments] = useState<Department[]>([])
   const [companies, setCompanies] = useState<Map<number, { name: string; prefix: string }>>(new Map())
@@ -76,6 +83,10 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [isDownloading, setIsDownloading] = useState(false)
   const [isLoadingTasks, setIsLoadingTasks] = useState(false)
   const [isRefreshingAllData, setIsRefreshingAllData] = useState(false)
+  // Live-pipeline (non-terminal-status) task counts per department_id / subdepartment_id,
+  // fetched independently of the per-department `tasks` state — see fetchLiveTaskCounts below.
+  const [liveTaskCountsByDept, setLiveTaskCountsByDept] = useState<Record<string, number>>({})
+  const [liveTaskCountsBySubdept, setLiveTaskCountsBySubdept] = useState<Record<string, number>>({})
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>(initialSearchTerm || '')
   const [currentTableHeaders, setCurrentTableHeaders] = useState(ENHANCED_TABLE_HEADERS)
   const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(new Set(ENHANCED_TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
@@ -553,6 +564,31 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     }
   }, [departments, companies])
 
+  // Lightweight scan (job_level + status only, not the full tm_tasks row) across every
+  // department at once — used purely to badge the Department/Sub-department tabs with live
+  // (non-terminal) task counts, independent of loadTasksData's per-department fetch/cache.
+  const fetchLiveTaskCounts = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from('tm_tasks').select('job_level, status');
+      if (error) throw error;
+
+      const byDept: Record<string, number> = {};
+      const bySubdept: Record<string, number> = {};
+      (data || []).forEach((row: any) => {
+        if (TERMINAL_STATUSES.includes(row.status)) return;
+        const deptId = row.job_level?.department_id;
+        const subdeptId = row.job_level?.subdepartment_id;
+        if (deptId != null) byDept[deptId] = (byDept[deptId] || 0) + 1;
+        if (subdeptId != null) bySubdept[subdeptId] = (bySubdept[subdeptId] || 0) + 1;
+      });
+
+      setLiveTaskCountsByDept(byDept);
+      setLiveTaskCountsBySubdept(bySubdept);
+    } catch (error) {
+      console.error('Error loading live task counts:', error);
+    }
+  }, []);
+
   const refreshAllData = useCallback(async () => {
     setIsRefreshingAllData(true);
     try {
@@ -569,7 +605,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         loadUserAssignmentData(),
         activeDepartmentTab ? loadTasksData(activeDepartmentTab, activeSubdepartmentTab, false, true) : Promise.resolve(null),
         fetchTasksDuplicate(),
-        fetchDocumentWorkflowLogs()
+        fetchDocumentWorkflowLogs(),
+        fetchLiveTaskCounts(),
       ]);
 
       // Batch state updates
@@ -603,7 +640,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     } finally {
       setIsRefreshingAllData(false);
     }
-  }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData, loadUserAssignmentData])
+  }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData, loadUserAssignmentData, fetchLiveTaskCounts])
 
   const isTaskRelevantToActiveView = useCallback((task: any) => {
     if (!task || !activeDepartmentTab) return false;
@@ -3356,7 +3393,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
           fetchCompanies(),
           fetchAllDocuments(),
           fetchAllKycFields(),
-          loadUserAssignmentData()
+          loadUserAssignmentData(),
+          fetchLiveTaskCounts(),
         ]);
 
         setCompanies(companiesData);
@@ -3668,18 +3706,25 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
           <div className="flex gap-1 bg-slate-100 p-1 rounded-full border border-slate-200">
             {departments.map(dept => {
               const isActive = activeDepartmentTab === dept.id.toString();
+              const count = liveTaskCountsByDept[dept.id.toString()] ?? liveTaskCountsByDept[dept.id] ?? 0;
               return (
                 <button
                   key={dept.id}
                   onClick={() => setActiveDepartmentTab(dept.id.toString())}
                   className={cn(
-                    "px-5 py-2 text-sm font-bold rounded-full transition-all flex items-center gap-2",
+                    "group px-5 py-2 text-sm font-bold rounded-full transition-all flex items-center gap-2",
                     isActive
                       ? "bg-custom-blue text-white shadow-sm"
                       : "text-slate-500 hover:text-slate-800"
                   )}
                 >
                   {dept.name}
+                  <span className={cn(
+                    "font-normal tabular-nums px-2 py-0.5 rounded-full text-xs min-w-[1.5rem] text-center",
+                    isActive ? "bg-white/25 text-white" : "bg-custom-blue/10 text-custom-blue"
+                  )}>
+                    {count}
+                  </span>
                 </button>
               );
             })}
@@ -3694,28 +3739,41 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
             <button
               onClick={() => setActiveSubdepartmentTab("")}
               className={cn(
-                "px-4 py-1.5 text-sm font-bold rounded-full transition-all",
+                "group px-4 py-1.5 text-sm font-bold rounded-full transition-all flex items-center gap-2",
                 activeSubdepartmentTab === ""
                   ? "bg-white text-slate-800 shadow-sm"
                   : "text-slate-500 hover:text-slate-800"
               )}
             >
               All Subdepartments
+              <span className={cn(
+                "font-normal tabular-nums px-2 py-0.5 rounded-full text-xs min-w-[1.5rem] text-center",
+                activeSubdepartmentTab === "" ? "bg-custom-blue/10 text-custom-blue" : "bg-slate-200 text-slate-500"
+              )}>
+                {liveTaskCountsByDept[activeDepartmentTab] ?? 0}
+              </span>
             </button>
             {defaultSubdepartments.map(subdept => {
               const isActive = activeSubdepartmentTab === subdept.id.toString();
+              const count = liveTaskCountsBySubdept[subdept.id.toString()] ?? liveTaskCountsBySubdept[subdept.id] ?? 0;
               return (
                 <button
                   key={subdept.id}
                   onClick={() => setActiveSubdepartmentTab(subdept.id.toString())}
                   className={cn(
-                    "px-4 py-1.5 text-sm font-bold rounded-full transition-all",
+                    "group px-4 py-1.5 text-sm font-bold rounded-full transition-all flex items-center gap-2",
                     isActive
                       ? "bg-custom-blue text-white shadow-sm"
                       : "text-slate-500 hover:text-slate-800"
                   )}
                 >
                   {subdept.name}
+                  <span className={cn(
+                    "font-normal tabular-nums px-2 py-0.5 rounded-full text-xs min-w-[1.5rem] text-center",
+                    isActive ? "bg-white/25 text-white" : "bg-custom-blue/10 text-custom-blue"
+                  )}>
+                    {count}
+                  </span>
                 </button>
               );
             })}
@@ -3729,11 +3787,11 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
           <div className="px-8 py-2.5 flex items-center bg-white">
             <div className="flex gap-1.5">
               {[
-                { id: 'enquiries', label: 'Enquiries', count: enquiryTasks.length },
-                { id: 'wip-stages', label: 'WIP Stages', count: wipTasks.length },
-                { id: 'write_up_completed', label: 'Write Up Completed', count: completedTasks.length },
-                { id: 'endorsed', label: 'Endorsed', count: endorsedTasks.length },
-                { id: 'cancelled', label: 'Cancelled', count: cancelledTasks.length },
+                { id: 'enquiries', label: 'Enquiries', count: enquiryTasks.length, active: 'bg-sky-600', badgeIdle: 'bg-sky-100 text-sky-700' },
+                { id: 'wip-stages', label: 'WIP Stages', count: wipTasks.length, active: 'bg-amber-500', badgeIdle: 'bg-amber-100 text-amber-700' },
+                { id: 'write_up_completed', label: 'Write Up Completed', count: completedTasks.length, active: 'bg-emerald-600', badgeIdle: 'bg-emerald-100 text-emerald-700' },
+                { id: 'endorsed', label: 'Endorsed', count: endorsedTasks.length, active: 'bg-violet-600', badgeIdle: 'bg-violet-100 text-violet-700' },
+                { id: 'cancelled', label: 'Cancelled', count: cancelledTasks.length, active: 'bg-red-600', badgeIdle: 'bg-red-100 text-red-700' },
               ].map(tab => {
                 const isActive = activeSubTab === tab.id;
                 return (
@@ -3741,16 +3799,16 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                     key={tab.id}
                     onClick={() => setActiveSubTab(tab.id)}
                     className={cn(
-                      "h-8 px-4 text-sm font-semibold rounded-lg transition-all flex items-center gap-2",
+                      "group h-9 px-4 text-sm font-bold rounded-lg transition-all flex items-center gap-2",
                       isActive
-                        ? "bg-custom-blue text-white shadow-sm"
+                        ? cn(tab.active, "text-white shadow-sm")
                         : "bg-white text-slate-500 border border-slate-200 hover:border-slate-300 hover:text-slate-700"
                     )}
                   >
                     {tab.label}
                     <span className={cn(
-                      "px-1.5 py-0.5 rounded-md text-xs font-bold tabular-nums",
-                      isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                      "font-normal tabular-nums px-2 py-0.5 rounded-md text-sm min-w-[1.75rem] text-center",
+                      isActive ? "bg-white/25 text-white" : tab.badgeIdle
                     )}>
                       {tab.count}
                     </span>

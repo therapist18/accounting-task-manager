@@ -1747,7 +1747,6 @@ export default function CVGeneratorPage() {
             companyOptions={companyOptions}
             handleCreateCompany={handleCreateCompany}
             selectedLayout={selectedLayout}
-            setSelectedLayout={setSelectedLayout}
             cvSettings={cvSettings}
             previewRef={previewRef}
           />
