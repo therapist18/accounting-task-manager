@@ -8,7 +8,7 @@ import {
   ZoomIn, ZoomOut, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   ChevronDown, List, RefreshCw,
 } from 'lucide-react';
-import { saveAs } from 'file-saver';
+import { downloadBlob, buildWordDocBlob, printElementAsPdf } from '@/lib/documentExport';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -152,6 +152,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
 
   const contentMeasureRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const printAreaRef = useRef<HTMLDivElement>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
   // Pagination Configuration
@@ -482,55 +483,34 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
       bodyContent = doc.body.firstElementChild?.innerHTML ?? bodyContent;
     }
 
-    // Real Microsoft Office HTML export markup, adopted from a proven
-    // reference (lynne-drafts/contracts/manan-travkings.html) rather than
-    // the plain-HTML-with-a-.doc-extension this used before. The
-    // xmlns:o/xmlns:w namespaces + <!--[if gte mso 9]> block tell Word's
-    // HTML import filter this is genuine Office markup, so it honors mso-*
-    // CSS and the named @page region below instead of falling back to a
-    // generic unstyled import. @page WordSection1 + div.page:WordSection1
-    // is Word's own mechanism for page size/margins on HTML-sourced
-    // documents - 0.5in matches the PDF export's page margin (see the
-    // .ec-print-area print stylesheet) so both formats agree, and both in
-    // turn match the on-screen preview's own single 48px (0.5in) gutter
-    // (applyThemeToHtml's .contract-theme-X padding - see the Contract
-    // content comment above). The theme wrapper's own inline padding/
-    // max-width (from applyThemeToHtml) is zeroed here for the same reason
-    // it is for print: @page already supplies the page margin, so leaving
-    // both in would double it on the first page.
-    const htmlDoc = `<!doctype html>
-<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-<head>
-<meta charset="utf-8">
-<title>${baseName} Employment Contract</title>
-<!--[if gte mso 9]>
-<xml>
-  <w:WordDocument>
-    <w:View>Print</w:View>
-    <w:DoNotOptimizeForBrowser/>
-  </w:WordDocument>
-</xml>
-<![endif]-->
-<style>
-${themeCss}
-  @page WordSection1 { size: 8.5in 11.7in; margin: 0.5in; mso-page-orientation: portrait; }
-  div.WordSection1 { page: WordSection1; }
-  div.WordSection1 [class^="contract-theme-"] { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }
-</style>
-</head>
-<body>
-<div class="WordSection1">${bodyContent}</div>
-</body>
-</html>`;
-    // Leading UTF-8 BOM so Word recognizes the encoding correctly instead of
-    // mis-rendering special characters (curly quotes, KES amounts, etc.).
-    const bomChar = String.fromCharCode(0xfeff);
-    return { blob: new Blob([bomChar, htmlDoc], { type: 'application/msword' }), fileName: `${baseName}_Employment_Contract.doc` };
+    // The mso namespaces, the <!--[if gte mso 9]> block, the hoisted <style>
+    // in <head> and the @page WordSection1 page-size/margin mechanism are all
+    // provided by the shared buildWordDocBlob (lib/documentExport.ts) - see
+    // the comments there. @page WordSection1 is Word's own mechanism for page
+    // size/margins on HTML-sourced documents - 0.5in matches the PDF export's
+    // page margin (see the .ec-print-area print stylesheet) so both formats
+    // agree, and both in turn match the on-screen preview's own single 48px
+    // (0.5in) gutter (applyThemeToHtml's .contract-theme-X padding - see the
+    // Contract content comment above). The theme wrapper's own inline padding/
+    // max-width (from applyThemeToHtml) is zeroed here for the same reason it
+    // is for print: @page already supplies the page margin, so leaving both in
+    // would double it on the first page.
+    return {
+      blob: buildWordDocBlob({
+        title: `${baseName} Employment Contract`,
+        html: bodyContent,
+        css: `${themeCss}
+  [class^="contract-theme-"] { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }`,
+        pageSize: '8.5in 11.7in',
+        pageMargin: '0.5in',
+      }),
+      fileName: `${baseName}_Employment_Contract.doc`,
+    };
   };
 
   const handleDownloadWord = () => {
     const output = buildOutput();
-    if (output) saveAs(output.blob, output.fileName);
+    if (output) downloadBlob(output.blob, output.fileName);
   };
 
   // Uses the browser's native print pipeline instead of rasterizing a
@@ -540,10 +520,19 @@ ${themeCss}
   // size) and respects the page-break-before/page-break-inside rules already
   // defined in themeEngine.ts's BASE_SECTION_STYLES, instead of a canvas
   // getting sliced into A4-height chunks with no regard for where a
-  // paragraph, table row, or signature block actually ends.
+  // paragraph, table row, or signature block actually ends. The shared
+  // printElementAsPdf handles waiting for fonts/images, the Save-as-PDF file
+  // name (document.title) and cleanup; the portaled print area's own
+  // @media print CSS hides the rest of the page.
   const handleDownloadPdf = () => {
     if (!hasOutput || !employee) return;
-    window.print();
+    const baseName = employee.fullName.replace(/\s+/g, '_');
+    printElementAsPdf({
+      element: printAreaRef.current,
+      fileName: `${baseName}_Employment_Contract`,
+    }).catch((err) => {
+      console.error('PDF generation failed', err);
+    });
   };
 
   const handleSaveToDb = async () => {
@@ -903,7 +892,7 @@ ${themeCss}
             }
           }
         `}</style>
-        <div className="hidden print:block ec-print-area bg-white text-black">
+        <div ref={printAreaRef} className="hidden print:block ec-print-area bg-white text-black">
           <div dangerouslySetInnerHTML={{ __html: exportThemedHtml }} />
         </div>
       </>,

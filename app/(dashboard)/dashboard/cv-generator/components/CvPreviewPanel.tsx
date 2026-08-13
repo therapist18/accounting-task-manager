@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ZoomIn, ZoomOut } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CVLayout } from "./cv-designs";
+import { buildCvDocument, type CvDocument } from "@/lib/cvThemeEngine";
 
 // Mirrors the Employment Contracts preview's pagination/toolbar design (see
 // ContractPreview.tsx) so both document-preview modules look and behave the
@@ -33,6 +33,20 @@ export function CvPreviewPanel({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [contentHeightPx, setContentHeightPx] = useState(0);
+
+  // Build the themed document (shared with the .doc export via
+  // buildCvDocument) so the live preview IS the Word output — same HTML +
+  // CSS in both. Async because the photo is converted to a data URL.
+  const [doc, setDoc] = useState<CvDocument | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    buildCvDocument(cvData, cvSettings, selectedLayout).then((d) => {
+      if (!cancelled) setDoc(d);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cvData, cvSettings, selectedLayout]);
 
   const [zoomPct, setZoomPct] = useState(80);
   const manualZoomRatio = zoomPct / 100;
@@ -84,14 +98,14 @@ export function CvPreviewPanel({
     const observer = new ResizeObserver(measure);
     observer.observe(el);
 
-    const images = el.querySelectorAll("img");
-    images.forEach((img) => img.addEventListener("load", measure));
+      const images = el.querySelectorAll("img");
+      images.forEach((img) => img.addEventListener("load", measure));
 
-    return () => {
-      observer.disconnect();
-      images.forEach((img) => img.removeEventListener("load", measure));
-    };
-  }, [previewRef, cvData, cvSettings, selectedLayout]);
+      return () => {
+        observer.disconnect();
+        images.forEach((img) => img.removeEventListener("load", measure));
+      };
+    }, [previewRef, cvData, cvSettings, selectedLayout, doc]);
 
   // Scroll-based page tracking.
   useEffect(() => {
@@ -199,7 +213,16 @@ export function CvPreviewPanel({
               ))}
 
               <div ref={previewRef} id="cv-preview-container" style={{ width: "210mm", minHeight: "297mm", background: "white" }}>
-                <CVLayout cvData={cvData} cvSettings={cvSettings} selectedLayout={selectedLayout} />
+                {doc ? (
+                  <>
+                    <style dangerouslySetInnerHTML={{ __html: doc.css }} />
+                    <div dangerouslySetInnerHTML={{ __html: doc.bodyHtml }} />
+                  </>
+                ) : (
+                  <div className="flex items-center justify-center" style={{ height: "297mm" }}>
+                    <span className="text-xs font-medium text-slate-400">Rendering preview…</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

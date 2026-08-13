@@ -11,7 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { exportToDocx } from "@/lib/cvDocxExporter";
+import { printElementAsPdf, downloadHtmlAsWord } from "@/lib/documentExport";
+import { buildCvDocument } from "@/lib/cvThemeEngine";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase/client";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
@@ -1477,68 +1478,30 @@ export default function CVGeneratorPage() {
     setIsDownloadingPdf(true);
     toast.info("Opening print dialog — choose \"Save as PDF\" as the destination.");
 
-    // The preview lives inside a scaled zoom wrapper, several flex/grid panels,
-    // and an app shell that's h-screen + overflow-hidden. None of that supports
-    // print pagination — a fixed/absolutely-positioned element, or one nested
-    // inside an overflow-clipped ancestor, only prints its first page's worth
-    // of content in Chrome. So instead of isolating it in place, we detach it
-    // and re-append it as a direct child of <body> (see @media print in
-    // globals.css) where it's in normal static flow and paginates correctly.
-    const originalParent = element.parentElement;
-    const originalNextSibling = element.nextSibling;
-    const originalTitle = document.title;
-
-    let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
-    const cleanup = () => {
-      document.body.classList.remove("pdf-mode");
-      if (originalParent) originalParent.insertBefore(element, originalNextSibling);
-      document.title = originalTitle;
-      window.removeEventListener("afterprint", cleanup);
-      if (fallbackTimer) clearTimeout(fallbackTimer);
-      setIsDownloadingPdf(false);
-    };
+    // Chrome's "Save as PDF" suggests document.title as the filename. The
+    // shared printElementAsPdf sets it before printing and restores it after.
+    const age = cvData.personalDetails?.dateOfBirth
+      ? (() => { const dob = cvData.personalDetails.dateOfBirth; const [d, m, y] = dob.includes('/') ? dob.split('/').map(Number) : [0, 0, Number(dob.split('-')[0])]; const birth = new Date(y, m ? m - 1 : 0, d || 1); return `${Math.floor((Date.now() - birth.getTime()) / (365.25 * 24 * 3600 * 1000))}`; })()
+      : '';
+    const rec = 'BCL';
+    const prof = (cvData.personalInfo?.title || '').replace(/\s+/g, '_').slice(0, 30);
+    const applicantName = (cvData.personalInfo.fullName || 'CV').replace(/\s+/g, '_');
+    const fileName = [applicantName, age, 'REF', rec, prof].filter(Boolean).join('_');
 
     try {
-      // Wait for the chosen theme font (and any images already in the DOM) to finish
-      // loading - otherwise Chrome can print with the fallback font, producing a
-      // PDF that visibly doesn't match the on-screen preview.
-      if (typeof document !== "undefined" && (document as any).fonts?.ready) {
-        try { await (document as any).fonts.ready; } catch { /* ignore */ }
-      }
-      await Promise.all(
-        Array.from(element.querySelectorAll("img")).map((img) =>
-          (img as HTMLImageElement).complete
-            ? Promise.resolve()
-            : new Promise<void>((resolve) => {
-                (img as HTMLImageElement).addEventListener("load", () => resolve(), { once: true });
-                (img as HTMLImageElement).addEventListener("error", () => resolve(), { once: true });
-              })
-        )
-      );
-
-      // Chrome's "Save as PDF" suggests document.title as the filename.
-      const age = cvData.personalDetails?.dateOfBirth
-        ? (() => { const dob = cvData.personalDetails.dateOfBirth; const [d, m, y] = dob.includes('/') ? dob.split('/').map(Number) : [0, 0, Number(dob.split('-')[0])]; const birth = new Date(y, m ? m - 1 : 0, d || 1); return `${Math.floor((Date.now() - birth.getTime()) / (365.25 * 24 * 3600 * 1000))}`; })()
-        : '';
-      const rec = 'BCL';
-      const prof = (cvData.personalInfo?.title || '').replace(/\s+/g, '_').slice(0, 30);
-      const applicantName = (cvData.personalInfo.fullName || 'CV').replace(/\s+/g, '_');
-      document.title = [applicantName, age, 'REF', rec, prof].filter(Boolean).join('_');
-
-      document.body.appendChild(element);
-      document.body.classList.add("pdf-mode");
-      window.addEventListener("afterprint", cleanup, { once: true });
-      // Safety net: some browsers don't reliably fire afterprint for
-      // programmatic print() calls — don't leave the button stuck spinning.
-      fallbackTimer = setTimeout(cleanup, 3 * 60 * 1000);
-
-      // Give the browser a frame to apply the layout/style changes before printing.
-      await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 50)));
-
-      window.print();
+      // The shared helper waits for the theme font/images, moves the preview
+      // to <body> for print (globals.css's body.pdf-mode handles the rest),
+      // and reliably restores the DOM + title afterwards.
+      await printElementAsPdf({
+        element,
+        fileName,
+        bodyClassName: "pdf-mode",
+        detach: true,
+        onCleanup: () => setIsDownloadingPdf(false),
+      });
     } catch (error: any) {
       console.error("PDF generation failed", error);
-      cleanup();
+      setIsDownloadingPdf(false);
       toast.error("PDF generation failed. Please try again.");
     }
   };
@@ -1546,16 +1509,21 @@ export default function CVGeneratorPage() {
   const handleDownloadDocx = async () => {
     try {
       toast.info("Generating Word document...");
-      await exportToDocx(
-        cvData,
-        {
-          primaryColor: cvSettings.primaryColor,
-          accentColor: cvSettings.accentColor,
-          showPhoto: cvSettings.showPhoto,
-        },
-        selectedLayout
-      );
-      toast.success("Word document (.docx) generated successfully!");
+      // Purpose-built .doc built from the same buildCvDocument source of truth
+      // that drives the on-screen preview (plain HTML tables + flat scoped CSS
+      // via buildWordDocBlob) — same approach the Employment Contracts module
+      // uses, so the downloaded Word file preserves the CV's styling instead
+      // of flattening it.
+      const result = await buildCvDocument(cvData, cvSettings, selectedLayout);
+      downloadHtmlAsWord({
+        html: result.bodyHtml,
+        title: result.title,
+        css: result.css,
+        pageSize: result.pageSize,
+        pageMargin: result.pageMargin,
+        fileName: result.fileName,
+      });
+      toast.success("Word document (.doc) generated successfully!");
     } catch (e: any) {
       console.error(e);
       toast.error("Failed to generate Word document.");
