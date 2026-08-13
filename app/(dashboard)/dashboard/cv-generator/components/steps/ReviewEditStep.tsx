@@ -1,10 +1,10 @@
 // @ts-nocheck
 "use client";
 
-import { ArrowRight, BarChart3, ChevronDown, ChevronRight, Copy, Crosshair, Download, PenLine, FileText as CoverLetterIcon, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowRight, ChevronDown, ChevronRight, Copy, Crosshair, Download, PenLine, FileText as CoverLetterIcon } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
-import { CVLayout } from "../cv-designs";
+import { CvPreviewPanel } from "../CvPreviewPanel";
 import type { ComboOption } from "../CreatableCombobox";
 import {
   ContactEditor,
@@ -30,11 +30,9 @@ interface ReviewEditStepProps {
   activeSection: string;
   setActiveSection: (id: string) => void;
   setShowAiWriter: (v: boolean) => void;
-  setShowAtsOptimizer: (v: boolean) => void;
   setShowJobMatch: (v: boolean) => void;
   setShowCoverLetter: (v: boolean) => void;
   setShowResumeVersions: (v: boolean) => void;
-  setShowAnalytics: (v: boolean) => void;
   setShowAdvancedExport: (v: boolean) => void;
   setWorkflowStep: (step: string) => void;
   cvData: any;
@@ -45,8 +43,6 @@ interface ReviewEditStepProps {
   toggleItem: (key: string) => void;
   companyOptions: ComboOption[];
   handleCreateCompany: (label: string) => Promise<string>;
-  zoomLevel: number;
-  setZoomLevel: (updater: any) => void;
   selectedLayout: string;
   setSelectedLayout: (layout: string) => void;
   cvSettings: any;
@@ -61,11 +57,9 @@ export function ReviewEditStep({
   activeSection,
   setActiveSection,
   setShowAiWriter,
-  setShowAtsOptimizer,
   setShowJobMatch,
   setShowCoverLetter,
   setShowResumeVersions,
-  setShowAnalytics,
   setShowAdvancedExport,
   setWorkflowStep,
   cvData,
@@ -76,8 +70,6 @@ export function ReviewEditStep({
   toggleItem,
   companyOptions,
   handleCreateCompany,
-  zoomLevel,
-  setZoomLevel,
   selectedLayout,
   setSelectedLayout,
   cvSettings,
@@ -133,11 +125,9 @@ export function ReviewEditStep({
         <div className="border-t border-slate-200 p-2 space-y-1.5">
           <span className="text-sm font-bold text-slate-400 uppercase tracking-wider px-1 block">AI &amp; Tools</span>
           <button onClick={() => setShowAiWriter(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-purple-50 text-slate-600 text-sm font-semibold"><PenLine className="h-3 w-3 text-purple-500" /> AI Writer</button>
-          <button onClick={() => setShowAtsOptimizer(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-amber-50 text-slate-600 text-sm font-semibold"><BarChart3 className="h-3 w-3 text-amber-600" /> ATS Optimizer</button>
           <button onClick={() => setShowJobMatch(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-blue-50 text-slate-600 text-sm font-semibold"><Crosshair className="h-3 w-3 text-blue-600" /> Job Match</button>
           <button onClick={() => setShowCoverLetter(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-green-50 text-slate-600 text-sm font-semibold"><CoverLetterIcon className="h-3 w-3 text-green-600" /> Cover Letter</button>
           <button onClick={() => setShowResumeVersions(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-slate-50 text-slate-600 text-sm font-semibold"><Copy className="h-3 w-3 text-slate-500" /> Versions</button>
-          <button onClick={() => setShowAnalytics(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-slate-50 text-slate-600 text-sm font-semibold"><BarChart3 className="h-3 w-3 text-slate-500" /> Analytics</button>
         </div>
         <div className="border-t border-slate-200 p-3 space-y-1.5">
           <Button size="sm" onClick={() => setShowAdvancedExport(true)} variant="outline" className="w-full text-xs h-7 border-slate-200"><Download className="h-3 w-3 mr-1" /> Advanced Export</Button>
@@ -215,27 +205,16 @@ export function ReviewEditStep({
       <PanelResizeHandle className="w-1.5 bg-slate-100 hover:bg-custom-blue/30 transition-colors cursor-col-resize flex-shrink-0" />
 
       {/* Right — Preview Panel (Review & Edit step) */}
-      <Panel defaultSize={45} minSize={25} className="bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-        <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Live Preview</span>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setZoomLevel(Math.max(0.4, zoomLevel - 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomOut className="h-3.5 w-3.5 text-slate-500" /></button>
-            <span className="text-sm font-bold text-slate-600 min-w-[36px] text-center">{Math.round(zoomLevel * 100)}%</span>
-            <button onClick={() => setZoomLevel(Math.min(1.2, zoomLevel + 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomIn className="h-3.5 w-3.5 text-slate-500" /></button>
-          </div>
-          <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5">
-            {[{ key: "theme1", label: "Classic" }, { key: "theme2", label: "Modern" }, { key: "theme3", label: "Minimal" }, { key: "theme4", label: "Executive" }].map(t => (
-              <button key={t.key} onClick={() => setSelectedLayout(t.key)}
-                className={`text-sm font-semibold px-2 py-1 rounded-md transition-all ${selectedLayout === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-              >{t.label}</button>
-            ))}
-          </div>
-        </div>
-        <div className="flex-1 overflow-auto p-6 flex items-start justify-center bg-slate-50 custom-scrollbar">
-          <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center', transition: 'transform 0.15s ease-out' }} className="shrink-0">
-            <div ref={previewRef} id="cv-preview-container" style={{ width: '210mm', minHeight: '297mm', background: 'white' }}><CVLayout cvData={cvData} cvSettings={cvSettings} selectedLayout={selectedLayout} /></div>
-          </div>
-        </div>
+      <Panel defaultSize={45} minSize={25} className="overflow-hidden flex flex-col">
+        <CvPreviewPanel
+          cvData={cvData}
+          cvSettings={cvSettings}
+          selectedLayout={selectedLayout}
+          setSelectedLayout={setSelectedLayout}
+          previewRef={previewRef}
+          showThemeSwitcher
+          title="Live Preview"
+        />
       </Panel>
     </PanelGroup>
   );

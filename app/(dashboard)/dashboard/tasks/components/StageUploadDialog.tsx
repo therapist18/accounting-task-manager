@@ -1292,6 +1292,12 @@ export function StageUploadDialog({
       const updatedSourceDocs = { ...selectedSourceDocs };
       const uploadedDocIds = new Set<string>();
       const uploadedDocumentsForWorkflow: Array<{ id: string; document_id: string; stage_doc_id: string }> = [];
+      // Rows newly inserted into acc_portal_directors_documents this save — handed back via
+      // onTaskAction so the caller can merge them straight into its allDocuments cache instead
+      // of only picking them up on the next full refreshAllData(). Without this, the preview
+      // icon (resolved from that cache via getDocumentForTaskStage) stays blank until the user
+      // manually clicks Refresh, even though the upload itself succeeded.
+      const newlyInsertedDocuments: any[] = [];
 
       const fieldMetadataByDocId = Object.entries(docFieldsMap).reduce((acc, [docId, fields]) => {
         const fieldIdToName = new Map();
@@ -1389,6 +1395,7 @@ export function StageUploadDialog({
             if (insertError) throw insertError;
             insertedDoc = newDoc;
             documentId = newDoc.id;
+            newlyInsertedDocuments.push(newDoc);
           } else if (docData.id) {
             insertedDoc = { id: docData.id };
             documentId = docData.id;
@@ -1538,7 +1545,8 @@ export function StageUploadDialog({
         taskId: task.id,
         task: updatedTask,
         stageId: stage.id,
-        source: 'stage-upload'
+        source: 'stage-upload',
+        newDocuments: newlyInsertedDocuments
       });
 
       const isWriteUpStage = stage.id === '072b9710-45df-4a05-ba65-01b4ef29d61d';

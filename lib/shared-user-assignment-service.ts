@@ -353,7 +353,13 @@ class UnifiedUserService {
     const cacheKey = `allUserData_${JSON.stringify(options)}_${deptKey}`;
 
     if (this.isCacheValid(cacheKey)) {
-      return this.cache.get(cacheKey);
+      // this.cache.get(cacheKey) is the {data, timestamp} wrapper setCache() stores, not the
+      // FilteredUserData itself — returning it directly used to hand callers an object with no
+      // .officers/.managers/.assistants/.allUsers on every cache HIT, which is exactly why
+      // managers/assistants would populate on a page's first load (cache miss, correct shape)
+      // and then silently come back empty on the next dialog open within the 5-minute window
+      // (cache hit, wrong shape). getCache() unwraps it correctly.
+      return this.getCache(cacheKey);
     }
     // Use existing fetchUserAssignmentData to get raw data
     const rawData = await fetchUserAssignmentData(options);

@@ -4,7 +4,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export async function POST(request: Request) {
   try {
-    const { mode, currentSummary, experience, skills, industry, jobDescription, currentSkills } = await request.json();
+    const { mode, currentSummary, experience, skills, industry, jobDescription, currentSkills, cvData } = await request.json();
 
     const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || API_KEYS[1] || API_KEYS[0];
     if (!apiKey) return NextResponse.json({ error: 'API key not configured' }, { status: 500 });
@@ -56,6 +56,26 @@ Rules:
       suggested.push({ category: "Soft Skills", items: "Leadership, Communication, Problem Solving, Teamwork, Time Management, Adaptability, Critical Thinking" });
 
       return NextResponse.json({ result: suggested.filter(s => !existingCategories.some((ec: string) => s.category.toLowerCase().includes(ec))) });
+    } else if (mode === "enhance-full-cv") {
+      prompt = `You are an expert professional CV writer and career coach. You are given a candidate's full CV as JSON. Rewrite and polish the WORDING of the CV to make it significantly more compelling, concise, and professional — as if preparing it for a competitive job application — without changing any of the underlying facts.
+
+Current CV data:
+${JSON.stringify(cvData || {})}
+
+Rewrite rules:
+- "summary": rewrite into a punchy 3-4 sentence professional summary highlighting years of experience, core expertise, and value proposition.
+- "experience" and "internships": for each entry, rewrite "responsibilities" using strong action verbs (Led, Delivered, Architected, Optimized, Reduced, Increased) and add plausible quantifiable impact only where the existing context supports it. Also tighten "companyDesc" into one crisp sentence if it is missing or vague. Do NOT change "company", "role", "location", "startDate", or "endDate" — return them unchanged in the same array position as the input so entries can be matched by index.
+- "skills": reorganize into clear, well-labelled categories and tighten the wording of each category's items. Do not invent skills that have no basis in the summary/experience.
+- "projects": polish each "description" for clarity and impact; keep "title" and "year" unchanged.
+- "achievements": polish each "description" for clarity and impact; keep "title" and "date" unchanged.
+
+Strict constraints:
+- Do NOT fabricate new employers, job titles, dates, schools, certifications, or achievements — only rewrite what already exists.
+- Do NOT include "personalInfo", "personalDetails", "education", "references", "certifications", "languages", "additionalInfo", "declaration", "includeDeclaration", or "verifiedBadge" in your response — those are handled separately and any values you provide for them will be ignored.
+- "experience", "internships", "projects", and "achievements" arrays in your response must be the same length, and in the same order, as the corresponding arrays in the input.
+
+Return ONLY valid JSON in this exact shape:
+{ "result": { "summary": "string", "skills": [{"category": "string", "items": "string"}], "experience": [{"companyDesc": "string", "responsibilities": ["string"]}], "internships": [{"companyDesc": "string", "responsibilities": ["string"]}], "projects": [{"description": "string"}], "achievements": [{"description": "string"}] } }`;
     } else {
       return NextResponse.json({ error: 'Invalid mode' }, { status: 400 });
     }

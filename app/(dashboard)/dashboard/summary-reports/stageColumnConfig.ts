@@ -76,10 +76,19 @@ export const SUMMARY_COLUMNS: SummaryColumnDef[] = [
   { id: 'promised_time', label: 'PROMISED TIME', type: 'computed_time', highlight: true },
   { id: 'planned_execution', label: 'PLANNED EXECUTION', type: 'computed_time' },
   { id: 'actual_execution', label: 'ACTUAL EXECUTION', type: 'computed_time' },
-  { id: 'execution_delta', label: 'Δ VS PROMISED', type: 'computed_time' },
+  { id: 'execution_delta', label: 'ACTUAL EXECUTION VS PROMISED', type: 'computed_time' },
   { id: 'stages_time_expected', label: 'STAGES TIME EXPECTED', type: 'computed_time' },
 ];
 
+const DEFAULT_HIDDEN_SUMMARY_COLUMN_IDS = new Set([
+  'company_prefix',
+  'sponsor_name',
+  'application_type',
+  'duration',
+  'subclass_name',
+  'stages_time_expected',
+]);
+
 export const DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS = SUMMARY_COLUMNS
   .map(c => c.id)
-  .filter(id => id !== 'company_prefix' && id !== 'sponsor_name');
+  .filter(id => !DEFAULT_HIDDEN_SUMMARY_COLUMN_IDS.has(id));

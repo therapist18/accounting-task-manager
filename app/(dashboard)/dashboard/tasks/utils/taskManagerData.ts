@@ -123,6 +123,33 @@ export const fetchCompanies = async (): Promise<Map<number, { name: string; pref
   }
 }
 
+// tm_class_requirements is small (a handful of KB) and gets re-read by both fetchTasks and
+// by callers that need expected/promised time (e.g. summary-reports) within the same page
+// load. A bare 5s in-flight/result cache means two callers racing on the same load share one
+// network round trip instead of issuing back-to-back identical `select('*')` queries, while
+// still staying fresh across separate page loads or a manual refresh.
+let classRequirementsCache: { promise: Promise<any[]>; timestamp: number } | null = null;
+const CLASS_REQUIREMENTS_CACHE_MS = 5000;
+
+export const fetchClassRequirements = (): Promise<any[]> => {
+  const now = Date.now();
+  if (classRequirementsCache && now - classRequirementsCache.timestamp < CLASS_REQUIREMENTS_CACHE_MS) {
+    return classRequirementsCache.promise;
+  }
+  const promise = supabase
+    .from('tm_class_requirements')
+    .select('*')
+    .then(({ data, error }) => {
+      if (error) {
+        console.error('Error fetching requirements:', error);
+        return [];
+      }
+      return data || [];
+    });
+  classRequirementsCache = { promise, timestamp: now };
+  return promise;
+};
+
 /**
  * Fetch tasks with related data
  */
@@ -149,18 +176,14 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
       }
     }
 
-    const { data, error } = await query;
+    // Requirements don't depend on the tasks query, so fetch both at once instead of
+    // chaining requirements after tasks resolves.
+    const [{ data, error }, requirementsData] = await Promise.all([
+      query,
+      fetchClassRequirements(),
+    ]);
 
     if (error) throw error;
-
-    // Fetch all requirements from tm_class_requirements
-    const { data: requirementsData, error: requirementsError } = await supabase
-      .from('tm_class_requirements')
-      .select('*');
-
-    if (requirementsError) {
-      console.error('Error fetching requirements:', requirementsError);
-    }
 
     // Process the data to ensure consistent structure
     const processedTasks = (data || []).map(task => {

@@ -601,3 +601,45 @@ export const isJustYear = (dateStr: string): boolean => {
   const trimmed = dateStr.trim();
   return /^(19|20)\d{2}$/.test(trimmed);
 };
+
+// Merges the AI's "enhance-full-cv" response back into the current CV data.
+// Only wording-level fields (summary, skills, responsibilities, descriptions) are
+// taken from the AI — factual/identity data (contact info, dates, company/institution
+// names, declaration, references, certifications, etc.) is always kept exactly as the
+// user already had it, regardless of what the model returned for those fields.
+const mergeEnhancedList = (originalList: any[], aiList: any[]) => {
+  if (!Array.isArray(originalList) || originalList.length === 0) return originalList;
+  return originalList.map((orig: any, idx: number) => {
+    const enhanced = Array.isArray(aiList) ? aiList[idx] : null;
+    if (!enhanced) return orig;
+    return {
+      ...orig,
+      companyDesc: enhanced.companyDesc || orig.companyDesc,
+      responsibilities: Array.isArray(enhanced.responsibilities) && enhanced.responsibilities.length > 0
+        ? enhanced.responsibilities
+        : orig.responsibilities,
+    };
+  });
+};
+
+export const mergeAiEnhancedCv = (current: any, aiResult: any) => {
+  if (!current) return current;
+  if (!aiResult || typeof aiResult !== 'object') return current;
+
+  return {
+    ...current,
+    summary: typeof aiResult.summary === 'string' && aiResult.summary.trim() ? aiResult.summary : current.summary,
+    skills: Array.isArray(aiResult.skills) && aiResult.skills.length > 0 ? aiResult.skills : current.skills,
+    experience: mergeEnhancedList(current.experience, aiResult.experience),
+    internships: mergeEnhancedList(current.internships, aiResult.internships),
+    projects: Array.isArray(current.projects) && Array.isArray(aiResult.projects)
+      ? current.projects.map((p: any, i: number) => ({ ...p, description: aiResult.projects[i]?.description || p.description }))
+      : current.projects,
+    achievements: Array.isArray(current.achievements) && Array.isArray(aiResult.achievements)
+      ? current.achievements.map((a: any, i: number) => ({ ...a, description: aiResult.achievements[i]?.description || a.description }))
+      : current.achievements,
+    // Everything else (personalInfo, personalDetails, education, references,
+    // certifications, languages, additionalInfo, declaration, includeDeclaration,
+    // verifiedBadge) is intentionally left untouched — spread from `current` above.
+  };
+};

@@ -19,7 +19,8 @@ import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import supabase from "@/lib/supabase/client"
 import { toast } from "@/lib/hooks/use-toast"
-import { format } from "date-fns"
+import { format, isValid } from "date-fns"
+import { Calendar as CalendarPicker } from "@/components/ui/calendar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "../utils/workflowBundleHelpers"
 import { getInheritedOfficer, getDepartmentOfficerIds, getSubdepartmentOfficerIds } from "../../departments/departments/database"
@@ -29,6 +30,12 @@ import { parseDateWithMonthName } from "@/app/generic-functions/dateUtils"
 const CLASS_D_ID = '1750687058159';
 const SPONSOR_SUBDEPT_ID = '26';
 const CLIENT_CATEGORIES = ['ACC', 'IMM', 'Sheria', 'Audit'];
+// Same "registered" milestone stage summary-reports/stageColumnConfig.ts and ReportsPage read
+// task.stages[...] .date/.completedAt off for their "Enquiry Date" / "Registered" column — the
+// Enquiry Date field here needs to read from and write to this exact stage so what the user
+// edits here is what those tables actually display, not a separate date_initiated field that
+// can silently drift from it.
+const ENQUIRY_STAGE_ID = '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa';
 
 // Photo document IDs
 const PASSPORT_PHOTO_ID = '48f48255-e5db-4944-8864-6f35b3af4696';
@@ -100,6 +107,18 @@ const normalizeEnquiryDateForStorage = (dateValue?: string) => {
         };
     }
 
+    // dd/mm/yyyy — the format the Enquiry Date field now actually displays/edits in. Handled
+    // explicitly rather than falling through to `new Date(dateValue)` below, since JS's Date
+    // parser treats slash-separated dates as ambiguous (commonly mm/dd/yyyy) and would silently
+    // swap day and month, or return an Invalid Date that quietly falls back to "today".
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateValue)) {
+        const [day, month, year] = dateValue.split('/');
+        return {
+            isoDateTime: `${year}-${month}-${day}T00:00:00.000Z`,
+            displayDate: `${day}/${month}/${year}`
+        };
+    }
+
     const parsedDate = new Date(dateValue);
     if (!isNaN(parsedDate.getTime())) {
         return {
@@ -115,11 +134,37 @@ const normalizeEnquiryDateForStorage = (dateValue?: string) => {
     };
 };
 
-// Moved TableRow outside to prevent re-rendering/focus loss
-const TableRow = ({ label, children, required = false }: { label: string; children: React.ReactNode; required?: boolean }) => (
-    <div className="grid grid-cols-12 gap-4 py-3 border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
-        <div className="col-span-4 flex items-center">
-            <Label className="text-xs font-semibold text-slate-700">
+// Populates the Enquiry Date field from the SAME source the "Enquiry Date" / "Registered"
+// column reads in Summary Reports and ReportsPage (task.stages[ENQUIRY_STAGE_ID].date, falling
+// back to .completedAt) — not task.date_initiated, which is a separate column that can drift
+// out of sync with the stage (e.g. it was never written back on edit, see handleSubmit below).
+const resolveEnquiryDateForEdit = (task: any): string => {
+    const stageData = task?.stages?.[ENQUIRY_STAGE_ID];
+    const raw = stageData?.date || stageData?.completedAt || task?.date_initiated;
+    if (!raw) return format(new Date(), 'dd/MM/yyyy');
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) return raw;
+    const parsed = new Date(raw);
+    return isNaN(parsed.getTime()) ? format(new Date(), 'dd/MM/yyyy') : format(parsed, 'dd/MM/yyyy');
+};
+
+// Moved TableRow outside to prevent re-rendering/focus loss.
+// `hasValue` is opt-in per field (omit it for fields where "empty" isn't meaningful, like
+// toggles that always have a value) — when passed, it renders a small filled/empty dot next to
+// the label plus a tinted row background, so the user can tell at a glance which fields still
+// need attention versus which are already set, instead of having to read every value.
+const TableRow = ({ label, children, required = false, hasValue }: { label: string; children: React.ReactNode; required?: boolean; hasValue?: boolean }) => (
+    <div className={cn(
+        "grid grid-cols-12 gap-4 py-3 border-b transition-colors",
+        hasValue === false ? "border-amber-100 bg-amber-50/40 hover:bg-amber-50/60" : "border-slate-100 hover:bg-slate-50/50"
+    )}>
+        <div className="col-span-4 flex items-center gap-2">
+            {hasValue !== undefined && (
+                <span
+                    className={cn("h-1.5 w-1.5 rounded-full shrink-0", hasValue ? "bg-emerald-500" : "bg-amber-400")}
+                    title={hasValue ? "Filled" : "Not set yet"}
+                />
+            )}
+            <Label className={cn("text-xs font-semibold", hasValue === false ? "text-amber-700" : "text-slate-700")}>
                 {label}
                 {required && <span className="text-red-500 ml-1">*</span>}
             </Label>
@@ -192,7 +237,7 @@ export function EnquiryDialog({
         officer_id: '',
         task_manager_id: '',
         task_assistant_id: '',
-        enquiry_date: new Date().toISOString().split('T')[0],
+        enquiry_date: format(new Date(), 'dd/MM/yyyy'),
         passport_number: '',
         duration: '',
         renewal_status: 'New',
@@ -212,6 +257,7 @@ export function EnquiryDialog({
     const [assistantsData, setAssistantsData] = useState<any[]>([]);
     const [isIndividualPopoverOpen, setIsIndividualPopoverOpen] = useState(false);
     const [isSponsorPopoverOpen, setIsSponsorPopoverOpen] = useState(false);
+    const [isEnquiryDatePickerOpen, setIsEnquiryDatePickerOpen] = useState(false);
     const [showCompanyAssociationDialog, setShowCompanyAssociationDialog] = useState(false);
     const [associationLoading, setAssociationLoading] = useState(false);
     const [showCompanyCreateDialog, setShowCompanyCreateDialog] = useState(false);
@@ -506,7 +552,7 @@ export function EnquiryDialog({
             officer_id: '',
             task_manager_id: '',
             task_assistant_id: '',
-            enquiry_date: new Date().toISOString().split('T')[0],
+            enquiry_date: format(new Date(), 'dd/MM/yyyy'),
             passport_number: '',
             duration: '',
             renewal_status: 'New',
@@ -619,7 +665,7 @@ export function EnquiryDialog({
             department_id: String(taskToEdit.job_level?.department_id || ''),
             subdepartment_id: String(taskToEdit.job_level?.subdepartment_id || ''),
             class_id: String(taskToEdit.job_level?.class_id || ''),
-            enquiry_date: taskToEdit.date_initiated ? taskToEdit.date_initiated.split('T')[0] : new Date().toISOString().split('T')[0],
+            enquiry_date: resolveEnquiryDateForEdit(taskToEdit),
             passport_number: taskToEdit.passport_number || '',
             duration: taskToEdit.duration || '',
             renewal_status: taskToEdit.renewal_status || 'New',
@@ -673,6 +719,19 @@ export function EnquiryDialog({
         // Mark as loaded
         editDataLoadedRef.current = true;
     }, [open, taskToEdit, loadingStaff]);
+
+    // Same "filled vs empty" signal the static fields above get via TableRow's hasValue —
+    // boolean questions count as filled once answered either way (false is a real answer, not
+    // an empty one), multiselect needs at least one selection, everything else just needs a
+    // non-empty value.
+    const isJobAnswerFilled = useCallback((q: JobQuestion): boolean => {
+        const val = jobAnswers[q.id];
+        if (q.type === 'boolean') return val === true || val === false;
+        if (q.type === 'multiselect') return Array.isArray(val) && val.length > 0;
+        if (val === undefined || val === null) return false;
+        if (typeof val === 'string') return val.trim() !== '';
+        return true;
+    }, [jobAnswers]);
 
     const checkVisibility = useCallback((q: JobQuestion) => {
         if (!q.depends_on || !q.depends_on.id) return true;
@@ -1405,6 +1464,15 @@ export function EnquiryDialog({
             return
         }
 
+        if (formData.enquiry_date && !/^\d{2}\/\d{2}\/\d{4}$/.test(formData.enquiry_date)) {
+            toast({
+                title: "Invalid Enquiry Date",
+                description: "Enter the Enquiry Date as DD/MM/YYYY, or pick one from the calendar.",
+                variant: "destructive"
+            })
+            return
+        }
+
         setLoading(true)
         try {
             const normalizedEnquiryDate = normalizeEnquiryDateForStorage(formData.enquiry_date);
@@ -1490,7 +1558,7 @@ export function EnquiryDialog({
                 }
             });
 
-            const payload = {
+            const payload: any = {
                 job_description: formData.job_description,
                 individual_id: selectedIndividual.id,
                 company_id: selectedCompany ? Number(selectedCompany) : null,
@@ -1513,6 +1581,23 @@ export function EnquiryDialog({
                 participants_details: participants,
             }
 
+            if (taskToEdit) {
+                // Keep date_initiated AND the Enquiry stage's own date in sync with whatever the
+                // user set in the Enquiry Date field — previously an edit only updated
+                // formData.enquiry_date locally and neither of these ever got written back, so
+                // changing the date here silently had no effect on save. Merge into the existing
+                // stages object rather than replacing it outright, so no other stage's data is lost.
+                payload.date_initiated = normalizedEnquiryDate.isoDateTime;
+                payload.stages = {
+                    ...taskToEdit.stages,
+                    [ENQUIRY_STAGE_ID]: {
+                        ...taskToEdit.stages?.[ENQUIRY_STAGE_ID],
+                        status: "completed",
+                        date: normalizedEnquiryDate.displayDate,
+                    },
+                };
+            }
+
             const insertPayload = !taskToEdit ? {
                 ...payload,
                 status: 'enquiry',
@@ -1532,7 +1617,7 @@ export function EnquiryDialog({
                     existing_workflow_detected: !!workflowRestrictionSummary?.matchedDocumentTypes?.length,
                     workflow_blocking_reasons: workflowRestrictionSummary?.blockingReasons || []
                 },
-                stages: { '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa': { status: "completed", date: normalizedEnquiryDate.displayDate } }
+                stages: { [ENQUIRY_STAGE_ID]: { status: "completed", date: normalizedEnquiryDate.displayDate } }
             } : null;
 
             const taskPromise = taskToEdit
@@ -1577,6 +1662,17 @@ export function EnquiryDialog({
         const cls = availableClasses.find(c => c.id.toString() === formData.class_id);
         return [dept?.name, sub?.name, cls?.name].filter(Boolean).join(' › ') || null;
     }, [taskToEdit, formData.department_id, formData.subdepartment_id, formData.class_id, departments, availableSubdepartments, availableClasses]);
+
+    // Enquiry Date is edited as dd/mm/yyyy text (matching the "Enquiry Date" column everywhere
+    // else in the app) with a calendar picker for convenience — derive the parsed Date (for the
+    // calendar's selection) and validity (to gate the picker/submit) off that same string.
+    const isEnquiryDateValid = /^\d{2}\/\d{2}\/\d{4}$/.test(formData.enquiry_date || '');
+    const enquiryDateAsDate = useMemo(() => {
+        if (!isEnquiryDateValid) return undefined;
+        const [dd, mm, yyyy] = formData.enquiry_date.split('/');
+        const d = new Date(`${yyyy}-${mm}-${dd}`);
+        return isValid(d) ? d : undefined;
+    }, [formData.enquiry_date, isEnquiryDateValid]);
 
     return (
         <>
@@ -1639,7 +1735,7 @@ export function EnquiryDialog({
                                             </RadioGroup>
                                         </TableRow>
 
-                                        <TableRow label="Primary Applicant" required>
+                                        <TableRow label="Primary Applicant" required hasValue={!!selectedIndividual}>
                                             <div className="flex items-center gap-4">
                                                 {/* Photo Preview - UPDATED FOR PDF */}
                                                 <div className="shrink-0">
@@ -1706,7 +1802,7 @@ export function EnquiryDialog({
                                             </div>
                                         </TableRow>
 
-                                        <TableRow label="Company Associated">
+                                        <TableRow label="Company Associated" hasValue={!!selectedCompany}>
                                             <div className="flex items-center gap-2 w-full">
                                                 <div className="flex-1">
                                                     <SearchableSelect
@@ -1789,7 +1885,7 @@ export function EnquiryDialog({
                                         )}
 
                                         {selectedIndividual && applicantType === 'dependant' && (
-                                            <TableRow label="Linked Principal">
+                                            <TableRow label="Linked Principal" hasValue={!!principalForDependant}>
                                                 {loadingRelations ? (
                                                     <div className="flex items-center gap-2 text-slate-400 text-xs italic"><Loader2 className="h-3 w-3 animate-spin" /> Loading principal...</div>
                                                 ) : principalForDependant ? (
@@ -1863,7 +1959,7 @@ export function EnquiryDialog({
                                         )}
 
                                         {formData.class_id === CLASS_D_ID && (
-                                            <TableRow label="Related Understudy" required>
+                                            <TableRow label="Related Understudy" required hasValue={!!selectedUnderstudy}>
                                                 {loadingRelations ? (
                                                     <div className="flex items-center gap-2 text-slate-400 text-xs italic"><Loader2 className="h-3 w-3 animate-spin" /> Loading available understudies...</div>
                                                 ) : understudies.length > 0 ? (
@@ -1888,7 +1984,7 @@ export function EnquiryDialog({
                                         )}
 
                                         {formData.subdepartment_id === SPONSOR_SUBDEPT_ID && (
-                                            <TableRow label="Designated Sponsor">
+                                            <TableRow label="Designated Sponsor" hasValue={!!selectedSponsor}>
                                                 <Popover open={isSponsorPopoverOpen} onOpenChange={setIsSponsorPopoverOpen}>
                                                     <PopoverTrigger asChild>
                                                         <Button variant="outline" className="w-full justify-between h-11 border-emerald-100 bg-emerald-50/30 hover:bg-emerald-50">
@@ -1930,7 +2026,7 @@ export function EnquiryDialog({
                                         </CardTitle>
                                     </CardHeader>
                                     <CardContent className="p-6 space-y-0">
-                                        <TableRow label="Department" required>
+                                        <TableRow label="Department" required hasValue={!!formData.department_id}>
                                             <SearchableSelect
                                                 value={formData.department_id}
                                                 onValueChange={id => setFormData(prev => ({ ...prev, department_id: id, subdepartment_id: '', class_id: '' }))}
@@ -1945,7 +2041,7 @@ export function EnquiryDialog({
                                             />
                                         </TableRow>
 
-                                        <TableRow label="Sub-Department">
+                                        <TableRow label="Sub-Department" hasValue={!!formData.subdepartment_id}>
                                             <SearchableSelect
                                                 value={formData.subdepartment_id}
                                                 onValueChange={id => setFormData(prev => ({ ...prev, subdepartment_id: id, class_id: '' }))}
@@ -1960,7 +2056,7 @@ export function EnquiryDialog({
                                             />
                                         </TableRow>
 
-                                        <TableRow label="Service Class">
+                                        <TableRow label="Service Class" hasValue={!!formData.class_id}>
                                             <SearchableSelect
                                                 value={formData.class_id}
                                                 onValueChange={id => setFormData(prev => ({ ...prev, class_id: id }))}
@@ -1987,7 +2083,7 @@ export function EnquiryDialog({
                                     </CardHeader>
                                     <CardContent className="p-6 space-y-0">
                                         {formData.department_id !== '1' && (
-                                            <TableRow label="Assigned Officer">
+                                            <TableRow label="Assigned Officer" hasValue={!!formData.officer_id}>
                                                 <div className="space-y-2">
                                                     <SearchableSelect
                                                         value={formData.officer_id}
@@ -2011,7 +2107,7 @@ export function EnquiryDialog({
                                             </TableRow>
                                         )}
 
-                                        <TableRow label="Task Manager">
+                                        <TableRow label="Task Manager" hasValue={!!formData.task_manager_id}>
                                             <SearchableSelect
                                                 value={formData.task_manager_id}
                                                 onValueChange={id => setFormData(prev => ({ ...prev, task_manager_id: id }))}
@@ -2024,7 +2120,7 @@ export function EnquiryDialog({
                                             />
                                         </TableRow>
 
-                                        <TableRow label="Task Assistant">
+                                        <TableRow label="Task Assistant" hasValue={!!formData.task_assistant_id}>
                                             <SearchableSelect
                                                 value={formData.task_assistant_id}
                                                 onValueChange={id => setFormData(prev => ({ ...prev, task_assistant_id: id }))}
@@ -2040,17 +2136,47 @@ export function EnquiryDialog({
                                         <TableRow label="Enquiry Date">
                                             <div className="relative max-w-sm">
                                                 <Input
-                                                    type="date"
+                                                    type="text"
+                                                    placeholder="DD/MM/YYYY"
                                                     value={formData.enquiry_date}
                                                     onChange={e => setFormData(prev => ({ ...prev, enquiry_date: e.target.value }))}
                                                     disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
-                                                    className="pl-10 h-11 border-slate-200 bg-white"
+                                                    className={cn(
+                                                        "pl-10 pr-10 h-11 border-slate-200 bg-white font-mono",
+                                                        formData.enquiry_date && !isEnquiryDateValid && "border-red-300 focus-visible:ring-red-300"
+                                                    )}
                                                 />
                                                 <Calendar className="absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
+                                                <Popover open={isEnquiryDatePickerOpen} onOpenChange={setIsEnquiryDatePickerOpen}>
+                                                    <PopoverTrigger asChild>
+                                                        <button
+                                                            type="button"
+                                                            className="absolute right-2 top-2 h-7 w-7 flex items-center justify-center rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                                            disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
+                                                        >
+                                                            <ChevronsUpDown className="h-3.5 w-3.5" />
+                                                        </button>
+                                                    </PopoverTrigger>
+                                                    <PopoverContent className="w-auto p-0 z-[9999]" align="start">
+                                                        <CalendarPicker
+                                                            mode="single"
+                                                            selected={enquiryDateAsDate}
+                                                            onSelect={(d) => {
+                                                                if (!d) return;
+                                                                setFormData(prev => ({ ...prev, enquiry_date: format(d, 'dd/MM/yyyy') }));
+                                                                setIsEnquiryDatePickerOpen(false);
+                                                            }}
+                                                            initialFocus
+                                                        />
+                                                    </PopoverContent>
+                                                </Popover>
                                             </div>
+                                            {formData.enquiry_date && !isEnquiryDateValid && (
+                                                <p className="text-xs text-red-500 mt-1">Enter a valid date as DD/MM/YYYY, or pick one from the calendar.</p>
+                                            )}
                                         </TableRow>
 
-                                        <TableRow label="Passport Number">
+                                        <TableRow label="Passport Number" hasValue={!!formData.passport_number}>
                                             <Input
                                                 type="text"
                                                 value={formData.passport_number}
@@ -2067,7 +2193,7 @@ export function EnquiryDialog({
                                             )}
                                         </TableRow>
 
-                                        <TableRow label="R Number">
+                                        <TableRow label="R Number" hasValue={!!editableRNumber}>
                                             <Input
                                                 type="text"
                                                 value={editableRNumber}
@@ -2101,7 +2227,7 @@ export function EnquiryDialog({
                                                         </div>
                                                         <div className="space-y-0">
                                                             {questions.map((q) => (
-                                                                <TableRow key={q.id} label={q.label} required={q.required}>
+                                                                <TableRow key={q.id} label={q.label} required={q.required} hasValue={isJobAnswerFilled(q)}>
                                                                     {q.type === 'text' && (
                                                                         <Input
                                                                             value={jobAnswers[q.id] || ''}

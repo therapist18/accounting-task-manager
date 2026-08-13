@@ -17,8 +17,8 @@ import { SUMMARY_COLUMNS } from "../stageColumnConfig";
 // ── Shared UI: Standard Tabs (replaces the old pill-style toggles) ──
 // Matches the bordered, squared-off tab look used across the app (e.g. bcl-task-diary).
 const TAB_LIST_CLASS = "bg-white border border-slate-200 p-1 h-auto rounded-md";
-const TAB_TRIGGER_CLASS = "group gap-1.5 rounded-md px-3.5 text-sm font-semibold text-slate-600 hover:text-slate-900 data-[state=active]:bg-custom-blue data-[state=active]:text-white data-[state=active]:shadow-none";
-const COUNT_BADGE_CLASS = "font-bold tabular-nums px-1.5 py-0.5 rounded-md text-xs bg-slate-100 text-slate-500 group-data-[state=active]:bg-white/20 group-data-[state=active]:text-white";
+const TAB_TRIGGER_CLASS = "group gap-2 rounded-md px-4 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors data-[state=active]:bg-custom-blue data-[state=active]:text-white data-[state=active]:shadow-sm";
+const COUNT_BADGE_CLASS = "font-normal tabular-nums px-2 py-0.5 rounded-md text-sm min-w-[1.75rem] text-center bg-custom-blue/10 text-custom-blue group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white";
 
 export interface PillTrackItem {
   id: string;
@@ -58,7 +58,7 @@ export function PillTrack({
                 <span className={cn("h-2 w-2 rounded-full shrink-0", item.dot)} />
               ) : null}
               {item.label}
-              {typeof item.count === 'number' && item.count > 0 && (
+              {typeof item.count === 'number' && (
                 <span className={COUNT_BADGE_CLASS}>
                   {item.count}
                 </span>
@@ -278,12 +278,15 @@ export function StatusTabs({
   officerFilterMode, setOfficerFilterMode,
   refreshData, loading,
 }: any) {
+  // Distinct semantic color per status so the tab bar reads at a glance instead of every
+  // tab looking identical except for label — active tab gets a solid fill in that color,
+  // idle tab gets a tinted badge in the same hue so the count stays legible either way.
   const STATUS_ITEMS = [
-    { id: 'all', label: 'All Applications' },
-    { id: 'enquiry', label: 'Enquiry' },
-    { id: 'wip', label: 'WIP' },
-    { id: 'completed', label: 'Completed' },
-    { id: 'overdue', label: 'Overdue' },
+    { id: 'all', label: 'All Applications', active: 'data-[state=active]:bg-custom-blue data-[state=active]:text-white', badgeIdle: 'bg-slate-100 text-slate-600' },
+    { id: 'enquiry', label: 'Enquiry', active: 'data-[state=active]:bg-sky-600 data-[state=active]:text-white', badgeIdle: 'bg-sky-100 text-sky-700' },
+    { id: 'wip', label: 'WIP', active: 'data-[state=active]:bg-amber-500 data-[state=active]:text-white', badgeIdle: 'bg-amber-100 text-amber-700' },
+    { id: 'completed', label: 'Completed', active: 'data-[state=active]:bg-emerald-600 data-[state=active]:text-white', badgeIdle: 'bg-emerald-100 text-emerald-700' },
+    { id: 'overdue', label: 'Overdue', active: 'data-[state=active]:bg-red-600 data-[state=active]:text-white', badgeIdle: 'bg-red-100 text-red-700' },
   ];
 
   const perspectiveCounts = { all: allCount || 0, officers: officersCount || 0, managers: managersCount || 0, clients: clientsCount || 0 };
@@ -301,9 +304,19 @@ export function StatusTabs({
         <Tabs value={activeTaskStatus} onValueChange={setActiveTaskStatus}>
           <TabsList className={TAB_LIST_CLASS}>
             {STATUS_ITEMS.map(tab => (
-              <TabsTrigger key={tab.id} value={tab.id} className={cn(TAB_TRIGGER_CLASS, "h-8")}>
+              <TabsTrigger
+                key={tab.id}
+                value={tab.id}
+                className={cn(
+                  "group gap-2 rounded-md px-4 h-9 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors data-[state=active]:shadow-sm",
+                  tab.active
+                )}
+              >
                 {tab.label}
-                <span className={COUNT_BADGE_CLASS}>
+                <span className={cn(
+                  "font-normal tabular-nums px-2 py-0.5 rounded-md text-sm min-w-[1.75rem] text-center group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white",
+                  tab.badgeIdle
+                )}>
                   {counts[tab.id] || 0}
                 </span>
               </TabsTrigger>
@@ -414,11 +427,9 @@ export function PerspectiveTabs({
                 return (
                   <TabsTrigger key={p.id} value={p.id.toString()} className={cn(TAB_TRIGGER_CLASS, "h-9")}>
                     {displayName}
-                    {count > 0 && (
-                      <span className={COUNT_BADGE_CLASS}>
-                        {count}
-                      </span>
-                    )}
+                    <span className={COUNT_BADGE_CLASS}>
+                      {count}
+                    </span>
                   </TabsTrigger>
                 );
               })}

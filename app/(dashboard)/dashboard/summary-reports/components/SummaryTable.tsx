@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, ArrowLeftRight, Layers, AlertTriangle } from "lucide-react";
+import { SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, ArrowLeftRight, Layers, AlertTriangle, Edit, X, RefreshCw, Trash2 } from "lucide-react";
 import { differenceInDays } from "date-fns";
 import { cn } from "@/lib/utils";
 import { formatDateCell, formatEstimatedMins } from "../../reports/components/reportCellRenderers";
@@ -17,17 +17,48 @@ import { SUMMARY_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS } from "../stageCol
 
 const DEFAULT_COL_WIDTH = 170;
 const INDEX_COL_WIDTH = 48;
+const ACTIONS_COL_WIDTH = 116;
 const DELTA_COL_WIDTH = 62;
+
+// Same /dashboard/tasks?deptId=&subDeptId=&taskId= pattern reportCellRenderers.tsx's
+// PendingUploadLink uses to jump into DepartmentTasksManager's task list (pre-filtered to
+// this one task via its search box) — deliberately NOT /dashboard/tasks/[id] (JobWorkspace).
+const buildTaskManagerHref = (task: any): string =>
+  `/dashboard/tasks?deptId=${task.department_id ?? ''}&subDeptId=${task.subdepartment_id ?? ''}&taskId=${task.id}`;
 
 export const resolveMilestoneDate = (task: any, stageId: string): string | null => {
   const stageData = task?.stages?.[stageId];
   return stageData?.date || stageData?.completedAt || null;
 };
 
+// task.company_name (set by fetchTasks) is matched off participants_details by ROLE only
+// ('sponsor' or 'company'), with no check that the participant is actually a company —
+// an individual sponsor gets the same role and would show their personal name in a "Company"
+// column. This resolver only ever surfaces a name that's confirmed type: 'company', either
+// via the authoritative acc_portal_company_duplicate lookup (task.company_id always refers
+// to a real company row by definition) or a participants_details/applicant_details entry
+// whose own `type` field says 'company'.
+export const resolveCompanyName = (task: any, companies: Map<number, any>): string | null => {
+  const direct = companies.get(task.company_id)?.name;
+  if (direct) return direct;
+
+  const applicant = task.applicant_details;
+  if (applicant?.type === 'company') {
+    return applicant.name || (applicant.id ? companies.get(Number(applicant.id))?.name : null) || null;
+  }
+
+  const participant = task.participants_details?.find((p: any) => p?.type === 'company');
+  if (participant) {
+    return participant.name || (participant.id ? companies.get(Number(participant.id))?.name : null) || null;
+  }
+
+  return null;
+};
+
 export const resolveFieldValue = (colId: string, task: any, companies: Map<number, any>, enhancedTasksData: Map<string, any>, departments: any[] = []): any => {
   const enhancedTask = enhancedTasksData?.get(task.id?.toString()) || task;
   switch (colId) {
-    case 'company': return companies.get(task.company_id)?.name || task.company_name || null;
+    case 'company': return resolveCompanyName(task, companies);
     case 'applicant': return task.applicant_name || null;
     case 'job_description': return task.job_description || null;
     case 'company_prefix': {
@@ -134,8 +165,60 @@ const PaginationButton = ({ children, onClick, disabled }: any) => (
   </Button>
 );
 
+// Edit / Cancel(-Reactivate) / Delete — same three actions and icons as
+// DepartmentTasksManager's renderActionButtons, just calling back up to page.tsx (which owns
+// the tm_tasks writes) instead of mutating a locally-owned tasks list. stopPropagation on each
+// button keeps a click here from also firing the row's own navigate-to-task-manager handler.
+const RowActionsCell = ({ task, onEditTask, onRequestCancel, onRequestUncancel, onRequestDelete }: any) => (
+  <div className="flex items-center justify-center gap-0.5">
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={(e) => { e.stopPropagation(); onEditTask?.(task); }}
+      className="h-7 w-7 text-slate-600 hover:bg-slate-100"
+      title="Edit Task"
+    >
+      <Edit className="h-3.5 w-3.5" />
+    </Button>
+
+    {task.status === 'cancel' ? (
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={(e) => { e.stopPropagation(); onRequestUncancel?.(task); }}
+        className="h-7 w-7 text-green-600 hover:bg-green-100"
+        title="Reactivate task"
+      >
+        <RefreshCw className="h-3.5 w-3.5" />
+      </Button>
+    ) : (
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={(e) => { e.stopPropagation(); onRequestCancel?.(task); }}
+        className="h-7 w-7 text-orange-600 hover:bg-orange-100"
+        title="Cancel task"
+      >
+        <X className="h-3.5 w-3.5" />
+      </Button>
+    )}
+
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={(e) => { e.stopPropagation(); onRequestDelete?.(task); }}
+      className="h-7 w-7 text-red-600 hover:bg-red-100"
+      title="Delete Task"
+    >
+      <Trash2 className="h-3.5 w-3.5" />
+    </Button>
+  </div>
+);
+
 export function SummaryTable({
   tasks, companies, departments = [],
+  activeDeptId = 'all',
+  showEmptyGroups = true,
   showTime = false, showDelta = false,
   sortConfig, handleSort,
   enhancedTasksData,
@@ -143,10 +226,13 @@ export function SummaryTable({
   getPromisedMinutesForTask, getPromisedTimeResolutionForTask, getPlannedExecutionDateForTask,
   getCurrentStageNameForTask,
   visibleColumnIds = DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS,
+  onEditTask, onRequestCancel, onRequestUncancel, onRequestDelete,
 }: {
   tasks: any[];
   companies: Map<number, { name: string; prefix: string }>;
   departments?: any[];
+  activeDeptId?: string;
+  showEmptyGroups?: boolean;
   showTime?: boolean;
   showDelta?: boolean;
   sortConfig?: { key: string; direction: 'asc' | 'desc' } | null;
@@ -159,6 +245,10 @@ export function SummaryTable({
   getPlannedExecutionDateForTask?: (task: any) => Date | null;
   getCurrentStageNameForTask?: (task: any) => string | null;
   visibleColumnIds?: string[];
+  onEditTask?: (task: any) => void;
+  onRequestCancel?: (task: any) => void;
+  onRequestUncancel?: (task: any) => void;
+  onRequestDelete?: (task: any) => void;
 }) {
   const columns = useMemo(() => SUMMARY_COLUMNS.filter(c => visibleColumnIds.includes(c.id)), [visibleColumnIds]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -184,6 +274,7 @@ export function SummaryTable({
   const columnDefs = useMemo<ColumnDef<any>[]>(() => [
     { id: '__index__', size: INDEX_COL_WIDTH, enableResizing: false },
     ...columns.map((col: any) => ({ id: col.id, size: DEFAULT_COL_WIDTH, minSize: 90, maxSize: 640 })),
+    { id: '__actions__', size: ACTIONS_COL_WIDTH, enableResizing: false },
   ], [columns]);
 
   const table = useReactTable({
@@ -259,7 +350,41 @@ export function SummaryTable({
     return rows.slice(start, start + rowsPerPage);
   }, [rows, currentPage, rowsPerPage]);
 
-  // ── Subdepartment section grouping (current page only, mirrors StandardReportView) ──
+  // Canonical section order — the same order the Sub-Department tabs (HierarchyTabs) show,
+  // i.e. each department's tm_subdepartments in their stored `order`. Scoped to the active
+  // department when one is selected; flattened across every department (in department order)
+  // for "All Departments", deduped by name since that's also how grouping keys rows.
+  const orderedSubDeptNames = useMemo(() => {
+    const names: string[] = [];
+    const seen = new Set<string>();
+    const addDept = (dept: any) => {
+      (dept?.tm_subdepartments || []).forEach((s: any) => {
+        const name = s?.name || 'N/A';
+        if (!seen.has(name)) { seen.add(name); names.push(name); }
+      });
+    };
+    if (activeDeptId && activeDeptId !== 'all') {
+      addDept(departments.find((d: any) => d.id.toString() === activeDeptId));
+    } else {
+      departments.forEach((d: any) => addDept(d));
+    }
+    return names;
+  }, [departments, activeDeptId]);
+
+  // Per-subdepartment totals across the FULL filtered set (not just the current page) — lets
+  // us tell "genuinely no tasks anywhere" (render a "No tasks associated" placeholder, stable
+  // across every page) apart from "has tasks, just none on this particular page" (render
+  // nothing here rather than a misleading empty section).
+  const subDeptTotalCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    rows.forEach(r => {
+      const name = getSubDepartmentDisplay(r.task, departments);
+      counts.set(name, (counts.get(name) || 0) + 1);
+    });
+    return counts;
+  }, [rows, departments]);
+
+  // ── Subdepartment section grouping (current page's rows, ordered per the tabs) ──
   const subDeptGroups = useMemo(() => {
     const map = new Map<string, typeof paginatedRows>();
     for (const row of paginatedRows) {
@@ -267,17 +392,39 @@ export function SummaryTable({
       if (!map.has(name)) map.set(name, []);
       map.get(name)!.push(row);
     }
-    return Array.from(map.entries())
-      .sort(([a], [b]) => (a === 'N/A' ? 1 : b === 'N/A' ? -1 : a.localeCompare(b)))
-      .map(([name, groupRows]) => ({ name, rows: groupRows }));
-  }, [paginatedRows, departments]);
+
+    const ordered: { name: string; rows: typeof paginatedRows }[] = [];
+    const consumed = new Set<string>();
+
+    orderedSubDeptNames.forEach(name => {
+      consumed.add(name);
+      if (map.has(name)) {
+        ordered.push({ name, rows: map.get(name)! });
+      } else if (showEmptyGroups && (subDeptTotalCounts.get(name) || 0) === 0) {
+        ordered.push({ name, rows: [] });
+      }
+      // else: has tasks overall, just none landed on this page — no section here.
+    });
+
+    // Anything not covered by the canonical tab order (e.g. department-level tasks with no
+    // sub-department) — same trailing behavior as before, N/A last.
+    const leftoverNames = Array.from(map.keys()).filter(n => !consumed.has(n));
+    leftoverNames.sort((a, b) => (a === 'N/A' ? 1 : b === 'N/A' ? -1 : a.localeCompare(b)));
+    leftoverNames.forEach(name => ordered.push({ name, rows: map.get(name)! }));
+
+    return ordered;
+  }, [paginatedRows, departments, orderedSubDeptNames, subDeptTotalCounts, showEmptyGroups]);
 
   const sectionedRows = useMemo(() => {
-    const result: ({ type: 'section'; name: string; count: number } | { type: 'row'; row: any; globalIdx: number })[] = [];
+    const result: ({ type: 'section'; name: string; count: number } | { type: 'empty'; name: string } | { type: 'row'; row: any; globalIdx: number })[] = [];
     let globalIdx = 0;
     for (const group of subDeptGroups) {
       result.push({ type: 'section', name: group.name, count: group.rows.length });
-      for (const row of group.rows) { result.push({ type: 'row', row, globalIdx }); globalIdx++; }
+      if (group.rows.length === 0) {
+        result.push({ type: 'empty', name: group.name });
+      } else {
+        for (const row of group.rows) { result.push({ type: 'row', row, globalIdx }); globalIdx++; }
+      }
     }
     return result;
   }, [subDeptGroups]);
@@ -324,6 +471,7 @@ export function SummaryTable({
               {interleavedColumns.map((col: any) => (
                 <col key={col.id} style={{ width: col.isDelta ? DELTA_COL_WIDTH : getColWidth(col.id) }} />
               ))}
+              <col style={{ width: ACTIONS_COL_WIDTH }} />
             </colgroup>
 
             <TableHeader className="sticky top-0 z-40">
@@ -415,6 +563,12 @@ export function SummaryTable({
                     </TableHead>
                   );
                 })}
+
+                <TableHead
+                  className="sticky right-0 z-50 border-l border-b border-white/30 text-center py-2.5 px-2 bg-custom-blue shadow-[-2px_0_4px_rgba(0,0,0,0.15)]"
+                >
+                  <span className="text-[10px] font-semibold text-white uppercase tracking-wider">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
 
@@ -444,6 +598,22 @@ export function SummaryTable({
                             </span>
                           </div>
                         </TableCell>
+                        <TableCell
+                          className="sticky right-0 z-30 bg-white border-l border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2 px-2"
+                          style={{ top: groupHeaderTop }}
+                        />
+                      </TableRow>
+                    );
+                  }
+
+                  if (item.type === 'empty') {
+                    return (
+                      <TableRow key={`empty-${item.name}`} className="border-0 hover:bg-transparent">
+                        <TableCell className="sticky left-0 z-20 bg-slate-50/60 border-r border-b border-slate-200 py-3 px-2" />
+                        <TableCell colSpan={interleavedColumns.length} className="bg-slate-50/60 px-4 py-3 border-b border-slate-200">
+                          <span className="text-sm italic text-slate-400">No tasks associated</span>
+                        </TableCell>
+                        <TableCell className="sticky right-0 z-20 bg-slate-50/60 border-l border-b border-slate-200 py-3 px-2" />
                       </TableRow>
                     );
                   }
@@ -452,7 +622,11 @@ export function SummaryTable({
                   const idx = item.globalIdx;
 
                   return (
-                    <TableRow key={task.id} className={cn("group border-0 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "hover:bg-blue-50/50")}>
+                    <TableRow
+                      key={task.id}
+                      className={cn("group border-0 transition-colors cursor-pointer", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "hover:bg-blue-50/50")}
+                      onClick={() => window.open(buildTaskManagerHref(task), '_blank', 'noopener,noreferrer')}
+                    >
                       <TableCell className={cn("sticky left-0 z-20 border-r border-b border-slate-200 text-center py-2.5", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "group-hover:bg-blue-50/50")}>
                         <span className="text-sm font-semibold text-slate-400 group-hover:text-slate-600 transition-colors">
                           {((currentPage - 1) * rowsPerPage) + idx + 1}
@@ -546,12 +720,24 @@ export function SummaryTable({
                           </TableCell>
                         );
                       })}
+
+                      <TableCell
+                        className={cn("sticky right-0 z-20 border-l border-b border-slate-200 py-2.5 shadow-[-2px_0_4px_rgba(0,0,0,0.02)]", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "group-hover:bg-blue-50/50")}
+                      >
+                        <RowActionsCell
+                          task={task}
+                          onEditTask={onEditTask}
+                          onRequestCancel={onRequestCancel}
+                          onRequestUncancel={onRequestUncancel}
+                          onRequestDelete={onRequestDelete}
+                        />
+                      </TableCell>
                     </TableRow>
                   );
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={interleavedColumns.length + 1} className="h-64 bg-slate-50">
+                  <TableCell colSpan={interleavedColumns.length + 2} className="h-64 bg-slate-50">
                     <div className="flex flex-col items-center justify-center">
                       <div className="h-12 w-12 rounded-full bg-slate-200 flex items-center justify-center mb-3">
                         <SearchX size={24} className="text-slate-500" />

@@ -75,6 +75,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [isPushingCase, setIsPushingCase] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
   const [isLoadingTasks, setIsLoadingTasks] = useState(false)
+  const [isRefreshingAllData, setIsRefreshingAllData] = useState(false)
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>(initialSearchTerm || '')
   const [currentTableHeaders, setCurrentTableHeaders] = useState(ENHANCED_TABLE_HEADERS)
   const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(new Set(ENHANCED_TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
@@ -553,6 +554,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   }, [departments, companies])
 
   const refreshAllData = useCallback(async () => {
+    setIsRefreshingAllData(true);
     try {
       const [
         documentsData,
@@ -598,6 +600,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         description: error instanceof Error ? error.message : "Failed to refresh data.",
         variant: "destructive"
       });
+    } finally {
+      setIsRefreshingAllData(false);
     }
   }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData, loadUserAssignmentData])
 
@@ -2431,6 +2435,20 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
             setActiveSubTab(STATUS_TAB_MAP[nextStatus]);
           }
 
+          // A stage upload inserts straight into acc_portal_directors_documents via Supabase,
+          // bypassing this component entirely — allDocuments (only ever populated by
+          // refreshAllData's fetchAllDocuments call) would otherwise stay stale until a manual
+          // Refresh, which is exactly why the preview icon (resolved off allDocuments via
+          // getDocumentForTaskStage) wouldn't show up right after a successful upload. Merge
+          // the newly-inserted row(s) in immediately instead of waiting on that refetch.
+          if (action.newDocuments?.length) {
+            setAllDocuments(prevDocs => {
+              const byId = new Map(prevDocs.map((d: any) => [d.id, d]));
+              action.newDocuments.forEach((d: any) => byId.set(d.id, d));
+              return Array.from(byId.values());
+            });
+          }
+
           // After a stage upload, silently confirm DB state matches the optimistic update
           if (action.source === 'stage-upload') {
             loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true);
@@ -3930,8 +3948,14 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
             size="sm"
             className="h-9 px-5 rounded-full border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 transition-all"
             onClick={refreshAllData}
+            disabled={isRefreshingAllData}
           >
-            <RotateCcw className="h-3.5 w-3.5 mr-1.5 text-slate-400" /> Refresh
+            {isRefreshingAllData ? (
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 text-slate-400 animate-spin" />
+            ) : (
+              <RotateCcw className="h-3.5 w-3.5 mr-1.5 text-slate-400" />
+            )}
+            {isRefreshingAllData ? "Refreshing..." : "Refresh"}
           </Button>
         </div>
       </div>

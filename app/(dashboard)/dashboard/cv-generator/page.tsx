@@ -41,13 +41,13 @@ import {
   saveToLocalStorage,
   getCVDiffs,
   isJustYear,
+  mergeAiEnhancedCv,
 } from "./utils/cvGeneratorData";
 
 export default function CVGeneratorPage() {
   const [cvData, setCvData] = useState<any>(initialCVData);
   const [mobileView, setMobileView] = useState<'edit' | 'preview'>('edit');
   const [selectedLayout, setSelectedLayout] = useState<string>("theme1");
-  const [zoomLevel, setZoomLevel] = useState<number>(0.75);
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
   const [extractionProgress, setExtractionProgress] = useState<string>("");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
@@ -105,20 +105,18 @@ export default function CVGeneratorPage() {
   const [collapsedItems, setCollapsedItems] = useState<Record<string, boolean>>({});
   const toggleItem = (key: string) => setCollapsedItems(p => ({ ...p, [key]: !p[key] }));
   const [showAiWriter, setShowAiWriter] = useState(false);
-  const [showAtsOptimizer, setShowAtsOptimizer] = useState(false);
   const [showJobMatch, setShowJobMatch] = useState(false);
   const [showCoverLetter, setShowCoverLetter] = useState(false);
   const [showResumeVersions, setShowResumeVersions] = useState(false);
-  const [showAnalytics, setShowAnalytics] = useState(false);
   const [showAdvancedExport, setShowAdvancedExport] = useState(false);
   const [cvVersions, setCvVersions] = useState<{ id: string; name: string; data: any; createdAt: string }[]>([]);
   const [activeDesignTab, setActiveDesignTab] = useState('theme');
+  const [isEnhancingCv, setIsEnhancingCv] = useState(false);
 
   // Load from localStorage after mount to avoid hydration mismatch
   useEffect(() => {
     const savedCvData = loadFromLocalStorage('cvData', initialCVData);
     const savedLayout = loadFromLocalStorage('selectedLayout', 'theme1');
-    const savedZoom = loadFromLocalStorage('zoomLevel', 0.75);
     const savedGroups = loadFromLocalStorage('collapsedGroups', {});
     const savedVersions = loadFromLocalStorage('cvVersions', []);
     const savedDrafts = loadFromLocalStorage('cvDrafts', []);
@@ -132,7 +130,6 @@ export default function CVGeneratorPage() {
     
     setCvData(savedCvData);
     setSelectedLayout(savedLayout);
-    setZoomLevel(savedZoom);
     setCollapsedGroups(savedGroups);
     setCvVersions(savedVersions);
     setCvDrafts(savedDrafts);
@@ -245,7 +242,6 @@ export default function CVGeneratorPage() {
       saveToLocalStorage('selectedLayout', selectedLayout);
       saveToLocalStorage('collapsedGroups', collapsedGroups);
       saveToLocalStorage('cvVersions', cvVersions);
-      saveToLocalStorage('zoomLevel', zoomLevel);
       saveToLocalStorage('collabTargetCountry', collabTargetCountry);
       saveToLocalStorage('collabTargetRole', collabTargetRole);
       saveToLocalStorage('hasClientSubmission', hasClientSubmission);
@@ -256,7 +252,7 @@ export default function CVGeneratorPage() {
       saveToLocalStorage('lastDraftName', lastDraftName);
     }, 500);
     return () => { if (autoSaveRef.current) clearTimeout(autoSaveRef.current); };
-  }, [cvData, cvSettings, selectedLayout, collapsedGroups, cvVersions, zoomLevel, collabTargetCountry, collabTargetRole, hasClientSubmission, clientSubmission, cvDrafts, currentPortalDraftId, hasSavedDraft, lastDraftName]);
+  }, [cvData, cvSettings, selectedLayout, collapsedGroups, cvVersions, collabTargetCountry, collabTargetRole, hasClientSubmission, clientSubmission, cvDrafts, currentPortalDraftId, hasSavedDraft, lastDraftName]);
 
   // Initialize client edits in client portal
   useEffect(() => {
@@ -561,7 +557,10 @@ export default function CVGeneratorPage() {
                   value: info.value || info.Value || info.description || ""
                 }));
               })(),
-              declaration: ed['Declaration'] || ed.declaration || DEFAULT_DECLARATION_TEXT,
+              // Declaration is a fixed BCL statement, not something extracted from the
+              // candidate's uploaded CV — always use our own default text here so it
+              // stays consistent regardless of what the source document contained.
+              declaration: DEFAULT_DECLARATION_TEXT,
               includeDeclaration: true,
               verifiedBadge: true
             };
@@ -660,7 +659,8 @@ export default function CVGeneratorPage() {
           certifications: Array.isArray(prefill.certifications) ? prefill.certifications : [],
           achievements: Array.isArray(prefill.achievements) ? prefill.achievements : [],
           additionalInfo: Array.isArray(prefill.additionalInfo) ? prefill.additionalInfo : [],
-          declaration: prefill.declaration || DEFAULT_DECLARATION_TEXT,
+          // Always use our own default declaration text, never whatever the prefill source carried.
+          declaration: DEFAULT_DECLARATION_TEXT,
           includeDeclaration: true,
           verifiedBadge: true
         };
@@ -740,6 +740,40 @@ export default function CVGeneratorPage() {
     setClientSubmission(null);
     setAcceptedFields({});
     toast.success(`Successfully merged ${mergeCount} updates into the registry!`);
+  };
+
+  // Sends the whole CV to the AI to be rewritten/polished in one pass, then merges
+  // the result back in — keeping factual/identity fields (contact info, dates,
+  // declaration, etc.) exactly as they were so the AI can only touch wording.
+  const handleAiEnhanceCv = async () => {
+    if (isEnhancingCv) return;
+    setIsEnhancingCv(true);
+
+    const enhancePromise = (async () => {
+      const res = await fetch("/api/cv/ai-writer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "enhance-full-cv", cvData }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setCvData((prev: any) => mergeAiEnhancedCv(prev, data.result || {}));
+      return data;
+    })();
+
+    toast.promise(enhancePromise, {
+      loading: "Sending your CV to AI for a full enhancement pass…",
+      success: "CV enhanced! Review the changes across each section before saving.",
+      error: (err: any) => `AI enhancement failed: ${err.message || "Unknown error"}`,
+    });
+
+    try {
+      await enhancePromise;
+    } catch {
+      // toast.promise already surfaced the error to the user
+    } finally {
+      setIsEnhancingCv(false);
+    }
   };
 
   const sectionGroups = [
@@ -1071,6 +1105,11 @@ export default function CVGeneratorPage() {
             references: Array.isArray(parsedData.references) ? parsedData.references : initialCVData.references,
             languages: Array.isArray(parsedData.languages) ? parsedData.languages : initialCVData.languages,
             certifications: Array.isArray(parsedData.certifications) ? parsedData.certifications : initialCVData.certifications,
+            // Declaration is a fixed BCL statement, never something the AI should extract
+            // or overwrite from the uploaded document — keep our own default here.
+            declaration: initialCVData.declaration,
+            includeDeclaration: true,
+            verifiedBadge: true,
           };
 
           setCvData(cleanedData);
@@ -1595,6 +1634,18 @@ export default function CVGeneratorPage() {
           ))}
         </div>
         <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            onClick={handleAiEnhanceCv}
+            disabled={isEnhancingCv}
+            className="text-xs h-8 gap-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-sm disabled:opacity-70"
+          >
+            {isEnhancingCv ? (
+              <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Enhancing...</>
+            ) : (
+              <><Sparkles className="h-3.5 w-3.5" /> AI Enhance</>
+            )}
+          </Button>
           {(selectedIndividual || applicantId) && (
             <Button size="sm" onClick={saveCVToDb} disabled={isSavingCv} className="text-xs h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white">
               {isSavingCv ? (
@@ -1665,8 +1716,6 @@ export default function CVGeneratorPage() {
             cvDrafts={cvDrafts}
             loadDraft={loadDraft}
             deleteDraft={deleteDraft}
-            zoomLevel={zoomLevel}
-            setZoomLevel={setZoomLevel}
             cvData={cvData}
             cvSettings={cvSettings}
             selectedLayout={selectedLayout}
@@ -1684,11 +1733,9 @@ export default function CVGeneratorPage() {
             activeSection={activeSection}
             setActiveSection={setActiveSection}
             setShowAiWriter={setShowAiWriter}
-            setShowAtsOptimizer={setShowAtsOptimizer}
             setShowJobMatch={setShowJobMatch}
             setShowCoverLetter={setShowCoverLetter}
             setShowResumeVersions={setShowResumeVersions}
-            setShowAnalytics={setShowAnalytics}
             setShowAdvancedExport={setShowAdvancedExport}
             setWorkflowStep={setWorkflowStep}
             cvData={cvData}
@@ -1699,8 +1746,6 @@ export default function CVGeneratorPage() {
             toggleItem={toggleItem}
             companyOptions={companyOptions}
             handleCreateCompany={handleCreateCompany}
-            zoomLevel={zoomLevel}
-            setZoomLevel={setZoomLevel}
             selectedLayout={selectedLayout}
             setSelectedLayout={setSelectedLayout}
             cvSettings={cvSettings}
@@ -1741,8 +1786,6 @@ export default function CVGeneratorPage() {
           previewRef={previewRef}
           showAiWriter={showAiWriter}
           setShowAiWriter={setShowAiWriter}
-          showAtsOptimizer={showAtsOptimizer}
-          setShowAtsOptimizer={setShowAtsOptimizer}
           showJobMatch={showJobMatch}
           setShowJobMatch={setShowJobMatch}
           showCoverLetter={showCoverLetter}
@@ -1751,8 +1794,6 @@ export default function CVGeneratorPage() {
           setShowResumeVersions={setShowResumeVersions}
           cvVersions={cvVersions}
           setCvVersions={setCvVersions}
-          showAnalytics={showAnalytics}
-          setShowAnalytics={setShowAnalytics}
           showAdvancedExport={showAdvancedExport}
           setShowAdvancedExport={setShowAdvancedExport}
         />

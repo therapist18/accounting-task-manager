@@ -77,7 +77,7 @@ const navItems = [
         icon: Mail,
         items: [
             { title: "Letter Generation", href: "/dashboard/letters", permission: "letters.view" },
-            { title: "Letterheads", href: "/dashboard/letters/letterheads", permission: "letterheads.view" },
+            { title: "Letterheads Settings", href: "/dashboard/letters/letterheads", permission: "letterheads.view" },
         ],
     },
     { title: "Diary", href: "/dashboard/diary", icon: Calendar, permission: "diary.view" },

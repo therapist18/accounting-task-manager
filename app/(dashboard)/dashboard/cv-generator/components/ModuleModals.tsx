@@ -2,11 +2,9 @@
 "use client";
 
 import AIWriterModule from "./AIWriterModule";
-import ATSOptimizer from "./ATSOptimizer";
 import JobMatch from "./JobMatch";
 import CoverLetterGenerator from "./CoverLetter";
 import ResumeVersions from "./ResumeVersions";
-import ResumeAnalytics from "./ResumeAnalytics";
 import AdvancedExport from "./AdvancedExport";
 
 interface ModuleModalsProps {
@@ -15,8 +13,6 @@ interface ModuleModalsProps {
   previewRef: React.RefObject<HTMLDivElement>;
   showAiWriter: boolean;
   setShowAiWriter: (v: boolean) => void;
-  showAtsOptimizer: boolean;
-  setShowAtsOptimizer: (v: boolean) => void;
   showJobMatch: boolean;
   setShowJobMatch: (v: boolean) => void;
   showCoverLetter: boolean;
@@ -25,8 +21,6 @@ interface ModuleModalsProps {
   setShowResumeVersions: (v: boolean) => void;
   cvVersions: any[];
   setCvVersions: (updater: any) => void;
-  showAnalytics: boolean;
-  setShowAnalytics: (v: boolean) => void;
   showAdvancedExport: boolean;
   setShowAdvancedExport: (v: boolean) => void;
 }
@@ -38,8 +32,6 @@ export function ModuleModals({
   previewRef,
   showAiWriter,
   setShowAiWriter,
-  showAtsOptimizer,
-  setShowAtsOptimizer,
   showJobMatch,
   setShowJobMatch,
   showCoverLetter,
@@ -48,8 +40,6 @@ export function ModuleModals({
   setShowResumeVersions,
   cvVersions,
   setCvVersions,
-  showAnalytics,
-  setShowAnalytics,
   showAdvancedExport,
   setShowAdvancedExport,
 }: ModuleModalsProps) {
@@ -58,11 +48,6 @@ export function ModuleModals({
       {showAiWriter && (
         <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowAiWriter(false); }}>
           <AIWriterModule cvData={cvData} setCvData={setCvData} onClose={() => setShowAiWriter(false)} />
-        </div>
-      )}
-      {showAtsOptimizer && (
-        <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowAtsOptimizer(false); }}>
-          <ATSOptimizer cvData={cvData} onClose={() => setShowAtsOptimizer(false)} />
         </div>
       )}
       {showJobMatch && (
@@ -78,11 +63,6 @@ export function ModuleModals({
       {showResumeVersions && (
         <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowResumeVersions(false); }}>
           <ResumeVersions cvData={cvData} setCvData={setCvData} cvVersions={cvVersions} setCvVersions={setCvVersions} onClose={() => setShowResumeVersions(false)} />
-        </div>
-      )}
-      {showAnalytics && (
-        <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowAnalytics(false); }}>
-          <ResumeAnalytics cvData={cvData} onClose={() => setShowAnalytics(false)} />
         </div>
       )}
       {showAdvancedExport && (

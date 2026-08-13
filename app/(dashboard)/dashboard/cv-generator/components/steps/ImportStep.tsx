@@ -1,11 +1,11 @@
 // @ts-nocheck
 "use client";
 
-import { CheckCircle2, ChevronDown, ChevronRight, FileText, Loader2, Save, Search, Trash2, Upload, Users, X, ZoomIn, ZoomOut } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, FileText, Loader2, Save, Search, Trash2, Upload, Users, X } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { CVLayout } from "../cv-designs";
+import { CvPreviewPanel } from "../CvPreviewPanel";
 import { EMPTY_CV_DATA } from "../../utils/cvGeneratorData";
 
 interface ImportStepProps {
@@ -33,8 +33,6 @@ interface ImportStepProps {
   cvDrafts: { id: string; name: string; data: any; createdAt: string; isPortalDraft: boolean }[];
   loadDraft: (draft: any) => void;
   deleteDraft: (id: string) => void;
-  zoomLevel: number;
-  setZoomLevel: (updater: any) => void;
   cvData: any;
   cvSettings: any;
   selectedLayout: string;
@@ -66,8 +64,6 @@ export function ImportStep({
   cvDrafts,
   loadDraft,
   deleteDraft,
-  zoomLevel,
-  setZoomLevel,
   cvData,
   cvSettings,
   selectedLayout,
@@ -208,20 +204,14 @@ export function ImportStep({
 
       <PanelResizeHandle className="w-1.5 bg-slate-100 hover:bg-custom-blue/30 transition-colors cursor-col-resize flex-shrink-0" />
 
-      <Panel defaultSize={45} minSize={25} className="bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-        <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between shrink-0">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Preview</span>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setZoomLevel(Math.max(0.4, zoomLevel - 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomOut className="h-3.5 w-3.5 text-slate-500" /></button>
-            <span className="text-sm font-bold text-slate-600 min-w-[36px] text-center">{Math.round(zoomLevel * 100)}%</span>
-            <button onClick={() => setZoomLevel(Math.min(1.2, zoomLevel + 0.05))} className="p-1 hover:bg-slate-100 rounded"><ZoomIn className="h-3.5 w-3.5 text-slate-500" /></button>
-          </div>
-        </div>
-        <div className="flex-1 overflow-auto p-6 flex items-start justify-center bg-slate-50 custom-scrollbar">
-          <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center', transition: 'transform 0.15s ease-out' }} className="shrink-0">
-            <div ref={previewRef} id="cv-preview-container" style={{ width: '210mm', minHeight: '297mm', background: 'white' }}><CVLayout cvData={cvData} cvSettings={cvSettings} selectedLayout={selectedLayout} /></div>
-          </div>
-        </div>
+      <Panel defaultSize={45} minSize={25} className="overflow-hidden flex flex-col">
+        <CvPreviewPanel
+          cvData={cvData}
+          cvSettings={cvSettings}
+          selectedLayout={selectedLayout}
+          previewRef={previewRef}
+          title="Preview"
+        />
       </Panel>
     </PanelGroup>
   );

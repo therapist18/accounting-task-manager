@@ -2,15 +2,20 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Loader2, Building2, Clock, GitCompare, FileDown } from "lucide-react";
+import { Loader2, Building2, Clock, GitCompare, FileDown, FileSpreadsheet, FileText, ChevronDown, ListFilter } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/hooks/use-toast";
+import { supabase } from "@/lib/supabase/client";
 import { fetchDepartments } from "../departments/departments/database";
-import { fetchTasks, fetchStages, fetchCompanies } from "../tasks/utils/taskManagerData";
+import { fetchTasks, fetchStages, fetchCompanies, fetchClassRequirements } from "../tasks/utils/taskManagerData";
 import { enhanceTasksWithIndividualData } from "../tasks/overall-view/tableUtils";
 import { userService } from "@/lib/shared-user-assignment-service";
-import { supabase } from "@/lib/supabase/client";
+import { EnquiryDialog } from "../tasks/components/EnquiryDialog";
+import { CancelConfirmationDialog } from "../tasks/components/CancelConfirmationDialog";
+import { DeleteConfirmationDialog } from "../tasks/components/DeleteConfirmationDialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   getCanonicalCurrentStage,
   getCurrentOfficerStage,
@@ -20,9 +25,9 @@ import {
   parseDateSafe,
 } from "../reports/utils/reportStageLogic";
 import { StatusTabs, PerspectiveTabs, HierarchyTabs, ColumnVisibilityDialog, } from "./components/PageHeader";
-import { SummaryTable } from "./components/SummaryTable";
+import { SummaryTable, resolveCompanyName } from "./components/SummaryTable";
 import { MILESTONE_STAGE_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS, SUMMARY_COLUMNS } from "./stageColumnConfig";
-import { exportSummaryReportToExcel } from "./utils/exportSummary";
+import { exportSummaryReportToExcel, exportSummaryReportToPDF } from "./utils/exportSummary";
 import {
   buildJobLevelKey,
   getApplicationTypeForTask as getApplicationTypeForTaskShared,
@@ -33,6 +38,9 @@ import {
 } from "./utils/executionMath";
 
 const TERMINAL_STATUSES = ['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'];
+const STATUS_LABELS: Record<string, string> = {
+  all: 'All Applications', enquiry: 'Enquiry', wip: 'WIP', completed: 'Completed', overdue: 'Overdue',
+};
 const COMPLETED_STATUSES = ['write_up_completed', 'endorsed', 'completed'];
 
 export default function SummaryReportsPage() {
@@ -45,6 +53,10 @@ export default function SummaryReportsPage() {
   const [unifiedOfficers, setUnifiedOfficers] = useState<any[]>([]);
   const [unifiedManagers, setUnifiedManagers] = useState<any[]>([]);
   const [unifiedAssistants, setUnifiedAssistants] = useState<any[]>([]);
+  // Full { officers, managers, assistants, allUsers } payload, kept as-is (not just the split-out
+  // lists above) so it can be handed straight to EnquiryDialog's `userData` prop — same shape
+  // DepartmentTasksManager passes it, letting the dialog skip its own staff refetch.
+  const [unifiedUserData, setUnifiedUserData] = useState<any>(null);
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
   const [expectedTimeByJobLevel, setExpectedTimeByJobLevel] = useState<Map<string, number>>(new Map());
   // Promised Time (Stages module) per job level — defaultMinutes is the fallback, conditions
@@ -57,7 +69,7 @@ export default function SummaryReportsPage() {
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
   const [activeClassIds, setActiveClassIds] = useState<string[]>([]);
   const [activeSubClassIds, setActiveSubClassIds] = useState<string[]>([]);
-  const [activeTaskStatus, setActiveTaskStatus] = useState<'all' | 'enquiry' | 'wip' | 'completed' | 'overdue'>('all');
+  const [activeTaskStatus, setActiveTaskStatus] = useState<'all' | 'enquiry' | 'wip' | 'completed' | 'overdue'>('enquiry');
 
   const [activePerspective, setActivePerspective] = useState<'all' | 'officers' | 'managers' | 'clients'>('all');
   const [officerFilterMode, setOfficerFilterMode] = useState<'current' | 'history'>('current');
@@ -66,8 +78,26 @@ export default function SummaryReportsPage() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [showTime, setShowTime] = useState(false);
   const [showDelta, setShowDelta] = useState(false);
+  // "Show All" also renders a "No tasks associated" placeholder section for every
+  // sub-department tab that's genuinely empty (see SummaryTable's showEmptyGroups); "Show
+  // With Tasks" hides those and only lists sub-departments that actually have rows.
+  const [showEmptySubDepts, setShowEmptySubDepts] = useState(true);
+  const [isExporting, setIsExporting] = useState<'excel' | 'pdf' | null>(null);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS);
+
+  // ── Row actions (Edit / Cancel / Reactivate / Delete) — same dialogs and tm_tasks writes
+  // DepartmentTasksManager's renderActionButtons uses, driven from this page's own allTasks
+  // state instead of that module's task list.
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<any>(null);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [taskToCancel, setTaskToCancel] = useState<any>(null);
+  const [uncancelDialogOpen, setUncancelDialogOpen] = useState(false);
+  const [taskToUncancel, setTaskToUncancel] = useState<any>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [taskToDelete, setTaskToDelete] = useState<any>(null);
+  const [isMutatingTask, setIsMutatingTask] = useState(false);
 
   const loadAllData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -79,11 +109,11 @@ export default function SummaryReportsPage() {
       setDepartments(depts);
       setCompanies(comps);
 
-      // fetchTasks() internally re-fetches the ENTIRE tm_class_requirements table (plus a
-      // reference-documents lookup) on every call, on top of its own tm_tasks query — calling
-      // it once per department (the old per-dept Promise.all) multiplied ALL of that work by
-      // the department count, which is what was actually slow (visible in the network panel
-      // as N near-identical tm_tasks/tm_class_requirements round trips). fetchStages needs no
+      // fetchTasks() internally fetches the ENTIRE tm_class_requirements table (plus a
+      // reference-documents lookup) on top of its own tm_tasks query — calling it once per
+      // department (the old per-dept Promise.all) multiplied ALL of that work by the
+      // department count, which is what was actually slow (visible in the network panel as N
+      // near-identical tm_tasks/tm_class_requirements round trips). fetchStages needs no
       // network call at all — it just reads the already-fetched `depts` payload — so it's fine
       // to keep per-department. tasks fetch happens exactly once for the whole company here,
       // then gets grouped by department client-side downstream via job_level.department_id.
@@ -99,6 +129,7 @@ export default function SummaryReportsPage() {
       setUnifiedOfficers(unifiedUserData.officers || []);
       setUnifiedManagers(unifiedUserData.managers || []);
       setUnifiedAssistants(unifiedUserData.assistants || []);
+      setUnifiedUserData(unifiedUserData);
 
       const newAllTasks = Array.isArray(allTasksData) ? allTasksData : [];
       const newStagesByDept = new Map<string, any[]>();
@@ -106,7 +137,13 @@ export default function SummaryReportsPage() {
       setAllTasks(newAllTasks);
       setStagesByDept(newStagesByDept);
 
-      const { enhancedTasksData: enhancedMap } = await enhanceTasksWithIndividualData(newAllTasks);
+      // Neither of these depends on the other's result, so run them concurrently instead of
+      // chaining — fetchClassRequirements shares its in-flight request with the identical
+      // query fetchTasks() already issued above, via the cache in taskManagerData.ts.
+      const [{ enhancedTasksData: enhancedMap }, requirementRows] = await Promise.all([
+        enhanceTasksWithIndividualData(newAllTasks),
+        fetchClassRequirements(),
+      ]);
       setEnhancedTasksData(enhancedMap);
 
       // Expected total time per job level (tm_class_requirements.expected_total_time_minutes),
@@ -117,12 +154,13 @@ export default function SummaryReportsPage() {
       // A `.in('job_level', [...])` bulk query was tried here to replace the old one-round-trip-
       // per-job-level loop, but PostgREST's `in.(...)` list syntax doesn't escape the internal
       // double-quotes of a JSON-string element, so it broke on every payload ("invalid input
-      // syntax for type json"). tm_class_requirements is small (a handful of KB, already fetched
-      // whole elsewhere on this page via fetchTasks's internal requirements lookup — same
-      // `select=*` pattern), so instead fetch it once, unfiltered, and match client-side. This
-      // also sidesteps jsonb equality being type-strict (some rows store class_id as a number,
-      // others as a string for the same class) by canonicalizing every id to a string before
-      // comparing, which the old per-row `.eq()` didn't do either.
+      // syntax for type json"). tm_class_requirements is small (a handful of KB), so instead
+      // fetch it once, unfiltered, and match client-side — via fetchClassRequirements() above,
+      // whose short-lived cache means this reuses the exact same request fetchTasks() already
+      // issued for its own internal requirements lookup rather than hitting the network again.
+      // This also sidesteps jsonb equality being type-strict (some rows store class_id as a
+      // number, others as a string for the same class) by canonicalizing every id to a string
+      // before comparing, which the old per-row `.eq()` didn't do either.
       const canonicalJobLevelKey = (jl: any) => JSON.stringify({
         department_id: jl?.department_id != null ? String(jl.department_id) : null,
         subdepartment_id: jl?.subdepartment_id != null ? String(jl.subdepartment_id) : null,
@@ -150,10 +188,7 @@ export default function SummaryReportsPage() {
       const newPromisedTimeMap = new Map<string, { defaultMinutes: number | null; conditions: { value: string; minutes: number }[] }>();
       // Same single-fetch-then-match pattern as above, extended to also pull Promised Time
       // (default + conditions) off the same rows — one query covers both derived-time columns.
-      const { data: requirementRows, error: requirementsErr } = await supabase
-        .from('tm_class_requirements')
-        .select('job_level, expected_total_time_minutes, promised_time');
-      if (!requirementsErr && requirementRows) {
+      if (requirementRows) {
         const byCanonicalKey = new Map<string, any>();
         requirementRows.forEach((row: any) => {
           byCanonicalKey.set(canonicalJobLevelKey(row.job_level), row);
@@ -189,6 +224,103 @@ export default function SummaryReportsPage() {
     setIsRefreshing(false);
     toast({ title: "Refreshed", description: "Summary report data has been updated." });
   }, [loadAllData]);
+
+  // ── Row actions: Edit / Cancel / Reactivate / Delete ──
+  // Same tm_tasks writes as DepartmentTasksManager's handleTaskEdit/handleCancelTask/
+  // handleUncancelTask/DeleteButton, just updating this page's own allTasks state afterward
+  // instead of that module's tasks list.
+  const handleEditTask = useCallback((task: any) => {
+    setEditingTask(task);
+    setEditDialogOpen(true);
+  }, []);
+
+  const handleTaskUpdated = useCallback((updatedTask: any) => {
+    setAllTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
+    setEditDialogOpen(false);
+    setEditingTask(null);
+  }, []);
+
+  const handleRequestCancel = useCallback((task: any) => {
+    setTaskToCancel(task);
+    setCancelDialogOpen(true);
+  }, []);
+
+  const handleRequestUncancel = useCallback((task: any) => {
+    setTaskToUncancel(task);
+    setUncancelDialogOpen(true);
+  }, []);
+
+  const handleRequestDelete = useCallback((task: any) => {
+    setTaskToDelete(task);
+    setDeleteDialogOpen(true);
+  }, []);
+
+  const handleConfirmCancel = useCallback(async (reason: string) => {
+    if (!taskToCancel) return;
+    setIsMutatingTask(true);
+    try {
+      const cancellation_details = {
+        reason,
+        cancelled_at: new Date().toISOString(),
+        cancelled_by: unifiedUserData?.user?.id || null,
+        previous_status: taskToCancel.status || 'pending',
+      };
+      const { error } = await supabase
+        .from('tm_tasks')
+        .update({ status: 'cancel', cancellation_details, updated_at: new Date().toISOString() })
+        .eq('id', taskToCancel.id);
+      if (error) throw error;
+      setAllTasks(prev => prev.map(t => t.id === taskToCancel.id ? { ...t, status: 'cancel', cancellation_details } : t));
+      toast({ title: 'Success', description: 'Task cancelled successfully' });
+    } catch (err) {
+      console.error('Error cancelling task:', err);
+      toast({ title: 'Error', description: 'Failed to cancel task. Please try again.', variant: 'destructive' });
+    } finally {
+      setIsMutatingTask(false);
+      setCancelDialogOpen(false);
+      setTaskToCancel(null);
+    }
+  }, [taskToCancel, unifiedUserData]);
+
+  const handleConfirmUncancel = useCallback(async () => {
+    if (!taskToUncancel) return;
+    setIsMutatingTask(true);
+    try {
+      const previousStatus = taskToUncancel.cancellation_details?.previous_status || 'pending';
+      const { error } = await supabase
+        .from('tm_tasks')
+        .update({ status: previousStatus, cancellation_details: null, updated_at: new Date().toISOString() })
+        .eq('id', taskToUncancel.id);
+      if (error) throw error;
+      setAllTasks(prev => prev.map(t => t.id === taskToUncancel.id ? { ...t, status: previousStatus, cancellation_details: null } : t));
+      toast({ title: 'Task reactivated successfully', description: 'The task has been restored to its previous status.' });
+    } catch (err) {
+      console.error('Error reactivating task:', err);
+      toast({ title: 'Error', description: 'Failed to reactivate task. Please try again.', variant: 'destructive' });
+    } finally {
+      setIsMutatingTask(false);
+      setUncancelDialogOpen(false);
+      setTaskToUncancel(null);
+    }
+  }, [taskToUncancel]);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!taskToDelete) return;
+    setIsMutatingTask(true);
+    try {
+      const { error } = await supabase.from('tm_tasks').delete().eq('id', taskToDelete.id);
+      if (error) throw error;
+      setAllTasks(prev => prev.filter(t => t.id !== taskToDelete.id));
+      toast({ title: 'Success', description: 'Task deleted successfully' });
+    } catch (err) {
+      console.error('Error deleting task:', err);
+      toast({ title: 'Error', description: 'Failed to delete task. Please try again.', variant: 'destructive' });
+    } finally {
+      setIsMutatingTask(false);
+      setDeleteDialogOpen(false);
+      setTaskToDelete(null);
+    }
+  }, [taskToDelete]);
 
   // Every current-stage lookup must use the stage list for the task's OWN department —
   // merging stages across departments would corrupt applicability checks for tasks whose
@@ -268,14 +400,19 @@ export default function SummaryReportsPage() {
     return true;
   }), [hierarchyScopedTasks, activeClassIds, activeSubClassIds]);
 
-  const tasksInActiveDept = useMemo(() => activeDeptId === 'all' ? [] : allTasks.filter(t => t.department_id?.toString() === activeDeptId), [allTasks, activeDeptId]);
+  // Department/Sub-department tabs count against the "live pipeline" (Enquiry + WIP), not
+  // every task ever created — wrapped-up completed/archived/cancelled work would otherwise
+  // pad these parent tabs with cases nobody's actively watching there.
+  const activePipelineTasks = useMemo(() => allTasks.filter(t => !TERMINAL_STATUSES.includes(t.status)), [allTasks]);
+
+  const tasksInActiveDept = useMemo(() => activeDeptId === 'all' ? [] : activePipelineTasks.filter(t => t.department_id?.toString() === activeDeptId), [activePipelineTasks, activeDeptId]);
   const tasksInActiveSubDept = useMemo(() => activeSubDeptId === 'all' ? [] : tasksInActiveDept.filter(t => t.subdepartment_id?.toString() === activeSubDeptId), [tasksInActiveDept, activeSubDeptId]);
 
   const deptTaskCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: allTasks.length };
-    departments.forEach((d: any) => { counts[d.id.toString()] = allTasks.filter(t => t.department_id?.toString() === d.id.toString()).length; });
+    const counts: Record<string, number> = { all: activePipelineTasks.length };
+    departments.forEach((d: any) => { counts[d.id.toString()] = activePipelineTasks.filter(t => t.department_id?.toString() === d.id.toString()).length; });
     return counts;
-  }, [allTasks, departments]);
+  }, [activePipelineTasks, departments]);
 
   const subDeptTaskCounts = useMemo(() => {
     const counts: Record<string, number> = { all: tasksInActiveDept.length };
@@ -424,7 +561,7 @@ export default function SummaryReportsPage() {
   }, [perspectiveScopedTasks, searchQuery, companies]);
 
   const getSortableValue = useCallback((task: any, columnId: string) => {
-    if (columnId === 'company') return (companies.get(task.company_id)?.name || task.company_name || '').toLowerCase();
+    if (columnId === 'company') return (resolveCompanyName(task, companies) || '').toLowerCase();
     if (columnId === 'applicant') return (task.applicant_name || '').toLowerCase();
     if (columnId === 'job_description') return (task.job_description || '').toLowerCase();
     if (columnId === 'company_prefix' || columnId === 'sponsor_name' || columnId === 'application_type' || columnId === 'duration') return '';
@@ -461,9 +598,13 @@ export default function SummaryReportsPage() {
 
   // Exports exactly what's currently on screen — same filtered/sorted rows and visible
   // columns as the SummaryTable, via the shared cell-resolution helpers it uses.
-  const handleExport = useCallback(() => {
+  const handleExport = useCallback(async (format: 'excel' | 'pdf') => {
+    if (sortedTasks.length === 0) {
+      toast({ title: "No Data", description: "No tasks available to export." });
+      return;
+    }
     const visibleColumns = SUMMARY_COLUMNS.filter(c => visibleColumnIds.includes(c.id));
-    exportSummaryReportToExcel({
+    const exportParams = {
       tasks: sortedTasks,
       columns: visibleColumns,
       companies,
@@ -476,8 +617,20 @@ export default function SummaryReportsPage() {
       getCurrentStageNameForTask,
       showTime,
       scopeName: departments.find((d: any) => d.id.toString() === activeDeptId)?.name,
-    });
-  }, [sortedTasks, visibleColumnIds, companies, enhancedTasksData, getExpectedMinutesForTask, getActualTimeInfoForTask, getPromisedMinutesForTask, getPlannedExecutionDateForTask, getCurrentStageNameForTask, showTime, departments, activeDeptId]);
+      statusLabel: STATUS_LABELS[activeTaskStatus] || 'All Applications',
+    };
+    setIsExporting(format);
+    try {
+      if (format === 'excel') await exportSummaryReportToExcel(exportParams);
+      else await exportSummaryReportToPDF(exportParams);
+      toast({ title: "Export Complete", description: `Summary report exported as ${format.toUpperCase()}.` });
+    } catch (err) {
+      console.error('Error exporting summary report:', err);
+      toast({ title: "Error", description: "Failed to export summary report.", variant: "destructive" });
+    } finally {
+      setIsExporting(null);
+    }
+  }, [sortedTasks, visibleColumnIds, companies, departments, enhancedTasksData, getExpectedMinutesForTask, getActualTimeInfoForTask, getPromisedMinutesForTask, getPlannedExecutionDateForTask, getCurrentStageNameForTask, showTime, activeDeptId, activeTaskStatus]);
 
   if (loading) {
     return (
@@ -521,6 +674,19 @@ export default function SummaryReportsPage() {
             <Button
               variant="outline"
               size="sm"
+              onClick={() => setShowEmptySubDepts((v) => !v)}
+              className={cn(
+                "h-9 px-4 rounded-md text-sm font-bold gap-2 transition-all",
+                !showEmptySubDepts ? "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+              )}
+              title={showEmptySubDepts ? "Hide sub-departments with no tasks" : "Show every sub-department, including empty ones"}
+            >
+              <ListFilter className="h-3.5 w-3.5" />
+              {showEmptySubDepts ? "Show With Tasks" : "Show All"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setShowTime((v) => !v)}
               className={cn(
                 "h-9 px-4 rounded-md text-sm font-bold gap-2 transition-all",
@@ -543,15 +709,30 @@ export default function SummaryReportsPage() {
               {showDelta ? "Hide Δ" : "Show Δ"}
             </Button>
             <div className="h-6 w-px bg-slate-200 mx-1" />
-            <Button
-              size="sm"
-              onClick={handleExport}
-              className="h-9 px-4 rounded-md text-sm font-bold gap-2 text-white hover:bg-[#2d5a94] shadow-sm"
-              style={{ backgroundColor: '#376bae' }}
-            >
-              <FileDown className="h-3.5 w-3.5" />
-              Export
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  disabled={!!isExporting}
+                  className="h-9 px-4 rounded-md text-sm font-bold gap-2 text-white hover:bg-[#2d5a94] shadow-sm disabled:opacity-70"
+                  style={{ backgroundColor: '#376bae' }}
+                >
+                  {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />}
+                  {isExporting ? `Exporting ${isExporting.toUpperCase()}...` : "Export"}
+                  {!isExporting && <ChevronDown className="h-3.5 w-3.5 opacity-70" />}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onClick={() => handleExport('excel')} disabled={!!isExporting} className="gap-2 cursor-pointer">
+                  <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                  Export as Excel
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('pdf')} disabled={!!isExporting} className="gap-2 cursor-pointer">
+                  <FileText className="h-4 w-4 text-red-600" />
+                  Export as PDF
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </div>
@@ -582,7 +763,8 @@ export default function SummaryReportsPage() {
       />
 
       <SummaryTable
-        tasks={sortedTasks} companies={companies} departments={departments}
+        tasks={sortedTasks} companies={companies} departments={departments} activeDeptId={activeDeptId}
+        showEmptyGroups={showEmptySubDepts}
         showTime={showTime} showDelta={showDelta}
         sortConfig={sortConfig} handleSort={handleSort}
         enhancedTasksData={enhancedTasksData}
@@ -593,6 +775,57 @@ export default function SummaryReportsPage() {
         getPlannedExecutionDateForTask={getPlannedExecutionDateForTask}
         getCurrentStageNameForTask={getCurrentStageNameForTask}
         visibleColumnIds={visibleColumnIds}
+        onEditTask={handleEditTask}
+        onRequestCancel={handleRequestCancel}
+        onRequestUncancel={handleRequestUncancel}
+        onRequestDelete={handleRequestDelete}
+      />
+
+      {/* Edit dialog — the exact EnquiryDialog DepartmentTasksManager reuses for editing,
+          fed the same departments/userData/taskToEdit shape so task edits behave identically
+          regardless of which module opened them. */}
+      <EnquiryDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        taskToEdit={editingTask}
+        departments={departments}
+        userData={unifiedUserData}
+        onEnquiryCreated={handleTaskUpdated}
+      />
+
+      <CancelConfirmationDialog
+        open={cancelDialogOpen}
+        onOpenChange={(open: boolean) => { setCancelDialogOpen(open); if (!open) setTaskToCancel(null); }}
+        onConfirm={handleConfirmCancel}
+        loading={isMutatingTask}
+      />
+
+      <Dialog open={uncancelDialogOpen} onOpenChange={(open) => { setUncancelDialogOpen(open); if (!open) setTaskToUncancel(null); }}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-green-600">Reactivate Task</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to reactivate this task? It will be restored to its previous status.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => { setUncancelDialogOpen(false); setTaskToUncancel(null); }} disabled={isMutatingTask}>
+              Cancel
+            </Button>
+            <Button className="bg-green-600 hover:bg-green-700" onClick={handleConfirmUncancel} disabled={isMutatingTask}>
+              {isMutatingTask ? "Reactivating..." : "Reactivate"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <DeleteConfirmationDialog
+        open={deleteDialogOpen}
+        onOpenChange={(open: boolean) => { setDeleteDialogOpen(open); if (!open) setTaskToDelete(null); }}
+        onConfirm={handleConfirmDelete}
+        title="Delete Task"
+        description="This action cannot be undone. This will permanently delete this task."
+        loading={isMutatingTask}
       />
     </div>
   );

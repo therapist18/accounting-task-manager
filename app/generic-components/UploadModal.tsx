@@ -694,6 +694,15 @@ export function UploadModal({
             return emptyData;
           };
 
+          // Same AbortController + extractingDocIds bookkeeping handleDocTypeChange/
+          // handleReExtract use below — without it the "Stop Extraction" button rendered per
+          // doc stays permanently disabled (extractingDocIds never contains this doc's id)
+          // during this very first extraction pass right after file selection, the one path
+          // that previously couldn't be interrupted.
+          const abortController = new AbortController();
+          abortControllersRef.current[doc.id] = abortController;
+          setExtractingDocIds(prev => new Set(prev).add(doc.id));
+
           try {
             const fieldsToExtract = finalSelectedDoc?.fields || [];
             let extractedData = {};
@@ -706,11 +715,20 @@ export function UploadModal({
                 finalSelectedDoc?.name || documentName,
                 (progressMessage) => showExtractionProgressToast(doc.fileName, progressMessage, extractionToastId),
                 doc.fileName,
+                abortController.signal,
               );
               extractedData = result.extractedData;
               success = result.success;
             } else {
               showSuccessToast(`${doc.fileName} processed (no extraction needed)`, extractionToastId);
+            }
+
+            // handleStopExtraction already wrote its own "stopped" state for this doc (and
+            // showed its own toast) — don't clobber that with results that arrived after the
+            // user hit Stop.
+            if (stoppedDocIdsRef.current.has(doc.id)) {
+              stoppedDocIdsRef.current.delete(doc.id);
+              return null;
             }
 
             if (!extractedData || (typeof extractedData === 'object' && Object.keys(extractedData).length === 0)) {
@@ -748,6 +766,11 @@ export function UploadModal({
             };
 
           } catch (error) {
+            if (stoppedDocIdsRef.current.has(doc.id) || error?.name === 'AbortError' || error?.message?.includes('aborted')) {
+              stoppedDocIdsRef.current.delete(doc.id);
+              return null;
+            }
+
             console.error(`Error processing ${doc.fileName}:`, error);
 
             showErrorToast(`Extraction failed for ${doc.fileName}. Please enter details manually.`, extractionToastId);
@@ -760,10 +783,17 @@ export function UploadModal({
               validationStatus: 'warning' as const,
               validationMessage: 'Extraction failed. Please fill in the details manually.',
             };
+          } finally {
+            delete abortControllersRef.current[doc.id];
+            setExtractingDocIds(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(doc.id);
+              return newSet;
+            });
           }
         });
 
-        const fullyProcessedDocs = await Promise.all(processedDocsPromises);
+        const fullyProcessedDocs = (await Promise.all(processedDocsPromises)).filter(Boolean);
         setUploadedDocs(prev => prev.map(oldDoc =>
           fullyProcessedDocs.find(pd => pd.id === oldDoc.id) || oldDoc
         ));
