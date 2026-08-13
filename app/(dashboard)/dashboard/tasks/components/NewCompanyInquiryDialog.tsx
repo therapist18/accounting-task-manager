@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { SearchableSelect } from "@/components/ui/searchable-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Check, ChevronsUpDown, User, Users, Building2, Loader2, FileText, Briefcase, Shield, Info, Search, X, Calendar, ListTodo, HelpCircle, Folder } from "lucide-react"
+import { Check, ChevronsUpDown, User, Users, Building2, Loader2, FileText, Briefcase, Shield, Info, Search, X, Calendar, ListTodo, HelpCircle, Folder, AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Textarea } from "@/components/ui/textarea"
@@ -116,6 +116,7 @@ export function NewCompanyInquiryDialog({
             subclass_id: null
         }
     });
+    const [errors, setErrors] = useState<Record<string, string>>({})
     const availableSubdepartments = useMemo(() => {
         const dept = departments.find(d => String(d.id) === String(formData.department_id));
         return dept?.tm_subdepartments || [];
@@ -336,6 +337,7 @@ export function NewCompanyInquiryDialog({
 
     useEffect(() => {
         if (open && initialData) {
+            setErrors({});
             setFormData({
                 job_description: initialData.job_description || '',
                 department_id: initialData.department_id?.toString() || '',
@@ -701,6 +703,7 @@ export function NewCompanyInquiryDialog({
 
 
     const handleOfficialSelection = (officialId: number) => {
+        clearError('officials');
         setSelectedOfficialIds(prev => {
             const newSet = new Set(prev);
             const official = officials.find(o => o.id === officialId);
@@ -715,12 +718,75 @@ export function NewCompanyInquiryDialog({
         });
     };
 
+    const clearError = (key: string) => {
+        setErrors(prev => {
+            if (!prev[key]) return prev;
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
+    };
+
+    const validateForm = useCallback(() => {
+        const newErrors: Record<string, string> = {}
+
+        if (!selectedCompany) {
+            newErrors.company = 'Please select a company to continue'
+        }
+
+        if (selectedOfficialIds.size === 0) {
+            newErrors.officials = 'Please select at least one company official'
+        }
+
+        if (!formData.department_id) {
+            newErrors.department_id = 'Department is required'
+        }
+
+        if (!formData.enquiry_date) {
+            newErrors.enquiry_date = 'Enquiry date is required'
+        }
+
+        if (!formData.job_description?.trim()) {
+            newErrors.job_description = 'Job description is required'
+        }
+
+        jobQuestions
+            .filter(q => checkVisibility(q))
+            .forEach(q => {
+                const items = q.type === 'field_group' && q.sub_questions ? q.sub_questions : [q];
+
+                items.forEach((item: any) => {
+                    if (!item.required) return;
+                    const val = jobAnswers[item.id];
+                    const isEmpty = val === undefined || val === null || val === '' ||
+                        (Array.isArray(val) && val.length === 0);
+                    if (isEmpty) {
+                        newErrors[`question_${item.id}`] = `Please answer "${item.label}"`
+                    }
+                });
+            });
+
+        return newErrors;
+    }, [selectedCompany, selectedOfficialIds, formData, jobQuestions, checkVisibility, jobAnswers]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selectedCompany || selectedOfficialIds.size === 0) {
-            toast({ title: "Validation Error", description: "Missing company or officials.", variant: "destructive" });
+
+        const newErrors = validateForm();
+        if (Object.keys(newErrors).length > 0) {
+            setErrors(newErrors);
+            toast({
+                title: "Missing required information",
+                description: "Please complete the highlighted fields before submitting.",
+                variant: "destructive"
+            });
+            requestAnimationFrame(() => {
+                const firstError = document.querySelector('[data-error]');
+                firstError?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            });
             return;
         }
+        setErrors({});
 
         if (!isEditMode && workflowRestrictionSummary?.hasBlockingWorkflow) {
             toast({
@@ -862,6 +928,7 @@ export function NewCompanyInquiryDialog({
     };
 
     const resetForm = () => {
+        setErrors({});
         setSelectedCompany(null);
         setOfficials([]);
         setSelectedOfficialIds(new Set());
@@ -895,7 +962,7 @@ export function NewCompanyInquiryDialog({
         : "New Company Enquiry";
 
     // Table Row Component for consistent styling
-    const TableRow = ({ label, children, required = false }: { label: string; children: React.ReactNode; required?: boolean }) => (
+    const TableRow = ({ label, children, required = false, error }: { label: string; children: React.ReactNode; required?: boolean; error?: string }) => (
         <div className="grid grid-cols-12 gap-4 py-3 border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
             <div className="col-span-4 flex items-center">
                 <Label className="text-xs font-semibold text-slate-700">
@@ -905,6 +972,12 @@ export function NewCompanyInquiryDialog({
             </div>
             <div className="col-span-8">
                 {children}
+                {error && (
+                    <p className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-red-600" data-error>
+                        <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                        {error}
+                    </p>
+                )}
             </div>
         </div>
     );
@@ -949,7 +1022,7 @@ export function NewCompanyInquiryDialog({
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="p-6 space-y-0">
-                                    <TableRow label="Company" required>
+                                    <TableRow label="Company" required error={errors.company}>
                                         <div className="flex items-center gap-4">
                                             {/* Logo Preview */}
                                             <div className="shrink-0">
@@ -997,7 +1070,7 @@ export function NewCompanyInquiryDialog({
                                                                             <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
                                                                         </div>
                                                                     ) : companies.map((c) => (
-                                                                        <CommandItem key={c.id} onSelect={() => { setSelectedCompany(c); setIsCompanyPopoverOpen(false); }}>
+                                                                        <CommandItem key={c.id} onSelect={() => { setSelectedCompany(c); setIsCompanyPopoverOpen(false); clearError('company'); }}>
                                                                             <Check className={cn("mr-2 h-4 w-4 text-indigo-600", selectedCompany?.id === c.id ? "opacity-100" : "opacity-0")} />
                                                                             {c.company_name}
                                                                         </CommandItem>
@@ -1138,6 +1211,12 @@ export function NewCompanyInquiryDialog({
                                                 <p className="text-xs mt-1">Please ensure directors/shareholders are registered</p>
                                             </div>
                                         )}
+                                        {errors.officials && (
+                                            <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-red-600" data-error>
+                                                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                                                {errors.officials}
+                                            </p>
+                                        )}
                                     </CardContent>
                                 </Card>
                             )}
@@ -1151,10 +1230,10 @@ export function NewCompanyInquiryDialog({
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="p-6 space-y-0">
-                                    <TableRow label="Department" required>
+                                    <TableRow label="Department" required error={errors.department_id}>
                                         <SearchableSelect
                                             value={formData.department_id}
-                                            onValueChange={(v) => setFormData(prev => ({ ...prev, department_id: v, subdepartment_id: '', class_id: '', subclass_id: '' }))}
+                                            onValueChange={(v) => { clearError('department_id'); setFormData(prev => ({ ...prev, department_id: v, subdepartment_id: '', class_id: '', subclass_id: '' })) }}
                                             options={departmentOptions}
                                             placeholder="Select Department"
                                             disabled={departmentOptions.length === 0}
@@ -1267,13 +1346,13 @@ export function NewCompanyInquiryDialog({
                                         />
                                     </TableRow>
 
-                                    <TableRow label="Enquiry Date" required>
+                                    <TableRow label="Enquiry Date" required error={errors.enquiry_date}>
                                         <div className="relative max-w-sm">
                                             <Input
                                                 type="date"
                                                 value={formData.enquiry_date}
                                                 disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode}
-                                                onChange={(e) => setFormData(p => ({ ...p, enquiry_date: e.target.value }))}
+                                                onChange={(e) => { clearError('enquiry_date'); setFormData(p => ({ ...p, enquiry_date: e.target.value })) }}
                                                 className="pl-10 h-11 border-slate-200 bg-white"
                                                 required
                                             />
@@ -1304,11 +1383,11 @@ export function NewCompanyInquiryDialog({
                                                     </div>
                                                     <div className="space-y-0">
                                                         {questions.map((q) => (
-                                                            <TableRow key={q.id} label={q.label} required={q.required}>
+                                                            <TableRow key={q.id} label={q.label} required={q.required} error={errors[`question_${q.id}`]}>
                                                                 {q.type === 'text' && (
                                                                     <Input
                                                                         value={jobAnswers[q.id] || ''}
-                                                                        onChange={e => setJobAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                                                                        onChange={e => { clearError(`question_${q.id}`); setJobAnswers(prev => ({ ...prev, [q.id]: e.target.value })) }}
                                                                         disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode}
                                                                         className="h-11 bg-white border-slate-200"
                                                                     />
@@ -1317,7 +1396,7 @@ export function NewCompanyInquiryDialog({
                                                                 {q.type === 'boolean' && (
                                                                     <RadioGroup
                                                                         value={jobAnswers[q.id] === undefined ? "" : String(jobAnswers[q.id])}
-                                                                        onValueChange={v => setJobAnswers(prev => ({ ...prev, [q.id]: v === 'true' }))}
+                                                                        onValueChange={v => { clearError(`question_${q.id}`); setJobAnswers(prev => ({ ...prev, [q.id]: v === 'true' })) }}
                                                                         disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode}
                                                                         className="flex gap-4"
                                                                     >
@@ -1353,6 +1432,7 @@ export function NewCompanyInquiryDialog({
                                                                                             <CommandGroup>
                                                                                                 {q.options?.map(opt => (
                                                                                                     <CommandItem key={opt} onSelect={() => {
+                                                                                                        clearError(`question_${q.id}`);
                                                                                                         if (q.type === 'multiselect') {
                                                                                                             const current = jobAnswers[q.id] || [];
                                                                                                             const next = current.includes(opt) ? current.filter(x => x !== opt) : [...current, opt];
@@ -1379,7 +1459,7 @@ export function NewCompanyInquiryDialog({
                                                                                 <Button
                                                                                     variant="outline"
                                                                                     size="sm"
-                                                                                    onClick={() => setJobAnswers(prev => ({ ...prev, [q.id]: [] }))}
+                                                                                    onClick={() => { clearError(`question_${q.id}`); setJobAnswers(prev => ({ ...prev, [q.id]: [] })) }}
                                                                                     className="h-11 px-3 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
                                                                                 >
                                                                                     <X className="h-3.5 w-3.5" />
@@ -1395,7 +1475,7 @@ export function NewCompanyInquiryDialog({
                                                                                         {val}
                                                                                         <X
                                                                                             className="h-3 w-3 cursor-pointer hover:text-indigo-800"
-                                                                                            onClick={() => setJobAnswers(prev => ({ ...prev, [q.id]: Array.isArray(prev[q.id]) ? prev[q.id].filter(x => x !== val) : [] }))}
+                                                                                            onClick={() => { clearError(`question_${q.id}`); setJobAnswers(prev => ({ ...prev, [q.id]: Array.isArray(prev[q.id]) ? prev[q.id].filter(x => x !== val) : [] })) }}
                                                                                         />
                                                                                     </Badge>
                                                                                 ))}
@@ -1415,7 +1495,7 @@ export function NewCompanyInquiryDialog({
                                                                                 {subQ.type === 'text' && (
                                                                                     <Input
                                                                                         value={jobAnswers[subQ.id] || ''}
-                                                                                        onChange={e => setJobAnswers(prev => ({ ...prev, [subQ.id]: e.target.value }))}
+                                                                                        onChange={e => { clearError(`question_${subQ.id}`); setJobAnswers(prev => ({ ...prev, [subQ.id]: e.target.value })) }}
                                                                                         className="h-10 bg-white border-slate-200"
                                                                                         required={subQ.required}
                                                                                     />
@@ -1423,7 +1503,7 @@ export function NewCompanyInquiryDialog({
                                                                                 {subQ.type === 'boolean' && (
                                                                                     <RadioGroup
                                                                                         value={jobAnswers[subQ.id] === undefined ? "" : String(jobAnswers[subQ.id])}
-                                                                                        onValueChange={v => setJobAnswers(prev => ({ ...prev, [subQ.id]: v === 'true' }))}
+                                                                                        onValueChange={v => { clearError(`question_${subQ.id}`); setJobAnswers(prev => ({ ...prev, [subQ.id]: v === 'true' })) }}
                                                                                         className="flex gap-3"
                                                                                     >
                                                                                         <div className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded-md border border-slate-200">
@@ -1457,6 +1537,7 @@ export function NewCompanyInquiryDialog({
                                                                                                             <CommandGroup>
                                                                                                                 {subQ.options?.map(opt => (
                                                                                                                     <CommandItem key={opt} onSelect={() => {
+                                                                                                                        clearError(`question_${subQ.id}`);
                                                                                                                         if (subQ.type === 'multiselect') {
                                                                                                                             const current = jobAnswers[subQ.id] || [];
                                                                                                                             const next = current.includes(opt) ? current.filter(x => x !== opt) : [...current, opt];
@@ -1483,7 +1564,7 @@ export function NewCompanyInquiryDialog({
                                                                                                 <Button
                                                                                                     variant="outline"
                                                                                                     size="sm"
-                                                                                                    onClick={() => setJobAnswers(prev => ({ ...prev, [subQ.id]: [] }))}
+                                                                                                    onClick={() => { clearError(`question_${subQ.id}`); setJobAnswers(prev => ({ ...prev, [subQ.id]: [] })) }}
                                                                                                     className="h-10 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
                                                                                                 >
                                                                                                     <X className="h-3 w-3" />
@@ -1497,13 +1578,19 @@ export function NewCompanyInquiryDialog({
                                                                                                         {val}
                                                                                                         <X
                                                                                                             className="h-2.5 w-2.5 cursor-pointer hover:text-indigo-800"
-                                                                                                            onClick={() => setJobAnswers(prev => ({ ...prev, [subQ.id]: Array.isArray(prev[subQ.id]) ? prev[subQ.id].filter(x => x !== val) : [] }))}
+                                                                                                            onClick={() => { clearError(`question_${subQ.id}`); setJobAnswers(prev => ({ ...prev, [subQ.id]: Array.isArray(prev[subQ.id]) ? prev[subQ.id].filter(x => x !== val) : [] })) }}
                                                                                                         />
                                                                                                     </Badge>
                                                                                                 ))}
                                                                                             </div>
                                                                                         )}
                                                                                     </div>
+                                                                                )}
+                                                                                {errors[`question_${subQ.id}`] && (
+                                                                                    <p className="mt-1 flex items-center gap-1.5 text-xs font-medium text-red-600" data-error>
+                                                                                        <AlertCircle className="h-3 w-3 shrink-0" />
+                                                                                        {errors[`question_${subQ.id}`]}
+                                                                                    </p>
                                                                                 )}
                                                                             </div>
                                                                         ))}
@@ -1541,12 +1628,18 @@ export function NewCompanyInquiryDialog({
                                 <CardContent className="p-6">
                                     <Textarea
                                         value={formData.job_description}
-                                        onChange={(e) => setFormData(p => ({ ...p, job_description: e.target.value }))}
+                                        onChange={(e) => { clearError('job_description'); setFormData(p => ({ ...p, job_description: e.target.value })) }}
                                         disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode}
                                         placeholder="Specify the services requested or the scope of work..."
                                         className="min-h-[120px] bg-white border-slate-200 p-4"
                                         required
                                     />
+                                    {errors.job_description && (
+                                        <p className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-red-600" data-error>
+                                            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                                            {errors.job_description}
+                                        </p>
+                                    )}
                                 </CardContent>
                             </Card>
                         </div>
@@ -1561,6 +1654,11 @@ export function NewCompanyInquiryDialog({
                             <span className="text-sm text-indigo-600 font-bold truncate max-w-[400px]">
                                 {selectedCompany?.company_name || "Awaiting Selection"}
                             </span>
+                            {Object.keys(errors).length > 0 && (
+                                <span className="text-xs font-semibold text-red-600">
+                                    {Object.keys(errors).length} required field{Object.keys(errors).length > 1 ? 's' : ''} need attention
+                                </span>
+                            )}
                         </div>
                         <div className="flex gap-3">
                             <Button
@@ -1575,7 +1673,7 @@ export function NewCompanyInquiryDialog({
                             <Button
                                 type="submit"
                                 form="company-enquiry-form"
-                                disabled={loading || !selectedCompany || selectedOfficialIds.size === 0 || (workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode)}
+                                disabled={loading || (workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode)}
                                 className="px-10 bg-indigo-600 hover:bg-indigo-700 h-11 text-white font-bold uppercase text-xs tracking-wide transition-all"
                             >
                                 {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}

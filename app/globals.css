@@ -198,7 +198,7 @@ body {
    with our values instead of the user's last-used settings.
    margin is a real, non-zero page margin (not 0) so every physical page gets
    consistent top/bottom breathing room - not just the first. The CV themes
-   (cv-designs.tsx) each carry their own one-time internal padding around the
+   (lib/cvThemeEngine.ts) each carry their own one-time internal padding around the
    whole flowing document (a header's p-8, a section's px-10, etc.), which
    only wraps the very start/end of the content, not every page break. With
    margin:0 here, a single-page CV looked fine (page 1's margin came entirely

@@ -1,9 +1,9 @@
-// @ts-nocheck
 "use client";
 
 import { Check, Layout, Palette, X } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { COLOR_PRESETS } from "./cv-designs";
+import { COLOR_PRESETS } from "@/lib/documentTheme";
+import type { CvSettings } from "../utils/cvGeneratorData";
 
 interface DesignPanelProps {
   showDesignPanel: boolean;
@@ -12,7 +12,7 @@ interface DesignPanelProps {
   setActiveDesignTab: (tab: string) => void;
   selectedLayout: string;
   setSelectedLayout: (layout: string) => void;
-  cvSettings: any;
+  cvSettings: CvSettings;
   updateCvSetting: <K extends string>(key: K, value: any) => void;
 }
 

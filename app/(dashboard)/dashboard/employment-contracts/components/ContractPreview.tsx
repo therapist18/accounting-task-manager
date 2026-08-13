@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ContractThemePanel } from './ContractThemePanel';
-import { ContractThemeSettings, DEFAULT_CONTRACT_THEME, applyThemeToHtml } from '../utils/themeEngine';
+import { ContractThemeSettings, DEFAULT_CONTRACT_THEME, applyThemeToHtml, toWordSafeFontStack } from '../utils/themeEngine';
 import {
   resolveEffectiveSettings, resolveEffectiveClauses, assembleContractHtml,
 } from '../utils/clauseEngine';
@@ -476,9 +476,49 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
         bookmark.setAttribute('name', id);
         section.insertBefore(bookmark, section.firstChild);
       });
+      // Word's import applies its own built-in "Heading N" paragraph styles
+      // to <h1>-<h3> tags no matter what CSS says, which is why makeWordSafe
+      // (themeEngine.ts) retargets every h1/h2/h3 selector at a .mso-hN
+      // class - but that class only means anything if the tags actually
+      // become <div class="mso-hN"> first. Convert them here (the step the
+      // makeWordSafe comment claims this file performs but never actually
+      // did), preserving each heading's existing classes so
+      // .cs-section-heading keeps applying. A <div> rather than a <p> so the
+      // theme's paragraph rules (e.g. the legal theme's text-indent: 48px)
+      // can't leak onto headings. The theme font is inlined as well, so the
+      // chosen face can't be lost even if Word fails to cascade the
+      // class-scoped rule.
+      const wordSafeFont = toWordSafeFontStack(themeSettings.fontFamily);
+      doc.querySelectorAll('h1, h2, h3').forEach((h) => {
+        const div = doc.createElement('div');
+        for (const attr of Array.from(h.attributes)) div.setAttribute(attr.name, attr.value);
+        div.className = `mso-${h.tagName.toLowerCase()} ${div.className || ''}`.trim();
+        div.style.fontFamily = wordSafeFont;
+        while (h.firstChild) div.appendChild(h.firstChild);
+        h.replaceWith(div);
+      });
       doc.querySelectorAll('table').forEach((table) => {
         table.setAttribute('cellpadding', '0');
         table.setAttribute('cellspacing', '0');
+        // width="100%" as a legacy HTML attribute rather than only scoped CSS
+        // - it's the one table directive Word's HTML filter honors
+        // unconditionally, so an exported table can't autofit to its content
+        // and blow out wider than the page (the table-layout: fixed
+        // workaround previously attempted in makeWordSafe wasn't being
+        // applied by Word anyway, and only stretched columns evenly).
+        table.setAttribute('width', '100%');
+      });
+      // applyThemeToHtml's theme wrapper carries inline padding:48px /
+      // max-width:850px / margin:0 auto for the on-screen preview; the CSS
+      // override meant to zero those for Word ([class^="contract-theme-"] ...)
+      // is an attribute selector Word can't parse, so Word was stacking the
+      // 48px gutter on top of @page's own 0.5in margin. Strip the inline
+      // values here instead.
+      doc.querySelectorAll('[class^="contract-theme-"]').forEach((el) => {
+        const styleEl = el as HTMLElement;
+        styleEl.style.padding = '';
+        styleEl.style.maxWidth = '';
+        styleEl.style.margin = '';
       });
       bodyContent = doc.body.firstElementChild?.innerHTML ?? bodyContent;
     }

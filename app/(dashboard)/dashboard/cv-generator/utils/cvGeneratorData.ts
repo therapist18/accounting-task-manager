@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Constants, seed data, and pure data-shaping helpers for the CV Generator.
 // Nothing here touches React state — safe to import from any client or server context.
 
@@ -8,7 +7,127 @@ export const CV_DOCUMENT_ID = 'd615e776-7d32-4704-b510-62287d459fae';
 
 export const DEFAULT_DECLARATION_TEXT = "DECLARATION: I hereby declare that the above information is accurate to the best of my knowledge and reflects my professional qualifications, experience, and readiness for international employment opportunities.";
 
-export const EMPTY_CV_DATA = {
+// ---------------------------------------------------------------------------
+// CV data model — shared across page.tsx, the step editors, the preview, the
+// theme engines and the export helpers so the whole module agrees on shapes.
+// ---------------------------------------------------------------------------
+
+export interface PersonalInfo {
+  fullName: string;
+  title: string;
+  email: string;
+  phone: string;
+  location: string;
+  github: string;
+  linkedin: string;
+  photoUrl: string;
+  portfolio?: string;
+}
+
+export interface PersonalDetails {
+  dateOfBirth: string;
+  nationality: string;
+  maritalStatus: string;
+  residence: string;
+  kenyaStatus: string;
+  nairobiRes: string;
+  drivingExperience: string;
+}
+
+export interface SkillGroup {
+  category: string;
+  items: string;
+}
+
+export interface WorkEntry {
+  company: string;
+  location?: string;
+  role: string;
+  startDate: string;
+  endDate: string;
+  companyDesc?: string;
+  responsibilities: string[] | string;
+}
+
+export interface ProjectEntry {
+  title: string;
+  description: string;
+  year?: string;
+}
+
+export interface EducationEntry {
+  degree: string;
+  institution: string;
+  year: string;
+  details?: string;
+}
+
+export interface ReferenceEntry {
+  name: string;
+  title: string;
+  company: string;
+  address?: string;
+  contact: string;
+}
+
+export interface LanguageEntry {
+  language: string;
+  proficiency: string;
+}
+
+export interface CertificationEntry {
+  name: string;
+  issuer: string;
+  date: string;
+  url: string;
+}
+
+export interface AchievementEntry {
+  title: string;
+  description: string;
+  date: string;
+}
+
+export interface AdditionalInfoEntry {
+  label: string;
+  value: string;
+}
+
+export interface CvData {
+  personalInfo: PersonalInfo;
+  personalDetails: PersonalDetails;
+  summary: string;
+  skills: SkillGroup[];
+  experience: WorkEntry[];
+  internships: WorkEntry[];
+  projects: ProjectEntry[];
+  education: EducationEntry[];
+  references: ReferenceEntry[];
+  languages: LanguageEntry[];
+  certifications: CertificationEntry[];
+  achievements: AchievementEntry[];
+  additionalInfo: AdditionalInfoEntry[];
+  declaration: string;
+  includeDeclaration: boolean;
+  verifiedBadge: boolean;
+}
+
+export type PhotoFit = "cover" | "contain" | "fill";
+export type PhotoShape = "square" | "circle" | "rounded";
+
+export interface CvSettings {
+  photoSize: number | string;
+  photoFit: PhotoFit;
+  photoShape: PhotoShape;
+  primaryColor: string;
+  accentColor: string;
+  fontScale: number;
+  fontFamily: string;
+  showPhoto: boolean;
+  showCustomize: boolean;
+}
+
+export const EMPTY_CV_DATA: CvData = {
   personalInfo: {
     fullName: "",
     title: "",
@@ -29,25 +148,25 @@ export const EMPTY_CV_DATA = {
     drivingExperience: ""
   },
   summary: "",
-  skills: [] as { category: string; items: string }[],
-  experience: [] as any[],
-  internships: [] as any[],
-  projects: [] as any[],
-  education: [] as any[],
-  references: [] as any[],
-  languages: [] as { language: string; proficiency: string }[],
-  certifications: [] as { name: string; issuer: string; date: string; url: string }[],
-  achievements: [] as { title: string; description: string; date: string }[],
-  additionalInfo: [] as { label: string; value: string }[],
+  skills: [],
+  experience: [],
+  internships: [],
+  projects: [],
+  education: [],
+  references: [],
+  languages: [],
+  certifications: [],
+  achievements: [],
+  additionalInfo: [],
   declaration: DEFAULT_DECLARATION_TEXT,
   includeDeclaration: true,
   verifiedBadge: true
 };
 
-export function mapSkillsFromExtractedDetails(ed: any): { category: string; items: string }[] {
+export function mapSkillsFromExtractedDetails(ed: any): SkillGroup[] {
   const rawSkills = ed?.['Skills'] || ed?.skills;
   if (!Array.isArray(rawSkills) || rawSkills.length === 0) return [];
-  return rawSkills.map((s: any) => {
+  return rawSkills.map((s: any): SkillGroup => {
     // Handle format: {Skill: "...", Proficiency Level: "..."}
     if (s.Skill || s.skill) {
       return { category: "", items: s.Skill || s.skill || "" };
@@ -62,7 +181,7 @@ export function mapSkillsFromExtractedDetails(ed: any): { category: string; item
   });
 }
 
-export function mapCertificationsFromExtractedDetails(ed: any, qualificationsText?: string | null): { name: string; issuer: string; date: string; url: string }[] {
+export function mapCertificationsFromExtractedDetails(ed: any, qualificationsText?: string | null): CertificationEntry[] {
   // Handle both array format (from extraction) and text format (from database qualifications column)
   const certsFromExtraction = ed?.['Professional Qualifications'] || ed?.certifications || ed?.['Certifications'];
   if (Array.isArray(certsFromExtraction) && certsFromExtraction.length > 0) {
@@ -106,7 +225,7 @@ export const COMMON_LANGUAGES = [
 export const PROFICIENCY_LEVELS = ['Native', 'Fluent', 'Professional', 'Conversational', 'Basic'];
 
 // Initial Ajay Yadav data for interactive demo and first-load preview
-export const initialCVData = {
+export const initialCVData: CvData = {
   personalInfo: {
     fullName: "Ajay Yadav",
     title: "Software Engineer & Automation Specialist",
@@ -286,15 +405,32 @@ export function saveToLocalStorage(key: string, value: any) {
   } catch { /* ignore */ }
 }
 
-export const analyzeCVCompleteness = (data: any) => {
-  if (!data) return { completionPercent: 0, checklist: [], gaps: [] };
-  const checklist = [];
+export interface CompletenessItem {
+  id: string;
+  label: string;
+  status: 'success' | 'warning' | 'danger';
+  missing: boolean;
+  missingItems: string[];
+  score: number;
+}
+
+export interface EmploymentGap {
+  from: number;
+  to: number;
+  prevCompany: string;
+  currCompany: string;
+  gapYears: number;
+}
+
+export const analyzeCVCompleteness = (data: CvData | null | undefined) => {
+  if (!data) return { completionPercent: 0, checklist: [] as CompletenessItem[], gaps: [] as EmploymentGap[] };
+  const checklist: CompletenessItem[] = [];
   let filledWeight = 0;
   let totalWeight = 0;
 
   // Contact Info (20 pts)
   totalWeight += 20;
-  const contactKeys = ['fullName', 'email', 'phone', 'location'];
+  const contactKeys: (keyof PersonalInfo)[] = ['fullName', 'email', 'phone', 'location'];
   const contactFilled = contactKeys.filter(k => !!data.personalInfo?.[k]).length;
   filledWeight += (contactFilled / contactKeys.length) * 20;
   checklist.push({
@@ -397,7 +533,7 @@ export const analyzeCVCompleteness = (data: any) => {
   const completionPercent = Math.min(100, Math.round((filledWeight / totalWeight) * 100));
 
   // Gap detection
-  const gaps = [];
+  const gaps: EmploymentGap[] = [];
   if (data.experience && data.experience.length > 1) {
     const parseYear = (dateStr: string) => {
       if (!dateStr) return null;
@@ -444,7 +580,7 @@ export const getCVDiffs = (oldData: any, newData: any) => {
   const diffs: any[] = [];
 
   // Compare personalInfo
-  const infoKeys = [
+  const infoKeys: { key: keyof PersonalInfo; label: string }[] = [
     { key: 'fullName', label: 'Full Name' },
     { key: 'title', label: 'Professional Title' },
     { key: 'email', label: 'Email' },
@@ -468,7 +604,7 @@ export const getCVDiffs = (oldData: any, newData: any) => {
   });
 
   // Compare personalDetails
-  const detailKeys = [
+  const detailKeys: { key: keyof PersonalDetails; label: string }[] = [
     { key: 'dateOfBirth', label: 'Date of Birth' },
     { key: 'nationality', label: 'Nationality' },
     { key: 'maritalStatus', label: 'Marital Status' },

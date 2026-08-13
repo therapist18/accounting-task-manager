@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 
 import { Save } from "lucide-react";

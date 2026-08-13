@@ -118,7 +118,8 @@
       "Bash(npm run *)",
       "Bash(echo \"EXIT:$?\")",
       "Bash(npx tsx *)",
-      "Bash(tail -40 /tmp/dev.log)"
+      "Bash(tail -40 /tmp/dev.log)",
+      "Bash(grep -ic \"consultancy-contracts\" /tmp/tscout3.txt)"
     ],
     "additionalDirectories": [
       "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals"

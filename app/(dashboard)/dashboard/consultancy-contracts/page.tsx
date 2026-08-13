@@ -9,11 +9,12 @@ import { CompaniesSidebar } from './components/CompaniesSidebar';
 import { DataValuesPanel } from './components/DataValuesPanel';
 import { ContractPreview } from './components/ContractPreview';
 import { fetchCompanies, Company } from '../companies/database';
-import { fetchDefaultTemplate, CcTemplate } from './utils/ccTemplate';
+import { fetchDefaultTemplate, updateTemplate, CcTemplate } from './utils/ccTemplate';
 import { fetchPlaceholders, EcPlaceholder } from '../employment-contracts/utils/ecPlaceholders';
 import { resolveEcPlaceholderValues } from '../employment-contracts/utils/masterFieldResolver';
 import { detectTokens } from './utils/placeholderDetection';
 import { fetchLatestEngagement, createEngagement, updateEngagement, CcEngagement } from './utils/ccEngagements';
+import { DEFAULT_CC_THEME, type CcThemeName } from './utils/themeEngine';
 
 export default function ConsultancyContractsPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -102,6 +103,16 @@ export default function ConsultancyContractsPage() {
       else next[key] = value;
       return next;
     });
+  };
+
+  // Persisted on cc_templates.theme_settings - a platform-wide choice, not
+  // per-company, matching the "one standard format" design.
+  const theme: CcThemeName = (template?.theme_settings?.theme as CcThemeName) || DEFAULT_CC_THEME;
+  const handleThemeChange = async (next: CcThemeName) => {
+    if (!template) return;
+    setTemplate({ ...template, theme_settings: { ...template.theme_settings, theme: next } });
+    const updated = await updateTemplate(template.id, { theme_settings: { ...template.theme_settings, theme: next } });
+    if (!updated) toast.error('Failed to save theme');
   };
 
   const handleSave = async () => {
@@ -234,6 +245,8 @@ export default function ConsultancyContractsPage() {
               resolvedValues={resolvedValues}
               overrides={overrides}
               engagement={engagement}
+              theme={theme}
+              onThemeChange={handleThemeChange}
               saving={saving}
               onSave={handleSave}
             />

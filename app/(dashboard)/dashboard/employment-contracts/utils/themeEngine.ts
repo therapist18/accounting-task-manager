@@ -35,16 +35,11 @@ export const DEFAULT_CONTRACT_THEME: ContractThemeSettings = {
   brandingStrategy: 'company_letterhead',
 };
 
-export const COLOR_PRESETS = [
-  { name: 'Ocean Blue', primary: '#2c3e50', accent: '#3498db' },
-  { name: 'Forest', primary: '#1a3d2e', accent: '#27ae60' },
-  { name: 'Royal Purple', primary: '#2c1654', accent: '#9b59b6' },
-  { name: 'Crimson', primary: '#4a1515', accent: '#e74c3c' },
-  { name: 'Slate', primary: '#2d3748', accent: '#64748b' },
-  { name: 'Teal', primary: '#164e4e', accent: '#0d9488' },
-  { name: 'Midnight', primary: '#0f172a', accent: '#6366f1' },
-  { name: 'Copper', primary: '#3d1f10', accent: '#d97706' },
-];
+// Shared across the Employment Contracts and CV Generator modules so both
+// modules' theme panels offer the same presets and produce Word-safe output
+// the same way.
+import { COLOR_PRESETS, toWordSafeFontStack } from '@/lib/documentTheme';
+export { COLOR_PRESETS, toWordSafeFontStack };
 
 export const FONT_OPTIONS = [
   { name: 'Georgia', family: 'Georgia, "Times New Roman", serif', desc: 'Elegant serif' },
@@ -421,10 +416,46 @@ function flattenNestedCss(rootSelector: string, css: string): string {
   return [`${rootSelector} { ${baseDecls.trim()} }`, ...rules].join('\n');
 }
 
-function makeWordSafe(css: string): string {
-  return css
+// The .doc export can't pull webfonts down the way a browser can - a family
+// that isn't installed on the machine opening the file silently falls back to
+// Word's default (typically Arial), which reads as "the theme font got reset".
+// toWordSafeFontStack (shared from lib/documentTheme.ts) remaps web-only faces
+// (Inter, Outfit, Merriweather, EB Garamond) to their closest installed-system
+// equivalent for Word output.
+function makeWordSafe(css: string, rootSelector: string, fontFamily: string): string {
+  const wordSafeFont = toWordSafeFontStack(fontFamily);
+  const withHeadingFix = css
     .replace(/(\.signature-block\s*\{[^}]*?)display:\s*flex;?/g, '$1display: table; width: 100%;')
-    .replace(/(\.signature-column\s*\{[^}]*?)flex:\s*1;?/g, '$1display: table-cell; width: 50%; vertical-align: top;');
+    .replace(/(\.signature-column\s*\{[^}]*?)flex:\s*1;?/g, '$1display: table-cell; width: 50%; vertical-align: top;')
+    // Word maps <h1>-<h3> tags to its own built-in "Heading N" paragraph
+    // styles regardless of any descendant-selector CSS targeting them - that
+    // built-in style carries Word's own default font and spacing, which is
+    // why headings ignored the theme font and lost their custom padding in
+    // the .doc export even though color/borders came through fine.
+    // ContractPreview.tsx's buildOutput() swaps each <h1>-<h3> for a
+    // <div class="mso-hN"> before serializing, so retarget these selectors at
+    // that class instead of the tag name - the rule keeps applying, but Word
+    // never invokes its built-in Heading style machinery to fight it.
+    .replace(/\bh([1-3])\b/g, '.mso-h$1');
+
+  // Word's HTML importer doesn't reliably cascade an inherited font-family
+  // down through arbitrary nesting depth the way a browser does - rather
+  // than trust inheritance from the single root rule above, restate it
+  // explicitly on every text-bearing element (remapped to an installed font
+  // via toWordSafeFontStack) so the chosen theme font survives the .doc
+  // round-trip instead of silently falling back to Word's own default.
+  const fontOverride = `${rootSelector} .mso-h1, ${rootSelector} .mso-h2, ${rootSelector} .mso-h3, ${rootSelector} p, ${rootSelector} li, ${rootSelector} td, ${rootSelector} th, ${rootSelector} div, ${rootSelector} span, ${rootSelector} a { font-family: ${wordSafeFont}; }`;
+
+  // mso-table-lspace/rspace strip the extra side padding Word otherwise adds
+  // around every table. Table width itself is enforced by buildOutput()
+  // setting the legacy width="100%" attribute directly - the one table
+  // directive Word's HTML filter honors unconditionally. No table-layout:
+  // fixed here: with no explicit column widths Word's fixed layout splits
+  // columns into equal-width slabs, so a 2-column label/value table leaves a
+  // huge empty gap beside a short value and reads as oversized.
+  const tableFix = `${rootSelector} table { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }`;
+
+  return `${withHeadingFix}\n${fontOverride}\n${tableFix}`;
 }
 
 export function applyThemeToHtml(content: string, settings: ContractThemeSettings, options?: { wordSafe?: boolean }): string {
@@ -461,7 +492,7 @@ export function applyThemeToHtml(content: string, settings: ContractThemeSetting
     + BASE_SECTION_STYLES;
   const rootSelector = `.contract-theme-${theme}`;
   let flatCss = flattenNestedCss(rootSelector, rawCss);
-  if (options?.wordSafe) flatCss = makeWordSafe(flatCss);
+  if (options?.wordSafe) flatCss = makeWordSafe(flatCss, rootSelector, args.fontFamily);
 
   return `
     <div class="contract-theme-${theme}" style="padding: 48px; max-width: 850px; margin: 0 auto; background: white; box-sizing: border-box;">

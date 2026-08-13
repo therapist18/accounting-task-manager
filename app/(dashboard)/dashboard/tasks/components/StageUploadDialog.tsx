@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Loader2, FileText, MessageSquare, Star, Eye, Check, CheckCircle2, RotateCcw, X } from "lucide-react"
+import { Loader2, FileText, MessageSquare, Star, Eye, Check, CheckCircle2, RotateCcw, X, AlertTriangle } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { toast } from "@/lib/hooks/use-toast"
@@ -23,6 +23,18 @@ import {
   TASK_STAGE_WORKFLOW_MAPPING,
   getWorkflowLogsForIndividual
 } from "../utils/workflowSyncService";
+
+// Same resolution order RequirementsTab.tsx's resolveTemplateEntityForReq uses — task.company_id
+// itself is a separate "sponsor company" association and is frequently null even when the
+// applicant IS a company (e.g. enquiry dialog only ever sets it from a selected sponsor, not
+// from the applicant), so fall back through participants_details and then applicant_details.
+const resolveCompanyIdForTask = (task: any): number | string | null => {
+  if (task?.company_id) return task.company_id;
+  const companyParticipant = task?.participants_details?.find((p: any) => p.type === 'company');
+  if (companyParticipant?.id) return companyParticipant.id;
+  if (task?.applicant_details?.type === 'company') return task.applicant_details.id;
+  return null;
+};
 
 // Optimized helper functions with memoization
 const transformKycFields = (() => {
@@ -284,6 +296,32 @@ const StageUploadDialogLoadingState = () => {
   );
 };
 
+// Rendered in place of StageUploadDialogLoadingState once loading either fails outright or
+// can't even start (missing individual_id, no stage documents configured, or a hung request
+// that tripped the timeout) — so a broken stage produces a readable message instead of an
+// endless fake progress bar.
+const StageUploadDialogErrorState = ({ message, onRetry, onClose }: { message: string; onRetry: () => void; onClose: () => void }) => (
+  <div className="flex-1 overflow-hidden flex flex-col">
+    <div className="flex-1 overflow-auto relative bg-slate-50/50">
+      <div className="flex items-center justify-center h-full p-6">
+        <div className="text-center space-y-4 max-w-md">
+          <div className="flex items-center justify-center gap-3">
+            <AlertTriangle className="h-8 w-8 text-amber-500" />
+            <span className="text-xl font-semibold text-slate-800">Couldn't Load Stage Documents</span>
+          </div>
+          <p className="text-sm text-slate-600">{message}</p>
+          <div className="flex items-center justify-center gap-2 pt-2">
+            <Button variant="outline" onClick={onClose}>Close</Button>
+            <Button onClick={onRetry}>
+              <RotateCcw className="h-4 w-4 mr-2" /> Retry
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
 // --- Sub-Component: Document Tab Panel ---
 const DocumentTabPanel = ({
   doc,
@@ -303,6 +341,11 @@ const DocumentTabPanel = ({
   workflowDocuments = {},
   onRevertResolution
 }) => {
+  // A task whose applicant is a company (no individual_id) uploads into acc_portal_kyc_uploads
+  // (keyed by company_id) instead of acc_portal_directors_documents (keyed by director_id) —
+  // same split the job-workspace RequirementsTab/UploadModal already use elsewhere.
+  const companyId = resolveCompanyIdForTask(task);
+  const isCompanyTask = !task?.individual_id && !!companyId;
   const [useExisting, setUseExisting] = useState(false);
   const [selectedExistingId, setSelectedExistingId] = useState("");
   const [messageText, setMessageText] = useState(messageState || "");
@@ -399,9 +442,14 @@ const DocumentTabPanel = ({
 
   const handlePendingChange = useCallback((docs: any[]) => {
     if (docs && docs.length > 0) {
+      // Requiring a non-empty extractedData used to exclude any document type with zero
+      // configured extraction fields — e.g. this VAT Obligation checklist, which is "just
+      // attach the file" — since {} always has Object.keys().length === 0 regardless of how
+      // successfully the file itself uploaded. That's why a "Valid" upload never made it into
+      // Save All: a valid/warning file is ready on its own; whether anything got extracted is
+      // a separate, unrelated question.
       const readyDocs = docs.filter(d =>
-        (d.validationStatus === 'valid' || d.validationStatus === 'warning') &&
-        d.extractedData && Object.keys(d.extractedData).length > 0
+        d.file && (d.validationStatus === 'valid' || d.validationStatus === 'warning')
       );
 
       if (readyDocs.length > 0) {
@@ -422,10 +470,11 @@ const DocumentTabPanel = ({
   }), [doc.kycId, documentName, activeDocFields]);
 
   const selectedMemberMemo = useMemo(() => ({
-    id: task?.individual_id,
+    id: isCompanyTask ? companyId : task?.individual_id,
     name: individualName,
-    full_name: individualName
-  }), [task?.individual_id, individualName]);
+    full_name: individualName,
+    type: isCompanyTask ? 'company' : 'individual'
+  }), [isCompanyTask, task?.individual_id, companyId, individualName]);
 
   const additionalFieldsMemo = useMemo(() => ({ expiry_date: null, isFormContext: true }), []);
 
@@ -599,13 +648,15 @@ const DocumentTabPanel = ({
               documentFields={activeDocFields}
               selectedDoc={selectedDocMemo}
               selectedMember={selectedMemberMemo}
-              entityId={task?.individual_id}
+              entityId={isCompanyTask ? companyId : task?.individual_id}
               entityName={individualName}
+              company={isCompanyTask ? { id: companyId, company_name: individualName } : undefined}
+              companyName={isCompanyTask ? individualName : undefined}
               onSuccess={handleSuccess}
-              targetTable="acc_portal_directors_documents"
-              idFieldName="director_id"
+              targetTable={isCompanyTask ? "acc_portal_kyc_uploads" : "acc_portal_directors_documents"}
+              idFieldName={isCompanyTask ? "company_id" : "director_id"}
               documentIdFieldName="document_id"
-              isCompanyUpload={false}
+              isCompanyUpload={isCompanyTask}
               additionalFields={additionalFieldsMemo}
               onBeforeUpload={handleBeforeUpload}
               onPendingChange={handlePendingChange}
@@ -617,7 +668,7 @@ const DocumentTabPanel = ({
               <small className="text-xs mt-2">
                 Doc KYC ID: {doc.kycId || 'missing'} |
                 Task ID: {task?.id || 'missing'} |
-                Individual ID: {task?.individual_id || 'missing'}
+                {isCompanyTask ? `Company ID: ${companyId || 'missing'}` : `Individual ID: ${task?.individual_id || 'missing'}`}
               </small>
             </div>
           )}
@@ -720,6 +771,7 @@ export function StageUploadDialog({
 }: any) {
   const [activeDocumentTab, setActiveDocumentTab] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map());
   const [existingDocuments, setExistingDocuments] = useState<Record<string, any[]>>({});
@@ -739,6 +791,12 @@ export function StageUploadDialog({
   const [tabMessageStates, setTabMessageStates] = useState<Record<string, string>>({});
 
   const { task, stage } = selectedStageTask || {};
+
+  // A task whose applicant is a company (no individual_id) reads/writes
+  // acc_portal_kyc_uploads (keyed by company_id) instead of acc_portal_directors_documents
+  // (keyed by director_id) — same split DocumentTabPanel below uses for its own UploadModal.
+  const companyId = resolveCompanyIdForTask(task);
+  const isCompanyTask = !task?.individual_id && !!companyId;
 
   const jobLevelDisplay = useMemo(() => {
     if (!task?.job_description) return '';
@@ -820,9 +878,36 @@ export function StageUploadDialog({
   }, [open]);
 
   useEffect(() => {
-    if (!open || !stage?.documents || !task?.individual_id) return;
+    if (!open) return;
 
+    // Previously this bailed out silently whenever any of these were missing, leaving
+    // isLoading stuck at its initial `true` forever — the dialog just spun with the fake
+    // progress steps below with no way to tell what was wrong. Surface WHY instead.
+    if (!task?.individual_id && !isCompanyTask) {
+      setIsLoading(false);
+      setLoadError("This task has neither an individual applicant nor a company linked to it, so its stage documents can't be loaded.");
+      return;
+    }
+    if (!stage?.documents) {
+      setIsLoading(false);
+      setLoadError("This stage has no document requirements configured, so there's nothing to upload here.");
+      return;
+    }
+
+    setLoadError(null);
     let isCancelled = false;
+    let hasTimedOut = false;
+
+    // Safety net for a genuinely hung request (e.g. a stalled network call or a Supabase
+    // query that never resolves) — without this, that failure mode looks identical to the
+    // silent-stuck-loading bug above, just from a different cause.
+    const timeoutId = setTimeout(() => {
+      hasTimedOut = true;
+      if (!isCancelled) {
+        setLoadError("Loading stage documents timed out. This is usually a network issue — close this dialog and try again.");
+        setIsLoading(false);
+      }
+    }, 20000);
 
     const fetchData = async () => {
       setIsLoading(true);
@@ -842,28 +927,48 @@ export function StageUploadDialog({
           dataPromises.push(Promise.resolve({ data: [] }));
         }
 
-        // User documents fetch with optimized query
+        // User/company documents fetch with optimized query
         dataPromises.push(
-          supabase
-            .from('acc_portal_directors_documents')
-            .select('id, document_id, file_path, created_at, extracted_details')
-            .eq('director_id', task.individual_id)
-            .order('created_at', { ascending: false })
+          isCompanyTask
+            ? supabase
+              .from('acc_portal_kyc_uploads')
+              .select('id, document_id, file_path, created_at, extracted_details')
+              .eq('company_id', companyId)
+              .order('created_at', { ascending: false })
+            : supabase
+              .from('acc_portal_directors_documents')
+              .select('id, document_id, file_path, created_at, extracted_details')
+              .eq('director_id', task.individual_id)
+              .order('created_at', { ascending: false })
         );
 
-        // Workflow logs fetch - cached and optimized
+        // Workflow logs fetch - cached and optimized. This renewal/workflow-log system is
+        // individual-specific (no company equivalent exists) — skip it for company tasks
+        // rather than calling it with an individual_id that doesn't exist.
         dataPromises.push(
-          getWorkflowLogsForIndividual(task.individual_id).then(logs => ({ data: logs }))
+          isCompanyTask
+            ? Promise.resolve({ data: [] })
+            : getWorkflowLogsForIndividual(task.individual_id).then(logs => ({ data: logs }))
         );
 
-        // Fetch all tasks for the same individual to check for document usage across tasks
+        // Fetch all tasks for the same individual/company to check for document usage across
+        // tasks. Note: tm_tasks.company_id is frequently null even on company-applicant tasks
+        // (it's really a separate "sponsor company" field) — this can only match other tasks
+        // where that column happens to be set, so it's a best-effort de-dupe, not exhaustive.
         dataPromises.push(
-          supabase
-            .from('tm_tasks')
-            .select('id, stages, individual_id, status')
-            .eq('individual_id', task.individual_id)
-            .neq('id', task.id) // Exclude current task
-            .in('status', ['completed', 'write_up_completed']) // Only check completed tasks
+          isCompanyTask
+            ? supabase
+              .from('tm_tasks')
+              .select('id, stages, company_id, status')
+              .eq('company_id', companyId)
+              .neq('id', task.id) // Exclude current task
+              .in('status', ['completed', 'write_up_completed']) // Only check completed tasks
+            : supabase
+              .from('tm_tasks')
+              .select('id, stages, individual_id, status')
+              .eq('individual_id', task.individual_id)
+              .neq('id', task.id) // Exclude current task
+              .in('status', ['completed', 'write_up_completed']) // Only check completed tasks
         );
 
         // Execute all requests in parallel
@@ -1053,11 +1158,14 @@ export function StageUploadDialog({
 
       } catch (error) {
         console.error("Error initializing stage upload dialog:", error);
-        if (!isCancelled) {
-          toast({ title: "Error loading data", description: "Please close and try again.", variant: "destructive" });
+        if (!isCancelled && !hasTimedOut) {
+          const message = error instanceof Error ? error.message : "Failed to load stage documents.";
+          setLoadError(message);
+          toast({ title: "Error loading data", description: message, variant: "destructive" });
         }
       } finally {
-        if (!isCancelled) {
+        clearTimeout(timeoutId);
+        if (!isCancelled && !hasTimedOut) {
           setIsLoading(false);
         }
       }
@@ -1069,8 +1177,9 @@ export function StageUploadDialog({
     return () => {
       isCancelled = true;
       clearTimeout(loadingTimeout);
+      clearTimeout(timeoutId);
     };
-  }, [open, stage?.documents, task?.individual_id, applicableDocuments, applicableKycIds, refreshTrigger, currentTaskTriggerDocumentIds, task?.id]);
+  }, [open, stage?.documents, task?.individual_id, companyId, isCompanyTask, applicableDocuments, applicableKycIds, refreshTrigger, currentTaskTriggerDocumentIds, task?.id]);
 
   useEffect(() => {
     if (!stage?.id || !applicableDocuments.length) return;
@@ -1292,12 +1401,15 @@ export function StageUploadDialog({
       const updatedSourceDocs = { ...selectedSourceDocs };
       const uploadedDocIds = new Set<string>();
       const uploadedDocumentsForWorkflow: Array<{ id: string; document_id: string; stage_doc_id: string }> = [];
-      // Rows newly inserted into acc_portal_directors_documents this save — handed back via
-      // onTaskAction so the caller can merge them straight into its allDocuments cache instead
+      // Rows newly inserted into acc_portal_directors_documents (individual tasks) or
+      // acc_portal_kyc_uploads (company tasks) this save — handed back via onTaskAction so the
+      // caller can merge them straight into its allDocuments/allCompanyDocuments caches instead
       // of only picking them up on the next full refreshAllData(). Without this, the preview
-      // icon (resolved from that cache via getDocumentForTaskStage) stays blank until the user
-      // manually clicks Refresh, even though the upload itself succeeded.
+      // icon (resolved from those caches) stays blank until the user manually clicks Refresh,
+      // even though the upload itself succeeded. Kept as two separate arrays since the two
+      // caches have different shapes (flat array vs. Record<company_id, doc[]>).
       const newlyInsertedDocuments: any[] = [];
+      const newlyInsertedCompanyDocuments: any[] = [];
 
       const fieldMetadataByDocId = Object.entries(docFieldsMap).reduce((acc, [docId, fields]) => {
         const fieldIdToName = new Map();
@@ -1345,7 +1457,9 @@ export function StageUploadDialog({
               ? `${sanitizedName.substring(0, 80)}_${timestamp}.pdf`
               : sanitizedName;
 
-            filePath = `individual-documents/${task.individual_id}/${docConfig.kycId}/${finalName}`;
+            filePath = isCompanyTask
+              ? `company-documents/${companyId}/${docConfig.kycId}/${finalName}`
+              : `individual-documents/${task.individual_id}/${docConfig.kycId}/${finalName}`;
 
             const { error: uploadError } = await supabase.storage
               .from('kyc-documents')
@@ -1379,9 +1493,9 @@ export function StageUploadDialog({
             });
 
             const { data: newDoc, error: insertError } = await supabase
-              .from('acc_portal_directors_documents')
+              .from(isCompanyTask ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents')
               .insert([{
-                director_id: task.individual_id,
+                ...(isCompanyTask ? { company_id: companyId } : { director_id: task.individual_id }),
                 document_id: docConfig.kycId,
                 extracted_details: cleanedDetails,
                 status: 'active',
@@ -1395,7 +1509,11 @@ export function StageUploadDialog({
             if (insertError) throw insertError;
             insertedDoc = newDoc;
             documentId = newDoc.id;
-            newlyInsertedDocuments.push(newDoc);
+            if (isCompanyTask) {
+              newlyInsertedCompanyDocuments.push(newDoc);
+            } else {
+              newlyInsertedDocuments.push(newDoc);
+            }
           } else if (docData.id) {
             insertedDoc = { id: docData.id };
             documentId = docData.id;
@@ -1546,7 +1664,9 @@ export function StageUploadDialog({
         task: updatedTask,
         stageId: stage.id,
         source: 'stage-upload',
-        newDocuments: newlyInsertedDocuments
+        newDocuments: newlyInsertedDocuments,
+        newCompanyDocuments: newlyInsertedCompanyDocuments,
+        companyId
       });
 
       const isWriteUpStage = stage.id === '072b9710-45df-4a05-ba65-01b4ef29d61d';
@@ -1560,8 +1680,11 @@ export function StageUploadDialog({
             null;
           const finalDocId = workflowTargetDocument?.id || null;
 
-          // Resolve triggering documents logic (Specifically for renewals in Write up stage)
-          if (isWriteUpStage && finalDocId) {
+          // Resolve triggering documents logic (Specifically for renewals in Write up stage) —
+          // this renewal-chain concept is individual-specific (document_workflow_logs is keyed
+          // by individual_id, with no company equivalent), so skip it for company tasks rather
+          // than querying with an undefined individual_id.
+          if (isWriteUpStage && finalDocId && !isCompanyTask) {
             const resolvedDocumentTypeId =
               workflowTargetDocument?.document_id ||
               task.linked_document_type_id;
@@ -1778,6 +1901,12 @@ export function StageUploadDialog({
               <div className="flex-1 overflow-auto relative bg-slate-50/50">
                 {isLoading ? (
                   <StageUploadDialogLoadingState />
+                ) : loadError ? (
+                  <StageUploadDialogErrorState
+                    message={loadError}
+                    onRetry={() => setRefreshTrigger(v => v + 1)}
+                    onClose={() => onOpenChange(false)}
+                  />
                 ) : (
                   applicableDocuments.map((doc: any) => (
                     <div

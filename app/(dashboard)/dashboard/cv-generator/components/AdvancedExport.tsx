@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
-import { X, Download, FileText, Loader2, Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { X, Download, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { downloadBlob, printElementAsPdf } from "@/lib/documentExport";
 
 interface AdvancedExportProps {
   cvData: any;
@@ -24,6 +24,8 @@ export default function AdvancedExport({ cvData, previewRef, onClose }: Advanced
     { id: 'plain-text', label: 'Plain Text', desc: 'Simple text version for copying', icon: FileText },
   ];
 
+  const baseName = () => (cvData.personalInfo?.fullName || "CV").replace(/\s+/g, "_");
+
   const handleExport = async (type: string) => {
     setExportType(type);
     setIsExporting(true);
@@ -31,30 +33,16 @@ export default function AdvancedExport({ cvData, previewRef, onClose }: Advanced
     try {
       if (type === 'plain-text') {
         const text = generatePlainText();
-        const blob = new Blob([text], { type: 'text/plain' });
-        downloadBlob(blob, `${cvData.personalInfo?.fullName?.replace(/\s+/g, '_') || 'CV'}_plain.txt`);
+        downloadBlob(new Blob([text], { type: 'text/plain' }), `${baseName()}_plain.txt`);
         toast.success("Plain text exported!");
       } else if (type === 'linkedin') {
         const text = generateLinkedInSummary();
-        const blob = new Blob([text], { type: 'text/plain' });
-        downloadBlob(blob, `${cvData.personalInfo?.fullName?.replace(/\s+/g, '_') || 'CV'}_linkedin.txt`);
+        downloadBlob(new Blob([text], { type: 'text/plain' }), `${baseName()}_linkedin.txt`);
         toast.success("LinkedIn summary exported!");
-      } else if (type === 'pdf-no-photo') {
-        const element = previewRef.current;
-        if (!element) { toast.error("Preview not available"); return; }
-        await generatePdf(element, { hidePhoto: true });
       } else if (type === 'ats-pdf') {
-        const element = previewRef.current;
-        if (!element) { toast.error("Preview not available"); return; }
-        await generatePdf(element, { atsOptimized: true });
-      } else if (type === 'print') {
-        const element = previewRef.current;
-        if (!element) { toast.error("Preview not available"); return; }
-        await generatePdf(element, { printOptimized: true });
+        await exportAtsPdf();
       } else {
-        const element = previewRef.current;
-        if (!element) { toast.error("Preview not available"); return; }
-        await generatePdf(element, {});
+        await exportPdf(type);
       }
     } catch (err: any) {
       toast.error(`Export failed: ${err.message}`);
@@ -64,105 +52,101 @@ export default function AdvancedExport({ cvData, previewRef, onClose }: Advanced
     }
   };
 
-  const generatePdf = async (element: HTMLElement, opts: { hidePhoto?: boolean; atsOptimized?: boolean; printOptimized?: boolean }) => {
-    const html2canvas = (await import("html2canvas")).default;
-    const { jsPDF } = await import("jspdf");
+  // PDFs use the shared printElementAsPdf on the live preview element — the
+  // same element the main "Download PDF" button prints, and the same source of
+  // truth (buildCvDocument) that drives the preview, so the exported PDF
+  // matches what's on screen instead of a rasterized approximation.
+  const exportPdf = async (type: string) => {
+    const element = previewRef.current;
+    if (!element) throw new Error("Preview not available");
 
-    const originalOverflow = element.style.overflow;
-    const originalStyle = element.style.transform;
-    const originalWidth = element.style.width;
-    const originalMinHeight = element.style.minHeight;
+    const hidePhoto = type === 'pdf-no-photo';
+    const suffix = hidePhoto ? '_NoPhoto' : type === 'print' ? '_Print' : '';
 
-    if (opts.hidePhoto) {
-      const photos = element.querySelectorAll('img[alt="Profile"]');
-      photos.forEach(p => (p as HTMLElement).style.display = 'none');
-    }
-
-    element.style.transform = "none";
-    element.style.overflow = "visible";
-    element.style.width = "210mm";
-
-    // Wait for the theme font and any images to finish loading so the capture matches
-    // what's on screen instead of falling back to a default font/broken image.
-    if (typeof document !== "undefined" && (document as any).fonts?.ready) {
-      try { await (document as any).fonts.ready; } catch { /* ignore */ }
-    }
-    await Promise.all(
-      Array.from(element.querySelectorAll("img")).map((img) =>
-        (img as HTMLImageElement).complete
-          ? Promise.resolve()
-          : new Promise<void>((resolve) => {
-              (img as HTMLImageElement).addEventListener("load", () => resolve(), { once: true });
-              (img as HTMLImageElement).addEventListener("error", () => resolve(), { once: true });
-            })
-      )
-    );
-
-    // Wait for layout
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    const contentHeight = element.scrollHeight;
-    const A4_HEIGHT_PX = 1122; // 297mm at 96dpi
-    const pages = Math.ceil(contentHeight / A4_HEIGHT_PX);
-    element.style.minHeight = `${pages * A4_HEIGHT_PX}px`;
-    
-    await new Promise(resolve => setTimeout(resolve, 50));
-
-    const canvas = await html2canvas(element, {
-      scale: opts.atsOptimized ? 1.5 : 2,
-      useCORS: true,
-      logging: false,
-      backgroundColor: "#ffffff",
-      scrollX: 0,
-      scrollY: 0,
-      width: element.scrollWidth,
-      height: Math.max(contentHeight, A4_HEIGHT_PX),
-      windowWidth: element.scrollWidth,
-      windowHeight: Math.max(contentHeight, A4_HEIGHT_PX),
-      onclone: (clonedDoc) => {
-        const clonedElement = clonedDoc.querySelector('[data-preview]') || clonedDoc.querySelector('#cv-preview-container > div');
-        if (clonedElement) {
-          (clonedElement as HTMLElement).style.width = '210mm';
-          (clonedElement as HTMLElement).style.minHeight = `${pages * A4_HEIGHT_PX}px`;
-          (clonedElement as HTMLElement).style.overflow = 'visible';
-          (clonedElement as HTMLElement).style.transform = 'none';
+    await printElementAsPdf({
+      element,
+      fileName: `${baseName()}${suffix}_CV`,
+      bodyClassName: "pdf-mode",
+      detach: true,
+      onBeforePrint: () => {
+        if (hidePhoto) {
+          const style = document.createElement("style");
+          style.id = "adv-export-hide-photo";
+          style.textContent = '#cv-preview-container img[alt="Profile"], #cv-preview-container .cv-photo, #cv-preview-container .cv-photo-wrap { display: none !important; }';
+          document.head.appendChild(style);
         }
-      }
+      },
+      onCleanup: () => {
+        document.getElementById("adv-export-hide-photo")?.remove();
+      },
     });
 
-    element.style.transform = originalStyle;
-    element.style.overflow = originalOverflow;
-    element.style.width = originalWidth;
-    element.style.minHeight = originalMinHeight;
-
-    if (opts.hidePhoto) {
-      const photos = element.querySelectorAll('img[alt="Profile"]');
-      photos.forEach(p => (p as HTMLElement).style.display = '');
-    }
-
-    const imgData = canvas.toDataURL("image/jpeg", opts.atsOptimized ? 0.8 : 0.95);
-    const pdf = new jsPDF("p", "mm", "a4");
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const canvasWidth = canvas.width;
-    const canvasHeight = canvas.height;
-    const imgWidth = pageWidth;
-    const imgHeight = (canvasHeight * pageWidth) / canvasWidth;
-    
-    const totalPages = Math.ceil(imgHeight / pageHeight);
-    
-    for (let i = 0; i < totalPages; i++) {
-      if (i > 0) {
-        pdf.addPage();
-      }
-      const position = -(i * pageHeight);
-      pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
-    }
-
-    const suffix = opts.atsOptimized ? '_ATS' : opts.printOptimized ? '_Print' : opts.hidePhoto ? '_NoPhoto' : '';
-    const fileName = `${(cvData.personalInfo?.fullName || "CV").replace(/\s+/g, "_")}${suffix}_CV.pdf`;
-    pdf.save(fileName);
     toast.success(`${suffix.replace('_', '') || 'PDF'} exported successfully!`);
+  };
+
+  // ATS-friendly output is a plain single-column semantic document (no images,
+  // no tables, no flex/grid) so text parsers read it in order. Built from
+  // cvData directly rather than the themed layout, then printed through the
+  // same shared printElementAsPdf path as every other PDF export.
+  const exportAtsPdf = async () => {
+    const container = document.createElement("div");
+    container.id = "cv-preview-container";
+    container.innerHTML = `<style>#cv-preview-container{font-family:Arial,Helvetica,sans-serif;color:#000;font-size:11pt;line-height:1.4}#cv-preview-container h1{font-size:18pt;margin:0 0 4pt}#cv-preview-container h2{font-size:13pt;margin:14pt 0 4pt;border-bottom:1px solid #000;padding-bottom:2pt}#cv-preview-container h3{font-size:11pt;margin:10pt 0 2pt}#cv-preview-container p,#cv-preview-container li{margin:2pt 0}</style>${buildAtsHtml()}`;
+
+    await printElementAsPdf({
+      element: container,
+      fileName: `${baseName()}_ATS_CV`,
+      bodyClassName: "pdf-mode",
+      detach: true,
+      onCleanup: () => container.remove(),
+    });
+
+    toast.success("ATS-friendly PDF exported!");
+  };
+
+  const escapeHtml = (value: any) =>
+    String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+
+  const buildAtsHtml = () => {
+    const p = cvData.personalInfo || {};
+    const sections = [
+      `<header><h1>${escapeHtml(p.fullName)}</h1><p>${escapeHtml(p.title)}</p><p>${escapeHtml(p.email)} | ${escapeHtml(p.phone)}</p><p>${escapeHtml(p.location)}</p></header>`,
+    ];
+
+    if (cvData.summary) {
+      sections.push(`<section><h2>Summary</h2><p>${escapeHtml(cvData.summary)}</p></section>`);
+    }
+
+    if (cvData.experience?.length) {
+      sections.push(
+        '<section><h2>Experience</h2>' +
+        cvData.experience
+          .map((e: any) =>
+            `<h3>${escapeHtml(e.role)}</h3><p>${escapeHtml(e.company)} | ${escapeHtml(e.startDate)} - ${escapeHtml(e.endDate)}</p>` +
+            (e.responsibilities?.length ? `<ul>${e.responsibilities.map((r: string) => `<li>${escapeHtml(r)}</li>`).join('')}</ul>` : '')
+          )
+          .join('') +
+        '</section>'
+      );
+    }
+
+    if (cvData.skills?.length) {
+      sections.push(
+        '<section><h2>Skills</h2><ul>' +
+        cvData.skills.map((s: any) => `<li>${escapeHtml(s.category)}: ${escapeHtml(s.items)}</li>`).join('') +
+        '</ul></section>'
+      );
+    }
+
+    if (cvData.education?.length) {
+      sections.push(
+        '<section><h2>Education</h2>' +
+        cvData.education.map((e: any) => `<p>${escapeHtml(e.degree)} - ${escapeHtml(e.institution)} (${escapeHtml(e.year)})</p>`).join('') +
+        '</section>'
+      );
+    }
+
+    return sections.join('');
   };
 
   const generatePlainText = () => {
@@ -193,7 +177,6 @@ export default function AdvancedExport({ cvData, previewRef, onClose }: Advanced
 
   const generateLinkedInSummary = () => {
     const p = cvData.personalInfo || {};
-    const topExp = (cvData.experience || [])[0] || {};
     const allSkills = (cvData.skills || []).flatMap((s: any) => s.items?.split(',').map((i: string) => i.trim()) || []);
     return [
       `${p.fullName} | ${p.title || 'Professional'}`,
@@ -211,15 +194,6 @@ export default function AdvancedExport({ cvData, previewRef, onClose }: Advanced
       `LinkedIn: ${p.linkedin || 'N/A'}`,
       `Email: ${p.email}`,
     ].join('\n');
-  };
-
-  const downloadBlob = (blob: Blob, fileName: string) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   return (

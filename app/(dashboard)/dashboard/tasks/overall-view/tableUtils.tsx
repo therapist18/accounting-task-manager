@@ -760,7 +760,8 @@ export const createEnhancedTaskData = (
   const taskDependantsMap = new Map<string, any[]>();
   const enhancedTasksMap = new Map<string, any>();
 
-  tasks.forEach(task => {
+  tasks.forEach((task, index) => {
+    const taskId = task?.id != null ? task.id.toString() : `__missing_id_${index}__`;
     const applicantData = applicantsMap.get(task.individual_id);
 
     // Extract duration and renewal/new from job_specific_answers
@@ -768,7 +769,7 @@ export const createEnhancedTaskData = (
     const duration = jobSpecificAnswers['1769582847128'] || null;
     const renewalNew = jobSpecificAnswers['1769582847129'] || null;
 
-    enhancedTasksMap.set(task.id.toString(), {
+    enhancedTasksMap.set(taskId, {
       ...task,
       applicant_data: applicantData,
       full_name: applicantData?.full_name || task.full_name,
@@ -788,7 +789,7 @@ export const createEnhancedTaskData = (
         }));
 
       if (taskDependants.length > 0) {
-        taskDependantsMap.set(task.id.toString(), taskDependants);
+        taskDependantsMap.set(taskId, taskDependants);
       }
     }
   });

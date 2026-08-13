@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 
 import { MessageSquare, X } from "lucide-react";
@@ -21,7 +20,7 @@ interface SendCvModalProps {
   setSelectedRecommender: (rec: any) => void;
   sendCvRecipients: Record<string, boolean>;
   setSendCvRecipients: (updater: any) => void;
-  thirdParties: { name: string; email: string; role: string }[];
+  thirdParties: { name: string; email: string; role: string; company?: string }[];
   setThirdParties: (updater: any) => void;
   coverLetterText: string;
   setCoverLetterText: (v: string) => void;
@@ -90,7 +89,7 @@ export function SendCvModal({
               { key: 'recommender', label: 'Recommender', detail: selectedRecommender?.email_address || selectedRecommender?.personal_mobile || 'Select a recommender' },
             ].map(r => (
               <label key={r.key} className="flex items-center gap-2 cursor-pointer">
-                <Checkbox checked={sendCvRecipients[r.key]} onCheckedChange={v => setSendCvRecipients(p => ({ ...p, [r.key]: !!v }))} />
+                <Checkbox checked={sendCvRecipients[r.key]} onCheckedChange={v => setSendCvRecipients((p: any) => ({ ...p, [r.key]: !!v }))} />
                 <div className="flex-1 min-w-0">
                   <span className="text-xs font-semibold text-slate-700">{r.label}</span>
                   <span className="text-xs text-slate-400 ml-2 truncate">{r.detail}</span>
@@ -103,18 +102,18 @@ export function SendCvModal({
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-600">Additional Recipients</span>
-              <button onClick={() => setThirdParties(p => [...p, { name: '', email: '', role: 'recruiter' }])} className="text-xs text-custom-blue font-bold hover:underline">+ Add</button>
+              <button onClick={() => setThirdParties((p: any) => [...p, { name: '', email: '', role: 'recruiter' }])} className="text-xs text-custom-blue font-bold hover:underline">+ Add</button>
             </div>
             {thirdParties.map((tp, i) => (
               <div key={i} className="flex gap-1.5 items-center">
-                <Input placeholder="Name" value={tp.name} onChange={e => setThirdParties(p => p.map((x, xi) => xi === i ? { ...x, name: e.target.value } : x))} className="h-7 text-xs flex-1" />
-                <Input placeholder="Email / Phone" value={tp.email} onChange={e => setThirdParties(p => p.map((x, xi) => xi === i ? { ...x, email: e.target.value } : x))} className="h-7 text-xs flex-1" />
-                <select value={tp.role} onChange={e => setThirdParties(p => p.map((x, xi) => xi === i ? { ...x, role: e.target.value } : x))} className="h-7 text-xs border border-slate-200 rounded-md px-1 bg-white">
+                <Input placeholder="Name" value={tp.name} onChange={e => setThirdParties((p: any) => p.map((x: any, xi: number) => xi === i ? { ...x, name: e.target.value } : x))} className="h-7 text-xs flex-1" />
+                <Input placeholder="Email / Phone" value={tp.email} onChange={e => setThirdParties((p: any) => p.map((x: any, xi: number) => xi === i ? { ...x, email: e.target.value } : x))} className="h-7 text-xs flex-1" />
+                <select value={tp.role} onChange={e => setThirdParties((p: any) => p.map((x: any, xi: number) => xi === i ? { ...x, role: e.target.value } : x))} className="h-7 text-xs border border-slate-200 rounded-md px-1 bg-white">
                   <option value="recruiter">Recruiter (To)</option>
                   <option value="applicant">Applicant (CC)</option>
                   <option value="cc">CC</option>
                 </select>
-                <button onClick={() => setThirdParties(p => p.filter((_, xi) => xi !== i))} className="text-slate-400 hover:text-red-500 shrink-0"><X className="h-3.5 w-3.5" /></button>
+                <button onClick={() => setThirdParties((p: any) => p.filter((_: any, xi: number) => xi !== i))} className="text-slate-400 hover:text-red-500 shrink-0"><X className="h-3.5 w-3.5" /></button>
               </div>
             ))}
           </div>
@@ -143,6 +142,7 @@ export function SendCvModal({
             onClick={async () => {
               const name = cvData.personalInfo?.fullName || 'Applicant';
               const role = cvData.personalInfo?.title || '';
+              const recommender = selectedRecommender;
 
               // Recommender is already saved when selected via RecommenderSelect component
               // No need to save again here

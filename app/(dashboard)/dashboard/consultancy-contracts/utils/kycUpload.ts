@@ -26,7 +26,8 @@ export interface SaveToProfileResult {
 export async function saveContractToProfile(
   companyId: string | number,
   companyName: string,
-  renderedHtml: string
+  renderedHtml: string,
+  css?: string
 ): Promise<SaveToProfileResult> {
   try {
     const { data: docType } = await supabase
@@ -36,7 +37,7 @@ export async function saveContractToProfile(
       .maybeSingle();
     const docName = docType?.name || 'Accountant Contract';
 
-    const blob = buildWordDocBlob({ html: renderedHtml, title: `Consultancy Agreement - ${companyName}` });
+    const blob = buildWordDocBlob({ html: renderedHtml, title: `Consultancy Agreement - ${companyName}`, css });
     const normalizedCompanyName = normalizeCompanyName(companyName);
     const timestamp = Date.now();
     const filePath = `company-documents/${normalizedCompanyName}/${docName}/${timestamp}.doc`;

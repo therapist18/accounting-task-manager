@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 
 import { CheckCircle2, ChevronDown, ChevronRight, FileText, Loader2, Save, Search, Trash2, Upload, Users, X } from "lucide-react";
@@ -156,7 +155,7 @@ export function ImportStep({
         {/* Saved Drafts Section */}
         <div className="bg-white border border-slate-200 shadow-sm rounded-lg overflow-hidden">
           <button
-            onClick={() => setShowDraftsList(prev => !prev)}
+            onClick={() => setShowDraftsList((prev: boolean) => !prev)}
             className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors"
           >
             <div className="flex items-center gap-2">

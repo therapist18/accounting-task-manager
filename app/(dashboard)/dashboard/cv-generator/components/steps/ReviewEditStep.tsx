@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 
 import { ArrowRight, ChevronDown, ChevronRight, Copy, Crosshair, Download, PenLine, FileText as CoverLetterIcon } from "lucide-react";
@@ -84,7 +83,7 @@ export function ReviewEditStep({
           {sectionGroups.map((group) => (
             <div key={group.label}>
               <button
-                onClick={() => setCollapsedGroups(prev => ({ ...prev, [group.label]: !prev[group.label] }))}
+                onClick={() => setCollapsedGroups((prev: Record<string, boolean>) => ({ ...prev, [group.label]: !prev[group.label] }))}
                 className="w-full flex items-center gap-1.5 px-2 py-1 rounded text-sm font-bold text-slate-400 uppercase tracking-wider hover:text-slate-600"
               >
                 {collapsedGroups[group.label] ? <ChevronRight className="h-2.5 w-2.5" /> : <ChevronDown className="h-2.5 w-2.5" />}

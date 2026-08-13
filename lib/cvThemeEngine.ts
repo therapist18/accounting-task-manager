@@ -26,6 +26,7 @@
 // inlined directly on the element as a second line of defense.
 
 import { imageUrlToDataUrl } from "@/lib/documentExport";
+import { toWordSafeFontStack } from "@/lib/documentTheme";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -848,11 +849,17 @@ function getCssCtx(primaryColor: string, accentColor: string, fontFamily: string
 // Builds the single source-of-truth themed CV document. The returned
 // bodyHtml/styleHtml render the live preview (CvPreviewPanel), and the same
 // bodyHtml/css feed buildWordDocBlob for the .doc download — identical markup
-// and CSS in both, so Word preserves the on-screen theme styling.
+// and CSS in both, so Word preserves the on-screen theme styling. Pass
+// `{ wordSafe: true }` (mirroring contracts' applyThemeToHtml option) when
+// the output is headed for the .doc: the theme font is remapped to an
+// installed-system equivalent (toWordSafeFontStack) since Word can't fetch
+// webfonts, keeping the .doc close to the on-screen theme instead of silently
+// falling back to Word's own default.
 export async function buildCvDocument(
   cvData: any,
   cvSettings: any,
-  selectedLayout?: string
+  selectedLayout?: string,
+  options?: { wordSafe?: boolean }
 ): Promise<CvDocument> {
   const layout: CvLayout = (CV_LAYOUTS as string[]).includes(selectedLayout || "") ? (selectedLayout as CvLayout) : "theme1";
   const spec = LAYOUT_SPECS[layout];
@@ -864,11 +871,14 @@ export async function buildCvDocument(
   // Roman) whenever the primary family isn't installed on the machine
   // opening the .doc. Calibri/Arial are near-universally present in Word
   // installs, so listing them before the generic keyword gives Word a much
-  // closer visual match than falling through to its own default.
-  const fontFamily =
+  // closer visual match than falling through to its own default. For the
+  // .doc path the caller passes `{ wordSafe: true }` and toWordSafeFontStack
+  // remaps the web-only faces outright (shared with Employment Contracts).
+  const baseFontFamily =
     layout === "theme6"
       ? cvSettings?.fontFamily || "Georgia, 'Times New Roman', serif"
       : cvSettings?.fontFamily || "Inter, Calibri, Arial, sans-serif";
+  const fontFamily = options?.wordSafe ? toWordSafeFontStack(baseFontFamily) : baseFontFamily;
   const fontScale = Number(cvSettings?.fontScale) || 1;
 
   const photoUrl = cvData?.personalInfo?.photoUrl;

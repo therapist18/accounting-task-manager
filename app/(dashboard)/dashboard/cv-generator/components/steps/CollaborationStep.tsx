@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 
 import { AlertCircle, Check, CheckCircle2, RefreshCw, Sparkles } from "lucide-react";
@@ -350,7 +349,7 @@ export function CollaborationStep({
                             size="sm"
                             variant={isAccepted ? 'default' : 'outline'}
                             onClick={() => {
-                              setAcceptedFields(prev => ({ ...prev, [diff.path]: true }));
+                              setAcceptedFields((prev: Record<string, boolean>) => ({ ...prev, [diff.path]: true }));
                             }}
                             className={`text-sm h-6 px-2.5 font-bold ${
                               isAccepted ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'text-slate-500'
@@ -362,7 +361,7 @@ export function CollaborationStep({
                             size="sm"
                             variant={!isAccepted ? 'destructive' : 'outline'}
                             onClick={() => {
-                              setAcceptedFields(prev => ({ ...prev, [diff.path]: false }));
+                              setAcceptedFields((prev: Record<string, boolean>) => ({ ...prev, [diff.path]: false }));
                             }}
                             className={`text-sm h-6 px-2.5 font-bold ${
                               !isAccepted ? 'bg-red-650 hover:bg-red-755 text-white' : 'text-slate-550 text-slate-500'

@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 
 import React, { useState } from "react";
@@ -11,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import supabase from "@/lib/supabase/client";
 import { CLEAR_PHOTO_ID } from "../../utils/cvGeneratorData";
 import { CreatableCombobox, type ComboOption } from "../CreatableCombobox";
-import { getVerifiedDateLabel } from "../cv-designs";
+import { getVerifiedDateLabel } from "@/lib/documentTheme";
 
 // ============================================================================
 // 1. CORE ARCHITECTURE (Hooks)

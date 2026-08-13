@@ -2472,17 +2472,26 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
             setActiveSubTab(STATUS_TAB_MAP[nextStatus]);
           }
 
-          // A stage upload inserts straight into acc_portal_directors_documents via Supabase,
-          // bypassing this component entirely — allDocuments (only ever populated by
-          // refreshAllData's fetchAllDocuments call) would otherwise stay stale until a manual
-          // Refresh, which is exactly why the preview icon (resolved off allDocuments via
-          // getDocumentForTaskStage) wouldn't show up right after a successful upload. Merge
-          // the newly-inserted row(s) in immediately instead of waiting on that refetch.
+          // A stage upload inserts straight into acc_portal_directors_documents (individual
+          // tasks) or acc_portal_kyc_uploads (company tasks) via Supabase, bypassing this
+          // component entirely — allDocuments/allCompanyDocuments (only ever populated by
+          // refreshAllData's fetch calls) would otherwise stay stale until a manual Refresh,
+          // which is exactly why the preview icon wouldn't show up right after a successful
+          // upload. Merge the newly-inserted row(s) in immediately instead of waiting on that
+          // refetch.
           if (action.newDocuments?.length) {
             setAllDocuments(prevDocs => {
               const byId = new Map(prevDocs.map((d: any) => [d.id, d]));
               action.newDocuments.forEach((d: any) => byId.set(d.id, d));
               return Array.from(byId.values());
+            });
+          }
+          if (action.newCompanyDocuments?.length && action.companyId) {
+            setAllCompanyDocuments(prev => {
+              const existing = prev[action.companyId] || [];
+              const byId = new Map(existing.map((d: any) => [d.id, d]));
+              action.newCompanyDocuments.forEach((d: any) => byId.set(d.id, d));
+              return { ...prev, [action.companyId]: Array.from(byId.values()) };
             });
           }
 

@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 
 import { AlertCircle, Award, Briefcase, Check, FileText, Globe, GraduationCap, BookOpen, ImagePlus, MessageSquare, Sparkles, User } from "lucide-react";

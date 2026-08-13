@@ -1,5 +1,4 @@
-﻿// @ts-nocheck
-"use client";
+﻿"use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Sparkles, FileText, Upload, Plus, Trash2, Download, ZoomIn, ZoomOut, Check, User, Briefcase, GraduationCap, FolderGit2, BookOpen, MessageSquare, AlertCircle, Eye, Search, Users, ImagePlus, X, Loader2, CheckCircle2, Save, Settings2, Palette, ChevronDown, ChevronRight, Globe, ArrowRight, Award, Target, FileSpreadsheet, Layout, Type, Image, PenLine, BarChart3, Crosshair, FileText as CoverLetterIcon, Copy, RefreshCw, Database } from "lucide-react";
@@ -36,6 +35,8 @@ import {
   isSkillsBlank,
   isCertificationsBlank,
   initialCVData,
+  type CvData,
+  type CvSettings,
   type EnhancementLevel,
   CONSENT_VERSION,
   loadFromLocalStorage,
@@ -46,7 +47,7 @@ import {
 } from "./utils/cvGeneratorData";
 
 export default function CVGeneratorPage() {
-  const [cvData, setCvData] = useState<any>(initialCVData);
+  const [cvData, setCvData] = useState<CvData>(initialCVData);
   const [mobileView, setMobileView] = useState<'edit' | 'preview'>('edit');
   const [selectedLayout, setSelectedLayout] = useState<string>("theme1");
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
@@ -77,7 +78,7 @@ export default function CVGeneratorPage() {
     location: '',
     languages: [{ language: 'English', proficiency: 'Professional' }] as { language: string; proficiency: string }[],
   });
-  const [cvSettings, setCvSettings] = useState(() => loadFromLocalStorage('cvSettings', {
+  const [cvSettings, setCvSettings] = useState<CvSettings>(() => loadFromLocalStorage<CvSettings>('cvSettings', {
     photoSize: 150,
     photoFit: 'cover' as 'cover' | 'contain' | 'fill',
     photoShape: 'square' as 'square' | 'circle' | 'rounded',
@@ -89,10 +90,10 @@ export default function CVGeneratorPage() {
     showCustomize: false,
   }));
 
-  const updateCvSetting = <K extends keyof typeof cvSettings>(key: K, value: typeof cvSettings[K]) =>
+  const updateCvSetting = <K extends string>(key: K, value: any) =>
     setCvSettings(prev => ({ ...prev, [key]: value }));
 
-  const [workflowStep, setWorkflowStep] = useState<'import' | 'review-edit' | 'collaboration' | 'client-portal'>('import');
+  const [workflowStep, setWorkflowStep] = useState<string>('import');
   const [showDesignPanel, setShowDesignPanel] = useState(false);
   const [showSendCvModal, setShowSendCvModal] = useState(false);
   const [recommenderContactId, setRecommenderContactId] = useState<string | null>(null);
@@ -262,7 +263,7 @@ export default function CVGeneratorPage() {
       setPortalStep(1);
       
       // Capture which sections are initially missing
-      const data = cvData;
+      const data: any = cvData;
       const initiallyNonKenyan = !(data.personalDetails?.nationality || '').toLowerCase().includes('kenyan') && !(data.personalDetails?.nationality || '').toLowerCase().includes('kenya');
       
       setInitiallyMissingSections({
@@ -1514,7 +1515,9 @@ export default function CVGeneratorPage() {
       // via buildWordDocBlob) — same approach the Employment Contracts module
       // uses, so the downloaded Word file preserves the CV's styling instead
       // of flattening it.
-      const result = await buildCvDocument(cvData, cvSettings, selectedLayout);
+      const result = await buildCvDocument(cvData, cvSettings, selectedLayout, {
+        wordSafe: true,
+      });
       downloadHtmlAsWord({
         html: result.bodyHtml,
         title: result.title,
