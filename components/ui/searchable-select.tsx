@@ -102,6 +102,7 @@ export function SearchableSelect({
       <Popover open={open} onOpenChange={handleOpenChange}>
         <PopoverTrigger asChild>
           <Button
+            type="button"
             variant="outline"
             role="combobox"
             aria-expanded={open}

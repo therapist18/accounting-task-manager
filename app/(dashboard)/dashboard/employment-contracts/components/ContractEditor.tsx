@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchCompanyEmployees, ContractEmployeeInfo } from '../utils/data';
 import { EcJobProfile, fetchJobProfiles, fetchGlobalJobProfiles, matchJobProfile } from '../utils/jobProfileData';
 import { EmploymentOffer, fetchLatestOffer } from '../utils/employmentOfferData';
@@ -70,6 +70,33 @@ export function ContractEditor({
   const [payrollStatutoryLine, setPayrollStatutoryLine] = useState<StatutoryDeductionsBreakdown | null>(null);
   const [dataFilter, setDataFilter] = useState<'all' | 'with' | 'missing'>('all');
   const { toast } = useToast();
+
+  // Height of the sticky toolbar+column-header block, measured live so the
+  // per-entity group headers below can stick right underneath it instead of
+  // guessing a fixed pixel offset that would drift whenever the toolbar wraps
+  // to a second line (mobile) or the column header row hides (below md).
+  const stickyHeaderObserverRef = useRef<ResizeObserver | null>(null);
+  const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
+  // A callback ref rather than a plain ref + mount-only effect: the toolbar
+  // block only exists once an employee is actually selected - until then this
+  // component returns the "No Employee Selected"/loading placeholder, which
+  // has no toolbar to measure. A mount-only effect would observe nothing in
+  // that case and leave stickyHeaderHeight stuck at 0, pinning the group
+  // headers to the very top of the scrollport where the toolbar (z-30) hides
+  // them behind it. React re-invokes the callback ref whenever the toolbar
+  // (re)mounts, so the observer always latches onto the real element.
+  const stickyHeaderRef = useCallback((el: HTMLDivElement | null) => {
+    stickyHeaderObserverRef.current?.disconnect();
+    stickyHeaderObserverRef.current = null;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) setStickyHeaderHeight(entry.contentRect.height);
+    });
+    observer.observe(el);
+    stickyHeaderObserverRef.current = observer;
+  }, []);
+  useEffect(() => () => stickyHeaderObserverRef.current?.disconnect(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -283,18 +310,26 @@ export function ContractEditor({
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 [&>[data-radix-scroll-area-viewport]>div]:!block">
         <div className="max-w-[1000px] mx-auto p-6 pb-12">
-          
+
+          {/* Sticky toolbar + column header block - pinned to the top of the
+              ScrollArea's own scrollport while reviewing a long field list.
+              Height is measured (see stickyHeaderRef) so the per-entity group
+              headers further down know exactly how far to stick below it. */}
+          <div
+            ref={stickyHeaderRef}
+            className="sticky top-0 z-30 -mx-6 px-6 pb-2 bg-slate-50/95 dark:bg-slate-950/95 backdrop-blur-sm"
+          >
           {/* Toolbar: Stats & Filters */}
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pt-1 pb-4">
             <div>
               <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <FileText className="w-5 h-5 text-indigo-500" /> Contract Fields
               </h3>
               <p className="text-sm text-slate-500 mt-1">Review and override placeholders resolved for this document.</p>
             </div>
-            
+
             <div className="flex items-center gap-4">
               {/* Modern Segmented Control */}
               <div className="p-1 bg-slate-200/50 dark:bg-slate-800/80 rounded-lg inline-flex items-center shadow-inner">
@@ -340,6 +375,16 @@ export function ContractEditor({
             </div>
           </div>
 
+          {/* Column definitions header - only when there's a list to label */}
+          {profileScopedPlaceholders.length > 0 && dataFilteredPlaceholders.length > 0 && (
+            <div className="hidden md:grid grid-cols-[35%_20%_1fr] gap-4 px-4 py-2 border-b border-slate-200 dark:border-slate-800 text-xs font-bold uppercase tracking-wider text-slate-400">
+              <div>Placeholder Field</div>
+              <div>Data Source</div>
+              <div>Resolved Output</div>
+            </div>
+          )}
+          </div>
+
           {/* Empty States */}
           {profileScopedPlaceholders.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 px-4 bg-white/50 dark:bg-slate-900/30 border border-dashed border-slate-300 dark:border-slate-800 rounded-2xl">
@@ -360,19 +405,16 @@ export function ContractEditor({
           ) : (
             
             /* Main Content List */
-            <div className="space-y-8">
-              {/* Column definitions header (Optional but helpful for alignment context) */}
-              <div className="hidden md:grid grid-cols-[35%_20%_1fr] gap-4 px-4 py-2 border-b border-slate-200 dark:border-slate-800 text-xs font-bold uppercase tracking-wider text-slate-400">
-                <div>Placeholder Field</div>
-                <div>Data Source</div>
-                <div>Resolved Output</div>
-              </div>
-
+            <div className="space-y-8 mt-4">
               {sortedEntities.map(([entityKey, group]) => (
                 <div key={entityKey} className="space-y-3">
-                  
-                  {/* Entity Group Header */}
-                  <div className="flex items-center gap-3 sticky top-0 z-20 bg-slate-50/90 dark:bg-slate-950/90 backdrop-blur-md py-2 shadow-[0_1px_0_0_rgba(0,0,0,0.03)] dark:shadow-none">
+
+                  {/* Entity Group Header - sticks directly below the toolbar
+                      block above, whose live-measured height is stickyHeaderHeight */}
+                  <div
+                    className="flex items-center gap-3 sticky z-20 bg-slate-50/90 dark:bg-slate-950/90 backdrop-blur-md py-2 shadow-[0_1px_0_0_rgba(0,0,0,0.03)] dark:shadow-none"
+                    style={{ top: stickyHeaderHeight }}
+                  >
                     <h4 className="text-sm font-bold tracking-wide text-slate-800 dark:text-slate-200 uppercase">
                       {group.label}
                     </h4>

@@ -76,8 +76,7 @@ const navItems = [
         icon: FileText,
         items: [
             { title: "Generate Contracts", href: "/dashboard/consultancy-contracts" },
-            { title: "Placeholders", href: "/dashboard/consultancy-contracts/placeholders" },
-            { title: "Settings", href: "/dashboard/consultancy-contracts/settings" },
+            { title: "Template & Placeholders", href: "/dashboard/consultancy-contracts/settings" },
         ],
     },
     { title: "Master Fields", href: "/dashboard/master-fields", icon: Database, permission: "master_fields.view" },

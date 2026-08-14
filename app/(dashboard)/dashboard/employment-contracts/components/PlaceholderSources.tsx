@@ -1,6 +1,23 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+// Shared placeholder registry browser for every module that reuses
+// ec_placeholders (Employment Contracts' own full page, its Clause Library
+// scoped view, and Consultancy Contracts' template page). The module using it
+// passes data/behavior in via props:
+//   - filterByKeys   - narrow to the tokens a clause/template actually uses
+//   - clausesEnabled - EC computes a "Clause Usage" column from ec_clauses;
+//                      Consultancy has no clause library, so it passes false
+//   - allowedSourceKinds - EC exposes all four source kinds; Consultancy rows
+//                      are company-scoped, so it restricts to master_field
+//   - deletableGroup - Consultancy only lets CC-owned rows (group_label
+//                      'Consultancy Contract') be deleted from its screen
+//   - typeScans - raw template/clause content to classify each token's type
+//                 with DTM's own detection ({{%token}} image, {{#token}}
+//                 array, {{#condition_token}} conditional, else text); EC
+//                 scans its fetched clauses, Consultancy passes [content]
+//   - toolbar/title/emptyMessage - per-module header actions and copy
+
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +36,7 @@ import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
 import { ecPlaceholderToDtmPlaceholder, dtmPlaceholderToEcUpdates, getPlaceholderSourceText } from '../utils/ecPlaceholderAdapter';
 import { PlaceholderFormDialog } from '../../templates/document-template-manager/components/PlaceholderFormDialog';
 import { useTemplateData } from '../../templates/document-template-manager/hooks/useTemplateData';
+import { detectPlaceholderTags, type DetectedPlaceholderTagType } from '../../templates/document-template-manager/utils';
 import { useTableData } from '@/lib/tableUtils';
 import { ENTITY_TYPES } from '@/lib/constants/entity-types';
 import type { Placeholder } from '../../templates/document-template-manager/types';
@@ -28,10 +46,50 @@ interface PlaceholderSourcesProps {
   filterByKeys?: string[];
   refreshKey?: number;
   fillHeight?: boolean;
+  // Optional right-side header actions (e.g. Consultancy's "Sync from
+  // template" button) - the parent owns the sync/refresh logic.
+  toolbar?: ReactNode;
+  // Header title. Default 'Placeholders Used'.
+  title?: string;
+  // EC-only "Clause Usage" column + clause-referenced delete warnings. Any
+  // module without a clause library passes false to hide both.
+  clausesEnabled?: boolean;
+  // Which source kinds the inline Source select offers. EC = all four;
+  // Consultancy (company-scoped resolution) = ['master_field']. When only one
+  // kind is allowed the select collapses into a static badge.
+  allowedSourceKinds?: PlaceholderSourceKind[];
+  // When set, only rows whose group_label matches can be deleted from this
+  // screen - shared rows are left to their owning module.
+  deletableGroup?: string;
+  // Empty-state text for the "no tokens to filter by" branch.
+  emptyMessage?: ReactNode;
+  // Raw content strings to classify each token's type with (see header note).
+  typeScans?: string[];
 }
 
-type SortColumn = '#' | 'token' | 'group' | 'source' | 'entity' | 'linked' | 'clauses' | 'default';
+type SortColumn = '#' | 'token' | 'group' | 'type' | 'source' | 'entity' | 'linked' | 'clauses' | 'default';
 type SortDir = 'asc' | 'desc';
+
+const ALL_SOURCE_KINDS: PlaceholderSourceKind[] = ['master_field', 'settings_cascade', 'job_profile', 'offer'];
+
+const SOURCE_KIND_OPTIONS: { value: PlaceholderSourceKind; label: string; icon: ReactNode }[] = [
+  { value: 'master_field', label: 'Master field', icon: <Database className="w-3 h-3 inline mr-1.5" /> },
+  { value: 'settings_cascade', label: 'Settings cascade', icon: <Sliders className="w-3 h-3 inline mr-1.5" /> },
+  { value: 'job_profile', label: 'Job profile field', icon: <ClipboardList className="w-3 h-3 inline mr-1.5" /> },
+  { value: 'offer', label: 'Offer field', icon: <FileStack className="w-3 h-3 inline mr-1.5" /> },
+];
+
+const SOURCE_KIND_LABELS: Record<PlaceholderSourceKind, string> = Object.fromEntries(
+  SOURCE_KIND_OPTIONS.map((o) => [o.value, o.label])
+) as Record<PlaceholderSourceKind, string>;
+
+// Types DTM's detectPlaceholderTags infers from the {{prefix}} in content.
+const TYPE_LABELS: Record<DetectedPlaceholderTagType, string> = {
+  text: 'Text',
+  image: 'Image',
+  array: 'Array',
+  conditional: 'Conditional',
+};
 
 const EC_HIDDEN_SECTIONS = {
   uiVisibility: true,
@@ -45,7 +103,11 @@ const strategyLabel = (s: string) => s === 'merge' ? 'Merge' : 'Fallback';
 const StrategyIcon = ({ strategy }: { strategy: string }) =>
   strategy === 'merge' ? <Shuffle className="w-3 h-3" /> : <ListOrdered className="w-3 h-3" />;
 
-export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0, fillHeight = false }: PlaceholderSourcesProps) {
+export function PlaceholderSources({
+  highlightKeys, filterByKeys, refreshKey = 0, fillHeight = false,
+  toolbar, title = 'Placeholders Used', clausesEnabled = true,
+  allowedSourceKinds = ALL_SOURCE_KINDS, deletableGroup, emptyMessage, typeScans,
+}: PlaceholderSourcesProps) {
   const [placeholders, setPlaceholders] = useState<EcPlaceholder[]>([]);
   const [masterFields, setMasterFields] = useState<MasterFieldOption[]>([]);
   const [clauses, setClauses] = useState<EcClause[]>([]);
@@ -68,13 +130,17 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
   useEffect(() => {
     (async () => {
       setIsLoading(true);
-      const [fields, ecPlaceholders, ecClauses] = await Promise.all([fetchMasterFieldOptions(), fetchPlaceholders(), fetchClauses()]);
+      const [fields, ecPlaceholders, ecClauses] = await Promise.all([
+        fetchMasterFieldOptions(),
+        fetchPlaceholders(),
+        clausesEnabled ? fetchClauses() : Promise.resolve([]),
+      ]);
       setMasterFields(fields);
       setPlaceholders(ecPlaceholders);
       setClauses(ecClauses);
       setIsLoading(false);
     })();
-  }, [refreshKey]);
+  }, [refreshKey, clausesEnabled]);
 
   // Which clauses actually reference each placeholder's {{token}} - scanned
   // from real clause content (detectTokens), not from any stored link, since
@@ -91,6 +157,22 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
     }
     return map;
   }, [clauses]);
+
+  // Per-token type inferred by DTM's own tag detection (see detectPlaceholderTags).
+  // Scans the explicit typeScans content (e.g. Consultancy's live template) plus
+  // every fetched clause - first tag seen for a key wins, mirroring DTM's
+  // processedTags dedupe, so a placeholder used as {{%logo}} shows "Image".
+  const detectedTypes = useMemo(() => {
+    const map = new Map<string, DetectedPlaceholderTagType>();
+    const scan = (text: string) => {
+      for (const tag of detectPlaceholderTags(text, 2)) {
+        if (!map.has(tag.key)) map.set(tag.key, tag.type);
+      }
+    };
+    if (typeScans) typeScans.forEach(scan);
+    if (clausesEnabled) clauses.forEach((c) => scan(c.content));
+    return map;
+  }, [typeScans, clauses, clausesEnabled]);
 
   // tm_job_fields ids arrive as numbers, while ec_placeholders stores
   // master_field_id as a number but master_field_links[].master_field_id as a
@@ -137,10 +219,12 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
           const q = search.toLowerCase();
           const linkedLabels = getLinkedLabels(p);
           const entityLabels = getEntityLabels(p);
+          const typeLabel = TYPE_LABELS[detectedTypes.get(p.key) as DetectedPlaceholderTagType] || '';
           return (
             p.key.toLowerCase().includes(q) ||
             p.label.toLowerCase().includes(q) ||
             p.group_label.toLowerCase().includes(q) ||
+            typeLabel.toLowerCase().includes(q) ||
             linkedLabels.some((l) => l.label.toLowerCase().includes(q)) ||
             entityLabels.some((l) => l.toLowerCase().includes(q))
           );
@@ -166,6 +250,11 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
         case 'group':
           cmp = a.group_label.localeCompare(b.group_label);
           break;
+        case 'type':
+          cmp = (TYPE_LABELS[detectedTypes.get(a.key) as DetectedPlaceholderTagType] || '').localeCompare(
+            TYPE_LABELS[detectedTypes.get(b.key) as DetectedPlaceholderTagType] || ''
+          );
+          break;
         case 'source':
           cmp = a.source_kind.localeCompare(b.source_kind);
           break;
@@ -186,7 +275,7 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
     });
 
     return list;
-  }, [placeholders, search, masterFieldMap, sortColumn, sortDir, filterByKeys, clauseUsage]);
+  }, [placeholders, search, masterFieldMap, sortColumn, sortDir, filterByKeys, clauseUsage, detectedTypes]);
 
   const openEdit = (placeholder: EcPlaceholder) => {
     setEditingEc(placeholder);
@@ -245,6 +334,7 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
   // would silently keep winning inside resolveEcPlaceholderValues.
   const handleChangeSourceKind = async (placeholder: EcPlaceholder, nextKind: PlaceholderSourceKind) => {
     if (nextKind === placeholder.source_kind) return;
+    if (!allowedSourceKinds.includes(nextKind)) return;
     setChangingKindId(placeholder.id);
     try {
       // Auto-default settings_key/offer_field to the placeholder's own key
@@ -291,12 +381,15 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
   return (
     <div ref={sectionRef} className={cn("bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800", fillHeight ? "h-full flex flex-col overflow-hidden p-4" : "p-4")}>
       <div className="flex items-center justify-between mb-3 shrink-0">
-        <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Placeholders Used</p>
-        <p className="text-xs text-slate-400">
-          {filterByKeys
-            ? `${sortedPlaceholders.length} / ${placeholders.length} total`
-            : `${placeholders.length} total`}
-        </p>
+        <p className="text-sm font-bold text-slate-600 dark:text-slate-300">{title}</p>
+        <div className="flex items-center gap-2 shrink-0">
+          {toolbar}
+          <p className="text-xs text-slate-400">
+            {filterByKeys
+              ? `${sortedPlaceholders.length} / ${placeholders.length} total`
+              : `${placeholders.length} total`}
+          </p>
+        </div>
       </div>
 
       <div className="relative mb-3 shrink-0">
@@ -317,7 +410,7 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
       ) : sortedPlaceholders.length === 0 ? (
         <p className={cn("text-sm text-slate-500 text-center", fillHeight ? "flex-1 flex items-center justify-center" : "py-6")}>
           {filterByKeys && filterByKeys.length === 0
-            ? 'No placeholders specified for this item.'
+            ? (emptyMessage ?? 'No placeholders specified for this item.')
             : placeholders.length === 0
             ? 'No placeholders detected yet.'
             : 'No placeholders match your search.'}
@@ -343,6 +436,11 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
                   </button>
                 </TableHead>
                 <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
+                  <button onClick={() => toggleSort('type')} className="flex items-center gap-0">
+                    Type <SortIcon col="type" />
+                  </button>
+                </TableHead>
+                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
                   <button onClick={() => toggleSort('source')} className="flex items-center gap-0">
                     Source <SortIcon col="source" />
                   </button>
@@ -362,11 +460,13 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
                     Default Value <SortIcon col="default" />
                   </button>
                 </TableHead>
-                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
-                  <button onClick={() => toggleSort('clauses')} className="flex items-center gap-0">
-                    Clause Usage <SortIcon col="clauses" />
-                  </button>
-                </TableHead>
+                {clausesEnabled && (
+                  <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
+                    <button onClick={() => toggleSort('clauses')} className="flex items-center gap-0">
+                      Clause Usage <SortIcon col="clauses" />
+                    </button>
+                  </TableHead>
+                )}
                 <TableHead className="text-right font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -389,27 +489,52 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
                     <Badge variant="secondary" className="text-[10px]">{p.group_label}</Badge>
                   </TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
-                    <Select
-                      value={p.source_kind}
-                      onValueChange={(v) => handleChangeSourceKind(p, v as PlaceholderSourceKind)}
-                      disabled={changingKindId === p.id}
-                    >
-                      <SelectTrigger className={cn(
-                        "h-7 text-xs font-medium rounded-full border px-2.5 gap-1.5 w-auto",
-                        p.source_kind === 'master_field' && "bg-slate-50 text-slate-600 border-slate-200",
-                        p.source_kind === 'settings_cascade' && "bg-blue-50 text-blue-700 border-blue-200",
-                        p.source_kind === 'job_profile' && "bg-emerald-50 text-emerald-700 border-emerald-200",
-                        p.source_kind === 'offer' && "bg-purple-50 text-purple-700 border-purple-200",
-                      )}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="master_field"><Database className="w-3 h-3 inline mr-1.5" />Master field</SelectItem>
-                        <SelectItem value="settings_cascade"><Sliders className="w-3 h-3 inline mr-1.5" />Settings cascade</SelectItem>
-                        <SelectItem value="job_profile"><ClipboardList className="w-3 h-3 inline mr-1.5" />Job profile field</SelectItem>
-                        <SelectItem value="offer"><FileStack className="w-3 h-3 inline mr-1.5" />Offer field</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {(() => {
+                      const t = detectedTypes.get(p.key);
+                      if (!t) return <span className="text-xs text-slate-300">—</span>;
+                      const styles: Record<DetectedPlaceholderTagType, string> = {
+                        text: 'bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+                        image: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-300 dark:border-violet-800',
+                        array: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-900/20 dark:text-sky-300 dark:border-sky-800',
+                        conditional: 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-800',
+                      };
+                      return (
+                        <Badge variant="outline" className={`text-[10px] font-medium ${styles[t]}`}>
+                          {TYPE_LABELS[t]}
+                        </Badge>
+                      );
+                    })()}
+                  </TableCell>
+                  <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
+                    {allowedSourceKinds.length <= 1 ? (
+                      <Badge variant="outline" className="text-[10px] font-medium bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
+                        {SOURCE_KIND_LABELS[p.source_kind] || p.source_kind}
+                      </Badge>
+                    ) : (
+                      <Select
+                        value={p.source_kind}
+                        onValueChange={(v) => handleChangeSourceKind(p, v as PlaceholderSourceKind)}
+                        disabled={changingKindId === p.id}
+                      >
+                        <SelectTrigger className={cn(
+                          "h-7 text-xs font-medium rounded-full border px-2.5 gap-1.5 w-auto",
+                          p.source_kind === 'master_field' && "bg-slate-50 text-slate-600 border-slate-200",
+                          p.source_kind === 'settings_cascade' && "bg-blue-50 text-blue-700 border-blue-200",
+                          p.source_kind === 'job_profile' && "bg-emerald-50 text-emerald-700 border-emerald-200",
+                          p.source_kind === 'offer' && "bg-purple-50 text-purple-700 border-purple-200",
+                        )}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {allowedSourceKinds.map((kind) => {
+                            const option = SOURCE_KIND_OPTIONS.find((o) => o.value === kind)!;
+                            return (
+                              <SelectItem key={kind} value={kind}>{option.icon}{option.label}</SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    )}
                     <p className="text-[10px] font-mono text-slate-400 mt-1">
                       {getPlaceholderSourceText(p) || <span className="italic text-red-400">not set - edit to set</span>}
                     </p>
@@ -451,21 +576,23 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
                     <span className="text-xs text-slate-500">{p.default_value || '—'}</span>
                   </TableCell>
-                  <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
-                    {usedByClauses.length > 0 ? (
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200"
-                        title={usedByClauses.map((c) => c.label).join(', ')}
-                      >
-                        Linked · {usedByClauses.length} clause{usedByClauses.length === 1 ? '' : 's'}
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
-                        Not linked
-                      </Badge>
-                    )}
-                  </TableCell>
+                  {clausesEnabled && (
+                    <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
+                      {usedByClauses.length > 0 ? (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200"
+                          title={usedByClauses.map((c) => c.label).join(', ')}
+                        >
+                          Linked · {usedByClauses.length} clause{usedByClauses.length === 1 ? '' : 's'}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
+                          Not linked
+                        </Badge>
+                      )}
+                    </TableCell>
+                  )}
                   <TableCell className="text-right border border-slate-200 dark:border-slate-700 px-2 py-2">
                     <Button
                       variant="ghost"
@@ -476,15 +603,19 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-slate-400 hover:text-red-600"
-                      onClick={() => setDeletingP(p)}
-                      title="Delete placeholder"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
+                    {deletableGroup && p.group_label !== deletableGroup ? (
+                      <span className="text-[10px] text-slate-300" title="Shared with another module - delete it from its owning module instead">—</span>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-slate-400 hover:text-red-600"
+                        onClick={() => setDeletingP(p)}
+                        title="Delete placeholder"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
                 );
@@ -524,10 +655,12 @@ export function PlaceholderSources({ highlightKeys, filterByKeys, refreshKey = 0
                 return (
                   <>
                     Deletes <span className="font-mono">{'{{' + deletingP.key + '}}'}</span> ("{deletingP.label}") from the registry.{' '}
-                    {usedBy.length > 0 ? (
+                    {clausesEnabled && usedBy.length > 0 ? (
                       <>It's currently referenced by <strong>{usedBy.length} clause{usedBy.length === 1 ? '' : 's'}</strong> ({usedBy.map((c) => c.label).join(', ')}) - those will render blank where it was used.</>
-                    ) : (
+                    ) : clausesEnabled ? (
                       "It isn't referenced by any clause right now."
+                    ) : (
+                      "Any place it's still typed into the template will render blank."
                     )}{' '}
                     This cannot be undone.
                   </>

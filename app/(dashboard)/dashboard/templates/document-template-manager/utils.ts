@@ -9,6 +9,51 @@ export const sanitizeClassName = (cls: string | undefined): string => {
 
 export const getCleanText = (str: string) => str.replace(/<[^>]+>/g, '');
 
+// Same prefix->type rules extractPlaceholders uses below: {%tag} is an image,
+// {#tag} opens an array block (condition_* names open a conditional instead),
+// {/tag} closes a block, and anything else is plain text. Extracted into a
+// standalone scanner so the contract modules can import the exact same type
+// detection - the only difference is their content uses {{double}} braces, so
+// braces is passed as 2 there (DTM's own content uses single braces, 1).
+export type DetectedPlaceholderTagType = 'text' | 'image' | 'array' | 'conditional';
+
+export interface DetectedPlaceholderTag {
+  key: string;
+  type: DetectedPlaceholderTagType;
+  prefix?: '#' | '/' | '%';
+  isBlockStart: boolean;
+  isBlockEnd: boolean;
+}
+
+export function detectPlaceholderTags(content: string, braces: 1 | 2 = 2): DetectedPlaceholderTag[] {
+  if (!content) return [];
+  const tagRegex = braces === 2
+    ? /\{\{([#\/%])?\s*([a-zA-Z0-9_]+)(?:\/([a-zA-Z0-9_]+))?\s*\}\}/g
+    : /\{([#\/%])?\s*([a-zA-Z0-9_]+)(?:\/([a-zA-Z0-9_]+))?\s*\}/g;
+
+  const tags: DetectedPlaceholderTag[] = [];
+  let match;
+  while ((match = tagRegex.exec(content)) !== null) {
+    const prefix = match[1] as '#' | '/' | '%' | undefined;
+    const key = match[2];
+    let type: DetectedPlaceholderTagType = 'text';
+    let isBlockStart = false;
+    let isBlockEnd = false;
+
+    if (prefix === '%') {
+      type = 'image';
+    } else if (prefix === '#') {
+      isBlockStart = true;
+      type = key.startsWith('condition_') ? 'conditional' : 'array';
+    } else if (prefix === '/') {
+      isBlockEnd = true;
+    }
+
+    tags.push({ key, type, prefix, isBlockStart, isBlockEnd });
+  }
+  return tags;
+}
+
 export const findMatchingMasterFields = (placeholderName: string, masterFields: JobField[]): { ids: number[], sourceType?: string } => {
   if (!placeholderName || !masterFields.length) return { ids: [] };
 

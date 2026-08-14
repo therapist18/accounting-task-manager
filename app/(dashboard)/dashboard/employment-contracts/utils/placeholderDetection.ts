@@ -1,5 +1,6 @@
 import supabase from '@/lib/supabase/client';
 import { fetchPlaceholders } from './ecPlaceholders';
+import { detectPlaceholderTags } from '../../templates/document-template-manager/utils';
 
 export interface MasterFieldOption {
   id: string;
@@ -8,12 +9,14 @@ export interface MasterFieldOption {
 }
 
 // Same {{token}} shape clauses actually use (see replacePlaceholders in
-// tasks-requirements/utils/templateFormatters.ts) - NOT DTM's single-brace
-// {tag} docxtemplater syntax, which doesn't apply here.
+// tasks-requirements/utils/templateFormatters.ts) - scanned with DTM's own
+// prefix-aware tag detector (double-brace syntax) so {{%token}} image tags
+// and {{#token}}/{{#condition_token}} blocks are also picked up, always
+// keyed by the bare token name (the {{%}} prefix is a display-type marker,
+// not part of the registry key).
 export function detectTokens(content: string): string[] {
   if (!content) return [];
-  const matches = Array.from(content.matchAll(/\{\{(\w+)\}\}/g)).map((m) => m[1]);
-  return Array.from(new Set(matches));
+  return Array.from(new Set(detectPlaceholderTags(content, 2).map((t) => t.key)));
 }
 
 function normalize(s: string): string {

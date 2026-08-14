@@ -119,7 +119,10 @@
       "Bash(echo \"EXIT:$?\")",
       "Bash(npx tsx *)",
       "Bash(tail -40 /tmp/dev.log)",
-      "Bash(grep -ic \"consultancy-contracts\" /tmp/tscout3.txt)"
+      "Bash(grep -ic \"consultancy-contracts\" /tmp/tscout3.txt)",
+      "Bash(awk 'NR==15{print length\\($0\\), $0}' \"app/\\(dashboard\\)/dashboard/consultancy-contracts/components/ContractPreview.tsx\")",
+      "Bash(rm -f tsconfig.tsbuildinfo)",
+      "Bash(grep -n 'payment_mode}$\\\\|s.payment_mode}</span>' app/sales/page.tsx)"
     ],
     "additionalDirectories": [
       "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals"

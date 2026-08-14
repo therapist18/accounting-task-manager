@@ -605,6 +605,23 @@ export function NewCompanyInquiryDialog({
         }, {} as Record<string, any[]>);
     }, [jobQuestions, checkVisibility]);
 
+    // Same "filled vs empty" signal the static fields above get via TableRow's hasValue —
+    // boolean questions count as filled once answered either way (false is a real answer, not
+    // an empty one), multiselect needs at least one selection, field_group is filled once every
+    // sub-question is, everything else just needs a non-empty value.
+    const isJobAnswerFilled = useCallback((q: any): boolean => {
+        const isFieldFilled = (id: string, type: string): boolean => {
+            const val = jobAnswers[id];
+            if (type === 'boolean') return val === true || val === false;
+            if (Array.isArray(val)) return val.length > 0;
+            return val !== undefined && val !== null && val !== '';
+        };
+        if (q.type === 'field_group' && q.sub_questions) {
+            return q.sub_questions.every((sq: any) => isFieldFilled(sq.id, sq.type));
+        }
+        return isFieldFilled(q.id, q.type);
+    }, [jobAnswers]);
+
     useEffect(() => {
         if (open && companies.length === 0) loadCompanies();
         if (open && !isEditMode && selectedDepartmentId) {
@@ -961,11 +978,23 @@ export function NewCompanyInquiryDialog({
         ? `Edit Company Enquiry: ${initialData?.applicant_name || 'Loading...'}`
         : "New Company Enquiry";
 
-    // Table Row Component for consistent styling
-    const TableRow = ({ label, children, required = false, error }: { label: string; children: React.ReactNode; required?: boolean; error?: string }) => (
-        <div className="grid grid-cols-12 gap-4 py-3 border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
-            <div className="col-span-4 flex items-center">
-                <Label className="text-xs font-semibold text-slate-700">
+    // Table Row Component for consistent styling. `hasValue` is opt-in per field (omit it for
+    // fields where "empty" isn't meaningful) — when passed, it renders a small filled/empty dot
+    // next to the label plus a tinted row background, same treatment EnquiryDialog uses, so the
+    // user can tell at a glance which fields still need attention.
+    const TableRow = ({ label, children, required = false, error, hasValue }: { label: string; children: React.ReactNode; required?: boolean; error?: string; hasValue?: boolean }) => (
+        <div className={cn(
+            "grid grid-cols-12 gap-4 py-3 border-b transition-colors",
+            error ? "border-red-100 bg-red-50/30" : hasValue === false ? "border-amber-100 bg-amber-50/40 hover:bg-amber-50/60" : "border-slate-100 hover:bg-slate-50/50"
+        )}>
+            <div className="col-span-4 flex items-center gap-2">
+                {hasValue !== undefined && !error && (
+                    <span
+                        className={cn("h-1.5 w-1.5 rounded-full shrink-0", hasValue ? "bg-emerald-500" : "bg-amber-400")}
+                        title={hasValue ? "Filled" : "Not set yet"}
+                    />
+                )}
+                <Label className={cn("text-xs font-semibold", error ? "text-red-700" : hasValue === false ? "text-amber-700" : "text-slate-700")}>
                     {label}
                     {required && <span className="text-red-500 ml-1">*</span>}
                 </Label>
@@ -1022,7 +1051,7 @@ export function NewCompanyInquiryDialog({
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="p-6 space-y-0">
-                                    <TableRow label="Company" required error={errors.company}>
+                                    <TableRow label="Company" required error={errors.company} hasValue={!!selectedCompany}>
                                         <div className="flex items-center gap-4">
                                             {/* Logo Preview */}
                                             <div className="shrink-0">
@@ -1051,7 +1080,7 @@ export function NewCompanyInquiryDialog({
                                             <div className="flex-1">
                                                 <Popover open={isCompanyPopoverOpen} onOpenChange={setIsCompanyPopoverOpen}>
                                                     <PopoverTrigger asChild>
-                                                        <Button variant="outline" className="w-full justify-between h-11 border-slate-200 bg-white">
+                                                        <Button type="button" variant="outline" className="w-full justify-between h-11 border-slate-200 bg-white">
                                                             {selectedCompany ? <span className="font-bold text-slate-800">{selectedCompany.company_name}</span> : <span className="text-slate-400">Search company database...</span>}
                                                             <Search className="h-4 w-4 opacity-30" />
                                                         </Button>
@@ -1230,7 +1259,7 @@ export function NewCompanyInquiryDialog({
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="p-6 space-y-0">
-                                    <TableRow label="Department" required error={errors.department_id}>
+                                    <TableRow label="Department" required error={errors.department_id} hasValue={!!formData.department_id}>
                                         <SearchableSelect
                                             value={formData.department_id}
                                             onValueChange={(v) => { clearError('department_id'); setFormData(prev => ({ ...prev, department_id: v, subdepartment_id: '', class_id: '', subclass_id: '' })) }}
@@ -1245,7 +1274,7 @@ export function NewCompanyInquiryDialog({
                                         />
                                     </TableRow>
 
-                                    <TableRow label="Sub-Department">
+                                    <TableRow label="Sub-Department" hasValue={!!formData.subdepartment_id}>
                                         <SearchableSelect
                                             value={formData.subdepartment_id}
                                             onValueChange={(v) => setFormData(prev => ({ ...prev, subdepartment_id: v, class_id: '', subclass_id: '' }))}
@@ -1260,7 +1289,7 @@ export function NewCompanyInquiryDialog({
                                         />
                                     </TableRow>
 
-                                    <TableRow label="Class">
+                                    <TableRow label="Class" hasValue={!!formData.class_id}>
                                         <SearchableSelect
                                             value={formData.class_id}
                                             onValueChange={(v) => setFormData(prev => ({ ...prev, class_id: v, subclass_id: '' }))}
@@ -1275,7 +1304,7 @@ export function NewCompanyInquiryDialog({
                                         />
                                     </TableRow>
 
-                                    <TableRow label="Subclass">
+                                    <TableRow label="Subclass" hasValue={!!formData.subclass_id}>
                                         <SearchableSelect
                                             value={formData.subclass_id}
                                             onValueChange={(v) => setFormData(p => ({ ...p, subclass_id: v }))}
@@ -1301,7 +1330,7 @@ export function NewCompanyInquiryDialog({
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="p-6 space-y-0">
-                                    <TableRow label="Assigned Officer">
+                                    <TableRow label="Assigned Officer" hasValue={!!formData.officer_id}>
                                         <SearchableSelect
                                             value={formData.officer_id}
                                             onValueChange={(v) => setFormData(p => ({ ...p, officer_id: v }))}
@@ -1316,7 +1345,7 @@ export function NewCompanyInquiryDialog({
                                         />
                                     </TableRow>
 
-                                    <TableRow label="Task Manager">
+                                    <TableRow label="Task Manager" hasValue={!!formData.task_manager_id}>
                                         <SearchableSelect
                                             value={formData.task_manager_id}
                                             onValueChange={(v) => setFormData(p => ({ ...p, task_manager_id: v }))}
@@ -1331,7 +1360,7 @@ export function NewCompanyInquiryDialog({
                                         />
                                     </TableRow>
 
-                                    <TableRow label="Task Assistant">
+                                    <TableRow label="Task Assistant" hasValue={!!formData.task_assistant_id}>
                                         <SearchableSelect
                                             value={formData.task_assistant_id}
                                             onValueChange={(v) => setFormData(p => ({ ...p, task_assistant_id: v }))}
@@ -1383,7 +1412,7 @@ export function NewCompanyInquiryDialog({
                                                     </div>
                                                     <div className="space-y-0">
                                                         {questions.map((q) => (
-                                                            <TableRow key={q.id} label={q.label} required={q.required} error={errors[`question_${q.id}`]}>
+                                                            <TableRow key={q.id} label={q.label} required={q.required} error={errors[`question_${q.id}`]} hasValue={isJobAnswerFilled(q)}>
                                                                 {q.type === 'text' && (
                                                                     <Input
                                                                         value={jobAnswers[q.id] || ''}
@@ -1416,7 +1445,7 @@ export function NewCompanyInquiryDialog({
                                                                         <div className="flex gap-2">
                                                                             <Popover>
                                                                                 <PopoverTrigger asChild>
-                                                                                    <Button variant="outline" className="flex-1 justify-between h-11 bg-white border-slate-200" disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode}>
+                                                                                    <Button type="button" variant="outline" className="flex-1 justify-between h-11 bg-white border-slate-200" disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode}>
                                                                                         <span className="truncate">
                                                                                             {q.type === 'multiselect'
                                                                                                 ? (Array.isArray(jobAnswers[q.id]) && jobAnswers[q.id].length > 0 ? `${jobAnswers[q.id].length} Selected` : "Choose multiple...")
@@ -1457,6 +1486,7 @@ export function NewCompanyInquiryDialog({
                                                                             </Popover>
                                                                             {q.type === 'multiselect' && Array.isArray(jobAnswers[q.id]) && jobAnswers[q.id].length > 0 && (
                                                                                 <Button
+                                                                                    type="button"
                                                                                     variant="outline"
                                                                                     size="sm"
                                                                                     onClick={() => { clearError(`question_${q.id}`); setJobAnswers(prev => ({ ...prev, [q.id]: [] })) }}
@@ -1521,7 +1551,7 @@ export function NewCompanyInquiryDialog({
                                                                                         <div className="flex gap-2">
                                                                                             <Popover>
                                                                                                 <PopoverTrigger asChild>
-                                                                                                    <Button variant="outline" className="flex-1 justify-between h-10 bg-white border-slate-200">
+                                                                                                    <Button type="button" variant="outline" className="flex-1 justify-between h-10 bg-white border-slate-200">
                                                                                                         <span className="truncate text-xs">
                                                                                                             {subQ.type === 'multiselect'
                                                                                                                 ? (Array.isArray(jobAnswers[subQ.id]) && jobAnswers[subQ.id].length > 0 ? `${jobAnswers[subQ.id].length} Selected` : "Choose multiple...")
@@ -1562,6 +1592,7 @@ export function NewCompanyInquiryDialog({
                                                                                             </Popover>
                                                                                             {subQ.type === 'multiselect' && Array.isArray(jobAnswers[subQ.id]) && jobAnswers[subQ.id].length > 0 && (
                                                                                                 <Button
+                                                                                                    type="button"
                                                                                                     variant="outline"
                                                                                                     size="sm"
                                                                                                     onClick={() => { clearError(`question_${subQ.id}`); setJobAnswers(prev => ({ ...prev, [subQ.id]: [] })) }}

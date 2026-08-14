@@ -182,6 +182,12 @@ export function assembleContractHtml({
   }
 
   // ── Table of Contents ──
+  // Deliberately <div>s, not <ol>/<li> - the number is already rendered
+  // explicitly via cs-toc-num below, and Word's HTML importer generates its
+  // own native list numbering for any <ol> tag regardless of the
+  // `list-style: none` that suppresses it in a browser, so an <ol> here
+  // doubled up as "1. 1. Parties" in the exported .doc (Word's own counter
+  // in its list-indent column, ours in the link text).
   let toc = '';
   if (includeToc) {
     const items = orderedSections
@@ -190,10 +196,10 @@ export function assembleContractHtml({
         const n = numMap[s.key];
         const isAppendix = s.key.startsWith('appendix_');
         const prefix = isAppendix ? `Appendix ${n}` : `${n}.`;
-        return `<li class="cs-toc-item"><a class="cs-toc-link" href="#section-${s.key}"><span class="cs-toc-num">${prefix}</span> ${s.title}</a></li>`;
+        return `<div class="cs-toc-item"><a class="cs-toc-link" href="#section-${s.key}"><span class="cs-toc-num">${prefix}</span> ${s.title}</a></div>`;
       })
       .join('\n');
-    toc = `<nav class="cs-toc"><div class="cs-toc-heading">Table of Contents</div><ol class="cs-toc-list">${items}</ol></nav>`;
+    toc = `<nav class="cs-toc"><div class="cs-toc-heading">Table of Contents</div><div class="cs-toc-list">${items}</div></nav>`;
   }
 
   // ── Sections ──

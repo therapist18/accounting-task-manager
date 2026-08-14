@@ -40,7 +40,7 @@ export default async function DashboardLayout({
     )
   }
 
-  const showNavbar = !pathname.startsWith("/dashboard/tasks") && !pathname.startsWith("/dashboard/employment-contracts") && !pathname.startsWith("/dashboard/summary-reports") && !pathname.startsWith("/dashboard/company-profiles") && !pathname.startsWith("/dashboard/letters")
+  const showNavbar = !pathname.startsWith("/dashboard/tasks") && !pathname.startsWith("/dashboard/employment-contracts") && !pathname.startsWith("/dashboard/consultancy-contracts") && !pathname.startsWith("/dashboard/summary-reports") && !pathname.startsWith("/dashboard/company-profiles") && !pathname.startsWith("/dashboard/letters")
 
   return (
     <SidebarProvider>

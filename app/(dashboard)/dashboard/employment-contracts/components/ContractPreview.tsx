@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import supabase from '@/lib/supabase/client';
 import { replacePlaceholders } from '../../tasks-requirements/utils/templateFormatters';
 import { Button } from '@/components/ui/button';
 import {
   Download, Loader2, Save, FileText, FileWarning, Palette, FileDown,
-  ZoomIn, ZoomOut, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   ChevronDown, List, RefreshCw,
 } from 'lucide-react';
+import { DocumentViewer, type DocumentViewerHandle } from '@/components/contracts/DocumentViewer';
 import { downloadBlob, buildWordDocBlob, printElementAsPdf } from '@/lib/documentExport';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -38,6 +37,17 @@ import type { EcPlaceholder } from '../utils/ecPlaceholders';
 // not a missing fact, so these never get the missing-value placeholder
 // treatment below either.
 const LIST_MARKUP_KEYS = new Set(['applicable_benefits', 'key_responsibilities', 'statutory_deductions_table']);
+
+// buildOutput() re-expresses the theme's ToC/heading rules as inline styles
+// on the elements themselves (see the comments there) - this pulls one
+// flattened, scoped declaration block out of the word-safe stylesheet so its
+// declarations can be copied onto the matching element verbatim. The leading
+// `\s*` tolerates the indentation the theme's <style> block is rendered with.
+function extractCssRule(css: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = css.match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'));
+  return match ? match[1].trim() : '';
+}
 
 // A single em dash reads as ambiguous - could be a stray hyphen, could be
 // intentional punctuation in a clause. A visibly blank-looking run makes it
@@ -150,54 +160,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const [isSaving, setIsSaving] = useState(false);
   const [showToc, setShowToc] = useState(true);
 
-  const contentMeasureRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const printAreaRef = useRef<HTMLDivElement>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-
-  // Pagination Configuration
-  const PAGE_WIDTH_PX = 794; // Standard A4 width at 96dpi
-  const PAGE_HEIGHT_PX = 1123; // Standard A4 height at 96dpi
-  const [zoomPct, setZoomPct] = useState(80);
-  const manualZoomRatio = zoomPct / 100;
-  // Defaults to "fit" (scaled to the panel's width) rather than a fixed manual 80% - a fixed
-  // percentage looks right at one panel width and leaves the page either swimming in dead
-  // gray space or overflowing at any other, whereas fit-to-width is what actually makes the
-  // page read as filling its frame on first load, matching how a document preview should
-  // look. Still switches to 'manual' the moment the user touches +/-/pinch zoom (see
-  // setManualZoom below), so this is purely about the first-load default.
-  const [sizingMode, setSizingMode] = useState<'manual' | 'fit' | 'fill'>('fit');
-  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
-  // Must equal the canvas wrapper's own px-6/py-8 padding below (24px/32px per side) - these
-  // used to be one guessed FIT_PADDING_PX=64 shared by both the width and height math, which
-  // didn't match either real padding (48px total horizontally, 64px total vertically) and
-  // over-reserved margin on top of what was actually being rendered, leaving extra
-  // unaccounted white space around the page beyond the real px-6/py-8 gutter.
-  const PAGE_GUTTER_X_PX = 24 * 2; // px-6
-  const PAGE_GUTTER_Y_PX = 32 * 2; // py-8
-  const zoomRatio = useMemo(() => {
-    if (sizingMode === 'fit' && containerSize.width > 0) return Math.max(0.1, (containerSize.width - PAGE_GUTTER_X_PX) / PAGE_WIDTH_PX);
-    if (sizingMode === 'fill' && containerSize.height > 0) return Math.max(0.1, (containerSize.height - PAGE_GUTTER_Y_PX) / PAGE_HEIGHT_PX);
-    return manualZoomRatio;
-  }, [sizingMode, containerSize, manualZoomRatio]);
-  // Leaving Fit/Fill via the zoom +/- buttons must continue from the ratio actually on
-  // screen, not from the stale `zoomPct` state - Fit/Fill compute zoomRatio independently
-  // and never write it back into zoomPct, so zoomPct sits frozen at whatever it was before
-  // Fit/Fill was turned on (e.g. the initial 80). Stepping from that stale base instead of
-  // the visible ~95-97% used to jump the page straight down to 70% on the very first click.
-  const setManualZoom = (updater: (z: number) => number) => {
-    const base = sizingMode === 'manual' ? zoomPct : Math.round(zoomRatio * 100);
-    setSizingMode('manual');
-    setZoomPct(Math.min(150, Math.max(40, updater(base))));
-  };
-  const [contentHeightPx, setContentHeightPx] = useState(0);
-
-  // Calculate total pages safely based on real measured height
-  const totalPages = Math.max(1, Math.ceil(contentHeightPx / PAGE_HEIGHT_PX));
-  // The visible page canvas is snapped to a whole multiple of the page height,
-  // so the last page reads as a full sheet instead of clipping to wherever the
-  // content happens to end (which left a gray gap below short documents).
-  const pageCanvasHeightPx = totalPages * PAGE_HEIGHT_PX;
+  const viewerRef = useRef<DocumentViewerHandle>(null);
 
   // Load base context - companyId is optional (job profiles can be scoped
   // "General / No Company"), in which case company just stays null but
@@ -225,70 +188,6 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   useEffect(() => {
     setThemeOverride(contractData?.metadata?.themeSettings || null);
   }, [employee?.individualId, selectedJobProfile?.id]);
-
-  // Track the scroll container's box size for the fit/fill sizing modes.
-  useEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry) setContainerSize({ width: entry.contentRect.width, height: entry.contentRect.height });
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  // Scroll-based page tracking + TOC anchor click interception
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    let rafId: number;
-
-    const onScroll = () => {
-      cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        const page = Math.floor(container.scrollTop / (PAGE_HEIGHT_PX * zoomRatio)) + 1;
-        setCurrentPage(Math.max(1, Math.min(page, totalPages)));
-      });
-    };
-
-    const onClick = (e: MouseEvent) => {
-      const link = (e.target as HTMLElement).closest('a[href^="#"]');
-      if (!link) return;
-      const href = link.getAttribute('href');
-      if (!href || href === '#') return;
-      const target = container.querySelector(href);
-      if (!target) return;
-      e.preventDefault();
-      const targetRect = target.getBoundingClientRect();
-      const containerRect = container.getBoundingClientRect();
-      container.scrollTo({
-        top: container.scrollTop + (targetRect.top - containerRect.top),
-        behavior: 'smooth',
-      });
-    };
-
-    container.addEventListener('scroll', onScroll, { passive: true });
-    container.addEventListener('click', onClick);
-    onScroll();
-    return () => {
-      container.removeEventListener('scroll', onScroll);
-      container.removeEventListener('click', onClick);
-      cancelAnimationFrame(rafId);
-    };
-  }, [totalPages, zoomRatio]);
-
-  const scrollToPage = (page: number) => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    container.scrollTo({ top: (page - 1) * PAGE_HEIGHT_PX * zoomRatio, behavior: 'smooth' });
-  };
-
-  // Reset scroll on document switch or TOC toggle
-  useEffect(() => {
-    scrollContainerRef.current?.scrollTo({ top: 0 });
-    setCurrentPage(1);
-  }, [employee?.individualId, showToc]);
 
   const clausesById = useMemo(() => Object.fromEntries(clauses.map((c) => [c.id, c])), [clauses]);
 
@@ -377,34 +276,6 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
 
   const themedHtml = bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings), mergedValues) : '';
 
-  // Track natural unscaled height for pagination math. themedHtml is in the
-  // deps so any content change that alters the layout - loading a profile's
-  // saved theme (which only flows in through the themeSettings fallback, not
-  // through themeOverride/defaultTheme), picking an employee/profile in the
-  // first place, typing in the editor - re-runs the measurement. Without it,
-  // the observer was never attached when a profile was first selected (the
-  // effect bailed on a null ref at mount), so pagination stayed stuck at one
-  // page until the theme panel happened to flip themeOverride.
-  useEffect(() => {
-    const el = contentMeasureRef.current;
-    if (!el) return;
-
-    const measure = () => {
-      setTimeout(() => setContentHeightPx(el.scrollHeight), 50);
-    };
-
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-
-    const images = el.querySelectorAll('img');
-    images.forEach(img => img.addEventListener('load', measure));
-
-    return () => {
-      observer.disconnect();
-      images.forEach(img => img.removeEventListener('load', measure));
-    };
-  }, [themeOverride, defaultTheme, showToc, themedHtml]);
   // Renamed id="section-x"/href="#section-x" to a "pdf-section-x" namespace,
   // distinct from the live on-screen preview's own id="section-x" elements
   // (which stay mounted, just display:none via print:hidden, during
@@ -508,6 +379,91 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
         // applied by Word anyway, and only stretched columns evenly).
         table.setAttribute('width', '100%');
       });
+
+      // Word's HTML filter doesn't recognize the <nav> element - it silently
+      // unwraps the tag, so the .cs-toc box/border/background CSS lands on an
+      // element Word never actually renders as a block. Swap it for a <div>
+      // (which Word treats as a plain paragraph) before inlining anything.
+      doc.querySelectorAll('nav.cs-toc').forEach((nav) => {
+        const div = doc.createElement('div');
+        for (const attr of Array.from(nav.attributes)) div.setAttribute(attr.name, attr.value);
+        while (nav.firstChild) div.appendChild(nav.firstChild);
+        nav.replaceWith(div);
+      });
+
+      // ...and re-express every .cs-toc* rule as an inline style on the
+      // matching element. Word is unreliable about applying the <style>
+      // block's block-level CSS (border/background/padding) to these, so the
+      // same declarations (already carrying the mso-padding-alt /
+      // mso-margin-*-alt directives makeWordSafe added) get copied onto the
+      // elements themselves, where inline styles always win. .cs-toc-link is
+      // handled separately below - inlining its full rule would put padding
+      // on an inline <a>, which the importer drops anyway.
+      const themeRootSelector = `.contract-theme-${themeSettings.theme}`;
+      const tocClasses = ['cs-toc', 'cs-toc-heading', 'cs-toc-list', 'cs-toc-item', 'cs-toc-num'];
+      for (const cls of tocClasses) {
+        // cls is a bare class name - the selector needs its leading '.' or it
+        // reads as an element selector ("cs-toc") that matches nothing.
+        const decls = extractCssRule(themeCss, `${themeRootSelector} .${cls}`);
+        if (!decls) continue;
+        doc.querySelectorAll(`.${cls}`).forEach((el) => {
+          const prev = el.getAttribute('style') ? `${el.getAttribute('style')};` : '';
+          el.setAttribute('style', `${prev}${decls}`);
+        });
+      }
+
+      // Word applies its built-in Hyperlink style (blue + underline) to every
+      // <a> regardless of CSS, and it can't resolve `color: inherit` (the
+      // value every theme's .cs-toc-link uses) - so re-apply only the text
+      // styling inline, substituting the theme's actual body color (from the
+      // scoped root rule) for the unresolvable `inherit`.
+      const linkDecls = extractCssRule(themeCss, `${themeRootSelector} .cs-toc-link`);
+      const linkTextDecls = (linkDecls || '')
+        .split(';')
+        .map((d) => d.trim())
+        .filter((d) => /^(color|text-decoration|font-size|font-weight|font-style|letter-spacing|text-transform)\s*:/.test(d))
+        .join('; ');
+      const baseColor = extractCssRule(themeCss, themeRootSelector).match(/color:\s*([^;]+)/)?.[1]?.trim();
+      if (linkTextDecls) {
+        const finalDecls = baseColor ? linkTextDecls.replace(/color:\s*inherit/g, `color: ${baseColor}`) : linkTextDecls;
+        doc.querySelectorAll('.cs-toc-link').forEach((el) => {
+          const prev = el.getAttribute('style') ? `${el.getAttribute('style')};` : '';
+          el.setAttribute('style', `${prev}${finalDecls}`);
+        });
+      }
+      // The link's padding belongs on the row's <div> (a paragraph in Word)
+      // rather than the inline anchor, or the ToC rows render with no
+      // spacing at all.
+      const linkPadding = linkDecls ? linkDecls.match(/padding:[^;]+;\s*mso-padding-alt:[^;]+;?/)?.[0] ?? '' : '';
+      if (linkPadding) {
+        doc.querySelectorAll('.cs-toc-item').forEach((item) => {
+          const style = item.getAttribute('style') || '';
+          if (/\bpadding\b/.test(style)) return;
+          item.setAttribute('style', `${style}${style.endsWith(';') ? '' : ';'} ${linkPadding}`.trim());
+        });
+      }
+
+      // Themed headings have the same class of problem - Word ignored their
+      // plain CSS padding/margin (the h2's padding-bottom that spaces the
+      // text off its underline, the margins pushing it away from the
+      // paragraph above/below), so they rendered compressed. Inline the
+      // theme's .mso-hN rule, then the .cs-section-heading spacing rule, then
+      // the .cs-section .mso-hN base rule - in that order, so each
+      // higher-specificity rule's spacing wins just like it does in the
+      // stylesheet cascade - onto each heading.
+      doc.querySelectorAll('.mso-h1, .mso-h2, .mso-h3').forEach((h) => {
+        const tag = h.classList.contains('mso-h1') ? 'h1' : h.classList.contains('mso-h2') ? 'h2' : 'h3';
+        const themeDecls = extractCssRule(themeCss, `${themeRootSelector} .mso-${tag}`);
+        if (!themeDecls) return;
+        const headingDecls = h.classList.contains('cs-section-heading')
+          ? extractCssRule(themeCss, `${themeRootSelector} .cs-section-heading`)
+          : '';
+        const sectionDecls = h.closest('.cs-section')
+          ? extractCssRule(themeCss, `${themeRootSelector} .cs-section .mso-${tag}`)
+          : '';
+        const prev = h.getAttribute('style') ? `${h.getAttribute('style')};` : '';
+        h.setAttribute('style', `${prev}${themeDecls}${headingDecls ? `; ${headingDecls}` : ''}${sectionDecls ? `; ${sectionDecls}` : ''}`);
+      });
       // applyThemeToHtml's theme wrapper carries inline padding:48px /
       // max-width:850px / margin:0 auto for the on-screen preview; the CSS
       // override meant to zero those for Word ([class^="contract-theme-"] ...)
@@ -568,7 +524,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     if (!hasOutput || !employee) return;
     const baseName = employee.fullName.replace(/\s+/g, '_');
     printElementAsPdf({
-      element: printAreaRef.current,
+      element: viewerRef.current?.getPrintArea() ?? null,
       fileName: `${baseName}_Employment_Contract`,
     }).catch((err) => {
       console.error('PDF generation failed', err);
@@ -637,217 +593,91 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const hasOutput = !!bodyHtml;
 
   return (
-  <>
-    <div className={cn(className || "flex flex-col h-full w-full min-w-0 bg-slate-100/50 dark:bg-slate-900 shadow-inner overflow-hidden relative", "print:hidden")}>
-
-      {/* Docked Toolbar */}
-      <div className="shrink-0 flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200/70 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur z-20">
-        {/* Left: Zoom + Sizing */}
-        <div className="flex items-center gap-1.5 min-w-0">
-          {/* Zoom Controls */}
-          <div className="flex items-center h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden shadow-sm shrink-0">
-            <button
-              onClick={() => setManualZoom((z) => z - 10)}
-              disabled={sizingMode === 'manual' && zoomPct <= 40}
-              title="Zoom out"
-              className="px-2 h-full text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-800 dark:hover:text-slate-200 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
-            >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
-            <span className="text-xs font-medium text-slate-600 dark:text-slate-300 w-10 text-center tabular-nums select-none border-x border-slate-200 dark:border-slate-700">
-              {Math.round(zoomRatio * 100)}%
-            </span>
-            <button
-              onClick={() => setManualZoom((z) => z + 10)}
-              disabled={sizingMode === 'manual' && zoomPct >= 150}
-              title="Zoom in"
-              className="px-2 h-full text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-800 dark:hover:text-slate-200 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* Sizing Mode: Fit width / Fill height */}
-          <div className="flex items-center h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden shadow-sm shrink-0">
-            <button
-              onClick={() => setSizingMode('fit')}
-              title="Fit page to width"
-              className={cn(
-                "px-2.5 h-full text-[10px] font-bold uppercase tracking-wide transition-colors",
-                sizingMode === 'fit' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" : "text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
-              )}
-            >
-              Fit
-            </button>
-            <button
-              onClick={() => setSizingMode('fill')}
-              title="Fill available height"
-              className={cn(
-                "px-2.5 h-full text-[10px] font-bold uppercase tracking-wide transition-colors border-l border-slate-200 dark:border-slate-700",
-                sizingMode === 'fill' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" : "text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
-              )}
-            >
-              Fill
-            </button>
-          </div>
-        </div>
-
-        {/* Right: Toggles + Export */}
-        <div className="flex items-center gap-1.5 min-w-0">
-          <button
-            onClick={() => setShowToc((v) => !v)}
-            title="Toggle table of contents"
-            className={cn(
-              "w-8 h-8 flex items-center justify-center rounded-lg transition-colors shrink-0",
-              showToc
-                ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
-                : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-            )}
-          >
-            <List className="w-4 h-4" />
-          </button>
-          {/* Theme sidebar panel - shared by both modules so profile design
-              and per-contract customization stay synchronized. */}
-          <button
-            onClick={() => setThemePanelOpen(true)}
-            title="Customize theme"
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
-          >
-            <Palette className="w-4 h-4" />
-          </button>
-          <button
-            onClick={handleRefreshAll}
-            disabled={isResolvingMasterFields || loadingContext}
-            title="Refresh everything (clauses, company, signatory, payroll figures, master fields)"
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50 shrink-0"
-          >
-            <RefreshCw className={cn("w-4 h-4", (isResolvingMasterFields || loadingContext) && "animate-spin")} />
-          </button>
-
-          <div className="h-5 w-px bg-slate-200 dark:bg-slate-700 shrink-0" />
-
-          {/* Export menu */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                disabled={!hasOutput || loadingContext}
-                className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors shrink-0"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Export
-                <ChevronDown className="w-3 h-3 ml-0.5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40 rounded-xl">
-              <DropdownMenuItem onClick={handleDownloadPdf} disabled={!hasOutput || loadingContext}>
-                <FileDown className="w-3.5 h-3.5 mr-2 text-slate-400" /> PDF Document
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleDownloadWord} disabled={!hasOutput || loadingContext}>
-                <FileText className="w-3.5 h-3.5 mr-2 text-slate-400" /> Word Document
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Primary action */}
-          {!previewOnly && (
-            <Button
-              size="sm"
-              className="h-8 px-4 text-xs font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md rounded-lg shrink-0"
-              onClick={handleSaveToDb}
-              disabled={!hasOutput || loadingContext || isSaving}
-            >
-              {isSaving ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-2" />}
-              Generate
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* Main Preview Area - Scrollable */}
-      <div 
-        ref={scrollContainerRef}
-        className="flex-1 overflow-auto bg-slate-200/50 dark:bg-slate-950/60 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700"
-      >
-        {!hasOutput && !loadingContext ? (
+    <>
+      <DocumentViewer
+        ref={viewerRef}
+        html={themedHtml}
+        printHtml={exportThemedHtml}
+        contentKey={`${employee?.individualId}:${showToc}`}
+        className={className || "bg-slate-100/50 dark:bg-slate-900 shadow-inner"}
+        loading={loadingContext}
+        empty={
           <div className="flex flex-col items-center justify-center h-full text-slate-400">
             <FileWarning className="w-10 h-10 mb-3" />
             <p className="text-sm">Nothing to preview yet.</p>
           </div>
-        ) : loadingContext ? (
-          <div className="flex items-center justify-center h-full min-h-[300px]">
-            <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-          </div>
-        ) : (
-          <div className="py-8 px-6 flex flex-col items-center min-h-full">
-            {/* Scaled wrapper */}
-            <div
-              className="relative shrink-0 shadow-2xl shadow-slate-300/30 dark:shadow-black/40 transition-transform duration-200"
-              style={{ width: PAGE_WIDTH_PX * zoomRatio, height: pageCanvasHeightPx * zoomRatio }}
+        }
+        actions={
+          <>
+            <button
+              onClick={() => setShowToc((v) => !v)}
+              title="Toggle table of contents"
+              className={cn(
+                "w-8 h-8 flex items-center justify-center rounded-lg transition-colors shrink-0",
+                showToc
+                  ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
+                  : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+              )}
             >
-              {/* Document canvas */}
-              <div
-                className="absolute top-0 left-0 bg-white origin-top-left"
-                style={{
-                  width: PAGE_WIDTH_PX,
-                  height: pageCanvasHeightPx,
-                  transform: `scale(${zoomRatio})`,
-                  color: 'black',
-                }}
+              <List className="w-4 h-4" />
+            </button>
+            {/* Theme sidebar panel - shared by both modules so profile design
+                and per-contract customization stay synchronized. */}
+            <button
+              onClick={() => setThemePanelOpen(true)}
+              title="Customize theme"
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+            >
+              <Palette className="w-4 h-4" />
+            </button>
+            <button
+              onClick={handleRefreshAll}
+              disabled={isResolvingMasterFields || loadingContext}
+              title="Refresh everything (clauses, company, signatory, payroll figures, master fields)"
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50 shrink-0"
+            >
+              <RefreshCw className={cn("w-4 h-4", (isResolvingMasterFields || loadingContext) && "animate-spin")} />
+            </button>
+
+            <div className="h-5 w-px bg-slate-200 dark:bg-slate-700 shrink-0" />
+
+            {/* Export menu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  disabled={!hasOutput || loadingContext}
+                  className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors shrink-0"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Export
+                  <ChevronDown className="w-3 h-3 ml-0.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40 rounded-xl">
+                <DropdownMenuItem onClick={handleDownloadPdf} disabled={!hasOutput || loadingContext}>
+                  <FileDown className="w-3.5 h-3.5 mr-2 text-slate-400" /> PDF Document
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleDownloadWord} disabled={!hasOutput || loadingContext}>
+                  <FileText className="w-3.5 h-3.5 mr-2 text-slate-400" /> Word Document
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Primary action */}
+            {!previewOnly && (
+              <Button
+                size="sm"
+                className="h-8 px-4 text-xs font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md rounded-lg shrink-0"
+                onClick={handleSaveToDb}
+                disabled={!hasOutput || loadingContext || isSaving}
               >
-                {/* Page break guides */}
-                {Array.from({ length: totalPages - 1 }, (_, i) => (
-                  <div 
-                    key={`pb-${i}`}
-                    className="absolute left-0 right-0 pointer-events-none z-10"
-                    style={{ top: (i + 1) * PAGE_HEIGHT_PX }}
-                  >
-                    <div className="border-t border-dashed border-slate-300/60" style={{ marginLeft: 48, marginRight: 48 }} />
-                  </div>
-                ))}
-
-                {/* Contract content. No outer padding here - applyThemeToHtml's
-                    .contract-theme-X wrapper already carries its own 48px
-                    padding (see themeEngine.ts), and both the print and Word
-                    export paths already rely on that being the only page
-                    margin (zeroing it out and supplying their own via @page).
-                    An outer p-12 here just stacked a second, redundant 48px
-                    on top of it for the on-screen preview only, doubling the
-                    margin to 96px on every side. */}
-                <div className="text-[14.5px] leading-relaxed relative z-0">
-                  <div dangerouslySetInnerHTML={{ __html: themedHtml }} />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Docked Pagination Footer */}
-      {hasOutput && !loadingContext && (
-        <div className="shrink-0 flex items-center justify-center gap-2.5 px-4 py-2 border-t border-slate-200/70 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur z-10">
-          <div className="flex items-center h-8 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
-            <button onClick={() => scrollToPage(1)} disabled={currentPage <= 1} title="First page" className="w-8 h-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors border-r border-slate-100 dark:border-slate-800">
-              <ChevronsLeft className="w-4 h-4" />
-            </button>
-            <button onClick={() => scrollToPage(currentPage - 1)} disabled={currentPage <= 1} title="Previous page" className="w-8 h-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-          </div>
-
-          <span className="text-xs font-medium text-slate-600 dark:text-slate-300 tabular-nums">
-            Page <span className="text-slate-900 dark:text-white font-bold">{currentPage}</span> / {totalPages}
-          </span>
-
-          <div className="flex items-center h-8 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
-            <button onClick={() => scrollToPage(currentPage + 1)} disabled={currentPage >= totalPages} title="Next page" className="w-8 h-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
-              <ChevronRight className="w-4 h-4" />
-            </button>
-            <button onClick={() => scrollToPage(totalPages)} disabled={currentPage >= totalPages} title="Last page" className="w-8 h-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors border-l border-slate-100 dark:border-slate-800">
-              <ChevronsRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
+                {isSaving ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-2" />}
+                Generate
+              </Button>
+            )}
+          </>
+        }
+      />
 
       <ContractThemePanel
         open={themePanelOpen}
@@ -855,89 +685,6 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
         settings={themeSettings}
         onChange={updateThemeSettings}
       />
-
-      <div
-        className="absolute top-0 left-0 pointer-events-none z-[-1] opacity-0"
-        aria-hidden="true"
-      >
-        <div
-          ref={contentMeasureRef}
-          className="bg-white"
-          style={{ width: PAGE_WIDTH_PX }}
-        >
-          {/* Must stay padding-identical to the visible canvas copy above -
-              this is what pagination height is measured from. */}
-          <div className="text-[14.5px] leading-relaxed">
-            <div dangerouslySetInnerHTML={{ __html: themedHtml }} />
-          </div>
-        </div>
-      </div>
-    </div>
-
-    {/* Print-only area, portaled straight to document.body rather than left
-        in place. ContractPreview is nested many layers deep inside the full
-        Employment Contracts page (entities sidebar, the Data & Values
-        panel, react-resizable-panels' Panel/PanelGroup wrappers, the page's
-        own h-[calc(100vh-1rem)] overflow-hidden root, ...). The classic
-        "print just this element" trick (visibility:hidden on body *,
-        visibility:visible + position:absolute on the target) still gets
-        clipped in a tree like this: an absolutely positioned element's
-        containing block is its nearest positioned ancestor, and if any
-        overflow-hidden wrapper sits between here and <body> (several do),
-        the print area gets cropped to that ancestor's fixed pixel height
-        instead of showing the whole document. Portaling to document.body
-        makes it a true sibling of the entire app root, so there is no
-        overflow-hidden/position ancestor left to clip it. */}
-    {typeof document !== 'undefined' && createPortal(
-      <>
-        <style>{`
-          @media print {
-            /* 0.5in (48px) page margin - matches the Word export's @page
-               WordSection1 margin below, and both match the on-screen
-               preview's own single 48px gutter (applyThemeToHtml's
-               .contract-theme-X padding), so what you see in the preview,
-               the PDF, and the Word doc all agree. This used to be 1in,
-               which was fine as a standalone value but ran noticeably wider
-               than the (correctly tighter) on-screen preview once that was
-               fixed to stop doubling its own padding - lets the browser's
-               print engine put a consistent gap at the top and bottom of
-               every physical page, which is what actually makes multi-page
-               breaks look deliberate instead of content being cut off flush
-               against the page edge. Before that, this was margin:0,
-               relying solely on applyThemeToHtml's one-time 48px padding
-               around the whole flowing document - since that padding only
-               wraps the start/end of the content, not each page, every page
-               after the first began right at the very top edge with zero
-               breathing room. */
-            @page { size: A4; margin: 0.5in; }
-            html, body { margin: 0; height: auto !important; overflow: visible !important; }
-            body > * { visibility: hidden !important; }
-            .ec-print-area, .ec-print-area * { visibility: visible !important; }
-            .ec-print-area {
-              position: absolute !important;
-              top: 0; left: 0;
-              width: 100% !important;
-              height: auto !important;
-              margin: 0;
-              overflow: visible !important;
-            }
-            /* Zero out applyThemeToHtml's own inline padding/max-width for
-               print specifically - @page above already supplies the page
-               margin on every page, so leaving the theme's 48px padding in
-               place too would double the whitespace at the top of page 1. */
-            .ec-print-area [class^="contract-theme-"] {
-              padding: 0 !important;
-              max-width: 100% !important;
-              margin: 0 !important;
-            }
-          }
-        `}</style>
-        <div ref={printAreaRef} className="hidden print:block ec-print-area bg-white text-black">
-          <div dangerouslySetInnerHTML={{ __html: exportThemedHtml }} />
-        </div>
-      </>,
-      document.body
-    )}
-  </>
+    </>
   );
 }

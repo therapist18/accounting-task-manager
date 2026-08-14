@@ -31,11 +31,12 @@ export function getVerifiedDateLabel(): string {
 // untouched.
 export function toWordSafeFontStack(fontFamily: string): string {
   return fontFamily
-    .replace(/['"]?\bInter\b['"]?/gi, "'Arial'")
-    .replace(/['"]?\bOutfit\b['"]?/gi, "'Arial'")
-    .replace(/['"]?\bRoboto\b['"]?/gi, "'Arial'")
-    .replace(/['"]?\bPoppins\b['"]?/gi, "'Arial'")
-    .replace(/['"]?\bLato\b['"]?/gi, "'Arial'")
+    .replace(/['"]?\bInter\b['"]?/gi, "'Calibri'")
+    .replace(/['"]?\bOutfit\b['"]?/gi, "'Calibri'")
+    .replace(/['"]?\bRoboto\b['"]?/gi, "'Calibri'")
+    .replace(/['"]?\bPoppins\b['"]?/gi, "'Calibri'")
+    .replace(/['"]?\bLato\b['"]?/gi, "'Calibri'")
+    .replace(/['"]?\bArial\b['"]?/gi, "'Calibri'")
     .replace(/['"]?\bMerriweather\b['"]?/gi, "'Georgia'")
-    .replace(/['"]?\bEB Garamond\b['"]?/gi, "'Georgia'");
+    .replace(/['"]?\bEB Garamond\b['"]?/gi, "'Georgia'") + ", 'Calibri', sans-serif";
 }

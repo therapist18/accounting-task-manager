@@ -1,3 +1,5 @@
+// tableOfContents.ts
+
 // Regex-based (not DOMParser) so this runs identically during SSR and in
 // the browser - the template's <h2> sections are typed freeform by the
 // admin (no fixed CONTRACT_SECTIONS list to drive a ToC off, unlike
@@ -10,7 +12,7 @@ function stripTags(html: string): string {
 
 // Assigns id="section-N" to every <h2> (overwriting any id already there, so
 // re-running this after a content edit doesn't drift out of sync with the
-// ToC's own links) and inserts a generated <nav class="cc-toc"> right after
+// ToC's own links) and inserts a generated <nav class="cs-toc"> right after
 // the document's <h1> title - or at the very top if there's no h1.
 export function withTableOfContents(html: string): string {
   if (!html) return html;
@@ -21,13 +23,30 @@ export function withTableOfContents(html: string): string {
     index += 1;
     const id = `section-${index}`;
     const title = stripTags(inner);
-    items.push(`<li class="cc-toc-item"><a class="cc-toc-link" href="#${id}">${title}</a></li>`);
+    
+    // <div>, not <li> - see the module comment: an <ol>/<li> ToC list
+    // doubles up in the exported .doc because Word generates its own list
+    // numbering for <ol> regardless of the `list-style: none` that
+    // suppresses it in a browser, stacking on top of this cs-toc-num span.
+    items.push(
+        `<div class="cs-toc-item">
+            <a class="cs-toc-link" href="#${id}">
+                <span class="cs-toc-num">${index}.</span> 
+                <span class="cs-toc-text">${title}</span>
+            </a>
+        </div>`
+    );
     const attrsWithoutId = String(attrs).replace(/\s+id="[^"]*"/i, '');
     return `<h2${attrsWithoutId} id="${id}">${inner}</h2>`;
   });
 
   if (items.length === 0) return html;
 
-  const toc = `<nav class="cc-toc"><div class="cc-toc-heading">Table of Contents</div><ol class="cc-toc-list">${items.join('')}</ol></nav>`;
+  const toc = `
+    <nav class="cs-toc">
+        <div class="cs-toc-heading">Table of Contents</div>
+        <div class="cs-toc-list">${items.join('')}</div>
+    </nav>`;
+    
   return /<\/h1>/i.test(withIds) ? withIds.replace(/<\/h1>/i, `</h1>${toc}`) : toc + withIds;
 }

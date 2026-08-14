@@ -14,7 +14,7 @@ import { fetchPlaceholders, EcPlaceholder } from '../employment-contracts/utils/
 import { resolveEcPlaceholderValues } from '../employment-contracts/utils/masterFieldResolver';
 import { detectTokens } from './utils/placeholderDetection';
 import { fetchLatestEngagement, createEngagement, updateEngagement, CcEngagement } from './utils/ccEngagements';
-import { DEFAULT_CC_THEME, type CcThemeName } from './utils/themeEngine';
+import { ContractThemeSettings, DEFAULT_CONTRACT_THEME } from './utils/themeEngine';
 
 export default function ConsultancyContractsPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -106,12 +106,16 @@ export default function ConsultancyContractsPage() {
   };
 
   // Persisted on cc_templates.theme_settings - a platform-wide choice, not
-  // per-company, matching the "one standard format" design.
-  const theme: CcThemeName = (template?.theme_settings?.theme as CcThemeName) || DEFAULT_CC_THEME;
-  const handleThemeChange = async (next: CcThemeName) => {
+  // per-company, matching the "one standard format" design. Reuses
+  // Employment Contracts' own theme engine/settings shape wholesale (see
+  // employment-contracts/utils/themeEngine.ts) rather than a second one.
+  const themeSettings: ContractThemeSettings = (template?.theme_settings && Object.keys(template.theme_settings).length > 0)
+    ? (template.theme_settings as ContractThemeSettings)
+    : DEFAULT_CONTRACT_THEME;
+  const handleThemeChange = async (next: ContractThemeSettings) => {
     if (!template) return;
-    setTemplate({ ...template, theme_settings: { ...template.theme_settings, theme: next } });
-    const updated = await updateTemplate(template.id, { theme_settings: { ...template.theme_settings, theme: next } });
+    setTemplate({ ...template, theme_settings: next });
+    const updated = await updateTemplate(template.id, { theme_settings: next });
     if (!updated) toast.error('Failed to save theme');
   };
 
@@ -245,7 +249,7 @@ export default function ConsultancyContractsPage() {
               resolvedValues={resolvedValues}
               overrides={overrides}
               engagement={engagement}
-              theme={theme}
+              themeSettings={themeSettings}
               onThemeChange={handleThemeChange}
               saving={saving}
               onSave={handleSave}

@@ -112,7 +112,7 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     ul, ol { margin-bottom: 16px; padding-left: 24px; }
     li { margin-bottom: 8px; }
     table { width: 100%; border-collapse: collapse; margin: 24px 0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03); border: 1px solid #e2e8f0; }
-    th, td { border-bottom: 1px solid #e2e8f0; padding: 10px 14px; text-align: left; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 10px 14px; text-align: left; line-height: 1.4; }
     th { background-color: ${primaryColor}; color: #ffffff; font-weight: 600; font-size: 10pt; text-transform: uppercase; letter-spacing: 0.05em; }
     tr:nth-child(even) td { background-color: #f8fafc; }
     tr:last-child td { border-bottom: none; }
@@ -136,7 +136,7 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     p.no-indent { text-indent: 0; }
     ol { list-style-type: upper-roman; padding-left: 48px; margin-bottom: 24px; }
     table { width: 100%; border-collapse: collapse; margin: 24px 0; border: 2px solid ${primaryColor}; }
-    th, td { border: 1px solid ${primaryColor}; padding: 10px 14px; vertical-align: top; }
+    th, td { border: 1px solid ${primaryColor}; padding: 10px 14px; vertical-align: top; line-height: 1.4; }
     th { font-weight: bold; text-transform: uppercase; font-size: 10pt; text-align: center; background: #f5f5f5; }
     .signature-block { margin-top: 80px; display: flex; justify-content: space-between; gap: 40px; }
     .signature-column { flex: 1; }
@@ -154,7 +154,7 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     h3 { color: ${accentColor}; font-weight: 600; font-size: ${11.5 * fontScale}pt; margin-top: 24px; margin-bottom: 10px; background: ${accentColor}10; display: inline-block; padding: 4px 12px; border-radius: 20px; }
     p { margin-bottom: 18px; }
     table { width: 100%; border-collapse: separate; border-spacing: 0; margin: 24px 0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); border: 1px solid #f3f4f6; }
-    th, td { padding: 10px 14px; text-align: left; }
+    th, td { padding: 10px 14px; text-align: left; line-height: 1.4; }
     th { background-color: #f9fafb; color: ${primaryColor}; font-weight: 700; font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e5e7eb; }
     td { border-bottom: 1px solid #f3f4f6; }
     tr:last-child td { border-bottom: none; }
@@ -175,7 +175,7 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     h3 { color: ${accentColor}; font-style: italic; font-weight: normal; font-size: ${12 * fontScale}pt; margin-top: 24px; margin-bottom: 12px; }
     p { margin-bottom: 20px; text-align: justify; }
     table { width: 100%; border-collapse: collapse; margin: 24px 0; border-top: 2px solid ${primaryColor}; border-bottom: 2px solid ${primaryColor}; }
-    th, td { border-bottom: 1px solid #e2e8f0; padding: 10px 14px; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 10px 14px; line-height: 1.4; }
     th { font-weight: 700; color: ${primaryColor}; text-transform: uppercase; font-size: 9pt; letter-spacing: 0.1em; background: #f8fafc; }
     .signature-block { margin-top: 88px; display: flex; justify-content: space-around; gap: 40px; }
     .signature-column { flex: 1; max-width: 45%; }
@@ -192,7 +192,7 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     h3 { font-weight: 400; font-size: ${10.5 * fontScale}pt; margin-top: 24px; margin-bottom: 8px; color: ${accentColor}; text-transform: uppercase; letter-spacing: 0.05em; }
     p { margin-bottom: 20px; color: #3f3f46; font-weight: 300; }
     table { width: 100%; border-collapse: collapse; margin: 24px 0; }
-    th, td { border-bottom: 1px solid #e4e4e7; padding: 10px 14px; text-align: left; }
+    th, td { border-bottom: 1px solid #e4e4e7; padding: 10px 14px; text-align: left; line-height: 1.4; }
     th { font-weight: 500; color: #a1a1aa; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.1em; }
     .signature-block { margin-top: 80px; display: flex; gap: 64px; }
     .signature-column { flex: 1; }
@@ -206,11 +206,11 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     font-size: ${11 * fontScale}pt;
     text-align: justify;
     h1 { text-align: center; font-weight: 700; font-size: ${20 * fontScale}pt; text-transform: uppercase; letter-spacing: 0.1em; color: ${primaryColor}; margin-bottom: 40px; }
-    h2 { color: #ffffff; background: ${primaryColor}; font-weight: 700; font-size: ${12 * fontScale}pt; padding: 8px 16px; margin: 40px 0 20px; letter-spacing: 0.05em; text-transform: uppercase; }
+    h2 { color: #ffffff; background: ${primaryColor}; font-weight: 700; font-size: ${12 * fontScale}pt; padding: 0; border: 8px solid ${primaryColor}; border-left-width: 16px; border-right-width: 16px; margin: 40px 0 20px; letter-spacing: 0.05em; text-transform: uppercase; }
     h3 { font-weight: 700; font-size: ${11.5 * fontScale}pt; color: ${accentColor}; margin-top: 24px; margin-bottom: 12px; }
     p { margin-bottom: 18px; }
     table { width: 100%; border-collapse: collapse; margin: 24px 0; box-shadow: 0 0 0 1px #e5e7eb; }
-    th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+    th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #e5e7eb; line-height: 1.4; }
     th { font-weight: 700; font-size: 9.5pt; text-transform: uppercase; color: ${primaryColor}; background: #f9fafb; border-bottom: 2px solid ${primaryColor}; }
     .signature-block { margin-top: 72px; display: flex; justify-content: space-between; gap: 48px; }
     .signature-column { flex: 1; border-top: 1px solid #e5e7eb; padding-top: 24px; }
@@ -227,7 +227,7 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     h3 { color: ${primaryColor}; font-weight: 900; font-size: ${12 * fontScale}pt; margin-top: 24px; margin-bottom: 12px; text-transform: uppercase; border-bottom: 4px solid ${accentColor}; display: inline-block; }
     p { margin-bottom: 20px; font-weight: 500; }
     table { width: 100%; border-collapse: collapse; margin: 24px 0; border: 4px solid #000000; box-shadow: 8px 8px 0px ${accentColor}; background: #ffffff; }
-    th, td { padding: 10px 14px; text-align: left; border: 2px solid #000000; }
+    th, td { padding: 10px 14px; text-align: left; border: 2px solid #000000; line-height: 1.4; }
     th { background: ${primaryColor}; color: #ffffff; font-weight: 900; font-size: 10pt; text-transform: uppercase; letter-spacing: 0.05em; }
     .signature-block { margin-top: 80px; display: flex; gap: 40px; }
     .signature-column { flex: 1; border: 4px solid #000000; padding: 24px; box-shadow: 8px 8px 0px ${accentColor}; background: #ffffff; }
@@ -246,7 +246,7 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     p { margin-bottom: 24px; text-align: justify; }
     p:first-of-type::first-letter { font-size: 4.5em; font-weight: 400; float: left; line-height: 0.8; padding-right: 16px; padding-top: 8px; color: ${primaryColor}; }
     table { width: 100%; border-collapse: collapse; margin: 24px 0; }
-    th, td { padding: 10px 14px; border-bottom: 1px solid #e7e5e4; text-align: left; }
+    th, td { padding: 10px 14px; border-bottom: 1px solid #e7e5e4; text-align: left; line-height: 1.4; }
     th { font-weight: 600; font-style: italic; color: ${primaryColor}; font-size: 11pt; border-bottom: 2px solid ${accentColor}; }
     .signature-block { margin-top: 88px; display: flex; justify-content: space-between; gap: 64px; }
     .signature-column { flex: 1; text-align: center; }
@@ -305,8 +305,8 @@ const THEME_TOC_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = 
     .cs-toc-num { font-weight: 500; margin-right: 8px; color: ${accentColor}; }
   `,
   letterhead: ({ primaryColor, accentColor }) => `
-    .cs-toc { margin-bottom: 32px; box-shadow: 0 0 0 1px #e5e7eb; }
-    .cs-toc-heading { font-size: 10.5pt; font-weight: 700; padding: 8px 16px; margin: 0; color: #ffffff; background: ${primaryColor}; text-transform: uppercase; letter-spacing: 0.05em; }
+    .cs-toc { margin-bottom: 32px; border: 1px solid #e5e7eb; }
+    .cs-toc-heading { font-size: 10.5pt; font-weight: 700; padding: 0; border: 8px solid ${primaryColor}; border-left-width: 16px; border-right-width: 16px; margin: 0; color: #ffffff; background: ${primaryColor}; text-transform: uppercase; letter-spacing: 0.05em; }
     .cs-toc-list { list-style: none; margin: 0; padding: 8px 0; }
     .cs-toc-item { margin: 0; }
     .cs-toc-link { display: block; padding: 5px 16px; text-decoration: none; color: inherit; font-size: 10.5pt; border-bottom: 1px solid #f3f4f6; }
@@ -416,12 +416,44 @@ function flattenNestedCss(rootSelector: string, css: string): string {
   return [`${rootSelector} { ${baseDecls.trim()} }`, ...rules].join('\n');
 }
 
-// The .doc export can't pull webfonts down the way a browser can - a family
-// that isn't installed on the machine opening the file silently falls back to
-// Word's default (typically Arial), which reads as "the theme font got reset".
-// toWordSafeFontStack (shared from lib/documentTheme.ts) remaps web-only faces
-// (Inter, Outfit, Merriweather, EB Garamond) to their closest installed-system
-// equivalent for Word output.
+// Word's HTML filter only reads block-element spacing through its own mso-*
+// directives - plain CSS `padding`/`margin` on a block element is ignored,
+// which is why the themed headings and ToC looked compressed in the .doc
+// export (all their breathing room was plain CSS padding/margin). Restate
+// every px padding/margin as the matching mso directive in points (0.75pt
+// per px, the same ratio the rest of the theme uses): shorthand
+// `padding: X Y;` becomes `mso-padding-alt`, longhand `padding-bottom: 6px;`
+// becomes `mso-padding-bottom-alt`, and likewise `margin-*` →
+// `mso-margin-*-alt` (Word's paragraph space-before/space-after properties).
+// Non-px values (%, em, auto, ...) are left untouched rather than guessed.
+function addMsoSpatialAlt(css: string): string {
+  const toPt = (v: string): string | null => {
+    if (v === '0') return '0pt';
+    const m = /^(-?\d*\.?\d+)px$/.exec(v);
+    return m ? `${(parseFloat(m[1]) * 0.75).toFixed(1)}pt` : null;
+  };
+
+  let out = css.replace(/padding:\s*([^;]+);/g, (full, rawValue: string) => {
+    const tokens = rawValue.trim().split(/\s+/);
+    if (tokens.length < 1 || tokens.length > 4) return full;
+    const pts = tokens.map(toPt);
+    if (pts.some((p) => p === null)) return full;
+    const [a, b, c, d] = pts as string[];
+    const top = a, right = b ?? a, bottom = c ?? a, left = d ?? b ?? a;
+    return `${full} mso-padding-alt: ${top} ${right} ${bottom} ${left};`;
+  });
+
+  out = out.replace(
+    /(margin|padding)-(top|right|bottom|left):\s*(-?\d*\.?\d+)px\s*;/g,
+    (_full, prop: string, side: string, px: string) => {
+      const pt = (parseFloat(px) * 0.75).toFixed(1);
+      return `${_full} mso-${prop}-${side}-alt: ${pt}pt;`;
+    }
+  );
+
+  return out;
+}
+
 function makeWordSafe(css: string, rootSelector: string, fontFamily: string): string {
   const wordSafeFont = toWordSafeFontStack(fontFamily);
   const withHeadingFix = css
@@ -438,12 +470,15 @@ function makeWordSafe(css: string, rootSelector: string, fontFamily: string): st
     // never invokes its built-in Heading style machinery to fight it.
     .replace(/\bh([1-3])\b/g, '.mso-h$1');
 
+  const withPadding = addMsoSpatialAlt(withHeadingFix);
+
   // Word's HTML importer doesn't reliably cascade an inherited font-family
   // down through arbitrary nesting depth the way a browser does - rather
   // than trust inheritance from the single root rule above, restate it
-  // explicitly on every text-bearing element (remapped to an installed font
+  // explicitly on every text-bearing element (remapped to a Word-safe stack
   // via toWordSafeFontStack) so the chosen theme font survives the .doc
-  // round-trip instead of silently falling back to Word's own default.
+  // round-trip instead of silently falling back to whatever Word picks on
+  // its own.
   const fontOverride = `${rootSelector} .mso-h1, ${rootSelector} .mso-h2, ${rootSelector} .mso-h3, ${rootSelector} p, ${rootSelector} li, ${rootSelector} td, ${rootSelector} th, ${rootSelector} div, ${rootSelector} span, ${rootSelector} a { font-family: ${wordSafeFont}; }`;
 
   // mso-table-lspace/rspace strip the extra side padding Word otherwise adds
@@ -455,7 +490,7 @@ function makeWordSafe(css: string, rootSelector: string, fontFamily: string): st
   // huge empty gap beside a short value and reads as oversized.
   const tableFix = `${rootSelector} table { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }`;
 
-  return `${withHeadingFix}\n${fontOverride}\n${tableFix}`;
+  return `${withPadding}\n${fontOverride}\n${tableFix}`;
 }
 
 export function applyThemeToHtml(content: string, settings: ContractThemeSettings, options?: { wordSafe?: boolean }): string {
