@@ -199,17 +199,6 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     selectedJobProfile, offer ? { section_clauses: offer.section_clauses_overrides } : null,
   ]), [selectedJobProfile, offer]);
 
-  // Temporary diagnostic logging for the clause-resolution cascade - remove
-  // once the no-inheritance behavior is confirmed working end to end.
-  useEffect(() => {
-    console.log('[ContractPreview] clause resolution', {
-      selectedJobProfile_section_clauses: selectedJobProfile?.section_clauses,
-      offer_section_clauses_overrides: offer?.section_clauses_overrides,
-      effectiveClauses,
-      unresolvedSections: CONTRACT_SECTIONS.map((s) => s.key).filter((k) => !effectiveClauses[k]),
-    });
-  }, [selectedJobProfile, offer, effectiveClauses]);
-
   const { ecPlaceholders, masterFieldValues, isResolving: isResolvingMasterFields, refresh: refreshMasterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
 
   // The toolbar's refresh button used to only re-run refreshMasterFieldValues,
@@ -364,7 +353,16 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
         const div = doc.createElement('div');
         for (const attr of Array.from(h.attributes)) div.setAttribute(attr.name, attr.value);
         div.className = `mso-${h.tagName.toLowerCase()} ${div.className || ''}`.trim();
-        div.style.fontFamily = wordSafeFont;
+        // Appended as a plain string rather than via the `.style.fontFamily =`
+        // CSSOM setter - that setter forces a re-parse/re-serialize of
+        // whatever style attribute was just copied from the original heading,
+        // which rewrites hex colors to rgb(...) (Word's importer only
+        // reliably reads hex) and can leave the attribute malformed enough
+        // that Word drops it entirely instead of just the font (confirmed as
+        // the cause of the CV Generator's export losing its theme font/color
+        // - see the identical fix in cv-generator/page.tsx's buildCvWordOutput).
+        const existingStyle = div.getAttribute('style');
+        div.setAttribute('style', `${existingStyle ? `${existingStyle};` : ''}font-family: ${wordSafeFont};`);
         while (h.firstChild) div.appendChild(h.firstChild);
         h.replaceWith(div);
       });

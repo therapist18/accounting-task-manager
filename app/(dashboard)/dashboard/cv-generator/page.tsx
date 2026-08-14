@@ -10,8 +10,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { printElementAsPdf, downloadHtmlAsWord } from "@/lib/documentExport";
+import { printElementAsPdf, buildWordDocBlob, downloadBlob } from "@/lib/documentExport";
 import { buildCvDocument } from "@/lib/cvThemeEngine";
+import { type DocumentViewerHandle } from "@/components/contracts/DocumentViewer";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase/client";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
@@ -46,10 +47,20 @@ import {
   mergeAiEnhancedCv,
 } from "./utils/cvGeneratorData";
 
+// Pulls one flattened, scoped declaration block out of buildCvDocument's
+// word-safe stylesheet so its declarations can be copied onto the matching
+// element verbatim - same helper Employment Contracts' ContractPreview.tsx
+// keeps at file scope for the identical purpose.
+function extractCssRule(css: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = css.match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'));
+  return match ? match[1].trim() : '';
+}
+
 export default function CVGeneratorPage() {
   const [cvData, setCvData] = useState<CvData>(initialCVData);
   const [mobileView, setMobileView] = useState<'edit' | 'preview'>('edit');
-  const [selectedLayout, setSelectedLayout] = useState<string>("theme1");
+  const [selectedLayout, setSelectedLayout] = useState<string>("corporate");
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
   const [extractionProgress, setExtractionProgress] = useState<string>("");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
@@ -68,7 +79,7 @@ export default function CVGeneratorPage() {
   const [isSavingCv, setIsSavingCv] = useState(false);
   const [applicantId, setApplicantId] = useState<string | null>(null);
   const [linkedIndividualId, setLinkedIndividualId] = useState<number | null>(null);
-  const previewRef = useRef<any>(null);
+  const previewRef = useRef<DocumentViewerHandle>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -119,7 +130,7 @@ export default function CVGeneratorPage() {
   // Load from localStorage after mount to avoid hydration mismatch
   useEffect(() => {
     const savedCvData = loadFromLocalStorage('cvData', initialCVData);
-    const savedLayout = loadFromLocalStorage('selectedLayout', 'theme1');
+    const savedLayout = loadFromLocalStorage('selectedLayout', 'corporate');
     const savedGroups = loadFromLocalStorage('collapsedGroups', {});
     const savedVersions = loadFromLocalStorage('cvVersions', []);
     const savedDrafts = loadFromLocalStorage('cvDrafts', []);
@@ -1472,8 +1483,14 @@ export default function CVGeneratorPage() {
     }
   };
 
+  // Mirrors Employment Contracts' ContractPreview.tsx handleDownloadPdf: the
+  // print target is always the DocumentViewer's portaled print area, already
+  // a direct child of document.body (see DocumentViewer.tsx's createPortal),
+  // so no detach/bodyClassName juggling is needed here - that's only for the
+  // Advanced Export modal's ATS variant, which prints a container it built
+  // itself outside the DocumentViewer.
   const handleDownloadPdf = async () => {
-    const element = previewRef.current?.getPrintArea ? previewRef.current.getPrintArea() : previewRef.current;
+    const element = previewRef.current?.getPrintArea() ?? null;
     if (!element) return;
 
     setIsDownloadingPdf(true);
@@ -1490,14 +1507,9 @@ export default function CVGeneratorPage() {
     const fileName = [applicantName, age, 'REF', rec, prof].filter(Boolean).join('_');
 
     try {
-      // The shared helper waits for the theme font/images, moves the preview
-      // to <body> for print (globals.css's body.pdf-mode handles the rest),
-      // and reliably restores the DOM + title afterwards.
       await printElementAsPdf({
         element,
         fileName,
-        bodyClassName: "pdf-mode",
-        detach: true,
         onCleanup: () => setIsDownloadingPdf(false),
       });
     } catch (error: any) {
@@ -1507,25 +1519,79 @@ export default function CVGeneratorPage() {
     }
   };
 
+  // Mirrors Employment Contracts' ContractPreview.tsx buildOutput(): the
+  // themed HTML/CSS is already word-safe at the CSS level (buildCvDocument's
+  // `wordSafe` option handles font substitution + the mso-* fallback
+  // declarations), but Word's HTML import filter also needs a DOM-level pass -
+  // it forces its own built-in Heading style onto real h1-h6 tags no matter
+  // what the CSS says, and ignores a <table>'s CSS width/padding in favor of
+  // legacy cellpadding/cellspacing/width attributes - so that pass happens
+  // here, in the calling component, exactly where Employment Contracts
+  // performs the equivalent fixups.
+  const buildCvWordOutput = async (): Promise<{ blob: Blob; fileName: string } | null> => {
+    const doc = await buildCvDocument(cvData, cvSettings, selectedLayout, { wordSafe: true });
+    let bodyContent = doc.bodyHtml;
+
+    if (typeof DOMParser !== 'undefined') {
+      const parser = new DOMParser();
+      const parsed = parser.parseFromString(`<div>${bodyContent}</div>`, 'text/html');
+
+      parsed.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((h) => {
+        const div = parsed.createElement('div');
+        for (const attr of Array.from(h.attributes)) div.setAttribute(attr.name, attr.value);
+        div.className = `mso-${h.tagName.toLowerCase()} ${div.className || ''}`.trim();
+        // Some headings (the CV name/title) already carry an inline
+        // style="color:..." baked in by assembleLayout() as a "second line of
+        // defense" color. Appending via the `.style.fontFamily =` CSSOM
+        // setter forces the browser to re-parse and re-serialize that WHOLE
+        // copied style attribute - which rewrites hex colors to rgb(...)
+        // (Word's importer only reliably reads hex) and can leave duplicate/
+        // malformed declarations behind, causing Word to silently drop the
+        // entire style attribute rather than just the font. Appending the
+        // property as a plain string sidesteps the CSSOM entirely.
+        const existingStyle = div.getAttribute('style');
+        div.setAttribute('style', `${existingStyle ? `${existingStyle};` : ''}font-family: ${doc.fontFamily};`);
+        while (h.firstChild) div.appendChild(h.firstChild);
+        h.replaceWith(div);
+      });
+
+      parsed.querySelectorAll('table').forEach((table) => {
+        table.setAttribute('cellpadding', '0');
+        table.setAttribute('cellspacing', '0');
+        table.setAttribute('width', '100%');
+      });
+
+      // Inline the CSS rules onto the headings to guarantee they win over Word's defaults.
+      parsed.querySelectorAll('.mso-h1, .mso-h2, .mso-h3, .mso-h4, .mso-h5, .mso-h6').forEach((h) => {
+        const tagMatch = h.className.match(/mso-(h[1-6])/);
+        if (!tagMatch) return;
+        const tag = tagMatch[1];
+        const baseDecls = extractCssRule(doc.css, `.cv-theme .mso-${tag}`);
+        const themeDecls = extractCssRule(doc.css, `.cv-theme-${doc.layout} .mso-${tag}`);
+        const prev = h.getAttribute('style') ? `${h.getAttribute('style')};` : '';
+        h.setAttribute('style', `${prev}${baseDecls ? `; ${baseDecls}` : ''}${themeDecls ? `; ${themeDecls}` : ''}`.trim());
+      });
+
+      bodyContent = parsed.body.firstElementChild?.innerHTML ?? bodyContent;
+    }
+
+    return {
+      blob: buildWordDocBlob({
+        title: doc.title,
+        html: bodyContent,
+        css: doc.css,
+        pageSize: doc.pageSize,
+        pageMargin: doc.pageMargin,
+      }),
+      fileName: doc.fileName,
+    };
+  };
+
   const handleDownloadDocx = async () => {
     try {
       toast.info("Generating Word document...");
-      // Purpose-built .doc built from the same buildCvDocument source of truth
-      // that drives the on-screen preview (plain HTML tables + flat scoped CSS
-      // via buildWordDocBlob) — same approach the Employment Contracts module
-      // uses, so the downloaded Word file preserves the CV's styling instead
-      // of flattening it.
-      const result = await buildCvDocument(cvData, cvSettings, selectedLayout, {
-        wordSafe: true,
-      });
-      downloadHtmlAsWord({
-        html: result.bodyHtml,
-        title: result.title,
-        css: result.css,
-        pageSize: result.pageSize,
-        pageMargin: result.pageMargin,
-        fileName: result.fileName,
-      });
+      const output = await buildCvWordOutput();
+      if (output) downloadBlob(output.blob, output.fileName);
       toast.success("Word document (.doc) generated successfully!");
     } catch (e: any) {
       console.error(e);

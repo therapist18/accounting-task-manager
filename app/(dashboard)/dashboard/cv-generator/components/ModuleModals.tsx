@@ -5,11 +5,12 @@ import JobMatch from "./JobMatch";
 import CoverLetterGenerator from "./CoverLetter";
 import ResumeVersions from "./ResumeVersions";
 import AdvancedExport from "./AdvancedExport";
+import { type DocumentViewerHandle } from "@/components/contracts/DocumentViewer";
 
 interface ModuleModalsProps {
   cvData: any;
   setCvData: (updater: any) => void;
-  previewRef: React.RefObject<HTMLDivElement>;
+  previewRef: React.RefObject<DocumentViewerHandle | null>;
   showAiWriter: boolean;
   setShowAiWriter: (v: boolean) => void;
   showJobMatch: boolean;
@@ -66,7 +67,7 @@ export function ModuleModals({
       )}
       {showAdvancedExport && (
         <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowAdvancedExport(false); }}>
-          <AdvancedExport cvData={cvData} previewRef={previewRef as React.RefObject<HTMLDivElement>} onClose={() => setShowAdvancedExport(false)} />
+          <AdvancedExport cvData={cvData} previewRef={previewRef} onClose={() => setShowAdvancedExport(false)} />
         </div>
       )}
     </>

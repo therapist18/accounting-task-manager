@@ -15,6 +15,7 @@ import { resolveEcPlaceholderValues } from '../employment-contracts/utils/master
 import { detectTokens } from './utils/placeholderDetection';
 import { fetchLatestEngagement, createEngagement, updateEngagement, CcEngagement } from './utils/ccEngagements';
 import { ContractThemeSettings, DEFAULT_CONTRACT_THEME } from './utils/themeEngine';
+import { useCompanyDirectors } from './hooks/useCompanyDirectors';
 
 export default function ConsultancyContractsPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -26,6 +27,12 @@ export default function ConsultancyContractsPage() {
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [engagement, setEngagement] = useState<CcEngagement | null>(null);
   const [engagementStatuses, setEngagementStatuses] = useState<Record<string, 'draft' | 'active' | 'superseded'>>({});
+  const [selectedDirectorIds, setSelectedDirectorIds] = useState<string[]>([]);
+  const { directors } = useCompanyDirectors(selectedCompanyId);
+  const selectedDirectors = useMemo(
+    () => directors.filter((d) => selectedDirectorIds.includes(d.id)),
+    [directors, selectedDirectorIds]
+  );
 
   const [loadingCompanyData, setLoadingCompanyData] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -75,6 +82,7 @@ export default function ConsultancyContractsPage() {
       setResolvedValues({});
       setOverrides({});
       setEngagement(null);
+      setSelectedDirectorIds([]);
       return;
     }
     let cancelled = false;
@@ -88,6 +96,11 @@ export default function ConsultancyContractsPage() {
       setResolvedValues(values);
       setOverrides(existingEngagement?.placeholder_overrides || {});
       setEngagement(existingEngagement);
+      // A saved engagement's own selection wins; a brand-new engagement has
+      // no saved selection yet (undefined, not an empty array) so the
+      // default-to-all-directors effect below can still populate it once the
+      // company's directors have loaded.
+      setSelectedDirectorIds(existingEngagement?.selected_director_ids || []);
       if (existingEngagement) {
         setEngagementStatuses((prev) => ({ ...prev, [selectedCompanyId]: existingEngagement.status }));
       }
@@ -95,6 +108,17 @@ export default function ConsultancyContractsPage() {
     })();
     return () => { cancelled = true; };
   }, [selectedCompanyId, placeholders]);
+
+  // New engagement (nothing saved yet) for this company: default the
+  // Directors picker to everyone who qualifies, since a signed acknowledgement
+  // normally names every director/shareholder rather than none. Only fires
+  // when there's no engagement row at all - once one exists (even with an
+  // empty selection the admin deliberately cleared), its own value is
+  // authoritative and this must not overwrite it.
+  useEffect(() => {
+    if (!selectedCompanyId || engagement || directors.length === 0) return;
+    setSelectedDirectorIds((prev) => (prev.length > 0 ? prev : directors.map((d) => d.id)));
+  }, [selectedCompanyId, engagement, directors]);
 
   const handleOverrideChange = (key: string, value: string | undefined) => {
     setOverrides((prev) => {
@@ -124,11 +148,12 @@ export default function ConsultancyContractsPage() {
     setSaving(true);
     try {
       const saved = engagement
-        ? await updateEngagement(engagement.id, { placeholder_overrides: overrides })
+        ? await updateEngagement(engagement.id, { placeholder_overrides: overrides, selected_director_ids: selectedDirectorIds })
         : await createEngagement({
             company_id: selectedCompanyId,
             template_id: template?.id ?? null,
             placeholder_overrides: overrides,
+            selected_director_ids: selectedDirectorIds,
             status: 'active',
           });
       if (saved) {
@@ -224,6 +249,9 @@ export default function ConsultancyContractsPage() {
               resolvedValues={resolvedValues}
               overrides={overrides}
               onOverrideChange={handleOverrideChange}
+              directors={directors}
+              selectedDirectorIds={selectedDirectorIds}
+              onDirectorsChange={setSelectedDirectorIds}
             />
           </Panel>
 
@@ -253,6 +281,7 @@ export default function ConsultancyContractsPage() {
               onThemeChange={handleThemeChange}
               saving={saving}
               onSave={handleSave}
+              selectedDirectors={selectedDirectors}
             />
           </Panel>
         </PanelGroup>

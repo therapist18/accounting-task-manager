@@ -9,12 +9,14 @@ import { cn } from '@/lib/utils';
 import { replacePlaceholders } from '../../tasks-requirements/utils/templateFormatters';
 import { downloadBlob, buildWordDocBlob, printElementAsPdf } from '@/lib/documentExport';
 import { withDerivedFeeValues } from '../utils/feeCalculations';
+import { withDirectorsAcknowledgementBlock } from '../utils/directorsBlock';
 import { withTableOfContents } from '../utils/tableOfContents';
 import { saveContractToProfile } from '../utils/kycUpload';
 import { ContractThemePanel } from './ContractThemePanel';
 import { DocumentViewer, type DocumentViewerHandle } from '@/components/contracts/DocumentViewer';
 import type { Company } from '../../companies/database';
 import type { CcEngagement } from '../utils/ccEngagements';
+import type { CompanyDirector } from '../hooks/useCompanyDirectors';
 import { applyThemeToHtml, toWordSafeFontStack , type ContractThemeSettings  } from '../utils/themeEngine';
 
 interface ContractPreviewProps {
@@ -27,6 +29,9 @@ interface ContractPreviewProps {
   onThemeChange: (settings: ContractThemeSettings) => void;
   saving: boolean;
   onSave: () => void;
+  // Directors/shareholders chosen in the Directors picker - rendered into
+  // the Acknowledgement section as {{directors_acknowledgement_block}}.
+  selectedDirectors: CompanyDirector[];
 }
 
 // Turns the themed body into the specific markup Word's HTML import filter
@@ -83,7 +88,7 @@ function toWordExportHtml(bodyHtml: string, settings: ContractThemeSettings): { 
 
 export function ContractPreview({
   company, templateContent, resolvedValues, overrides, engagement,
-  themeSettings, onThemeChange, saving, onSave,
+  themeSettings, onThemeChange, saving, onSave, selectedDirectors,
 }: ContractPreviewProps) {
   const viewerRef = useRef<DocumentViewerHandle>(null);
   const [exporting, setExporting] = useState<'word' | 'pdf' | null>(null);
@@ -91,8 +96,8 @@ export function ContractPreview({
   const [themePanelOpen, setThemePanelOpen] = useState(false);
 
   const mergedValues = useMemo(
-    () => withDerivedFeeValues({ ...resolvedValues, ...overrides }),
-    [resolvedValues, overrides]
+    () => withDirectorsAcknowledgementBlock(withDerivedFeeValues({ ...resolvedValues, ...overrides }), selectedDirectors),
+    [resolvedValues, overrides, selectedDirectors]
   );
 
   // Unthemed body (placeholders resolved + ToC injected) - the shared input

@@ -4,6 +4,7 @@ import { ArrowRight, ChevronDown, ChevronRight, Copy, Crosshair, Download, PenLi
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
 import { CvPreviewPanel } from "../CvPreviewPanel";
+import { type DocumentViewerHandle } from "@/components/contracts/DocumentViewer";
 import type { ComboOption } from "../CreatableCombobox";
 import {
   ContactEditor,
@@ -44,7 +45,7 @@ interface ReviewEditStepProps {
   handleCreateCompany: (label: string) => Promise<string>;
   selectedLayout: string;
   cvSettings: any;
-  previewRef: React.RefObject<HTMLDivElement>;
+  previewRef: React.RefObject<DocumentViewerHandle | null>;
 }
 
 export function ReviewEditStep({

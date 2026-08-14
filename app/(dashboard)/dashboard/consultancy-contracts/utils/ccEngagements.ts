@@ -7,6 +7,10 @@ export interface CcEngagement {
   // Per-company {{token}} value overrides - the only per-company
   // customization this module supports (see plan: "placeholder values only").
   placeholder_overrides: Record<string, string>;
+  // Which of the company's director/shareholder associations (registry_
+  // individuals ids, as strings) are party to the Acknowledgement section -
+  // see hooks/useCompanyDirectors.ts and utils/directorsBlock.ts.
+  selected_director_ids: string[];
   status: 'draft' | 'active' | 'superseded';
   effective_date: string | null;
   created_at: string;

@@ -9,6 +9,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, RotateCcw, Database, PenLine, Building2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { EcPlaceholder } from '../../employment-contracts/utils/ecPlaceholders';
+import { DirectorsPicker } from './DirectorsPicker';
+import type { CompanyDirector } from '../hooks/useCompanyDirectors';
 
 interface DataValuesPanelProps {
   companySelected: boolean;
@@ -19,21 +21,28 @@ interface DataValuesPanelProps {
   // This company's saved overrides (cc_engagements.placeholder_overrides).
   overrides: Record<string, string>;
   onOverrideChange: (key: string, value: string | undefined) => void;
+  // Directors/shareholders picker - see hooks/useCompanyDirectors.ts and
+  // utils/directorsBlock.ts.
+  directors: CompanyDirector[];
+  selectedDirectorIds: string[];
+  onDirectorsChange: (ids: string[]) => void;
 }
 
 // _vat_fee/_gross_fee tokens are always derived from the matching _net_fee
 // value (see utils/feeCalculations.ts) - the admin only ever types the Net
 // figure, so the computed siblings are hidden here rather than inviting a
-// manual entry that gets silently superseded.
-function isComputedFeeKey(key: string): boolean {
-  return key.endsWith('_vat_fee') || key.endsWith('_gross_fee');
+// manual entry that gets silently superseded. directors_acknowledgement_block
+// is likewise fully derived, from the Directors picker below rather than a
+// text field (see utils/directorsBlock.ts).
+function isComputedKey(key: string): boolean {
+  return key.endsWith('_vat_fee') || key.endsWith('_gross_fee') || key === 'directors_acknowledgement_block';
 }
 
-export function DataValuesPanel({ companySelected, loading, placeholders, resolvedValues, overrides, onOverrideChange }: DataValuesPanelProps) {
+export function DataValuesPanel({ companySelected, loading, placeholders, resolvedValues, overrides, onOverrideChange, directors, selectedDirectorIds, onDirectorsChange }: DataValuesPanelProps) {
   const grouped = useMemo(() => {
     const groups = new Map<string, EcPlaceholder[]>();
     for (const p of placeholders) {
-      if (isComputedFeeKey(p.key)) continue;
+      if (isComputedKey(p.key)) continue;
       if (!groups.has(p.group_label)) groups.set(p.group_label, []);
       groups.get(p.group_label)!.push(p);
     }
@@ -61,6 +70,11 @@ export function DataValuesPanel({ companySelected, loading, placeholders, resolv
   return (
     <ScrollArea className="h-full">
       <div className="p-5 space-y-6">
+        <div>
+          <h3 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2.5">Directors / Shareholders</h3>
+          <DirectorsPicker directors={directors} selectedIds={selectedDirectorIds} onChange={onDirectorsChange} />
+        </div>
+
         {grouped.length === 0 && (
           <p className="text-sm text-slate-400 text-center py-8">No placeholders configured yet - add them from Settings.</p>
         )}

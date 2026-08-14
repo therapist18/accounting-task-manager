@@ -3,7 +3,18 @@
 import { Check, Layout, Palette, X } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { COLOR_PRESETS } from "@/lib/documentTheme";
+import type { CvLayout } from "@/lib/cvThemeEngine";
 import type { CvSettings } from "../utils/cvGeneratorData";
+
+// Labels/descriptions for each engine layout, in the order they should appear.
+const CV_LAYOUT_OPTIONS: { key: CvLayout; label: string; desc: string }[] = [
+  { key: "corporate", label: "Corporate", desc: "Fortune 500 split-layout" },
+  { key: "legal", label: "Legal", desc: "Formal, centered header" },
+  { key: "modern", label: "Modern", desc: "Sleek, tech-forward banner" },
+  { key: "minimal", label: "Minimal", desc: "Clean, whitespace heavy" },
+  { key: "letterhead", label: "Letterhead", desc: "Classic stationery banner" },
+  { key: "editorial", label: "Editorial", desc: "Magazine style serif" },
+];
 
 interface DesignPanelProps {
   showDesignPanel: boolean;
@@ -48,17 +59,7 @@ export function DesignPanel({
             <div className="space-y-3">
               <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">CV Layout</span>
               <div className="grid grid-cols-2 gap-2">
-                {[
-                  { key: "theme1", label: "Classic", desc: "Two-column sidebar" },
-                  { key: "theme2", label: "Modern", desc: "Top-header layout" },
-                  { key: "theme3", label: "Minimal", desc: "Single column" },
-                  { key: "theme4", label: "Executive", desc: "Bold leadership" },
-                  { key: "theme5", label: "Creative", desc: "Split accent bar" },
-                  { key: "theme6", label: "Academic", desc: "Scholar format" },
-                  { key: "theme7", label: "Timeline", desc: "Vertical timeline" },
-                  { key: "cv_corporate", label: "Corporate", desc: "Classic corporate style" },
-                  { key: "cv_legal", label: "Legal", desc: "Formal legal style" },
-                ].map(t => (
+                {CV_LAYOUT_OPTIONS.map(t => (
                   <button key={t.key} onClick={() => setSelectedLayout(t.key)}
                     className={`p-2.5 rounded-lg border-2 text-left transition-all ${selectedLayout === t.key ? 'border-custom-blue bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}
                   >

@@ -5,6 +5,7 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CvPreviewPanel } from "../CvPreviewPanel";
+import { type DocumentViewerHandle } from "@/components/contracts/DocumentViewer";
 import { EMPTY_CV_DATA } from "../../utils/cvGeneratorData";
 
 interface ImportStepProps {
@@ -35,7 +36,7 @@ interface ImportStepProps {
   cvData: any;
   cvSettings: any;
   selectedLayout: string;
-  previewRef: React.RefObject<HTMLDivElement>;
+  previewRef: React.RefObject<DocumentViewerHandle | null>;
 }
 
 export function ImportStep({

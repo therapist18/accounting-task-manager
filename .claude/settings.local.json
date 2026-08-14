@@ -122,7 +122,17 @@
       "Bash(grep -ic \"consultancy-contracts\" /tmp/tscout3.txt)",
       "Bash(awk 'NR==15{print length\\($0\\), $0}' \"app/\\(dashboard\\)/dashboard/consultancy-contracts/components/ContractPreview.tsx\")",
       "Bash(rm -f tsconfig.tsbuildinfo)",
-      "Bash(grep -n 'payment_mode}$\\\\|s.payment_mode}</span>' app/sales/page.tsx)"
+      "Bash(grep -n 'payment_mode}$\\\\|s.payment_mode}</span>' app/sales/page.tsx)",
+      "Bash(break)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/dashboard/cv-generator --max-time 5)",
+      "Bash(npx --no-install playwright --version)",
+      "Bash(which chromium-cli; find / -iname \"chromium-cli*\" 2>/dev/null | head -5)",
+      "Bash(node \"C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\e--GitHub-accounting-task-manager\\\\c96c13df-9300-4844-8a7d-dbba0f09af21\\\\scratchpad\\\\cv_themes.js\" \"C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\e--GitHub-accounting-task-manager\\\\c96c13df-9300-4844-8a7d-dbba0f09af21\\\\scratchpad\")",
+      "Bash(tail -80 /tmp/nextdev.log)",
+      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\\\"CommandLine LIKE '%next dev%'\\\\\" | Select-Object ProcessId, CommandLine\")",
+      "PowerShell(Get-NetTCPConnection -State Listen | Where-Object { $_.LocalPort -in 3000,3001,3002,3003,3004 } | Select-Object LocalPort, OwningProcess)",
+      "Bash(npx --no-install playwright screenshot --viewport-size=1400,1100 --wait-for-timeout=15000 --full-page \"http://localhost:3003/dashboard/cv-generator\" \"C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\e--GitHub-accounting-task-manager\\\\c96c13df-9300-4844-8a7d-dbba0f09af21\\\\scratchpad\\\\retry.png\")",
+      "PowerShell(Stop-Process -Id 26356 -Force -Confirm:$false; Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -eq 3003 })"
     ],
     "additionalDirectories": [
       "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals"

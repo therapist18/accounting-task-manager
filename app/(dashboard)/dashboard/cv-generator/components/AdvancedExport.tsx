@@ -4,10 +4,11 @@ import React, { useState } from "react";
 import { X, Download, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { downloadBlob, printElementAsPdf } from "@/lib/documentExport";
+import { type DocumentViewerHandle } from "@/components/contracts/DocumentViewer";
 
 interface AdvancedExportProps {
   cvData: any;
-  previewRef: React.RefObject<HTMLDivElement | null>;
+  previewRef: React.RefObject<DocumentViewerHandle | null>;
   onClose: () => void;
 }
 
@@ -52,12 +53,13 @@ export default function AdvancedExport({ cvData, previewRef, onClose }: Advanced
     }
   };
 
-  // PDFs use the shared printElementAsPdf on the live preview element — the
-  // same element the main "Download PDF" button prints, and the same source of
+  // PDFs use the shared printElementAsPdf on the DocumentViewer's portaled
+  // print area — the same element (and the same unwrap via getPrintArea())
+  // the main "Download PDF" button in page.tsx prints, and the same source of
   // truth (buildCvDocument) that drives the preview, so the exported PDF
   // matches what's on screen instead of a rasterized approximation.
   const exportPdf = async (type: string) => {
-    const element = previewRef.current;
+    const element = previewRef.current?.getPrintArea() ?? null;
     if (!element) throw new Error("Preview not available");
 
     const hidePhoto = type === 'pdf-no-photo';
@@ -66,8 +68,6 @@ export default function AdvancedExport({ cvData, previewRef, onClose }: Advanced
     await printElementAsPdf({
       element,
       fileName: `${baseName()}${suffix}_CV`,
-      bodyClassName: "pdf-mode",
-      detach: true,
       onBeforePrint: () => {
         if (hidePhoto) {
           const style = document.createElement("style");
