@@ -18,7 +18,7 @@ import { SUMMARY_COLUMNS } from "../stageColumnConfig";
 // Matches the bordered, squared-off tab look used across the app (e.g. bcl-task-diary).
 const TAB_LIST_CLASS = "bg-white border border-slate-200 p-1 h-auto rounded-md";
 const TAB_TRIGGER_CLASS = "group gap-2 rounded-md px-4 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors data-[state=active]:bg-custom-blue data-[state=active]:text-white data-[state=active]:shadow-sm";
-const COUNT_BADGE_CLASS = "font-normal tabular-nums px-2 py-0.5 rounded-md text-sm min-w-[1.75rem] text-center bg-custom-blue/10 text-custom-blue group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white";
+const COUNT_BADGE_CLASS = "font-bold tabular-nums px-2 py-1 rounded-md text-sm min-w-[2rem] text-center bg-custom-blue/10 text-custom-blue group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white";
 
 export interface PillTrackItem {
   id: string;
@@ -49,11 +49,11 @@ export function PillTrack({
               value={item.id}
               className={cn(
                 TAB_TRIGGER_CLASS,
-                size === 'sm' ? "h-7 px-3 text-xs" : "h-8 px-4"
+                size === 'sm' ? "h-8 px-3 text-sm" : "h-9 px-4"
               )}
             >
               {Icon ? (
-                <Icon className={cn(size === 'sm' ? "h-3 w-3" : "h-3.5 w-3.5", "text-slate-400 group-data-[state=active]:text-white")} />
+                <Icon className={cn(size === 'sm' ? "h-4 w-4" : "h-4 w-4", "text-slate-400 group-data-[state=active]:text-white")} />
               ) : item.dot ? (
                 <span className={cn("h-2 w-2 rounded-full shrink-0", item.dot)} />
               ) : null}
@@ -128,7 +128,7 @@ function MultiSelectSearchableDropdown({
                     <Check className={cn("mr-3 h-4 w-4 shrink-0 transition-opacity", isSelected ? "opacity-100 text-blue-600" : "opacity-0")} />
                     <span className={cn("flex-1 text-sm font-semibold truncate", isSelected ? "text-slate-900" : "text-slate-600")}>{it.name}</span>
                     {typeof counts[id] === 'number' && counts[id] > 0 && (
-                      <span className="ml-2 shrink-0 text-xs font-black tabular-nums h-5 min-w-5 flex items-center justify-center px-1.5 rounded-full bg-slate-100 text-slate-500">
+                      <span className="ml-2 shrink-0 text-xs font-black tabular-nums h-5 min-w-5 flex items-center justify-center px-1.5 rounded-full bg-blue-100 text-blue-600">
                         {counts[id]}
                       </span>
                     )}
@@ -220,7 +220,7 @@ export function HierarchyTabs({
                       value={activeSubDeptId}
                       onValueChange={handleSubDeptChange}
                       items={[
-                        { id: 'all', label: 'All Sub-units', count: subDeptTaskCounts.all },
+                        { id: 'all', label: 'All Sub-departments', count: subDeptTaskCounts.all },
                         ...subDepartments.map((s: any) => ({ id: s.id.toString(), label: s.name, count: subDeptTaskCounts[s.id.toString()] })),
                       ]}
                     />
@@ -282,11 +282,12 @@ export function StatusTabs({
   // tab looking identical except for label — active tab gets a solid fill in that color,
   // idle tab gets a tinted badge in the same hue so the count stays legible either way.
   const STATUS_ITEMS = [
-    { id: 'all', label: 'All Applications', active: 'data-[state=active]:bg-custom-blue data-[state=active]:text-white', badgeIdle: 'bg-slate-100 text-slate-600' },
+    { id: 'all', label: 'All Tasks', active: 'data-[state=active]:bg-custom-blue data-[state=active]:text-white', badgeIdle: 'bg-custom-blue/10 text-custom-blue' },
+    { id: 'active', label: 'All Enquiry + WIP', active: 'data-[state=active]:bg-indigo-600 data-[state=active]:text-white', badgeIdle: 'bg-indigo-100 text-indigo-700' },
     { id: 'enquiry', label: 'Enquiry', active: 'data-[state=active]:bg-sky-600 data-[state=active]:text-white', badgeIdle: 'bg-sky-100 text-sky-700' },
     { id: 'wip', label: 'WIP', active: 'data-[state=active]:bg-amber-500 data-[state=active]:text-white', badgeIdle: 'bg-amber-100 text-amber-700' },
     { id: 'completed', label: 'Completed', active: 'data-[state=active]:bg-emerald-600 data-[state=active]:text-white', badgeIdle: 'bg-emerald-100 text-emerald-700' },
-    { id: 'overdue', label: 'Overdue', active: 'data-[state=active]:bg-red-600 data-[state=active]:text-white', badgeIdle: 'bg-red-100 text-red-700' },
+    { id: 'overdue', label: 'Overdue Tasks Based on Promised Time', active: 'data-[state=active]:bg-red-600 data-[state=active]:text-white', badgeIdle: 'bg-red-100 text-red-700' },
   ];
 
   const perspectiveCounts = { all: allCount || 0, officers: officersCount || 0, managers: managersCount || 0, clients: clientsCount || 0 };
@@ -314,7 +315,7 @@ export function StatusTabs({
               >
                 {tab.label}
                 <span className={cn(
-                  "font-normal tabular-nums px-2 py-0.5 rounded-md text-sm min-w-[1.75rem] text-center group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white",
+                  "font-bold tabular-nums px-2 py-1 rounded-md text-sm min-w-[2rem] text-center group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white",
                   tab.badgeIdle
                 )}>
                   {counts[tab.id] || 0}
@@ -330,7 +331,7 @@ export function StatusTabs({
           <Tabs value={activePerspective} onValueChange={setActivePerspective}>
             <TabsList className={TAB_LIST_CLASS}>
               {PERSPECTIVES.map(p => (
-                <TabsTrigger key={p.id} value={p.id} className={cn(TAB_TRIGGER_CLASS, "h-8")}>
+                <TabsTrigger key={p.id} value={p.id} className={cn(TAB_TRIGGER_CLASS, "h-9")}>
                   {p.label}
                   <span className={COUNT_BADGE_CLASS}>
                     {perspectiveCounts[p.id]}

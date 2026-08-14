@@ -43,7 +43,7 @@ export const DEFAULT_CONTRACT_THEME: ContractThemeSettings = {
   brandingStrategy: 'theme_header',
 };
 
-import { COLOR_PRESETS, toWordSafeFontStack } from '@/lib/documentTheme';
+import { COLOR_PRESETS, toWordSafeFontStack, makeCssWordSafe } from '@/lib/documentTheme';
 export { COLOR_PRESETS, toWordSafeFontStack };
 
 export const FONT_OPTIONS = [
@@ -77,87 +77,96 @@ const BASE_SECTION_STYLES = `
 `;
 
 const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
-  // Implements the design from the provided Consultancy Agreement images
   consulting_standard: ({ primaryColor, accentColor, fontFamily, fontScale }) => `
     font-family: ${fontFamily};
-    color: #000000;
-    line-height: 1.5;
-    font-size: ${11 * fontScale}pt;
-    h1 { color: ${primaryColor}; font-weight: bold; font-size: ${14 * fontScale}pt; text-transform: uppercase; margin-bottom: 24px; text-align: center; }
-    h2 { color: #000000; font-weight: bold; font-size: ${11.5 * fontScale}pt; margin-top: 24px; margin-bottom: 12px; }
-    h3 { font-weight: bold; font-size: ${11 * fontScale}pt; margin-top: 16px; margin-bottom: 8px; }
-    p { margin-bottom: 16px; text-align: left; }
-    table { width: 100%; border-collapse: collapse; margin: 24px 0; border: 1px solid #000000; }
-    th, td { border: 1px solid #000000; padding: 8px 12px; text-align: left; vertical-align: top; }
-    th { font-weight: bold; font-size: 10pt; text-transform: uppercase; background-color: #f2f2f2; }
-    .signature-block { margin-top: 48px; display: flex; flex-direction: column; gap: 32px; }
-    .signature-column { flex: 1; margin-bottom: 24px; }
-    .signature-line { border-bottom: 1px dashed #000000; height: 30px; margin-bottom: 8px; width: 60%; }
-    .signature-label { font-size: 10pt; font-weight: normal; color: #000000; }
+    color: #334155;
+    line-height: 1.7;
+    font-size: ${11.5 * fontScale}pt;
+    h1 { color: ${primaryColor}; font-weight: 800; font-size: ${18 * fontScale}pt; text-transform: uppercase; letter-spacing: 0.05em; background: linear-gradient(90deg, #f8fafc 0%, transparent 100%); border-left: 6px solid ${accentColor}; padding: 12px 16px; margin-bottom: 32px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+    h2 { color: ${primaryColor}; font-weight: 700; font-size: ${12.5 * fontScale}pt; margin-top: 36px; margin-bottom: 14px; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px; }
+    h3 { color: ${accentColor}; font-weight: 700; font-size: ${11 * fontScale}pt; margin-top: 24px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+    p { margin-bottom: 16px; text-align: justify; }
+    ul, ol { margin-bottom: 16px; padding-left: 24px; }
+    li { margin-bottom: 8px; }
+    table { width: 100%; border-collapse: collapse; margin: 24px 0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03); border: 1px solid #e2e8f0; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 10px 14px; text-align: left; line-height: 1.4; }
+    th { background-color: ${primaryColor}; color: #ffffff; font-weight: 600; font-size: 10pt; text-transform: uppercase; letter-spacing: 0.05em; }
+    tr:nth-child(even) td { background-color: #f8fafc; }
+    tr:last-child td { border-bottom: none; }
+    .signature-block { margin-top: 72px; display: flex; justify-content: space-between; gap: 48px; }
+    .signature-column { flex: 1; padding: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
+    .signature-line { border-bottom: 1px solid #94a3b8; height: 50px; margin-bottom: 12px; position: relative; }
+    .signature-line::after { content: 'Signature'; position: absolute; bottom: 4px; left: 0; font-size: 9px; color: #cbd5e1; text-transform: uppercase; font-family: sans-serif; letter-spacing: 0.1em; }
+    .signature-label { font-size: 10pt; color: ${primaryColor}; font-weight: 700; text-transform: uppercase; }
   `,
   modern_agency: ({ primaryColor, accentColor, fontFamily, fontScale }) => `
     font-family: ${fontFamily};
-    color: #3f3f46;
-    line-height: 1.7;
+    color: #4b5563;
+    line-height: 1.75;
     font-size: ${10.5 * fontScale}pt;
-    h1 { color: ${primaryColor}; font-weight: 800; font-size: ${20 * fontScale}pt; margin-bottom: 32px; }
-    h2 { color: ${primaryColor}; font-weight: 700; font-size: ${13 * fontScale}pt; margin-top: 32px; margin-bottom: 12px; }
-    h3 { color: ${accentColor}; font-weight: 600; font-size: ${11 * fontScale}pt; margin-top: 20px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
-    p { margin-bottom: 16px; }
-    table { width: 100%; border-collapse: collapse; margin: 24px 0; border-radius: 8px; overflow: hidden; border: 1px solid #e4e4e7; }
-    th, td { border-bottom: 1px solid #e4e4e7; padding: 12px 16px; text-align: left; }
-    th { background-color: #fafafa; color: ${primaryColor}; font-weight: 600; font-size: 9.5pt; text-transform: uppercase; }
+    h1 { color: ${primaryColor}; font-weight: 800; font-size: ${24 * fontScale}pt; letter-spacing: -0.03em; margin-bottom: 32px; }
+    h2 { color: ${primaryColor}; font-weight: 700; font-size: ${14 * fontScale}pt; margin-top: 40px; margin-bottom: 16px; display: flex; align-items: center; }
+    h2::before { content: ''; display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: ${accentColor}; margin-right: 12px; }
+    h3 { color: ${accentColor}; font-weight: 600; font-size: ${11.5 * fontScale}pt; margin-top: 24px; margin-bottom: 10px; background: ${accentColor}10; display: inline-block; padding: 4px 12px; border-radius: 20px; }
+    p { margin-bottom: 18px; }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; margin: 24px 0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); border: 1px solid #f3f4f6; }
+    th, td { padding: 10px 14px; text-align: left; line-height: 1.4; }
+    th { background-color: #f9fafb; color: ${primaryColor}; font-weight: 700; font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e5e7eb; }
+    td { border-bottom: 1px solid #f3f4f6; }
     tr:last-child td { border-bottom: none; }
-    .signature-block { margin-top: 64px; display: flex; gap: 40px; }
-    .signature-column { flex: 1; background: #fafafa; padding: 24px; border-radius: 8px; border: 1px solid #e4e4e7; }
-    .signature-line { border-bottom: 1px solid #a1a1aa; height: 40px; margin-bottom: 12px; }
-    .signature-label { font-size: 10pt; font-weight: 600; color: ${primaryColor}; }
+    .signature-block { margin-top: 72px; display: flex; gap: 32px; }
+    .signature-column { flex: 1; background: #ffffff; box-shadow: 0 4px 20px rgba(0,0,0,0.04); padding: 30px; border-radius: 16px; border: 1px solid #f3f4f6; position: relative; overflow: hidden; }
+    .signature-column::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; background: ${accentColor}; }
+    .signature-line { border-bottom: 2px dashed #d1d5db; height: 40px; margin-bottom: 16px; }
+    .signature-label { font-size: 11pt; color: ${primaryColor}; font-weight: 800; }
   `,
   classic_legal: ({ primaryColor, fontFamily, fontScale }) => `
     font-family: ${fontFamily};
     color: #000000;
-    line-height: 2.0; /* Double spaced */
-    font-size: ${12 * fontScale}pt;
+    line-height: 2.0;
+    font-size: ${11 * fontScale}pt;
     text-align: justify;
-    h1 { text-align: center; text-transform: uppercase; font-size: ${14 * fontScale}pt; font-weight: bold; margin: 40px 0; }
-    h2 { text-transform: uppercase; font-size: ${12 * fontScale}pt; font-weight: bold; margin-top: 32px; margin-bottom: 16px; text-align: center; }
-    h3 { font-size: ${12 * fontScale}pt; font-weight: bold; text-decoration: underline; margin-top: 24px; margin-bottom: 12px; }
+    h1 { text-align: center; text-transform: uppercase; font-size: ${16 * fontScale}pt; font-weight: bold; color: ${primaryColor}; border-top: 4px double ${primaryColor}; border-bottom: 4px double ${primaryColor}; padding: 16px 0; margin: 40px 0; letter-spacing: 0.1em; }
+    h2 { text-transform: uppercase; font-size: ${12 * fontScale}pt; font-weight: bold; color: ${primaryColor}; margin-top: 48px; margin-bottom: 16px; text-align: center; }
+    h3 { font-size: ${11 * fontScale}pt; font-weight: bold; text-decoration: underline; margin-top: 24px; margin-bottom: 12px; }
     p { margin-bottom: 24px; text-indent: 48px; }
     p.no-indent { text-indent: 0; }
-    table { width: 100%; border-collapse: collapse; margin: 24px 0; }
-    th, td { border: 1px solid ${primaryColor}; padding: 10px 14px; vertical-align: top; }
-    th { font-weight: bold; text-align: center; }
-    .signature-block { margin-top: 80px; display: flex; gap: 40px; }
+    ol { list-style-type: upper-roman; padding-left: 48px; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; margin: 24px 0; border: 2px solid ${primaryColor}; }
+    th, td { border: 1px solid ${primaryColor}; padding: 10px 14px; vertical-align: top; line-height: 1.4; }
+    th { font-weight: bold; text-transform: uppercase; font-size: 10pt; text-align: center; background: #f5f5f5; }
+    .signature-block { margin-top: 80px; display: flex; justify-content: space-between; gap: 40px; }
     .signature-column { flex: 1; }
     .signature-line { border-bottom: 1px solid ${primaryColor}; height: 40px; margin-bottom: 8px; }
-    .signature-label { font-weight: bold; font-size: 11pt; }
+    .signature-label { font-weight: bold; font-size: 10pt; text-transform: uppercase; }
   `,
 };
 
 const THEME_TOC_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
-  consulting_standard: ({ primaryColor }) => `
-    .cs-toc { margin-bottom: 32px; padding-bottom: 16px; border-bottom: 2px solid ${primaryColor}; }
-    .cs-toc-heading { font-size: 12pt; font-weight: bold; padding: 0 0 12px 0; margin: 0; color: #000000; }
-    .cs-toc-list { list-style: none; margin: 0; padding: 0; }
+  consulting_standard: ({ primaryColor, accentColor }) => `
+    .cs-toc { margin-bottom: 32px; border: 1px solid #e2e8f0; border-left: 6px solid ${accentColor}; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+    .cs-toc-heading { font-size: 11pt; font-weight: 800; padding: 12px 18px; margin: 0; text-transform: uppercase; letter-spacing: 0.08em; background: #f8fafc; color: ${primaryColor}; border-bottom: 1px solid #e2e8f0; }
+    .cs-toc-list { list-style: none; margin: 0; padding: 8px 0; }
     .cs-toc-item { margin: 0; }
-    .cs-toc-link { display: flex; text-decoration: none; color: #000000; font-size: 11pt; padding: 4px 0; }
-    .cs-toc-num { font-weight: normal; width: 24px; flex-shrink: 0; }
+    .cs-toc-link { display: block; padding: 6px 18px; text-decoration: none; color: inherit; font-size: 10.5pt; line-height: 1.6; }
+    .cs-toc-num { font-weight: 700; margin-right: 8px; min-width: 28px; display: inline-block; color: ${accentColor}; }
   `,
   modern_agency: ({ primaryColor, accentColor }) => `
-    .cs-toc { margin-bottom: 40px; padding: 24px; background: #fafafa; border-radius: 8px; border: 1px solid #e4e4e7; }
-    .cs-toc-heading { font-size: 10.5pt; font-weight: 700; color: ${primaryColor}; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 16px 0; }
-    .cs-toc-list { list-style: none; margin: 0; padding: 0; }
-    .cs-toc-item { margin: 0; border-bottom: 1px solid #f4f4f5; }
-    .cs-toc-link { display: block; padding: 8px 0; text-decoration: none; color: #52525b; font-size: 10.5pt; }
-    .cs-toc-num { font-weight: 600; color: ${accentColor}; margin-right: 8px; }
+    .cs-toc { margin-bottom: 32px; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -8px rgba(0,0,0,0.08); border: 1px solid #f3f4f6; }
+    .cs-toc-heading { font-size: 11pt; font-weight: 700; padding: 14px 20px; margin: 0; color: ${primaryColor}; background: #f9fafb; }
+    .cs-toc-list { list-style: none; margin: 0; padding: 6px 0; }
+    .cs-toc-item { margin: 0; }
+    .cs-toc-link { display: block; position: relative; padding: 7px 20px 7px 34px; text-decoration: none; color: inherit; font-size: 10pt; }
+    .cs-toc-link::before { content: ''; position: absolute; left: 20px; top: 50%; margin-top: -3px; width: 6px; height: 6px; border-radius: 50%; background: ${accentColor}; }
+    .cs-toc-num { font-weight: 700; margin-right: 6px; color: ${accentColor}; }
   `,
-  classic_legal: () => `
-    .cs-toc { margin-bottom: 40px; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 20px 0; }
-    .cs-toc-heading { font-size: 12pt; font-weight: bold; text-align: center; text-transform: uppercase; margin: 0 0 20px 0; }
-    .cs-toc-list { list-style: none; margin: 0; padding: 0 40px; }
+  classic_legal: ({ primaryColor }) => `
+    .cs-toc { margin-bottom: 40px; border: 3px double ${primaryColor}; padding: 20px 0; }
+    .cs-toc-heading { font-size: 13pt; font-weight: bold; text-align: left; text-transform: uppercase; letter-spacing: 0.15em; margin: 0 0 12px; color: ${primaryColor}; }
+    .cs-toc-list { list-style: none; margin: 0; padding: 0 32px; }
     .cs-toc-item { margin: 0; text-align: left; }
-    .cs-toc-link { display: block; padding: 4px 0; text-decoration: none; color: #000000; font-size: 12pt; }
-    .cs-toc-num { font-weight: normal; margin-right: 12px; }
+    .cs-toc-link { display: block; padding: 4px 0; text-decoration: none; color: inherit; font-size: 10.5pt; }
+    .cs-toc-num { font-weight: bold; margin-right: 8px; }
   `,
 };
 
@@ -216,38 +225,7 @@ function flattenNestedCss(rootSelector: string, css: string): string {
   return [`${rootSelector} { ${baseDecls.trim()} }`, ...rules].join('\n');
 }
 
-function addMsoPaddingAlt(css: string): string {
-  return css.replace(/padding:\s*([^;]+);/g, (full, rawValue: string) => {
-    const tokens = rawValue.trim().split(/\s+/);
-    if (tokens.length < 1 || tokens.length > 4) return full;
-    const toPt = (v: string): string | null => {
-      if (v === '0') return '0pt';
-      const m = /^(-?\d*\.?\d+)px$/.exec(v);
-      return m ? `${(parseFloat(m[1]) * 0.75).toFixed(1)}pt` : null;
-    };
-    const pts = tokens.map(toPt);
-    if (pts.some((p) => p === null)) return full; 
-    const [a, b, c, d] = pts as string[];
-    const top = a, right = b ?? a, bottom = c ?? a, left = d ?? b ?? a;
-    return `${full} mso-padding-alt: ${top} ${right} ${bottom} ${left};`;
-  });
-}
 
-function makeWordSafe(css: string, rootSelector: string, fontFamily: string): string {
-  const wordSafeFont = toWordSafeFontStack(fontFamily);
-  const withHeadingFix = css
-    .replace(/(\.signature-block\s*\{[^}]*?)display:\s*flex;?/g, '$1display: table; width: 100%;')
-    .replace(/(\.signature-column\s*\{[^}]*?)flex:\s*1;?/g, '$1display: table-cell; width: 50%; vertical-align: top;')
-    .replace(/\bh([1-3])\b/g, '.mso-h$1');
-
-  const withPadding = addMsoPaddingAlt(withHeadingFix);
-
-  const fontOverride = `${rootSelector} .mso-h1, ${rootSelector} .mso-h2, ${rootSelector} .mso-h3, ${rootSelector} p, ${rootSelector} li, ${rootSelector} td, ${rootSelector} th, ${rootSelector} div, ${rootSelector} span, ${rootSelector} a { font-family: ${wordSafeFont}; }`;
-
-  const tableFix = `${rootSelector} table { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }`;
-
-  return `${withPadding}\n${fontOverride}\n${tableFix}`;
-}
 
 export function applyThemeToHtml(content: string, settings: ContractThemeSettings, options?: { wordSafe?: boolean }): string {
   // settings.theme || 'consulting_standard' only guards falsy values - a
@@ -282,7 +260,7 @@ export function applyThemeToHtml(content: string, settings: ContractThemeSetting
     
   const rootSelector = `.contract-theme-${theme}`;
   let flatCss = flattenNestedCss(rootSelector, rawCss);
-  if (options?.wordSafe) flatCss = makeWordSafe(flatCss, rootSelector, args.fontFamily);
+  if (options?.wordSafe) flatCss = makeCssWordSafe(flatCss, rootSelector, args.fontFamily);
 
   return `
     <div class="contract-theme-${theme}" style="padding: 48px; max-width: 850px; margin: 0 auto; background: white; box-sizing: border-box;">

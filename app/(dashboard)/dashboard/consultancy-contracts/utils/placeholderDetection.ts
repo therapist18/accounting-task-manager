@@ -1,5 +1,6 @@
 import supabase from '@/lib/supabase/client';
 import { fetchPlaceholders } from '../../employment-contracts/utils/ecPlaceholders';
+import { detectPlaceholderTags } from '../../templates/document-template-manager/utils';
 
 export interface MasterFieldOption {
   id: string;
@@ -7,12 +8,13 @@ export interface MasterFieldOption {
   field_key: string;
 }
 
-// Same {{token}} shape the rest of the app's document engines use (see
-// replacePlaceholders in tasks-requirements/utils/templateFormatters.ts).
+// Reuse DocumentTemplateManager's detection logic to properly identify
+// structural tags ({#block}, {%image}, etc) instead of just plain {{text}}.
+// We map it back to just the keys for now, as that's what the UI/sync expects.
 export function detectTokens(content: string): string[] {
   if (!content) return [];
-  const matches = Array.from(content.matchAll(/\{\{(\w+)\}\}/g)).map((m) => m[1]);
-  return Array.from(new Set(matches));
+  const tags = detectPlaceholderTags(content, 2);
+  return Array.from(new Set(tags.map(t => t.key)));
 }
 
 function normalize(s: string): string {
@@ -63,7 +65,7 @@ export async function fetchMasterFieldOptions(): Promise<MasterFieldOption[]> {
   return (data || []) as MasterFieldOption[];
 }
 
-// Scans the template body for {{tokens}} and registers any not already in
+// Scans the template body for tokens and registers any not already in
 // ec_placeholders (the shared registry this module reuses - see the note in
 // 20260813000000_consultancy_contract_engine.sql). A token this module
 // shares with Employment Contracts (company_name, company_kra_pin, ...) is
@@ -74,17 +76,31 @@ export async function fetchMasterFieldOptions(): Promise<MasterFieldOption[]> {
 // same way employment-contracts/utils/placeholderDetection.ts does. Returns
 // the newly-registered token keys for caller feedback.
 export async function syncPlaceholdersFromContent(content: string): Promise<string[]> {
-  const tokens = detectTokens(content);
+  const tags = detectPlaceholderTags(content, 2);
+  const tokens = Array.from(new Set(tags.map(t => t.key)));
+  console.log(`[placeholderDetection] Detected ${tokens.length} token(s) in content:`, tokens);
+  console.log('[placeholderDetection] Tag details:', tags.map(t => ({ key: t.key, type: t.type, prefix: t.prefix })));
   if (tokens.length === 0) return [];
 
   const existing = await fetchPlaceholders();
   const existingKeys = new Set(existing.map((p) => p.key));
   const newTokens = tokens.filter((t) => !existingKeys.has(t));
+  console.log(`[placeholderDetection] ${existing.length} existing placeholder(s); ${newTokens.length} new token(s):`, newTokens);
   if (newTokens.length === 0) return [];
 
   const masterFields = await fetchMasterFieldOptions();
+  console.log(`[placeholderDetection] ${masterFields.length} master field(s) loaded for fuzzy matching`);
   const rows = newTokens.map((key) => {
     const match = findBestMasterFieldMatch(key, masterFields);
+    const tagInfo = tags.find(t => t.key === key);
+    console.log(`[placeholderDetection] Matching token "${key}" -> master field ${match ? `"${match.label}" (${match.field_key})` : 'none'}`);
+    
+    // Fallback to text for any types not supported by ec_placeholders ('image', 'array')
+    let typeToSave = 'text';
+    if (tagInfo?.type === 'conditional' || tagInfo?.type === 'text') {
+      typeToSave = tagInfo.type;
+    }
+
     return {
       key,
       label: humanizeKey(key),
@@ -93,13 +109,15 @@ export async function syncPlaceholdersFromContent(content: string): Promise<stri
       master_field_id: match?.id ?? null,
       entity_type: ['company'],
       editable: true,
+      type: typeToSave as 'text' | 'conditional' | 'boolean',
     };
   });
 
   const { error } = await supabase.from('ec_placeholders').insert(rows);
   if (error) {
-    console.error('Error syncing detected consultancy placeholders:', error);
+    console.error('[placeholderDetection] Error syncing detected consultancy placeholders:', error);
     return [];
   }
+  console.log(`[placeholderDetection] Registered ${rows.length} new placeholder(s):`, rows.map(r => ({ key: r.key, type: r.type, master_field_id: r.master_field_id })));
   return newTokens;
 }

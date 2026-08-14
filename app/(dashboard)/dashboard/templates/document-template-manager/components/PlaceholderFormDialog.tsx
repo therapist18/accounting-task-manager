@@ -164,7 +164,7 @@ export function PlaceholderFormDialog({
                 <Input
                   id="name"
                   placeholder="e.g. client_first_name"
-                  value={placeholder.name}
+                  value={placeholder.name || ''}
                   onChange={(e) => onChange({ name: e.target.value.replace(/\s+/g, '_') })}
                   className="font-mono text-sm bg-slate-50"
                 />
@@ -221,7 +221,7 @@ export function PlaceholderFormDialog({
                 <Textarea
                   id="description"
                   placeholder="Internal notes about this field..."
-                  value={placeholder.description}
+                  value={placeholder.description || ''}
                   onChange={(e) => onChange({ description: e.target.value })}
                   className="min-h-[60px] resize-none bg-slate-50"
                 />
@@ -1050,7 +1050,7 @@ export function PlaceholderFormDialog({
                   <Label className="text-[11px] font-black uppercase text-slate-400">Select Options</Label>
                   <Textarea
                     placeholder="Option A&#10;Option B"
-                    value={placeholder.options?.join('\n')}
+                    value={placeholder.options?.join('\n') || ''}
                     onChange={e => onChange({ options: e.target.value.split('\n').filter(Boolean) })}
                   />
                 </div>
@@ -1169,11 +1169,11 @@ export function PlaceholderFormDialog({
                   <div className="grid grid-cols-2 gap-4 p-5 bg-green-50/50 rounded-2xl border border-green-100/50">
                     <div className="space-y-2">
                       <Label className="text-[11px] font-bold text-green-700">Image Width</Label>
-                      <Input className="bg-white" value={placeholder.image_width} onChange={e => onChange({ image_width: e.target.value })} placeholder="e.g. 200px" />
+                      <Input className="bg-white" value={placeholder.image_width || ''} onChange={e => onChange({ image_width: e.target.value })} placeholder="e.g. 200px" />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-[11px] font-bold text-green-700">Image Height</Label>
-                      <Input className="bg-white" value={placeholder.image_height} onChange={e => onChange({ image_height: e.target.value })} placeholder="e.g. 150px" />
+                      <Input className="bg-white" value={placeholder.image_height || ''} onChange={e => onChange({ image_height: e.target.value })} placeholder="e.g. 150px" />
                     </div>
                   </div>
 
@@ -1307,7 +1307,7 @@ export function PlaceholderFormDialog({
                   <Textarea
                     className="bg-purple-50/10 border-purple-100/30 rounded-xl"
                     placeholder="Prompt: Rewrite the source data to be more professional..."
-                    value={placeholder.ai_prompt}
+                    value={placeholder.ai_prompt || ''}
                     onChange={e => onChange({ ai_prompt: e.target.value })}
                   />
                 )}

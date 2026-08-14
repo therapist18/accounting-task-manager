@@ -26,15 +26,15 @@
 // inlined directly on the element as a second line of defense.
 
 import { imageUrlToDataUrl } from "@/lib/documentExport";
-import { toWordSafeFontStack } from "@/lib/documentTheme";
+import { toWordSafeFontStack, makeCssWordSafe } from "@/lib/documentTheme";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type CvLayout = "theme1" | "theme2" | "theme3" | "theme4" | "theme5" | "theme6" | "theme7";
+export type CvLayout = "theme1" | "theme2" | "theme3" | "theme4" | "theme5" | "theme6" | "theme7" | "cv_corporate" | "cv_legal";
 
-export const CV_LAYOUTS: CvLayout[] = ["theme1", "theme2", "theme3", "theme4", "theme5", "theme6", "theme7"];
+export const CV_LAYOUTS: CvLayout[] = ["theme1", "theme2", "theme3", "theme4", "theme5", "theme6", "theme7", "cv_corporate", "cv_legal"];
 
 export interface CvDocument {
   // Themed body markup (root div + tables + content). Contains no <style>.
@@ -248,57 +248,88 @@ const LAYOUT_SPECS: Record<CvLayout, LayoutSpec> = {
     footerPadding: "16px 24px 24px",
   },
   theme6: {
-    header: { variant: "banner", photo: true, padding: "24px 40px 20px" },
-    hasPhoto: true,
+    header: { variant: "banner", padding: "16px" },
+    hasPhoto: false,
     nameInMain: false,
-    bodyPadding: "24px 40px 24px",
-    mainPadding: "0 32px 0 0",
+    bodyPadding: "20px",
+    mainPadding: "16px",
     mainSections: [
-      { kind: "summary", title: "Research Profile" },
-      { kind: "experience", title: "Professional Experience" },
-      { kind: "education", title: "Education" },
+      { kind: "summary", title: "Abstract" },
+      { kind: "experience", title: "Academic & Research Experience" },
       { kind: "projects", title: "Publications & Projects" },
+      { kind: "education", title: "Education" },
+      { kind: "references", title: "Referees" },
     ],
     side: {
-      widthPx: 190,
-      padding: "0",
+      widthPct: 30,
+      padding: "16px",
       dark: false,
       blocks: [
-        { kind: "details", title: "Personal" },
-        { kind: "skills", title: "Competencies" },
+        { kind: "contact", title: "Contact" },
         { kind: "languages", title: "Languages" },
+        { kind: "skills", title: "Technical Skills" },
         { kind: "certifications", title: "Certifications" },
-        { kind: "references", title: "References" },
       ],
     },
-    declarationIn: "footer",
-    footerPadding: "16px 40px 16px",
+    declarationIn: "side",
+    footerPadding: "0",
   },
   theme7: {
-    header: { variant: "banner", photo: true, padding: "28px 40px" },
-    hasPhoto: true,
+    header: { variant: "centered", padding: "24px" },
+    hasPhoto: false,
     nameInMain: false,
-    bodyPadding: "24px 40px 24px",
-    mainPadding: "0 32px 0 0",
+    bodyPadding: "32px",
+    mainPadding: "24px",
     mainSections: [
-      { kind: "summary", title: "About" },
-      { kind: "experience", title: "Career Timeline" },
+      { kind: "summary", title: "Career Profile" },
+      { kind: "experience", title: "Work History" },
       { kind: "education", title: "Education" },
+      { kind: "certifications", title: "Certifications" },
+      { kind: "skills", title: "Skills" },
+      { kind: "projects", title: "Projects" },
     ],
-    side: {
-      widthPx: 200,
-      padding: "0",
-      dark: false,
-      blocks: [
-        { kind: "details", title: "Personal" },
-        { kind: "skills", title: "Skills" },
-        { kind: "languages", title: "Languages" },
-        { kind: "achievements", title: "Achievements" },
-        { kind: "references", title: "References" },
-      ],
-    },
     declarationIn: "footer",
-    footerPadding: "16px 40px 16px",
+    footerPadding: "24px",
+  },
+  cv_corporate: {
+    header: { variant: "centered", padding: "0 0 20px" },
+    hasPhoto: false,
+    nameInMain: false,
+    bodyPadding: "40px 60px",
+    mainPadding: "0",
+    mainSections: [
+      { kind: "summary", title: "Professional Profile" },
+      { kind: "experience", title: "Professional Experience" },
+      { kind: "education", title: "Education" },
+      { kind: "skills", title: "Technical & Professional Skills" },
+      { kind: "languages", title: "Languages" },
+      { kind: "certifications", title: "Certifications" },
+      { kind: "achievements", title: "Achievements" },
+      { kind: "additional", title: "Additional Info" },
+      { kind: "references", title: "References" },
+    ],
+    declarationIn: "footer",
+    footerPadding: "20px 60px 40px",
+  },
+  cv_legal: {
+    header: { variant: "centered", padding: "0 0 20px" },
+    hasPhoto: false,
+    nameInMain: false,
+    bodyPadding: "40px 60px",
+    mainPadding: "0",
+    mainSections: [
+      { kind: "summary", title: "Professional Profile" },
+      { kind: "experience", title: "Professional Experience" },
+      { kind: "education", title: "Education" },
+      { kind: "skills", title: "Technical & Professional Skills" },
+      { kind: "languages", title: "Languages" },
+      { kind: "certifications", title: "Certifications" },
+      { kind: "achievements", title: "Achievements" },
+      { kind: "additional", title: "Additional Info" },
+      { kind: "references", title: "References" },
+    ],
+    declarationIn: "footer",
+    footerPadding: "20px 60px 40px",
   },
 };
 
@@ -359,7 +390,7 @@ function photoFrame(photoSrc: string | null, settings: any, size: number, border
   const radius = settings.photoShape === "circle" ? "50%" : settings.photoShape === "rounded" ? "12px" : "0";
   const style = `width:${size}px;height:${size}px;border:3px solid ${borderColor};border-radius:${radius};display:block;overflow:hidden;background:#ffffff;`;
   const img = photoSrc
-    ? `<img src="${photoSrc}" alt="Profile" style="width:100%;height:100%;object-fit:${settings.photoFit || "cover"};" />`
+    ? `<img src="${photoSrc}" alt="Profile" width="${size}" height="${size}" style="width:${size}px;height:${size}px;object-fit:${settings.photoFit || "cover"};" />`
     : "";
   return `<div class="cv-photo" style="${style}">${img}</div>`;
 }
@@ -496,6 +527,8 @@ const H1_UPPERCASE: Record<CvLayout, boolean> = {
   theme5: true,
   theme6: false,
   theme7: false,
+  cv_corporate: false,
+  cv_legal: false,
 };
 
 // Word also auto-maps <h1>-<h6> tags to its own built-in "Heading N" styles,
@@ -675,15 +708,26 @@ function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: 
     // pages once main-column content outlasts the sidebar. Confining the
     // color to a div sized to actual content avoids that: any leftover
     // forced cell height beyond the div is left uncolored instead.
+    // Word requires bgcolor on the <td> to actually color the whole column.
+    // The previous approach tried to confine color to an inner div to avoid 
+    // coloring trailing pages, but Word renders div backgrounds as tight text 
+    // highlights instead of block backgrounds.
     const sideBg = spec.side.dark ? pri : "#f8fafc";
-    const innerStyle = `background-color:${sideBg};padding:${spec.side.padding};${spec.side.dark ? "color:#ffffff;" : ""}`;
+    const innerStyle = `padding:${spec.side.padding};${spec.side.dark ? "color:#ffffff;" : ""}`;
     const widthAttr = spec.side.widthPx
       ? ` width="${spec.side.widthPx}" style="width:${spec.side.widthPx}px;"`
       : spec.side.widthPct
         ? ` width="${spec.side.widthPct}%"`
         : "";
-    const sideTd = `<td class="cv-sidebar"${widthAttr}><div style="${innerStyle}">${sideParts.join("")}</div></td>`;
-    const mainTd = `<td class="cv-main" style="padding:${spec.mainPadding};">${mainHtml}</td>`;
+    // Use a nested table instead of a div for the inner sidebar container.
+    // Word is notorious for converting <div> background/padding into tight text
+    // highlighting across page breaks. A nested table forces a block context.
+    const sideTd = `<td class="cv-sidebar" bgcolor="${sideBg}"${widthAttr} valign="top" style="padding:0;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr><td bgcolor="${sideBg}" valign="top" style="${innerStyle}">${sideParts.join("")}</td></tr>
+      </table>
+    </td>`;
+    const mainTd = `<td class="cv-main" valign="top" style="padding:${spec.mainPadding};">${mainHtml}</td>`;
     const row = spec.sideFirst ? `${sideTd}${mainTd}` : `${mainTd}${sideTd}`;
     bodyTable = `<table cellpadding="0" cellspacing="0" border="0" style="width:100%;"><tr>${row}</tr></table>`;
   } else {
@@ -785,15 +829,31 @@ const THEME_STYLES: Record<CvLayout, (a: CssCtx) => string> = {
     table td { font-size: ${S(10.5)}; }
   `,
   theme7: ({ pri, acc, fam, S }) => `
-    font-family: ${fam};
-    color: #333333;
-    line-height: 1.5;
-    font-size: ${S(10.5)};
-    h1 { font-size: ${S(24)}; font-weight: 800; color: #ffffff; letter-spacing: -0.5px; }
-    h2 { font-size: ${S(13)}; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: ${pri}; }
-    h3 { font-size: ${S(11)}; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: ${acc}; border-bottom: 1px solid #e2e8f0; padding-bottom: 3px; }
-    h4 { font-size: ${S(10.5)}; font-weight: 700; }
-    table td { font-size: ${S(10.5)}; }
+    font-family: ${fam}; color: #333; font-size: ${S(11)}; line-height: 1.5;
+    h1 { color: ${pri}; font-size: ${S(22)}; font-weight: 700; border-bottom: 2px solid ${pri}; padding-bottom: 6px; }
+    h2 { color: ${pri}; font-size: ${S(16)}; font-weight: 700; margin-top: 24px; position: relative; padding-left: 20px; }
+    h2::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: ${acc}; }
+    h3 { font-size: ${S(13)}; font-weight: 700; color: #111; }
+    h4 { font-size: ${S(11)}; font-weight: 600; color: #444; }
+  `,
+  cv_corporate: ({ pri, acc, fam, S }) => `
+    font-family: ${fam}; color: #334155; font-size: ${S(11.5)}; line-height: 1.7;
+    h1 { color: ${pri}; font-weight: 800; font-size: ${S(18)}; text-transform: uppercase; letter-spacing: 0.05em; background: linear-gradient(90deg, #f8fafc 0%, transparent 100%); border-left: 6px solid ${acc}; padding: 12px 16px; margin-bottom: 32px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); text-align: left; }
+    h2 { color: ${pri}; font-weight: 700; font-size: ${S(12.5)}; margin-top: 36px; margin-bottom: 14px; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px; }
+    h3 { color: ${acc}; font-weight: 700; font-size: ${S(11)}; margin-top: 24px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+    p { margin-bottom: 16px; text-align: justify; }
+    ul, ol { margin-bottom: 16px; padding-left: 24px; }
+    li { margin-bottom: 8px; }
+  `,
+  cv_legal: ({ pri, fam, S }) => `
+    font-family: ${fam}; color: #000000; font-size: ${S(11)}; line-height: 2.0; text-align: justify;
+    h1 { text-align: center; text-transform: uppercase; font-size: ${S(16)}; font-weight: bold; color: ${pri}; border-top: 4px double ${pri}; border-bottom: 4px double ${pri}; padding: 16px 0; margin: 40px 0; letter-spacing: 0.1em; }
+    h2 { text-transform: uppercase; font-size: ${S(12)}; font-weight: bold; color: ${pri}; margin-top: 48px; margin-bottom: 16px; text-align: center; }
+    h3 { font-size: ${S(11)}; font-weight: bold; text-decoration: underline; margin-top: 24px; margin-bottom: 12px; }
+    p { margin-bottom: 24px; text-indent: 48px; }
+    p.no-indent { text-indent: 0; }
+    ol { list-style-type: upper-roman; padding-left: 48px; margin-bottom: 24px; }
+    ul { list-style-type: disc; padding-left: 48px; margin-bottom: 24px; }
   `,
 };
 
@@ -842,7 +902,7 @@ function getCssCtx(primaryColor: string, accentColor: string, fontFamily: string
     pri: primaryColor,
     acc: accentColor,
     fam: fontFamily,
-    S: (px) => `${Math.round(px * fontScale)}px`,
+    S: (px: number) => `${Math.round(px * fontScale)}px`,
   };
 }
 
@@ -885,11 +945,57 @@ export async function buildCvDocument(
   const photoSrc = cvSettings?.showPhoto !== false && photoUrl ? await cachedImageUrlToDataUrl(photoUrl) : null;
 
   const body = assembleLayout(spec, cvData, cvSettings, photoSrc, layout);
-  const bodyHtml = `<div class="cv-theme cv-theme-${layout}">${body}</div>`;
+  let bodyHtml = `<div class="cv-theme cv-theme-${layout}">${body}</div>`;
 
   const cssCtx = getCssCtx(primaryColor, accentColor, fontFamily, fontScale);
-  const css =
-    flattenNestedCss(".cv-theme", BASE_CV_STYLES) + "\n" + flattenNestedCss(`.cv-theme-${layout}`, THEME_STYLES[layout](cssCtx));
+  let css = flattenNestedCss(".cv-theme", BASE_CV_STYLES) + "\n" + flattenNestedCss(`.cv-theme-${layout}`, THEME_STYLES[layout](cssCtx));
+
+  if (options?.wordSafe) {
+    css = makeCssWordSafe(css, `.cv-theme-${layout}`, fontFamily);
+    
+    if (typeof DOMParser !== 'undefined') {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(`<div>${bodyHtml}</div>`, 'text/html');
+      
+      const extractCssRule = (cssText: string, selector: string) => {
+        const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const match = cssText.match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'));
+        return match ? match[1].trim() : '';
+      };
+
+      // Word's import applies its own built-in Heading styles to h1-h6 no matter what.
+      // Convert them to div.mso-hX and inline their CSS, just like Employment Contracts does.
+      doc.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((h) => {
+        const div = doc.createElement('div');
+        for (const attr of Array.from(h.attributes)) div.setAttribute(attr.name, attr.value);
+        div.className = `mso-${h.tagName.toLowerCase()} ${div.className || ''}`.trim();
+        div.style.fontFamily = fontFamily;
+        while (h.firstChild) div.appendChild(h.firstChild);
+        h.replaceWith(div);
+      });
+
+      // Table fixes (Word ignores CSS width for tables, needs attributes)
+      doc.querySelectorAll('table').forEach((table) => {
+        table.setAttribute('cellpadding', '0');
+        table.setAttribute('cellspacing', '0');
+        table.setAttribute('width', '100%');
+      });
+
+      // Inline the CSS rules onto the headings to guarantee they win over Word's defaults
+      doc.querySelectorAll('.mso-h1, .mso-h2, .mso-h3, .mso-h4, .mso-h5, .mso-h6').forEach((h) => {
+        const tagMatch = h.className.match(/mso-(h[1-6])/);
+        if (!tagMatch) return;
+        const tag = tagMatch[1];
+        
+        const baseDecls = extractCssRule(css, `.cv-theme .mso-${tag}`);
+        const themeDecls = extractCssRule(css, `.cv-theme-${layout} .mso-${tag}`);
+        const prev = h.getAttribute('style') ? `${h.getAttribute('style')};` : '';
+        h.setAttribute('style', `${prev}${baseDecls ? `; ${baseDecls}` : ''}${themeDecls ? `; ${themeDecls}` : ''}`.trim());
+      });
+
+      bodyHtml = doc.body.firstElementChild?.innerHTML ?? bodyHtml;
+    }
+  }
 
   const applicantName = cvData?.personalInfo?.fullName || "CV";
 
@@ -899,7 +1005,7 @@ export async function buildCvDocument(
     css,
     title: `${applicantName} CV`,
     pageSize: "8.27in 11.69in",
-    pageMargin: "0.4in",
+    pageMargin: options?.wordSafe ? "0in" : "0.4in",
     fileName: `${applicantName.replace(/\s+/g, "_")}_CV.doc`,
   };
 }

@@ -576,20 +576,23 @@ export function SummaryTable({
               {sectionedRows.length > 0 ? (
                 sectionedRows.map((item) => {
                   if (item.type === 'section') {
+                    // The name/count cell must NOT span every column if it's going to stay
+                    // pinned on horizontal scroll — a full-width sticky cell would cover the
+                    // whole table. Instead the sticky block spans just the index + sticky
+                    // data columns (same widths the data rows' sticky cells occupy), so the
+                    // group header's Layers icon, sub-department name and count all stay
+                    // visible while the rest of the row scrolls underneath.
+                    const stickyColCount = columns.filter((c: any) => c.sticky).length;
+                    const headerSpacerColSpan = Math.max(1, interleavedColumns.length - stickyColCount);
                     return (
                       <TableRow key={`section-${item.name}`} className="border-0 hover:bg-transparent">
                         <TableCell
-                          className="sticky left-0 z-30 bg-white border-r border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2 px-2 text-center"
+                          colSpan={1 + stickyColCount}
+                          className="sticky left-0 z-30 bg-white border-r border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2 pl-3 pr-4"
                           style={{ top: groupHeaderTop }}
                         >
-                          <Layers className="h-3 w-3 text-custom-blue/60 mx-auto shrink-0" />
-                        </TableCell>
-                        <TableCell
-                          colSpan={interleavedColumns.length}
-                          className="sticky z-30 bg-white px-4 py-2 border-t-2 border-t-custom-blue border-b border-b-slate-200"
-                          style={{ top: groupHeaderTop }}
-                        >
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Layers className="h-3 w-3 text-custom-blue/60 shrink-0" />
                             <span className="text-[11px] font-bold uppercase tracking-wider text-custom-blue whitespace-nowrap">
                               {item.name === 'N/A' ? 'Unassigned' : item.name}
                             </span>
@@ -599,6 +602,11 @@ export function SummaryTable({
                           </div>
                         </TableCell>
                         <TableCell
+                          colSpan={headerSpacerColSpan}
+                          className="bg-white px-4 py-2 border-t-2 border-t-custom-blue border-b border-b-slate-200"
+                          style={{ top: groupHeaderTop }}
+                        />
+                        <TableCell
                           className="sticky right-0 z-30 bg-white border-l border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2 px-2"
                           style={{ top: groupHeaderTop }}
                         />
@@ -607,12 +615,20 @@ export function SummaryTable({
                   }
 
                   if (item.type === 'empty') {
+                    // Same sticky-span trick as the section header above — the "No tasks
+                    // associated" message must stay pinned with the index + sticky data
+                    // columns on horizontal scroll instead of scrolling away with the rest.
+                    const stickyColCount = columns.filter((c: any) => c.sticky).length;
+                    const spacerColSpan = Math.max(1, interleavedColumns.length - stickyColCount);
                     return (
                       <TableRow key={`empty-${item.name}`} className="border-0 hover:bg-transparent">
-                        <TableCell className="sticky left-0 z-20 bg-slate-50/60 border-r border-b border-slate-200 py-3 px-2" />
-                        <TableCell colSpan={interleavedColumns.length} className="bg-slate-50/60 px-4 py-3 border-b border-slate-200">
+                        <TableCell
+                          colSpan={1 + stickyColCount}
+                          className="sticky left-0 z-20 bg-slate-50/60 border-r border-b border-slate-200 py-3 px-4"
+                        >
                           <span className="text-sm italic text-slate-400">No tasks associated</span>
                         </TableCell>
+                        <TableCell colSpan={spacerColSpan} className="bg-slate-50/60 border-b border-slate-200 py-3" />
                         <TableCell className="sticky right-0 z-20 bg-slate-50/60 border-l border-b border-slate-200 py-3 px-2" />
                       </TableRow>
                     );

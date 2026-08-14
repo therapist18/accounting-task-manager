@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Sparkles, FileText, Upload, Plus, Trash2, Download, ZoomIn, ZoomOut, Check, User, Briefcase, GraduationCap, FolderGit2, BookOpen, MessageSquare, AlertCircle, Eye, Search, Users, ImagePlus, X, Loader2, CheckCircle2, Save, Settings2, Palette, ChevronDown, ChevronRight, Globe, ArrowRight, Award, Target, FileSpreadsheet, Layout, Type, Image, PenLine, BarChart3, Crosshair, FileText as CoverLetterIcon, Copy, RefreshCw, Database } from "lucide-react";
@@ -68,6 +68,7 @@ export default function CVGeneratorPage() {
   const [isSavingCv, setIsSavingCv] = useState(false);
   const [applicantId, setApplicantId] = useState<string | null>(null);
   const [linkedIndividualId, setLinkedIndividualId] = useState<number | null>(null);
+  const previewRef = useRef<any>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -816,7 +817,6 @@ export default function CVGeneratorPage() {
 
   const sectionMeta = sectionGroups.flatMap(g => g.sections);
 
-  const previewRef = useRef<HTMLDivElement>(null);
 
   const handleClientPersonalInfoChange = (field: string, value: any) => {
     setClientEdits((prev: any) => ({
@@ -1473,7 +1473,7 @@ export default function CVGeneratorPage() {
   };
 
   const handleDownloadPdf = async () => {
-    const element = previewRef.current;
+    const element = previewRef.current?.getPrintArea ? previewRef.current.getPrintArea() : previewRef.current;
     if (!element) return;
 
     setIsDownloadingPdf(true);

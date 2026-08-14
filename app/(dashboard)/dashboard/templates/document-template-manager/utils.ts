@@ -13,8 +13,10 @@ export const getCleanText = (str: string) => str.replace(/<[^>]+>/g, '');
 // {#tag} opens an array block (condition_* names open a conditional instead),
 // {/tag} closes a block, and anything else is plain text. Extracted into a
 // standalone scanner so the contract modules can import the exact same type
-// detection - the only difference is their content uses {{double}} braces, so
-// braces is passed as 2 there (DTM's own content uses single braces, 1).
+// detection - their content is scanned with braces=2, which accepts both
+// {{double}} and {single} braces (contract templates mix them: {{token}} text
+// markers next to {%signature} image markers), while DTM's own single-brace
+// content uses braces=1.
 export type DetectedPlaceholderTagType = 'text' | 'image' | 'array' | 'conditional';
 
 export interface DetectedPlaceholderTag {
@@ -28,7 +30,7 @@ export interface DetectedPlaceholderTag {
 export function detectPlaceholderTags(content: string, braces: 1 | 2 = 2): DetectedPlaceholderTag[] {
   if (!content) return [];
   const tagRegex = braces === 2
-    ? /\{\{([#\/%])?\s*([a-zA-Z0-9_]+)(?:\/([a-zA-Z0-9_]+))?\s*\}\}/g
+    ? /(?:\{\{|\{)([#\/%])?\s*([a-zA-Z0-9_]+)(?:\/([a-zA-Z0-9_]+))?\s*(?:\}\}|\})/g
     : /\{([#\/%])?\s*([a-zA-Z0-9_]+)(?:\/([a-zA-Z0-9_]+))?\s*\}/g;
 
   const tags: DetectedPlaceholderTag[] = [];

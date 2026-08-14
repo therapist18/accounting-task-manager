@@ -56,6 +56,8 @@ export function DesignPanel({
                   { key: "theme5", label: "Creative", desc: "Split accent bar" },
                   { key: "theme6", label: "Academic", desc: "Scholar format" },
                   { key: "theme7", label: "Timeline", desc: "Vertical timeline" },
+                  { key: "cv_corporate", label: "Corporate", desc: "Classic corporate style" },
+                  { key: "cv_legal", label: "Legal", desc: "Formal legal style" },
                 ].map(t => (
                   <button key={t.key} onClick={() => setSelectedLayout(t.key)}
                     className={`p-2.5 rounded-lg border-2 text-left transition-all ${selectedLayout === t.key ? 'border-custom-blue bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}

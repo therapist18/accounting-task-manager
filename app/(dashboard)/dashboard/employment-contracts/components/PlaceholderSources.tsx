@@ -279,7 +279,18 @@ export function PlaceholderSources({
 
   const openEdit = (placeholder: EcPlaceholder) => {
     setEditingEc(placeholder);
-    setDraft(ecPlaceholderToDtmPlaceholder(placeholder));
+    const draft = ecPlaceholderToDtmPlaceholder(placeholder);
+    // ec_placeholders.type only stores text/conditional/boolean, so a token
+    // used as {%logo} or {#section} would otherwise open the dialog showing
+    // the generic "Text" fallback even though the table badges it Image/Array.
+    // Surface the type DTM's own detection inferred from the template/clause
+    // content instead - array/image can't be persisted to the DB column, but
+    // they're still the truth for display. Only fills a 'text' fallback (the
+    // DB default) with a richer detected type; never touches an explicitly
+    // configured conditional/boolean type.
+    const detected = detectedTypes.get(placeholder.key);
+    if (detected && (draft.type === 'text' || draft.type === detected)) draft.type = detected;
+    setDraft(draft);
   };
 
   const closeEdit = () => {

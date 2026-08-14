@@ -39,7 +39,7 @@ import {
 
 const TERMINAL_STATUSES = ['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'];
 const STATUS_LABELS: Record<string, string> = {
-  all: 'All Applications', enquiry: 'Enquiry', wip: 'WIP', completed: 'Completed', overdue: 'Overdue',
+  all: 'All Tasks', active: 'All Enquiry + WIP', enquiry: 'Enquiry', wip: 'WIP', completed: 'Completed', overdue: 'Overdue',
 };
 const COMPLETED_STATUSES = ['write_up_completed', 'endorsed', 'completed'];
 
@@ -69,7 +69,7 @@ export default function SummaryReportsPage() {
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
   const [activeClassIds, setActiveClassIds] = useState<string[]>([]);
   const [activeSubClassIds, setActiveSubClassIds] = useState<string[]>([]);
-  const [activeTaskStatus, setActiveTaskStatus] = useState<'all' | 'enquiry' | 'wip' | 'completed' | 'overdue'>('enquiry');
+  const [activeTaskStatus, setActiveTaskStatus] = useState<'all' | 'active' | 'enquiry' | 'wip' | 'completed' | 'overdue'>('enquiry');
 
   const [activePerspective, setActivePerspective] = useState<'all' | 'officers' | 'managers' | 'clients'>('all');
   const [officerFilterMode, setOfficerFilterMode] = useState<'current' | 'history'>('current');
@@ -378,6 +378,7 @@ export default function SummaryReportsPage() {
   // ── Task status scoping (Enquiry / WIP / Completed / Overdue) ──
   const matchesActiveTaskStatus = useCallback((task: any) => {
     if (activeTaskStatus === 'all') return true;
+    if (activeTaskStatus === 'active') return !TERMINAL_STATUSES.includes(task.status);
     if (activeTaskStatus === 'enquiry') return task.status === 'enquiry';
     if (activeTaskStatus === 'wip') return task.status !== 'enquiry' && !TERMINAL_STATUSES.includes(task.status);
     if (activeTaskStatus === 'completed') return COMPLETED_STATUSES.includes(task.status);
@@ -467,6 +468,7 @@ export default function SummaryReportsPage() {
   // zeroes out the others' counts — same convention as ReportsPage's StatusFilterBar.
   const taskStatusCounts = useMemo(() => ({
     all: deptScopedTasks.length,
+    active: deptScopedTasks.filter(t => !TERMINAL_STATUSES.includes(t.status)).length,
     enquiry: deptScopedTasks.filter(t => t.status === 'enquiry').length,
     wip: deptScopedTasks.filter(t => t.status !== 'enquiry' && !TERMINAL_STATUSES.includes(t.status)).length,
     completed: deptScopedTasks.filter(t => COMPLETED_STATUSES.includes(t.status)).length,
@@ -617,7 +619,7 @@ export default function SummaryReportsPage() {
       getCurrentStageNameForTask,
       showTime,
       scopeName: departments.find((d: any) => d.id.toString() === activeDeptId)?.name,
-      statusLabel: STATUS_LABELS[activeTaskStatus] || 'All Applications',
+      statusLabel: STATUS_LABELS[activeTaskStatus] || 'All Tasks',
     };
     setIsExporting(format);
     try {
@@ -645,7 +647,7 @@ export default function SummaryReportsPage() {
 
   const activeDepartment = departments.find((d: any) => d.id.toString() === activeDeptId);
   const activeSubDepartment = (activeDepartment?.tm_subdepartments || []).find((s: any) => s.id.toString() === activeSubDeptId);
-  const breadcrumbSubtext = activeSubDepartment?.name || (activeDeptId !== 'all' ? 'All Sub-units' : 'All Departments');
+  const breadcrumbSubtext = activeSubDepartment?.name || (activeDeptId !== 'all' ? 'All Sub-departments' : 'All Departments');
 
   return (
     <div className="flex flex-col flex-1 overflow-auto bg-slate-50">

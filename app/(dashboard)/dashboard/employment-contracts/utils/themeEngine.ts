@@ -38,7 +38,7 @@ export const DEFAULT_CONTRACT_THEME: ContractThemeSettings = {
 // Shared across the Employment Contracts and CV Generator modules so both
 // modules' theme panels offer the same presets and produce Word-safe output
 // the same way.
-import { COLOR_PRESETS, toWordSafeFontStack } from '@/lib/documentTheme';
+import { COLOR_PRESETS, toWordSafeFontStack, makeCssWordSafe } from '@/lib/documentTheme';
 export { COLOR_PRESETS, toWordSafeFontStack };
 
 export const FONT_OPTIONS = [
@@ -416,82 +416,7 @@ function flattenNestedCss(rootSelector: string, css: string): string {
   return [`${rootSelector} { ${baseDecls.trim()} }`, ...rules].join('\n');
 }
 
-// Word's HTML filter only reads block-element spacing through its own mso-*
-// directives - plain CSS `padding`/`margin` on a block element is ignored,
-// which is why the themed headings and ToC looked compressed in the .doc
-// export (all their breathing room was plain CSS padding/margin). Restate
-// every px padding/margin as the matching mso directive in points (0.75pt
-// per px, the same ratio the rest of the theme uses): shorthand
-// `padding: X Y;` becomes `mso-padding-alt`, longhand `padding-bottom: 6px;`
-// becomes `mso-padding-bottom-alt`, and likewise `margin-*` →
-// `mso-margin-*-alt` (Word's paragraph space-before/space-after properties).
-// Non-px values (%, em, auto, ...) are left untouched rather than guessed.
-function addMsoSpatialAlt(css: string): string {
-  const toPt = (v: string): string | null => {
-    if (v === '0') return '0pt';
-    const m = /^(-?\d*\.?\d+)px$/.exec(v);
-    return m ? `${(parseFloat(m[1]) * 0.75).toFixed(1)}pt` : null;
-  };
 
-  let out = css.replace(/padding:\s*([^;]+);/g, (full, rawValue: string) => {
-    const tokens = rawValue.trim().split(/\s+/);
-    if (tokens.length < 1 || tokens.length > 4) return full;
-    const pts = tokens.map(toPt);
-    if (pts.some((p) => p === null)) return full;
-    const [a, b, c, d] = pts as string[];
-    const top = a, right = b ?? a, bottom = c ?? a, left = d ?? b ?? a;
-    return `${full} mso-padding-alt: ${top} ${right} ${bottom} ${left};`;
-  });
-
-  out = out.replace(
-    /(margin|padding)-(top|right|bottom|left):\s*(-?\d*\.?\d+)px\s*;/g,
-    (_full, prop: string, side: string, px: string) => {
-      const pt = (parseFloat(px) * 0.75).toFixed(1);
-      return `${_full} mso-${prop}-${side}-alt: ${pt}pt;`;
-    }
-  );
-
-  return out;
-}
-
-function makeWordSafe(css: string, rootSelector: string, fontFamily: string): string {
-  const wordSafeFont = toWordSafeFontStack(fontFamily);
-  const withHeadingFix = css
-    .replace(/(\.signature-block\s*\{[^}]*?)display:\s*flex;?/g, '$1display: table; width: 100%;')
-    .replace(/(\.signature-column\s*\{[^}]*?)flex:\s*1;?/g, '$1display: table-cell; width: 50%; vertical-align: top;')
-    // Word maps <h1>-<h3> tags to its own built-in "Heading N" paragraph
-    // styles regardless of any descendant-selector CSS targeting them - that
-    // built-in style carries Word's own default font and spacing, which is
-    // why headings ignored the theme font and lost their custom padding in
-    // the .doc export even though color/borders came through fine.
-    // ContractPreview.tsx's buildOutput() swaps each <h1>-<h3> for a
-    // <div class="mso-hN"> before serializing, so retarget these selectors at
-    // that class instead of the tag name - the rule keeps applying, but Word
-    // never invokes its built-in Heading style machinery to fight it.
-    .replace(/\bh([1-3])\b/g, '.mso-h$1');
-
-  const withPadding = addMsoSpatialAlt(withHeadingFix);
-
-  // Word's HTML importer doesn't reliably cascade an inherited font-family
-  // down through arbitrary nesting depth the way a browser does - rather
-  // than trust inheritance from the single root rule above, restate it
-  // explicitly on every text-bearing element (remapped to a Word-safe stack
-  // via toWordSafeFontStack) so the chosen theme font survives the .doc
-  // round-trip instead of silently falling back to whatever Word picks on
-  // its own.
-  const fontOverride = `${rootSelector} .mso-h1, ${rootSelector} .mso-h2, ${rootSelector} .mso-h3, ${rootSelector} p, ${rootSelector} li, ${rootSelector} td, ${rootSelector} th, ${rootSelector} div, ${rootSelector} span, ${rootSelector} a { font-family: ${wordSafeFont}; }`;
-
-  // mso-table-lspace/rspace strip the extra side padding Word otherwise adds
-  // around every table. Table width itself is enforced by buildOutput()
-  // setting the legacy width="100%" attribute directly - the one table
-  // directive Word's HTML filter honors unconditionally. No table-layout:
-  // fixed here: with no explicit column widths Word's fixed layout splits
-  // columns into equal-width slabs, so a 2-column label/value table leaves a
-  // huge empty gap beside a short value and reads as oversized.
-  const tableFix = `${rootSelector} table { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }`;
-
-  return `${withPadding}\n${fontOverride}\n${tableFix}`;
-}
 
 export function applyThemeToHtml(content: string, settings: ContractThemeSettings, options?: { wordSafe?: boolean }): string {
   const theme = settings.theme || 'corporate';
@@ -527,7 +452,7 @@ export function applyThemeToHtml(content: string, settings: ContractThemeSetting
     + BASE_SECTION_STYLES;
   const rootSelector = `.contract-theme-${theme}`;
   let flatCss = flattenNestedCss(rootSelector, rawCss);
-  if (options?.wordSafe) flatCss = makeWordSafe(flatCss, rootSelector, args.fontFamily);
+  if (options?.wordSafe) flatCss = makeCssWordSafe(flatCss, rootSelector, args.fontFamily);
 
   return `
     <div class="contract-theme-${theme}" style="padding: 48px; max-width: 850px; margin: 0 auto; background: white; box-sizing: border-box;">
