@@ -3,7 +3,7 @@
 import { Check, Layout, Palette, X } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { COLOR_PRESETS } from "@/lib/documentTheme";
-import type { CvLayout } from "@/lib/cvThemeEngine";
+import type { CvLayout } from "@/app/(dashboard)/dashboard/cv-generator/utils/cvThemeEngine";
 import type { CvSettings } from "../utils/cvGeneratorData";
 
 // Labels/descriptions for each engine layout, in the order they should appear.

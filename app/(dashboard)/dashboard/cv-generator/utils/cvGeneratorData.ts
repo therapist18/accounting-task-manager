@@ -266,7 +266,7 @@ export const initialCVData: CvData = {
   ],
   experience: [
     {
-      company: "Velvet Furniture | India",
+      company: "Velvet Furniture",
       location: "India",
       role: "Business Owner / Operations Manager",
       startDate: "Sept 2023",
@@ -279,7 +279,7 @@ export const initialCVData: CvData = {
       ]
     },
     {
-      company: "KreditBee | India",
+      company: "KreditBee",
       location: "India",
       role: "Software Engineer (Python)",
       startDate: "Feb 2022",

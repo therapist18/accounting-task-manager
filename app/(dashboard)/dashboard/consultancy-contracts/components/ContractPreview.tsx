@@ -17,7 +17,8 @@ import { DocumentViewer, type DocumentViewerHandle } from '@/components/contract
 import type { Company } from '../../companies/database';
 import type { CcEngagement } from '../utils/ccEngagements';
 import type { CompanyDirector } from '../hooks/useCompanyDirectors';
-import { applyThemeToHtml, toWordSafeFontStack , type ContractThemeSettings  } from '../utils/themeEngine';
+import { applyThemeToHtml, type ContractThemeSettings } from '../utils/themeEngine';
+import { applyWordSafeDomFixes } from '@/lib/documentTheme';
 
 interface ContractPreviewProps {
   company: Company | null;
@@ -35,51 +36,35 @@ interface ContractPreviewProps {
 }
 
 // Turns the themed body into the specific markup Word's HTML import filter
-// actually honors - same technique employment-contracts/components/
-// ContractPreview.tsx's buildOutput() uses (reused here as a direct port,
-// not an import, since that function is a private closure there): pull the
-// theme's <style> out to be passed via buildWordDocBlob's head-level css
-// (Word only reliably reads <style> as a direct child of <head>, not one
-// nested in the body the way applyThemeToHtml embeds it for on-screen/PDF
-// use), turn <h1>-<h3> into <div class="mso-hN"> (Word forces its own
-// built-in Heading N style onto real heading tags no matter what CSS says),
-// bookmark every ToC target with <a name="section-N"> (Word doesn't treat a
-// plain id="..." as a jump target), and strip the theme wrapper's inline
-// padding/max-width/margin (redundant with @page's own margin in Word).
-function toWordExportHtml(bodyHtml: string, settings: ContractThemeSettings): { bodyContent: string; css: string } {
-  const wordSafeHtml = applyThemeToHtml(bodyHtml, settings, { wordSafe: true });
+// actually honors - shares its DOM-transform logic with employment-contracts/
+// components/ContractPreview.tsx's own buildOutput() via
+// applyWordSafeDomFixes (lib/documentTheme.ts), rather than each module
+// carrying its own drifting copy (this module's previous standalone port had
+// fallen behind: it was missing the heading padding/margin inlining and ToC
+// nav/class inlining EC's copy had already gained). Pulls the theme's
+// <style> out to be passed via buildWordDocBlob's head-level css (Word only
+// reliably reads <style> as a direct child of <head>, not one nested in the
+// body the way applyThemeToHtml embeds it for on-screen/PDF use);
+// bookmarkSelector is '[id^="section-"]' here rather than EC's 'section[id]'
+// since utils/tableOfContents.ts assigns ids straight onto the <h2> itself
+// (no <section> wrapper).
+function toWordExportHtml(bodyHtml: string, settings: ContractThemeSettings, mergedValues: Record<string, string>): { bodyContent: string; css: string } {
+  // applyThemeToHtml's 'theme_header' branding strategy injects CC_COVER_HTML
+  // (themeEngine.ts) - including its own {{company_name}} token - AFTER
+  // bodyHtml's own placeholders already resolved, so it needs its own
+  // replacePlaceholders pass here or that token would export literally.
+  const wordSafeHtml = replacePlaceholders(applyThemeToHtml(bodyHtml, settings, { wordSafe: true }), mergedValues);
   const styleMatch = wordSafeHtml.match(/<style>([\s\S]*?)<\/style>/);
   const css = styleMatch ? styleMatch[1] : '';
   let bodyContent = wordSafeHtml.replace(/<style>[\s\S]*?<\/style>/, '');
 
   if (typeof DOMParser !== 'undefined') {
     const doc = new DOMParser().parseFromString(`<div>${bodyContent}</div>`, 'text/html');
-    doc.querySelectorAll('[id^="section-"]').forEach((el) => {
-      const id = el.getAttribute('id');
-      if (!id) return;
-      const bookmark = doc.createElement('a');
-      bookmark.setAttribute('name', id);
-      el.insertBefore(bookmark, el.firstChild);
-    });
-    const wordSafeFont = toWordSafeFontStack(settings.fontFamily);
-    doc.querySelectorAll('h1, h2, h3').forEach((h) => {
-      const div = doc.createElement('div');
-      for (const attr of Array.from(h.attributes)) div.setAttribute(attr.name, attr.value);
-      div.className = `mso-${h.tagName.toLowerCase()} ${div.className || ''}`.trim();
-      (div as HTMLElement).style.fontFamily = wordSafeFont;
-      while (h.firstChild) div.appendChild(h.firstChild);
-      h.replaceWith(div);
-    });
-    doc.querySelectorAll('table').forEach((table) => {
-      table.setAttribute('cellpadding', '0');
-      table.setAttribute('cellspacing', '0');
-      table.setAttribute('width', '100%');
-    });
-    doc.querySelectorAll('[class^="contract-theme-"]').forEach((el) => {
-      const styleEl = el as HTMLElement;
-      styleEl.style.padding = '';
-      styleEl.style.maxWidth = '';
-      styleEl.style.margin = '';
+    applyWordSafeDomFixes(doc, {
+      themeCss: css,
+      rootSelector: `.contract-theme-${settings.theme}`,
+      fontFamily: settings.fontFamily,
+      bookmarkSelector: '[id^="section-"]',
     });
     bodyContent = doc.body.firstElementChild?.innerHTML ?? bodyContent;
   }
@@ -112,9 +97,15 @@ export function ContractPreview({
     return content ? `<div class="cs-section">${content}</div>` : '';
   }, [templateContent, mergedValues]);
 
+  // replacePlaceholders runs again here, after theming - the 'theme_header'
+  // branding strategy injects CC_COVER_HTML (themeEngine.ts), which carries
+  // its own {{company_name}} token, only at this step (inside
+  // applyThemeToHtml), after bodyHtml's own placeholder pass above already
+  // ran. Re-resolving here is a harmless no-op for content whose tokens were
+  // already substituted in bodyHtml.
   const themedHtml = useMemo(
-    () => (bodyHtml ? applyThemeToHtml(bodyHtml, themeSettings) : ''),
-    [bodyHtml, themeSettings]
+    () => (bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings), mergedValues) : ''),
+    [bodyHtml, themeSettings, mergedValues]
   );
 
   // Same markup for the print-only portal, but with the ToC's
@@ -134,7 +125,7 @@ export function ContractPreview({
     if (!bodyHtml) return;
     setExporting('word');
     try {
-      const { bodyContent, css } = toWordExportHtml(bodyHtml, themeSettings);
+      const { bodyContent, css } = toWordExportHtml(bodyHtml, themeSettings, mergedValues);
       const blob = buildWordDocBlob({ html: bodyContent, title: fileNameBase, css });
       downloadBlob(blob, `${fileNameBase}.doc`);
     } catch (err: any) {
@@ -162,7 +153,7 @@ export function ContractPreview({
     if (!company || !bodyHtml) return;
     setFilingToProfile(true);
     try {
-      const { bodyContent, css } = toWordExportHtml(bodyHtml, themeSettings);
+      const { bodyContent, css } = toWordExportHtml(bodyHtml, themeSettings, mergedValues);
       const result = await saveContractToProfile(company.id, company.company_name, bodyContent, css);
       if (result.success) toast.success('Filed to company profile');
       else toast.error(result.error || 'Failed to file to company profile');

@@ -16,6 +16,7 @@ import { detectTokens } from './utils/placeholderDetection';
 import { fetchLatestEngagement, createEngagement, updateEngagement, CcEngagement } from './utils/ccEngagements';
 import { ContractThemeSettings, DEFAULT_CONTRACT_THEME } from './utils/themeEngine';
 import { useCompanyDirectors } from './hooks/useCompanyDirectors';
+import type { JobField } from '../master-fields/components/types/database';
 
 export default function ConsultancyContractsPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -24,6 +25,7 @@ export default function ConsultancyContractsPage() {
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
   const [resolvedValues, setResolvedValues] = useState<Record<string, string>>({});
+  const [masterFields, setMasterFields] = useState<Map<number, JobField>>(new Map());
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [engagement, setEngagement] = useState<CcEngagement | null>(null);
   const [engagementStatuses, setEngagementStatuses] = useState<Record<string, 'draft' | 'active' | 'superseded'>>({});
@@ -80,6 +82,7 @@ export default function ConsultancyContractsPage() {
   useEffect(() => {
     if (!selectedCompanyId || placeholders.length === 0) {
       setResolvedValues({});
+      setMasterFields(new Map());
       setOverrides({});
       setEngagement(null);
       setSelectedDirectorIds([]);
@@ -88,12 +91,13 @@ export default function ConsultancyContractsPage() {
     let cancelled = false;
     setLoadingCompanyData(true);
     (async () => {
-      const [{ values }, existingEngagement] = await Promise.all([
+      const [{ values, masterFields: fields }, existingEngagement] = await Promise.all([
         resolveEcPlaceholderValues(placeholders, null, selectedCompanyId),
         fetchLatestEngagement(selectedCompanyId),
       ]);
       if (cancelled) return;
       setResolvedValues(values);
+      setMasterFields(fields);
       setOverrides(existingEngagement?.placeholder_overrides || {});
       setEngagement(existingEngagement);
       // A saved engagement's own selection wins; a brand-new engagement has
@@ -108,6 +112,17 @@ export default function ConsultancyContractsPage() {
     })();
     return () => { cancelled = true; };
   }, [selectedCompanyId, placeholders]);
+
+  // Manual "refresh source data" trigger - re-resolves master-field values
+  // for the current company without touching overrides/engagement/directors,
+  // for MasterFieldEditControl's onSaved callback (DataValuesPanel.tsx) after
+  // an inline edit writes a new value back to its source record.
+  const handleRefreshMasterFieldValues = async () => {
+    if (!selectedCompanyId || placeholders.length === 0) return;
+    const { values, masterFields: fields } = await resolveEcPlaceholderValues(placeholders, null, selectedCompanyId);
+    setResolvedValues(values);
+    setMasterFields(fields);
+  };
 
   // New engagement (nothing saved yet) for this company: default the
   // Directors picker to everyone who qualifies, since a signed acknowledgement
@@ -252,6 +267,9 @@ export default function ConsultancyContractsPage() {
               directors={directors}
               selectedDirectorIds={selectedDirectorIds}
               onDirectorsChange={setSelectedDirectorIds}
+              masterFields={masterFields}
+              companyId={selectedCompanyId}
+              onRefresh={handleRefreshMasterFieldValues}
             />
           </Panel>
 

@@ -94,3 +94,169 @@ export function makeCssWordSafe(css: string, rootSelector: string, fontFamily: s
 
   return `${withPadding}\n${fontOverride}\n${tableFix}`;
 }
+
+// Pulls one flattened, scoped declaration block out of a word-safe stylesheet
+// (the output of makeCssWordSafe above) so its declarations can be copied
+// onto a matching element verbatim - Word's HTML import filter is unreliable
+// about applying class-scoped <style> rules to certain elements (headings,
+// <nav>), so applyWordSafeDomFixes below re-expresses those rules as inline
+// styles instead. The leading `\s*` tolerates the indentation the stylesheet
+// is rendered with.
+function extractCssRule(css: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = css.match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'));
+  return match ? match[1].trim() : '';
+}
+
+export interface WordSafeDomFixOptions {
+  // The word-safe stylesheet's own content (the <style> block's text, before
+  // it's pulled out into <head> by the caller) - source for the declarations
+  // extractCssRule pulls out and inlines.
+  themeCss: string;
+  // The theme's scoping selector, e.g. `.contract-theme-corporate` - matches
+  // applyThemeToHtml's own wrapper class.
+  rootSelector: string;
+  fontFamily: string;
+  // Which elements are ToC jump targets and need a Word-recognized <a name>
+  // bookmark inserted at their start - Employment Contracts wraps every
+  // section in `<section id="...">` (bookmarkSelector: 'section[id]');
+  // Consultancy Contracts has no section wrapper, just `id="section-N"` on
+  // the heading itself (bookmarkSelector: '[id^="section-"]').
+  bookmarkSelector: string;
+}
+
+// Turns a parsed export-body document into the specific markup Word's HTML
+// import filter actually honors, shared by Employment Contracts' and
+// Consultancy Contracts' own ContractPreview.tsx (previously two independent,
+// drifting copies of this same logic - see the commit that introduced this
+// function). Mutates `doc` in place; callers re-serialize afterwards
+// (doc.body.firstElementChild?.innerHTML).
+//
+//  1. Bookmarks every ToC target with <a name="..."> - Word doesn't treat a
+//     plain id="..." as a jump target, only a genuine bookmark, which is
+//     exactly what Word itself emits for one via "Save as Web Page".
+//  2. Converts <h1>-<h3> into <div class="mso-hN"> - Word forces its own
+//     built-in Heading N paragraph style onto real heading tags no matter
+//     what CSS says. The theme font is set as a plain string append (not via
+//     the `.style.fontFamily =` CSSOM setter, which forces a re-parse/
+//     re-serialize of whatever style attribute was just copied from the
+//     original heading, rewriting hex colors to rgb(...) that Word's
+//     importer can't reliably read and sometimes dropping the attribute
+//     entirely - the same fix CV Generator's own Word export needed).
+//  3. Strips Word's own default table cell margins via the legacy
+//     cellpadding/cellspacing/width HTML attributes, which Word's table
+//     rendering honors unconditionally where CSS `padding`/`width` alone is
+//     unreliable.
+//  4. Swaps `<nav class="cs-toc">` for a `<div>` - Word's HTML filter doesn't
+//     recognize <nav> at all and silently unwraps it, stranding the ToC's
+//     border/background/padding CSS on a tag Word never renders as a block.
+//  5. Re-expresses every .cs-toc* rule as an inline style on the matching
+//     element, since Word is unreliable about applying the <style> block's
+//     own border/background/padding to them.
+//  6. Re-applies .cs-toc-link's text styling inline (Word forces its own blue
+//     +underline Hyperlink style onto every <a> and can't resolve
+//     `color: inherit`, which every theme's .cs-toc-link relies on, so the
+//     theme's actual body color is substituted in). The link's own padding
+//     moves onto its parent .cs-toc-item (a block Word treats as a
+//     paragraph) rather than staying on the inline <a>, where the importer
+//     would drop it.
+//  7. Inlines each heading's composed spacing rules - its own .mso-hN rule,
+//     then .cs-section-heading, then the .cs-section-scoped .mso-hN rule, in
+//     that cascade order - since Word ignored their plain CSS padding/margin
+//     entirely when left in the <style> block, rendering every heading
+//     compressed regardless of the theme's own spacing design.
+//  8. Strips the theme wrapper's inline padding/max-width/margin (from
+//     applyThemeToHtml's on-screen/PDF wrapper) - the CSS override meant to
+//     zero those for Word ([class^="contract-theme-"] ...) is an attribute
+//     selector Word can't parse, so without this it stacks the wrapper's own
+//     gutter on top of @page's own margin.
+export function applyWordSafeDomFixes(doc: Document, options: WordSafeDomFixOptions): void {
+  const { themeCss, rootSelector, fontFamily, bookmarkSelector } = options;
+  const wordSafeFont = toWordSafeFontStack(fontFamily);
+
+  doc.querySelectorAll(bookmarkSelector).forEach((el) => {
+    const id = el.getAttribute('id');
+    if (!id) return;
+    const bookmark = doc.createElement('a');
+    bookmark.setAttribute('name', id);
+    el.insertBefore(bookmark, el.firstChild);
+  });
+
+  doc.querySelectorAll('h1, h2, h3').forEach((h) => {
+    const div = doc.createElement('div');
+    for (const attr of Array.from(h.attributes)) div.setAttribute(attr.name, attr.value);
+    div.className = `mso-${h.tagName.toLowerCase()} ${div.className || ''}`.trim();
+    const existingStyle = div.getAttribute('style');
+    div.setAttribute('style', `${existingStyle ? `${existingStyle};` : ''}font-family: ${wordSafeFont};`);
+    while (h.firstChild) div.appendChild(h.firstChild);
+    h.replaceWith(div);
+  });
+
+  doc.querySelectorAll('table').forEach((table) => {
+    table.setAttribute('cellpadding', '0');
+    table.setAttribute('cellspacing', '0');
+    table.setAttribute('width', '100%');
+  });
+
+  doc.querySelectorAll('nav.cs-toc').forEach((nav) => {
+    const div = doc.createElement('div');
+    for (const attr of Array.from(nav.attributes)) div.setAttribute(attr.name, attr.value);
+    while (nav.firstChild) div.appendChild(nav.firstChild);
+    nav.replaceWith(div);
+  });
+
+  const rootDecls = extractCssRule(themeCss, rootSelector);
+  const tocClasses = ['cs-toc', 'cs-toc-heading', 'cs-toc-list', 'cs-toc-item', 'cs-toc-num'];
+  for (const cls of tocClasses) {
+    const decls = extractCssRule(themeCss, `${rootSelector} .${cls}`);
+    if (!decls) continue;
+    doc.querySelectorAll(`.${cls}`).forEach((el) => {
+      const prev = el.getAttribute('style') ? `${el.getAttribute('style')};` : '';
+      el.setAttribute('style', `${prev}${decls}`);
+    });
+  }
+
+  const linkDecls = extractCssRule(themeCss, `${rootSelector} .cs-toc-link`);
+  const linkTextDecls = (linkDecls || '')
+    .split(';')
+    .map((d) => d.trim())
+    .filter((d) => /^(color|text-decoration|font-size|font-weight|font-style|letter-spacing|text-transform)\s*:/.test(d))
+    .join('; ');
+  const baseColor = rootDecls.match(/color:\s*([^;]+)/)?.[1]?.trim();
+  if (linkTextDecls) {
+    const finalDecls = baseColor ? linkTextDecls.replace(/color:\s*inherit/g, `color: ${baseColor}`) : linkTextDecls;
+    doc.querySelectorAll('.cs-toc-link').forEach((el) => {
+      const prev = el.getAttribute('style') ? `${el.getAttribute('style')};` : '';
+      el.setAttribute('style', `${prev}${finalDecls}`);
+    });
+  }
+  const linkPadding = linkDecls ? linkDecls.match(/padding:[^;]+;\s*mso-padding-alt:[^;]+;?/)?.[0] ?? '' : '';
+  if (linkPadding) {
+    doc.querySelectorAll('.cs-toc-item').forEach((item) => {
+      const style = item.getAttribute('style') || '';
+      if (/\bpadding\b/.test(style)) return;
+      item.setAttribute('style', `${style}${style.endsWith(';') ? '' : ';'} ${linkPadding}`.trim());
+    });
+  }
+
+  doc.querySelectorAll('.mso-h1, .mso-h2, .mso-h3').forEach((h) => {
+    const tag = h.classList.contains('mso-h1') ? 'h1' : h.classList.contains('mso-h2') ? 'h2' : 'h3';
+    const themeDecls = extractCssRule(themeCss, `${rootSelector} .mso-${tag}`);
+    if (!themeDecls) return;
+    const headingDecls = h.classList.contains('cs-section-heading')
+      ? extractCssRule(themeCss, `${rootSelector} .cs-section-heading`)
+      : '';
+    const sectionDecls = h.closest('.cs-section')
+      ? extractCssRule(themeCss, `${rootSelector} .cs-section .mso-${tag}`)
+      : '';
+    const prev = h.getAttribute('style') ? `${h.getAttribute('style')};` : '';
+    h.setAttribute('style', `${prev}${themeDecls}${headingDecls ? `; ${headingDecls}` : ''}${sectionDecls ? `; ${sectionDecls}` : ''}`);
+  });
+
+  doc.querySelectorAll('[class^="contract-theme-"]').forEach((el) => {
+    const styleEl = el as HTMLElement;
+    styleEl.style.padding = '';
+    styleEl.style.maxWidth = '';
+    styleEl.style.margin = '';
+  });
+}

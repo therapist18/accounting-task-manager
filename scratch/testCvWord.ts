@@ -1,6 +1,6 @@
 import fs from 'fs';
 import { JSDOM } from 'jsdom';
-import { buildCvDocument } from '../lib/cvThemeEngine';
+import { buildCvDocument } from '../app/(dashboard)/dashboard/cv-generator/utils/cvThemeEngine';
 import { buildWordDocBlob } from '../lib/documentExport';
 
 // Minimal DOMParser polyfill backed by jsdom, so this Node script can exercise

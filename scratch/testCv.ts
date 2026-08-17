@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { buildCvDocument } from '../lib/cvThemeEngine';
+import { buildCvDocument } from '../app/(dashboard)/dashboard/cv-generator/utils/cvThemeEngine';
 
 async function run() {
   const data = { 

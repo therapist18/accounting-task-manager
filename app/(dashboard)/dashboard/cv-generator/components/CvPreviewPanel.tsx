@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { DocumentViewer, type DocumentViewerHandle } from "@/components/contracts/DocumentViewer";
-import { buildCvDocument, type CvDocument } from "@/lib/cvThemeEngine";
+import { buildCvDocument, type CvDocument } from "@/app/(dashboard)/dashboard/cv-generator/utils/cvThemeEngine";
 import { Loader2 } from "lucide-react";
 
 interface CvPreviewPanelProps {

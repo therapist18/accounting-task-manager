@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { printElementAsPdf, buildWordDocBlob, downloadBlob } from "@/lib/documentExport";
-import { buildCvDocument } from "@/lib/cvThemeEngine";
+import { buildCvDocument } from "@/app/(dashboard)/dashboard/cv-generator/utils/cvThemeEngine";
 import { type DocumentViewerHandle } from "@/components/contracts/DocumentViewer";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase/client";

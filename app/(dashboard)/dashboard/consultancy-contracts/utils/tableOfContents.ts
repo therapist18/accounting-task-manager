@@ -10,10 +10,39 @@ function stripTags(html: string): string {
   return html.replace(/<[^>]+>/g, '').trim();
 }
 
+// Where to splice the generated <nav class="cs-toc"> in: right after the
+// document's own title block, which is either the newer structured cover
+// (<div class="cc-cover">...</div>, see themeEngine.ts's .cc-cover rules -
+// gives each theme a properly designed title/subtitle/parties treatment
+// instead of one plain <h1>) or, for templates not yet migrated to it, the
+// older plain <h1>. Walks nested <div> depth from the cover's opening tag so
+// this finds THAT div's own matching close, not just the first </div>
+// anywhere in the document (which could belong to a nested child instead).
+function findTitleBlockEnd(html: string): number | null {
+  const coverOpen = /<div\b[^>]*\bclass="[^"]*\bcc-cover\b[^"]*"[^>]*>/i.exec(html);
+  if (coverOpen) {
+    const divTagRe = /<div\b[^>]*>|<\/div>/gi;
+    divTagRe.lastIndex = coverOpen.index;
+    let depth = 0;
+    let m: RegExpExecArray | null;
+    while ((m = divTagRe.exec(html))) {
+      if (m[0].toLowerCase() === '</div>') {
+        depth -= 1;
+        if (depth === 0) return m.index + m[0].length;
+      } else {
+        depth += 1;
+      }
+    }
+    return null;
+  }
+  const h1Close = /<\/h1>/i.exec(html);
+  return h1Close ? h1Close.index + h1Close[0].length : null;
+}
+
 // Assigns id="section-N" to every <h2> (overwriting any id already there, so
 // re-running this after a content edit doesn't drift out of sync with the
 // ToC's own links) and inserts a generated <nav class="cs-toc"> right after
-// the document's <h1> title - or at the very top if there's no h1.
+// the document's title block - see findTitleBlockEnd above.
 export function withTableOfContents(html: string): string {
   if (!html) return html;
 
@@ -48,5 +77,6 @@ export function withTableOfContents(html: string): string {
         <div class="cs-toc-list">${items.join('')}</div>
     </nav>`;
     
-  return /<\/h1>/i.test(withIds) ? withIds.replace(/<\/h1>/i, `</h1>${toc}`) : toc + withIds;
+  const insertAt = findTitleBlockEnd(withIds);
+  return insertAt != null ? withIds.slice(0, insertAt) + toc + withIds.slice(insertAt) : toc + withIds;
 }

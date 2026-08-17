@@ -99,11 +99,11 @@ const LAYOUT_SPECS: Record<CvLayout, LayoutSpec> = {
       { kind: "additional", title: "Additional Information" },
     ],
     side: {
-      widthPx: 260,
+      widthPx: 280,
       padding: "24px 16px",
       dark: true,
       blocks: [
-        { kind: "contact", title: "Contact" },
+        { kind: "contact", title: "Contact Information" },
         { kind: "details", title: "Personal Details" },
         { kind: "skills", title: "Core Competencies" },
         { kind: "languages", title: "Languages" },
@@ -296,6 +296,19 @@ const CONTACT_DEFS: [string, string][] = [
   ["github", "GitHub"],
 ];
 
+// Small inline SVGs (self-contained, no external icon-font request) standing in for the
+// FontAwesome glyphs used by the corporate theme's reference design. Scoped to corporate
+// only - other themes stay icon-free per standing convention.
+const CONTACT_ICONS: Record<string, string> = {
+  location: `<svg viewBox="0 0 20 20" width="11" height="11" fill="currentColor" style="vertical-align:-1px;"><path d="M10 20s6-5.686 6-10a6 6 0 10-12 0c0 4.314 6 10 6 10zm0-7a3 3 0 110-6 3 3 0 010 6z"/></svg>`,
+  phone: `<svg viewBox="0 0 20 20" width="11" height="11" fill="currentColor" style="vertical-align:-1px;"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"/></svg>`,
+  email: `<svg viewBox="0 0 20 20" width="11" height="11" fill="currentColor" style="vertical-align:-1px;"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/></svg>`,
+  linkedin: `<svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" style="vertical-align:-1px;"><path d="M14.82 0H1.18C.53 0 0 .53 0 1.18v13.64C0 15.47.53 16 1.18 16h13.64c.65 0 1.18-.53 1.18-1.18V1.18C16 .53 15.47 0 14.82 0zM4.75 13.5H2.4V6h2.35v7.5zM3.58 5.03c-.75 0-1.36-.61-1.36-1.36 0-.75.61-1.36 1.36-1.36.75 0 1.36.61 1.36 1.36 0 .75-.61 1.36-1.36 1.36zM13.5 13.5h-2.35V9.9c0-.86-.02-1.97-1.2-1.97-1.2 0-1.39.94-1.39 1.9v3.67H6.2V6h2.26v1.03h.03c.32-.6 1.09-1.24 2.25-1.24 2.4 0 2.84 1.58 2.84 3.64v3.57z"/></svg>`,
+  github: `<svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" style="vertical-align:-1px;"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>`,
+};
+
+const CHECK_CIRCLE_SVG = `<svg viewBox="0 0 20 20" width="11" height="11" fill="currentColor" style="vertical-align:-1px;"><path fill-rule="evenodd" clip-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/></svg>`;
+
 // ---------------------------------------------------------------------------
 // Shared content-block builders
 // ---------------------------------------------------------------------------
@@ -309,7 +322,14 @@ function photoFrame(photoSrc: string | null, settings: any, size: number, border
   return `<div class="cv-photo" style="${style}">${img}</div>`;
 }
 
-function contactBlock(personalInfo: any, accent: string): string {
+function contactBlock(personalInfo: any, accent: string, layout: CvLayout): string {
+  if (layout === "corporate") {
+    const lines = CONTACT_DEFS
+      .filter(([key]) => personalInfo?.[key])
+      .map(([key]) => `<div class="cv-contact-item" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span style="color:${accent};display:inline-flex;">${CONTACT_ICONS[key] || ""}</span><span>${esc(personalInfo[key])}</span></div>`);
+    if (!lines.length) return "";
+    return lines.join("");
+  }
   const lines = CONTACT_DEFS
     .filter(([key]) => personalInfo?.[key])
     .map(([key]) => esc(personalInfo[key]));
@@ -338,11 +358,12 @@ function skillsBlock(categories: any[], layout: CvLayout, pri: string, acc: stri
   const { style, uppercase } = headingVisual(layout, "h4", pri, acc);
   const styleAttr = style ? ` style="${style}"` : "";
   
+  const separator = layout === "corporate" ? ", " : " &bull; ";
   return categories
     .map((grp: any) => {
       const items = splitItems(grp.items);
-      // Renders large skill lists gracefully as inline bullet-separated text to prevent massive vertical overflow.
-      const list = items.length ? `<p style="line-height:1.6; margin-bottom:12px;">${items.map(i => esc(i)).join(" &bull; ")}</p>` : "";
+      // Renders large skill lists gracefully as inline separated text to prevent massive vertical overflow.
+      const list = items.length ? `<p style="line-height:1.6; margin-bottom:12px;">${items.map(i => esc(i)).join(separator)}</p>` : "";
       const title = String(grp.category || "");
       return `<h4${styleAttr}>${esc(uppercase ? title.toUpperCase() : title)}</h4>${list}`;
     })
@@ -355,7 +376,7 @@ function languagesBlock(languages: any[]): string {
   return `<p>${lines.join("<br/>")}</p>`;
 }
 
-function expEntry(exp: any): string {
+function expEntry(exp: any, layout: CvLayout): string {
   const company = esc(exp.company || "Company");
   const role = esc(exp.role || "Role");
   const loc = exp.location ? ` <em>| ${esc(exp.location)}</em>` : "";
@@ -367,12 +388,18 @@ function expEntry(exp: any): string {
     .join("");
   const ul = respList ? `<ul>${respList}</ul>` : "";
 
+  if (layout === "corporate") {
+    const head = `<table class="cv-exp-head" cellpadding="0" cellspacing="0" border="0" style="width:100%;"><tr><td><strong>${company}</strong>${loc}</td><td align="right"><em>${dates}</em></td></tr></table>`;
+    const roleLine = `<p class="cv-exp-role">${role}</p>`;
+    return `${head}${roleLine}${companyDesc}${ul}`;
+  }
+
   return `<table cellpadding="0" cellspacing="0" border="0" style="width:100%;"><tr><td><strong>${company}</strong> — ${role}${loc}</td><td align="right"><em>${dates}</em></td></tr></table>${companyDesc}${ul}`;
 }
 
-function expSection(entries: any[], emptyText: string): string {
+function expSection(entries: any[], emptyText: string, layout: CvLayout): string {
   if (!entries.length) return `<p><em>${esc(emptyText)}</em></p>`;
-  return entries.map((e: any) => expEntry(e)).join("");
+  return entries.map((e: any) => expEntry(e, layout)).join("");
 }
 
 function eduEntries(entries: any[]): string {
@@ -385,8 +412,23 @@ function eduEntries(entries: any[]): string {
     .join("");
 }
 
-function projectsBlock(projects: any[]): string {
+function projectsBlock(projects: any[], layout: CvLayout): string {
   if (!projects.length) return "<p><em>No projects added yet.</em></p>";
+
+  if (layout === "corporate") {
+    const card = (p: any) => `<td class="cv-project-card" valign="top" width="50%" style="border:1px solid #eeeeee;padding:12px;">
+      <strong>${esc(p.title || "Project Title")}${p.year ? ` (${esc(p.year)})` : ""}</strong>
+      ${p.description ? `<p>${esc(p.description)}</p>` : ""}
+    </td>`;
+    const rows: string[] = [];
+    for (let i = 0; i < projects.length; i += 2) {
+      const left = card(projects[i]);
+      const right = projects[i + 1] ? card(projects[i + 1]) : `<td width="50%" style="border:none;"></td>`;
+      rows.push(`<tr>${left}${right}</tr>`);
+    }
+    return `<table cellpadding="0" cellspacing="0" border="0" style="width:100%;"><tbody>${rows.join("")}</tbody></table>`;
+  }
+
   return projects
     .map(
       (p: any) =>
@@ -427,12 +469,15 @@ function achievementsBlock(achievements: any[]): string {
     .join("");
 }
 
-function declarationHtml(cvData: any, accent: string): string {
+function declarationHtml(cvData: any, accent: string, layout: CvLayout): string {
   const declaration = cvData.declaration || "";
   if (!cvData.includeDeclaration || !declaration) return "";
-  const badge = cvData.verifiedBadge
-    ? `<p style="color:${accent};"><strong>✓ CV Verified &amp; Up-to-date ${verifiedDateLabel()}</strong></p>`
-    : "";
+  let badge = "";
+  if (cvData.verifiedBadge) {
+    badge = layout === "corporate"
+      ? `<p><span class="cv-verified-badge">${CHECK_CIRCLE_SVG}&nbsp;CV Verified &amp; Up-to-date ${verifiedDateLabel()}</span></p>`
+      : `<p style="color:${accent};"><strong>✓ CV Verified &amp; Up-to-date ${verifiedDateLabel()}</strong></p>`;
+  }
   return `<p><em>${esc(declaration)}</em></p>${badge}`;
 }
 
@@ -452,8 +497,8 @@ const H1_UPPERCASE: Record<CvLayout, boolean> = {
 function headingVisual(layout: CvLayout, level: "h2" | "h3" | "h4", pri: string, acc: string): { style: string; uppercase: boolean } {
   switch (layout) {
     case "corporate":
-      if (level === "h2") return { style: `color:${pri};border-bottom:2px solid #e2e8f0;padding-bottom:6px;`, uppercase: false };
-      if (level === "h3") return { style: `color:${acc};`, uppercase: true };
+      if (level === "h2") return { style: `color:${pri};background:#e8f4fd;border-left:5px solid ${acc};padding:8px 15px;`, uppercase: true };
+      if (level === "h3") return { style: `color:${acc};border-bottom:1px solid ${acc};padding-bottom:5px;`, uppercase: true };
       return { style: "", uppercase: false };
     case "legal":
       if (level === "h2") return { style: `color:${pri};text-align:center;`, uppercase: true };
@@ -530,13 +575,13 @@ function buildBlock(block: BlockSpec, cvData: any, settings: any, layout: CvLayo
     case "summary":
       return cvData.summary ? `<p>${esc(cvData.summary)}</p>` : "<p><em>No profile summary added yet.</em></p>";
     case "experience":
-      return expSection(cvData.experience || [], "No work experience added yet.");
+      return expSection(cvData.experience || [], "No work experience added yet.", layout);
     case "internships":
-      return expSection(cvData.internships || [], "No internships added yet.");
+      return expSection(cvData.internships || [], "No internships added yet.", layout);
     case "education":
       return eduEntries(education);
     case "projects":
-      return projectsBlock(cvData.projects || []);
+      return projectsBlock(cvData.projects || [], layout);
     case "skills":
       return skillsBlock(skills, layout, pri, acc);
     case "languages":
@@ -550,7 +595,7 @@ function buildBlock(block: BlockSpec, cvData: any, settings: any, layout: CvLayo
     case "additional":
       return additionalBlock(additionalInfo);
     case "contact":
-      return contactBlock(personalInfo, toCssColor(settings?.accentColor, "#3498db"));
+      return contactBlock(personalInfo, toCssColor(settings?.accentColor, "#3498db"), layout);
     case "details":
       return detailsBlock(personalDetails);
     default:
@@ -576,15 +621,16 @@ function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: 
   if (spec.nameInMain) {
     const { personalInfo = {} } = cvData;
     const nameText = personalInfo.fullName || "Your Name";
-    mainParts.push(`<h1 style="color:${pri};">${esc(H1_UPPERCASE[layout] ? nameText.toUpperCase() : nameText)}</h1>`);
-    mainParts.push(`<p style="color:${acc};"><strong>${esc((personalInfo.title || "Professional Title").toUpperCase())}</strong></p>`);
+    const nameH1 = `<h1 style="color:${pri};">${esc(H1_UPPERCASE[layout] ? nameText.toUpperCase() : nameText)}</h1>`;
+    const titleP = `<p class="cv-title" style="color:${acc};"><strong>${esc((personalInfo.title || "Professional Title").toUpperCase())}</strong></p>`;
+    mainParts.push(layout === "corporate" ? `<div class="cv-header-box">${nameH1}${titleP}</div>` : `${nameH1}${titleP}`);
   }
-  
+
   for (const block of spec.mainSections) {
     mainParts.push(withHeading("h2", block, buildBlock(block, cvData, settings, layout, pri, acc), layout, pri, acc));
   }
   if (spec.declarationIn === "main") {
-    const decl = declarationHtml(cvData, acc);
+    const decl = declarationHtml(cvData, acc, layout);
     if (decl) mainParts.push(`<div class="cv-declaration">${decl}</div>`);
   }
   const mainHtml = mainParts.join("");
@@ -598,7 +644,7 @@ function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: 
       sideParts.push(withHeading("h3", block, buildBlock(block, cvData, settings, layout, pri, acc), layout, pri, acc));
     }
     if (spec.declarationIn === "side") {
-      const decl = declarationHtml(cvData, acc);
+      const decl = declarationHtml(cvData, acc, layout);
       if (decl) sideParts.push(`<div class="cv-declaration">${decl}</div>`);
     }
   }
@@ -626,7 +672,7 @@ function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: 
   }
 
   const footer = spec.declarationIn === "footer" ? (() => {
-    const decl = declarationHtml(cvData, acc);
+    const decl = declarationHtml(cvData, acc, layout);
     return decl ? `<div class="cv-declaration" style="padding:${spec.footerPadding};">${decl}</div>` : "";
   })() : "";
 
@@ -653,12 +699,20 @@ const BASE_CV_STYLES = `
 const THEME_STYLES: Record<CvLayout, (a: CssCtx) => string> = {
   corporate: ({ pri, acc, fam, S }) => `
     font-family: ${fam}; color: #334155; font-size: ${S(11.5)}; line-height: 1.7;
-    h1 { color: ${pri}; font-weight: 800; font-size: ${S(24)}; text-transform: uppercase; letter-spacing: 0.05em; background: linear-gradient(90deg, #f8fafc 0%, transparent 100%); border-left: 6px solid ${acc}; padding: 12px 16px; margin-bottom: 24px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); text-align: left; }
-    h2 { color: ${pri}; font-weight: 700; font-size: ${S(12.5)}; margin-top: 36px; margin-bottom: 14px; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px; }
-    h3 { color: ${acc}; font-weight: 700; font-size: ${S(11)}; margin-top: 24px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
-    h4 { font-size: ${S(10.5)}; font-weight: 700; color: #64748b; }
+    .cv-header-box { border-bottom: 4px solid ${pri}; padding-bottom: 20px; margin-bottom: 25px; }
+    h1 { color: ${pri}; font-weight: 900; font-size: ${S(30)}; text-transform: uppercase; letter-spacing: -0.02em; margin: 0; }
+    .cv-title { font-size: ${S(14)}; font-weight: 700; margin-top: 5px; margin-bottom: 0; }
+    h2 { color: ${pri}; font-weight: 800; font-size: ${S(12.5)}; text-transform: uppercase; letter-spacing: 0.02em; background: #e8f4fd; border-left: 5px solid ${acc}; padding: 8px 15px; margin-top: 28px; margin-bottom: 15px; }
+    h3 { color: ${acc}; font-weight: 800; font-size: ${S(11)}; margin-top: 24px; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid ${acc}; padding-bottom: 5px; }
+    h4 { font-size: ${S(10)}; font-weight: 800; color: #ffffff; text-decoration: underline; text-underline-offset: 3px; margin-bottom: 5px; }
     p { margin-bottom: 16px; text-align: justify; }
     table td { font-size: ${S(11.5)}; }
+    .cv-exp-head strong { color: #000000; font-weight: 800; font-size: ${S(12.5)}; }
+    .cv-exp-role { color: ${acc}; font-weight: 700; font-size: ${S(11.5)}; margin: 2px 0 6px; }
+    .cv-project-card strong { color: ${pri}; font-size: ${S(12)}; }
+    .cv-project-card p { color: #555555; font-size: ${S(10.5)}; line-height: 1.4; margin: 4px 0 0; }
+    .cv-sidebar p strong { color: ${acc}; }
+    .cv-verified-badge { display: inline-block; background: #27ae60; color: #ffffff; padding: 4px 12px; border-radius: 4px; font-weight: 800; font-size: ${S(10)}; text-transform: uppercase; }
   `,
   legal: ({ pri, fam, S }) => `
     font-family: ${fam}; color: #000000; font-size: ${S(11)}; line-height: 2.0; text-align: justify;

@@ -12,7 +12,8 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ContractThemePanel } from './ContractThemePanel';
-import { ContractThemeSettings, DEFAULT_CONTRACT_THEME, applyThemeToHtml, toWordSafeFontStack } from '../utils/themeEngine';
+import { ContractThemeSettings, DEFAULT_CONTRACT_THEME, applyThemeToHtml } from '../utils/themeEngine';
+import { applyWordSafeDomFixes } from '@/lib/documentTheme';
 import {
   resolveEffectiveSettings, resolveEffectiveClauses, assembleContractHtml,
 } from '../utils/clauseEngine';
@@ -37,17 +38,6 @@ import type { EcPlaceholder } from '../utils/ecPlaceholders';
 // not a missing fact, so these never get the missing-value placeholder
 // treatment below either.
 const LIST_MARKUP_KEYS = new Set(['applicable_benefits', 'key_responsibilities', 'statutory_deductions_table']);
-
-// buildOutput() re-expresses the theme's ToC/heading rules as inline styles
-// on the elements themselves (see the comments there) - this pulls one
-// flattened, scoped declaration block out of the word-safe stylesheet so its
-// declarations can be copied onto the matching element verbatim. The leading
-// `\s*` tolerates the indentation the theme's <style> block is rendered with.
-function extractCssRule(css: string, selector: string): string {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = css.match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'));
-  return match ? match[1].trim() : '';
-}
 
 // A single em dash reads as ambiguous - could be a stray hyphen, could be
 // intentional punctuation in a clause. A visibly blank-looking run makes it
@@ -320,159 +310,19 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     // exportThemedHtml's id="pdf-section-x" renaming above for the
     // equivalent PDF fix, a different problem with a different cause.)
     //
-    // Also strip Word's own default table cell margins via the legacy
-    // cellpadding/cellspacing HTML attributes - Word's table rendering
-    // applies its own built-in cell margins on top of/instead of a table's
-    // CSS `padding` unless told not to, which is why the exported tables
-    // showed noticeably more cell padding than the same theme's PDF output
-    // even though both share the exact same padding CSS.
+    // Also strip Word's own default table cell margins, swap the ToC's <nav>
+    // for a <div>, and inline the heading/ToC spacing rules Word ignores when
+    // left in the <style> block - see applyWordSafeDomFixes for the full
+    // rationale (shared with Consultancy Contracts' own Word export, which
+    // has the same fixes applied to the same theme engine's output).
     if (typeof DOMParser !== 'undefined') {
       const parser = new DOMParser();
       const doc = parser.parseFromString(`<div>${bodyContent}</div>`, 'text/html');
-      doc.querySelectorAll('section[id]').forEach((section) => {
-        const id = section.getAttribute('id');
-        if (!id) return;
-        const bookmark = doc.createElement('a');
-        bookmark.setAttribute('name', id);
-        section.insertBefore(bookmark, section.firstChild);
-      });
-      // Word's import applies its own built-in "Heading N" paragraph styles
-      // to <h1>-<h3> tags no matter what CSS says, which is why makeWordSafe
-      // (themeEngine.ts) retargets every h1/h2/h3 selector at a .mso-hN
-      // class - but that class only means anything if the tags actually
-      // become <div class="mso-hN"> first. Convert them here (the step the
-      // makeWordSafe comment claims this file performs but never actually
-      // did), preserving each heading's existing classes so
-      // .cs-section-heading keeps applying. A <div> rather than a <p> so the
-      // theme's paragraph rules (e.g. the legal theme's text-indent: 48px)
-      // can't leak onto headings. The theme font is inlined as well, so the
-      // chosen face can't be lost even if Word fails to cascade the
-      // class-scoped rule.
-      const wordSafeFont = toWordSafeFontStack(themeSettings.fontFamily);
-      doc.querySelectorAll('h1, h2, h3').forEach((h) => {
-        const div = doc.createElement('div');
-        for (const attr of Array.from(h.attributes)) div.setAttribute(attr.name, attr.value);
-        div.className = `mso-${h.tagName.toLowerCase()} ${div.className || ''}`.trim();
-        // Appended as a plain string rather than via the `.style.fontFamily =`
-        // CSSOM setter - that setter forces a re-parse/re-serialize of
-        // whatever style attribute was just copied from the original heading,
-        // which rewrites hex colors to rgb(...) (Word's importer only
-        // reliably reads hex) and can leave the attribute malformed enough
-        // that Word drops it entirely instead of just the font (confirmed as
-        // the cause of the CV Generator's export losing its theme font/color
-        // - see the identical fix in cv-generator/page.tsx's buildCvWordOutput).
-        const existingStyle = div.getAttribute('style');
-        div.setAttribute('style', `${existingStyle ? `${existingStyle};` : ''}font-family: ${wordSafeFont};`);
-        while (h.firstChild) div.appendChild(h.firstChild);
-        h.replaceWith(div);
-      });
-      doc.querySelectorAll('table').forEach((table) => {
-        table.setAttribute('cellpadding', '0');
-        table.setAttribute('cellspacing', '0');
-        // width="100%" as a legacy HTML attribute rather than only scoped CSS
-        // - it's the one table directive Word's HTML filter honors
-        // unconditionally, so an exported table can't autofit to its content
-        // and blow out wider than the page (the table-layout: fixed
-        // workaround previously attempted in makeWordSafe wasn't being
-        // applied by Word anyway, and only stretched columns evenly).
-        table.setAttribute('width', '100%');
-      });
-
-      // Word's HTML filter doesn't recognize the <nav> element - it silently
-      // unwraps the tag, so the .cs-toc box/border/background CSS lands on an
-      // element Word never actually renders as a block. Swap it for a <div>
-      // (which Word treats as a plain paragraph) before inlining anything.
-      doc.querySelectorAll('nav.cs-toc').forEach((nav) => {
-        const div = doc.createElement('div');
-        for (const attr of Array.from(nav.attributes)) div.setAttribute(attr.name, attr.value);
-        while (nav.firstChild) div.appendChild(nav.firstChild);
-        nav.replaceWith(div);
-      });
-
-      // ...and re-express every .cs-toc* rule as an inline style on the
-      // matching element. Word is unreliable about applying the <style>
-      // block's block-level CSS (border/background/padding) to these, so the
-      // same declarations (already carrying the mso-padding-alt /
-      // mso-margin-*-alt directives makeWordSafe added) get copied onto the
-      // elements themselves, where inline styles always win. .cs-toc-link is
-      // handled separately below - inlining its full rule would put padding
-      // on an inline <a>, which the importer drops anyway.
-      const themeRootSelector = `.contract-theme-${themeSettings.theme}`;
-      const tocClasses = ['cs-toc', 'cs-toc-heading', 'cs-toc-list', 'cs-toc-item', 'cs-toc-num'];
-      for (const cls of tocClasses) {
-        // cls is a bare class name - the selector needs its leading '.' or it
-        // reads as an element selector ("cs-toc") that matches nothing.
-        const decls = extractCssRule(themeCss, `${themeRootSelector} .${cls}`);
-        if (!decls) continue;
-        doc.querySelectorAll(`.${cls}`).forEach((el) => {
-          const prev = el.getAttribute('style') ? `${el.getAttribute('style')};` : '';
-          el.setAttribute('style', `${prev}${decls}`);
-        });
-      }
-
-      // Word applies its built-in Hyperlink style (blue + underline) to every
-      // <a> regardless of CSS, and it can't resolve `color: inherit` (the
-      // value every theme's .cs-toc-link uses) - so re-apply only the text
-      // styling inline, substituting the theme's actual body color (from the
-      // scoped root rule) for the unresolvable `inherit`.
-      const linkDecls = extractCssRule(themeCss, `${themeRootSelector} .cs-toc-link`);
-      const linkTextDecls = (linkDecls || '')
-        .split(';')
-        .map((d) => d.trim())
-        .filter((d) => /^(color|text-decoration|font-size|font-weight|font-style|letter-spacing|text-transform)\s*:/.test(d))
-        .join('; ');
-      const baseColor = extractCssRule(themeCss, themeRootSelector).match(/color:\s*([^;]+)/)?.[1]?.trim();
-      if (linkTextDecls) {
-        const finalDecls = baseColor ? linkTextDecls.replace(/color:\s*inherit/g, `color: ${baseColor}`) : linkTextDecls;
-        doc.querySelectorAll('.cs-toc-link').forEach((el) => {
-          const prev = el.getAttribute('style') ? `${el.getAttribute('style')};` : '';
-          el.setAttribute('style', `${prev}${finalDecls}`);
-        });
-      }
-      // The link's padding belongs on the row's <div> (a paragraph in Word)
-      // rather than the inline anchor, or the ToC rows render with no
-      // spacing at all.
-      const linkPadding = linkDecls ? linkDecls.match(/padding:[^;]+;\s*mso-padding-alt:[^;]+;?/)?.[0] ?? '' : '';
-      if (linkPadding) {
-        doc.querySelectorAll('.cs-toc-item').forEach((item) => {
-          const style = item.getAttribute('style') || '';
-          if (/\bpadding\b/.test(style)) return;
-          item.setAttribute('style', `${style}${style.endsWith(';') ? '' : ';'} ${linkPadding}`.trim());
-        });
-      }
-
-      // Themed headings have the same class of problem - Word ignored their
-      // plain CSS padding/margin (the h2's padding-bottom that spaces the
-      // text off its underline, the margins pushing it away from the
-      // paragraph above/below), so they rendered compressed. Inline the
-      // theme's .mso-hN rule, then the .cs-section-heading spacing rule, then
-      // the .cs-section .mso-hN base rule - in that order, so each
-      // higher-specificity rule's spacing wins just like it does in the
-      // stylesheet cascade - onto each heading.
-      doc.querySelectorAll('.mso-h1, .mso-h2, .mso-h3').forEach((h) => {
-        const tag = h.classList.contains('mso-h1') ? 'h1' : h.classList.contains('mso-h2') ? 'h2' : 'h3';
-        const themeDecls = extractCssRule(themeCss, `${themeRootSelector} .mso-${tag}`);
-        if (!themeDecls) return;
-        const headingDecls = h.classList.contains('cs-section-heading')
-          ? extractCssRule(themeCss, `${themeRootSelector} .cs-section-heading`)
-          : '';
-        const sectionDecls = h.closest('.cs-section')
-          ? extractCssRule(themeCss, `${themeRootSelector} .cs-section .mso-${tag}`)
-          : '';
-        const prev = h.getAttribute('style') ? `${h.getAttribute('style')};` : '';
-        h.setAttribute('style', `${prev}${themeDecls}${headingDecls ? `; ${headingDecls}` : ''}${sectionDecls ? `; ${sectionDecls}` : ''}`);
-      });
-      // applyThemeToHtml's theme wrapper carries inline padding:48px /
-      // max-width:850px / margin:0 auto for the on-screen preview; the CSS
-      // override meant to zero those for Word ([class^="contract-theme-"] ...)
-      // is an attribute selector Word can't parse, so Word was stacking the
-      // 48px gutter on top of @page's own 0.5in margin. Strip the inline
-      // values here instead.
-      doc.querySelectorAll('[class^="contract-theme-"]').forEach((el) => {
-        const styleEl = el as HTMLElement;
-        styleEl.style.padding = '';
-        styleEl.style.maxWidth = '';
-        styleEl.style.margin = '';
+      applyWordSafeDomFixes(doc, {
+        themeCss,
+        rootSelector: `.contract-theme-${themeSettings.theme}`,
+        fontFamily: themeSettings.fontFamily,
+        bookmarkSelector: 'section[id]',
       });
       bodyContent = doc.body.firstElementChild?.innerHTML ?? bodyContent;
     }
