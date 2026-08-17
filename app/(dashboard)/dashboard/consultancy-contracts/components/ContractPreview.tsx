@@ -19,6 +19,7 @@ import type { CcEngagement } from '../utils/ccEngagements';
 import type { CompanyDirector } from '../hooks/useCompanyDirectors';
 import { applyThemeToHtml, type ContractThemeSettings } from '../utils/themeEngine';
 import { applyWordSafeDomFixes } from '@/lib/documentTheme';
+import type { EcPlaceholder } from '../../employment-contracts/utils/ecPlaceholders';
 
 interface ContractPreviewProps {
   company: Company | null;
@@ -33,85 +34,89 @@ interface ContractPreviewProps {
   // Directors/shareholders chosen in the Directors picker - rendered into
   // the Acknowledgement section as {{directors_acknowledgement_block}}.
   selectedDirectors: CompanyDirector[];
+  placeholders: EcPlaceholder[];
 }
 
-// Turns the themed body into the specific markup Word's HTML import filter
-// actually honors - shares its DOM-transform logic with employment-contracts/
-// components/ContractPreview.tsx's own buildOutput() via
-// applyWordSafeDomFixes (lib/documentTheme.ts), rather than each module
-// carrying its own drifting copy (this module's previous standalone port had
-// fallen behind: it was missing the heading padding/margin inlining and ToC
-// nav/class inlining EC's copy had already gained). Pulls the theme's
-// <style> out to be passed via buildWordDocBlob's head-level css (Word only
-// reliably reads <style> as a direct child of <head>, not one nested in the
-// body the way applyThemeToHtml embeds it for on-screen/PDF use);
-// bookmarkSelector is '[id^="section-"]' here rather than EC's 'section[id]'
-// since utils/tableOfContents.ts assigns ids straight onto the <h2> itself
-// (no <section> wrapper).
-function toWordExportHtml(bodyHtml: string, settings: ContractThemeSettings, mergedValues: Record<string, string>): { bodyContent: string; css: string } {
-  // applyThemeToHtml's 'theme_header' branding strategy injects CC_COVER_HTML
-  // (themeEngine.ts) - including its own {{company_name}} token - AFTER
-  // bodyHtml's own placeholders already resolved, so it needs its own
-  // replacePlaceholders pass here or that token would export literally.
-  const wordSafeHtml = replacePlaceholders(applyThemeToHtml(bodyHtml, settings, { wordSafe: true }), mergedValues);
+const LIST_MARKUP_KEYS = new Set(['applicable_benefits', 'key_responsibilities', 'statutory_deductions_table', 'services_table', 'fee_schedule_table']);
+const MISSING_VALUE_PLACEHOLDER = '_________________';
+
+function toWordExportHtml(
+  htmlText: string,
+  themeSettings: ContractThemeSettings,
+  mergedValues: Record<string, string>
+) {
+  const wordSafeHtml = replacePlaceholders(applyThemeToHtml(htmlText, themeSettings, { wordSafe: true }), mergedValues);
   const styleMatch = wordSafeHtml.match(/<style>([\s\S]*?)<\/style>/);
-  const css = styleMatch ? styleMatch[1] : '';
+  const themeCss = styleMatch ? styleMatch[1] : '';
   let bodyContent = wordSafeHtml.replace(/<style>[\s\S]*?<\/style>/, '');
 
   if (typeof DOMParser !== 'undefined') {
-    const doc = new DOMParser().parseFromString(`<div>${bodyContent}</div>`, 'text/html');
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${bodyContent}</div>`, 'text/html');
+
+    // Same global Word fixes employment-contracts uses
     applyWordSafeDomFixes(doc, {
-      themeCss: css,
-      rootSelector: `.contract-theme-${settings.theme}`,
-      fontFamily: settings.fontFamily,
+      themeCss,
+      rootSelector: `.contract-theme-${themeSettings.theme}`,
+      fontFamily: themeSettings.fontFamily,
       bookmarkSelector: '[id^="section-"]',
     });
+
     bodyContent = doc.body.firstElementChild?.innerHTML ?? bodyContent;
   }
-  return { bodyContent, css };
+
+  return {
+    bodyContent,
+    css: themeCss
+  };
 }
 
 export function ContractPreview({
   company, templateContent, resolvedValues, overrides, engagement,
-  themeSettings, onThemeChange, saving, onSave, selectedDirectors,
+  themeSettings, onThemeChange, saving, onSave, selectedDirectors, placeholders
 }: ContractPreviewProps) {
   const viewerRef = useRef<DocumentViewerHandle>(null);
   const [exporting, setExporting] = useState<'word' | 'pdf' | null>(null);
   const [filingToProfile, setFilingToProfile] = useState(false);
   const [themePanelOpen, setThemePanelOpen] = useState(false);
 
-  const mergedValues = useMemo(
+  const mergedValuesRaw = useMemo(
     () => withDirectorsAcknowledgementBlock(withDerivedFeeValues({ ...resolvedValues, ...overrides }), selectedDirectors),
     [resolvedValues, overrides, selectedDirectors]
   );
 
-  // Unthemed body (placeholders resolved + ToC injected) - the shared input
-  // to both the themed live preview and the Word-safe export transform.
-  // Wrapped in .cs-section because BASE_SECTION_STYLES (themeEngine.ts)
-  // only restores list-style/margins for content inside that class - without
-  // it, Tailwind's Preflight reset leaves this template's plain <ul>/<li>
-  // bullets stripped, since the wrapper is what EC's own assembleContractHtml
-  // provides for every clause and this module has no equivalent.
+  const mergedValues = useMemo(() => {
+    const wrap = (key: string, value: string, entity: string | undefined): string => {
+      if (LIST_MARKUP_KEYS.has(key)) return value;
+      const isMissing = !value;
+      const display = isMissing ? MISSING_VALUE_PLACEHOLDER : value;
+      const missingClass = isMissing ? ' ph-entity-missing' : '';
+      if (entity === 'company') return `<span class="ph-entity-company${missingClass}">${display}</span>`;
+      if (entity === 'individual' || entity === 'employee') return `<span class="ph-entity-employee${missingClass}">${display}</span>`;
+      return display;
+    };
+
+    const highlighted: Record<string, string> = {};
+    for (const p of placeholders) {
+      highlighted[p.key] = wrap(p.key, mergedValuesRaw[p.key] || '', p.entity_type?.[0]);
+    }
+    for (const [key, value] of Object.entries(mergedValuesRaw)) {
+      if (key in highlighted) continue;
+      highlighted[key] = wrap(key, value, undefined);
+    }
+    return highlighted;
+  }, [mergedValuesRaw, placeholders]);
+
   const bodyHtml = useMemo(() => {
     const content = withTableOfContents(replacePlaceholders(templateContent || '', mergedValues));
     return content ? `<div class="cs-section">${content}</div>` : '';
   }, [templateContent, mergedValues]);
 
-  // replacePlaceholders runs again here, after theming - the 'theme_header'
-  // branding strategy injects CC_COVER_HTML (themeEngine.ts), which carries
-  // its own {{company_name}} token, only at this step (inside
-  // applyThemeToHtml), after bodyHtml's own placeholder pass above already
-  // ran. Re-resolving here is a harmless no-op for content whose tokens were
-  // already substituted in bodyHtml.
   const themedHtml = useMemo(
     () => (bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings), mergedValues) : ''),
     [bodyHtml, themeSettings, mergedValues]
   );
 
-  // Same markup for the print-only portal, but with the ToC's
-  // id/href="#section-x" anchors renamed to a "pdf-section-x" namespace so
-  // the hidden live preview (same ids, still in the DOM during window.print)
-  // can't win the browser's anchor lookup and break the PDF's ToC links.
   const printThemedHtml = useMemo(
     () => themedHtml
       ? themedHtml.replace(/id="section-/g, 'id="pdf-section-').replace(/href="#section-/g, 'href="#pdf-section-')
@@ -119,17 +124,32 @@ export function ContractPreview({
     [themedHtml]
   );
 
-  const fileNameBase = company ? `Consultancy Agreement - ${company.company_name}` : 'Consultancy Agreement';
+  const buildOutput = (): { blob: Blob; fileName: string } | null => {
+    if (!bodyHtml) return null;
+    const baseName = company?.legal_name?.replace(/\s+/g, '_') || 'Consultancy';
+    const { bodyContent, css } = toWordExportHtml(bodyHtml, themeSettings, mergedValues);
+    
+    return {
+      blob: buildWordDocBlob({
+        title: `${baseName} Contract`,
+        html: bodyContent,
+        css: `${css}\n[class^="contract-theme-"] { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }`,
+        pageSize: '8.5in 11.7in',
+        pageMargin: '0.5in',
+      }),
+      fileName: `${baseName}_Contract.doc`,
+    };
+  };
 
   const handleExportWord = () => {
     if (!bodyHtml) return;
     setExporting('word');
     try {
-      const { bodyContent, css } = toWordExportHtml(bodyHtml, themeSettings, mergedValues);
-      const blob = buildWordDocBlob({ html: bodyContent, title: fileNameBase, css });
-      downloadBlob(blob, `${fileNameBase}.doc`);
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to export Word document');
+      const output = buildOutput();
+      if (output) downloadBlob(output.blob, output.fileName);
+    } catch (error) {
+      console.error('Word export failed:', error);
+      toast.error('Could not generate Word document');
     } finally {
       setExporting(null);
     }
@@ -138,9 +158,10 @@ export function ContractPreview({
   const handleExportPdf = async () => {
     setExporting('pdf');
     try {
+      const baseName = company?.legal_name?.replace(/\s+/g, '_') || 'Consultancy';
       await printElementAsPdf({
         element: viewerRef.current?.getPrintArea() ?? null,
-        fileName: fileNameBase,
+        fileName: `${baseName}_Contract`,
       });
     } catch (err: any) {
       toast.error(err?.message || 'Failed to export PDF');

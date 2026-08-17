@@ -84,11 +84,27 @@ const SOURCE_KIND_LABELS: Record<PlaceholderSourceKind, string> = Object.fromEnt
 ) as Record<PlaceholderSourceKind, string>;
 
 // Types DTM's detectPlaceholderTags infers from the {{prefix}} in content.
-const TYPE_LABELS: Record<DetectedPlaceholderTagType, string> = {
+// EC placeholder types (from ecPlaceholders.ts)
+type EcPlaceholderType = EcPlaceholder['type'];
+
+const EC_TYPE_LABELS: Record<EcPlaceholderType, string> = {
   text: 'Text',
+  conditional: 'Conditional',
+  boolean: 'Boolean',
   image: 'Image',
   array: 'Array',
-  conditional: 'Conditional',
+  ordinal: 'Ordinal',
+  document_checklist: 'Doc Checklist',
+};
+
+const EC_TYPE_STYLES: Record<EcPlaceholderType, string> = {
+  text: 'bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+  conditional: 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-800',
+  boolean: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800',
+  image: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-300 dark:border-violet-800',
+  array: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-900/20 dark:text-sky-300 dark:border-sky-800',
+  ordinal: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800',
+  document_checklist: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-900/20 dark:text-rose-300 dark:border-rose-800',
 };
 
 const EC_HIDDEN_SECTIONS = {
@@ -162,16 +178,29 @@ export function PlaceholderSources({
   // Scans the explicit typeScans content (e.g. Consultancy's live template) plus
   // every fetched clause - first tag seen for a key wins, mirroring DTM's
   // processedTags dedupe, so a placeholder used as {{%logo}} shows "Image".
-  const detectedTypes = useMemo(() => {
-    const map = new Map<string, DetectedPlaceholderTagType>();
+  // Also builds a parentMap by tracking block start/end to indent child tokens.
+  const { detectedTypes, parentMap } = useMemo(() => {
+    const typeMap = new Map<string, DetectedPlaceholderTagType>();
+    const parMap = new Map<string, string>();
     const scan = (text: string) => {
+      const blockStack: string[] = [];
       for (const tag of detectPlaceholderTags(text, 2)) {
-        if (!map.has(tag.key)) map.set(tag.key, tag.type);
+        if (!typeMap.has(tag.key)) typeMap.set(tag.key, tag.type);
+        if (tag.isBlockStart) {
+          blockStack.push(tag.key);
+        } else if (tag.isBlockEnd) {
+          blockStack.pop();
+        } else {
+          const currentParent = blockStack.length > 0 ? blockStack[blockStack.length - 1] : null;
+          if (currentParent && !parMap.has(tag.key)) {
+            parMap.set(tag.key, currentParent);
+          }
+        }
       }
     };
     if (typeScans) typeScans.forEach(scan);
     if (clausesEnabled) clauses.forEach((c) => scan(c.content));
-    return map;
+    return { detectedTypes: typeMap, parentMap: parMap };
   }, [typeScans, clauses, clausesEnabled]);
 
   // tm_job_fields ids arrive as numbers, while ec_placeholders stores
@@ -219,7 +248,7 @@ export function PlaceholderSources({
           const q = search.toLowerCase();
           const linkedLabels = getLinkedLabels(p);
           const entityLabels = getEntityLabels(p);
-          const typeLabel = TYPE_LABELS[detectedTypes.get(p.key) as DetectedPlaceholderTagType] || '';
+          const typeLabel = EC_TYPE_LABELS[p.type as EcPlaceholderType] || '';
           return (
             p.key.toLowerCase().includes(q) ||
             p.label.toLowerCase().includes(q) ||
@@ -238,8 +267,28 @@ export function PlaceholderSources({
       list = list.filter((p) => filterByKeys.includes(p.key));
     }
 
-    list.sort((a, b) => {
+    // Hierarchical sort: keep children under their parent blocks
+    // 1. Build parent->children map from parentMap
+    const childrenMap = new Map<string, EcPlaceholder[]>();
+    for (const p of list) {
+      const parent = parentMap.get(p.key);
+      if (parent) {
+        if (!childrenMap.has(parent)) childrenMap.set(parent, []);
+        childrenMap.get(parent)!.push(p);
+      }
+    }
+
+    // 2. Identify root nodes (blocks and placeholders without parents)
+    const roots = list.filter(p => !parentMap.has(p.key));
+
+    // 3. Sort function for a list of placeholders
+    const sortFn = (a: EcPlaceholder, b: EcPlaceholder) => {
       let cmp = 0;
+      const aType = detectedTypes.get(a.key) as EcPlaceholderType | undefined;
+      const bType = detectedTypes.get(b.key) as EcPlaceholderType | undefined;
+      const aEffectiveType = aType || a.type;
+      const bEffectiveType = bType || b.type;
+      
       switch (sortColumn) {
         case '#':
           cmp = 0;
@@ -251,8 +300,8 @@ export function PlaceholderSources({
           cmp = a.group_label.localeCompare(b.group_label);
           break;
         case 'type':
-          cmp = (TYPE_LABELS[detectedTypes.get(a.key) as DetectedPlaceholderTagType] || '').localeCompare(
-            TYPE_LABELS[detectedTypes.get(b.key) as DetectedPlaceholderTagType] || ''
+          cmp = (EC_TYPE_LABELS[aEffectiveType] || '').localeCompare(
+            EC_TYPE_LABELS[bEffectiveType] || ''
           );
           break;
         case 'source':
@@ -272,24 +321,34 @@ export function PlaceholderSources({
           break;
       }
       return sortDir === 'asc' ? cmp : -cmp;
-    });
+    };
 
-    return list;
-  }, [placeholders, search, masterFieldMap, sortColumn, sortDir, filterByKeys, clauseUsage, detectedTypes]);
+    // 4. Sort roots
+    roots.sort(sortFn);
+
+    // 5. Sort children within each parent
+    for (const children of childrenMap.values()) {
+      children.sort(sortFn);
+    }
+
+    // 6. Flatten: root, then its children, then next root...
+    const flattened: EcPlaceholder[] = [];
+    for (const root of roots) {
+      flattened.push(root);
+      const children = childrenMap.get(root.key);
+      if (children) {
+        flattened.push(...children);
+      }
+    }
+
+    return flattened;
+  }, [placeholders, search, masterFieldMap, sortColumn, sortDir, filterByKeys, clauseUsage, detectedTypes, parentMap]);
 
   const openEdit = (placeholder: EcPlaceholder) => {
     setEditingEc(placeholder);
     const draft = ecPlaceholderToDtmPlaceholder(placeholder);
-    // ec_placeholders.type only stores text/conditional/boolean, so a token
-    // used as {%logo} or {#section} would otherwise open the dialog showing
-    // the generic "Text" fallback even though the table badges it Image/Array.
-    // Surface the type DTM's own detection inferred from the template/clause
-    // content instead - array/image can't be persisted to the DB column, but
-    // they're still the truth for display. Only fills a 'text' fallback (the
-    // DB default) with a richer detected type; never touches an explicitly
-    // configured conditional/boolean type.
-    const detected = detectedTypes.get(placeholder.key);
-    if (detected && (draft.type === 'text' || draft.type === detected)) draft.type = detected;
+    // EC's type field now stores all types (text, conditional, boolean, image, array, ordinal, document_checklist)
+    // so we use it directly instead of falling back to content-detected types.
     setDraft(draft);
   };
 
@@ -486,35 +545,67 @@ export function PlaceholderSources({
                 const linkedLabels = getLinkedLabels(p);
                 const entityLabels = getEntityLabels(p);
                 const usedByClauses = clauseUsage.get(p.key) || [];
+                
+                // Use detected type from content scan for block/child hierarchy (source of truth for template structure)
+                // Fall back to database type for display styling
+                const detectedType = detectedTypes.get(p.key) as EcPlaceholderType | undefined;
+                const dbType = p.type as EcPlaceholderType;
+                const effectiveType = detectedType || dbType;
+                
+                const isArrayBlock = effectiveType === 'array';
+                const isConditionalBlock = effectiveType === 'conditional';
+                const isBlock = isArrayBlock || isConditionalBlock;
+                const isChild = parentMap.has(p.key);
+                const parentKey = parentMap.get(p.key);
+                const prefix = isBlock ? '{#' : effectiveType === 'image' ? '{%' : '{{';
+                const suffix = isBlock ? '}' : effectiveType === 'image' ? '}' : '}}';
+                
+                // Row styling matching PlaceholderPanel hierarchy
+                const rowClassName = cn(
+                  highlightKeys?.includes(p.key) && "bg-amber-50/60 dark:bg-amber-900/10",
+                  isBlock && "bg-sky-50/40 hover:bg-sky-50/60 dark:bg-sky-900/10",
+                  isChild && "bg-slate-50/50 hover:bg-slate-100/50 dark:bg-slate-800/30"
+                );
+                
                 return (
                 <TableRow
                   key={p.id}
-                  className={cn(highlightKeys?.includes(p.key) && "bg-amber-50/60 dark:bg-amber-900/10")}
+                  className={rowClassName}
                 >
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2 text-xs text-slate-400 text-center">{idx + 1}</TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
                     <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{p.label}</p>
-                    <p className="text-xs font-mono text-slate-400">{'{{' + p.key + '}}'}</p>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <div className={cn(
+                        "flex items-center gap-1 font-mono text-xs",
+                        isChild && "pl-6 border-l-2 border-sky-200 dark:border-sky-800 ml-1"
+                      )}>
+                        {isBlock && (
+                          <Badge className="bg-sky-600 hover:bg-sky-700 h-4 px-1.5 text-[10px]">ARRAY</Badge>
+                        )}
+                        {isChild && !isBlock && (
+                          <svg className="h-3 w-3 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                            <circle cx="9" cy="7" r="4" />
+                            <line x1="23" y1="21" x2="17" y2="17" />
+                          </svg>
+                        )}
+                        <span className={cn(
+                          isBlock && "font-bold text-sky-700 dark:text-sky-400",
+                          isChild && !isBlock && "text-slate-500 dark:text-slate-400"
+                        )}>
+                          {prefix + p.key + suffix}
+                        </span>
+                      </div>
+                    </div>
                   </TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
                     <Badge variant="secondary" className="text-[10px]">{p.group_label}</Badge>
                   </TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
-                    {(() => {
-                      const t = detectedTypes.get(p.key);
-                      if (!t) return <span className="text-xs text-slate-300">—</span>;
-                      const styles: Record<DetectedPlaceholderTagType, string> = {
-                        text: 'bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
-                        image: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-300 dark:border-violet-800',
-                        array: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-900/20 dark:text-sky-300 dark:border-sky-800',
-                        conditional: 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-800',
-                      };
-                      return (
-                        <Badge variant="outline" className={`text-[10px] font-medium ${styles[t]}`}>
-                          {TYPE_LABELS[t]}
-                        </Badge>
-                      );
-                    })()}
+                    <Badge variant="outline" className={`text-[10px] font-medium ${EC_TYPE_STYLES[effectiveType]}`}>
+                      {EC_TYPE_LABELS[effectiveType]}
+                    </Badge>
                   </TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
                     {allowedSourceKinds.length <= 1 ? (
@@ -554,7 +645,11 @@ export function PlaceholderSources({
                     {entityLabels.length > 0 ? (
                       <div className="flex flex-wrap gap-1">
                         {entityLabels.map((label) => (
-                          <Badge key={label} variant="secondary" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200">
+                          <Badge key={label} variant="secondary" className={cn(
+                            "text-[10px]",
+                            isChild ? "bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-300 dark:border-sky-800" :
+                              "bg-indigo-50 text-indigo-700 border-indigo-200"
+                          )}>
                             {label}
                           </Badge>
                         ))}
@@ -568,11 +663,11 @@ export function PlaceholderSources({
                       linkedLabels.length > 0 ? (
                         <div className="flex flex-wrap gap-1">
                           {linkedLabels.map((item, li) => (
-                            <Badge key={item.label} variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 flex items-center gap-1">
+                            <Badge key={item.label} variant="outline" className="text-xs bg-white dark:bg-slate-800 flex items-center gap-1">
                               <StrategyIcon strategy={item.strategy} />
                               <span>{item.label}</span>
                               {linkedLabels.length > 1 && (
-                                <span className="text-[10px] text-emerald-400 font-bold">#{item.priority}</span>
+                                <span className="text-[10px] text-slate-400 font-bold">#{item.priority}</span>
                               )}
                             </Badge>
                           ))}
@@ -585,7 +680,12 @@ export function PlaceholderSources({
                     )}
                   </TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
-                    <span className="text-xs text-slate-500">{p.default_value || '—'}</span>
+                    <Badge variant="secondary" className={cn(
+                      "text-[10px] capitalize",
+                      isChild ? "bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-300 dark:border-sky-800" : ""
+                    )}>
+                      {p.default_value || '—'}
+                    </Badge>
                   </TableCell>
                   {clausesEnabled && (
                     <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">

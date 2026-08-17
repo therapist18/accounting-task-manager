@@ -5,13 +5,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, RotateCcw, Database, PenLine, Building2, FileText, AlertCircle } from 'lucide-react';
+import { Loader2, RotateCcw, Database, PenLine, Building2, FileText, AlertCircle, ImageIcon, UploadCloud } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { EcPlaceholder } from '../../employment-contracts/utils/ecPlaceholders';
 import { MasterFieldEditControl } from '../../employment-contracts/components/MasterFieldEditControl';
 import type { JobField } from '../../master-fields/components/types/database';
 import { DirectorsPicker } from './DirectorsPicker';
 import type { CompanyDirector } from '../hooks/useCompanyDirectors';
+import { UploadModal } from '@/app/generic-components/UploadModal';
 
 interface DataValuesPanelProps {
   companySelected: boolean;
@@ -212,6 +213,22 @@ function PlaceholderRow({
   const linked = p.source_kind === 'master_field' && !!p.master_field_id;
   const sourceLabel = linked ? (masterFields.get(Number(p.master_field_id))?.label || 'Master field') : 'Manual';
 
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const uploadTarget = useMemo(() => {
+    if (p.type !== 'image' || !p.master_field_id || !masterFields) return null;
+    const mf = masterFields.get(Number(p.master_field_id));
+    const source = mf?.sources?.[0];
+    if (!source?.table || !companyId) return null;
+    const docIds = Array.isArray(source.document_id) ? source.document_id : (source.document_id ? [source.document_id] : []);
+    return {
+      targetTable: source.table,
+      idFieldName: source.linking_variable || 'company_id',
+      entityId: String(companyId),
+      documentId: docIds[0] || null,
+      isCompanyUpload: (source.linking_variable || '') === 'company_id',
+    };
+  }, [p, masterFields, companyId]);
+
   return (
     <div className={cn(
       "grid grid-cols-1 md:grid-cols-[35%_20%_1fr] gap-4 p-4 items-center transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40 relative overflow-hidden",
@@ -260,7 +277,53 @@ function PlaceholderRow({
 
       {/* Column 3: Value Control */}
       <div className="flex items-center gap-2">
-        {p.editable ? (
+        {p.type === 'image' ? (
+          <div className="flex-1">
+            {effectiveVal ? (
+              <div className="relative border rounded overflow-hidden flex items-center justify-center bg-slate-50 h-[40px] group">
+                <img src={effectiveVal} className="max-h-full object-contain" />
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                  {uploadTarget && (
+                    <button type="button" onClick={() => setUploadModalOpen(true)} className="h-6 bg-white/20 hover:bg-white/30 text-white rounded px-2 text-[9px]">
+                      Upload New
+                    </button>
+                  )}
+                  {isOverridden && (
+                    <button type="button" onClick={() => onOverride(undefined)} className="h-6 bg-red-500/80 hover:bg-red-500 text-white rounded px-2 text-[9px]">
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => uploadTarget && setUploadModalOpen(true)}
+                disabled={!uploadTarget}
+                className={cn("w-full h-[40px] border border-dashed rounded-lg flex items-center justify-center text-xs gap-2 transition-colors", uploadTarget ? "border-slate-300 hover:border-custom-blue hover:bg-blue-50/50 text-slate-500 hover:text-custom-blue" : "border-slate-200 bg-slate-50 text-slate-400 opacity-50 cursor-not-allowed")}
+              >
+                <UploadCloud className="w-4 h-4" />
+                {uploadTarget ? "Upload Image" : "Missing Config"}
+              </button>
+            )}
+            {uploadModalOpen && uploadTarget && (
+              <UploadModal
+                isOpen={uploadModalOpen}
+                onClose={() => setUploadModalOpen(false)}
+                title={`Upload ${p.label}`}
+                table={uploadTarget.targetTable}
+                documentId={uploadTarget.documentId || ''}
+                entityId={uploadTarget.entityId}
+                idFieldName={uploadTarget.idFieldName}
+                isCompanyUpload={uploadTarget.isCompanyUpload}
+                onUploadComplete={() => {
+                  setUploadModalOpen(false);
+                  onRefresh();
+                }}
+              />
+            )}
+          </div>
+        ) : p.editable ? (
           <Input
             className={cn(
               "h-9 text-sm rounded-lg flex-1",

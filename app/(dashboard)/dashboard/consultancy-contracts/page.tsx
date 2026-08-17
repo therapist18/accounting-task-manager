@@ -300,6 +300,7 @@ export default function ConsultancyContractsPage() {
               saving={saving}
               onSave={handleSave}
               selectedDirectors={selectedDirectors}
+              placeholders={placeholders}
             />
           </Panel>
         </PanelGroup>

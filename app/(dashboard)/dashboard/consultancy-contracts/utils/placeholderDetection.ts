@@ -95,10 +95,17 @@ export async function syncPlaceholdersFromContent(content: string): Promise<stri
     const tagInfo = tags.find(t => t.key === key);
     console.log(`[placeholderDetection] Matching token "${key}" -> master field ${match ? `"${match.label}" (${match.field_key})` : 'none'}`);
     
-    // Fallback to text for any types not supported by ec_placeholders ('image', 'array')
-    let typeToSave = 'text';
-    if (tagInfo?.type === 'conditional' || tagInfo?.type === 'text') {
-      typeToSave = tagInfo.type;
+    // ec_placeholders supports: text, conditional, boolean, image, array, ordinal, document_checklist
+    // Map detected types to supported ec_placeholders types
+    let typeToSave: 'text' | 'conditional' | 'boolean' | 'image' | 'array' | 'ordinal' | 'document_checklist' = 'text';
+    if (tagInfo?.type === 'conditional') {
+      typeToSave = 'conditional';
+    } else if (tagInfo?.type === 'array') {
+      typeToSave = 'array';
+    } else if (tagInfo?.type === 'image') {
+      typeToSave = 'image';
+    } else if (tagInfo?.type === 'text') {
+      typeToSave = 'text';
     }
 
     return {

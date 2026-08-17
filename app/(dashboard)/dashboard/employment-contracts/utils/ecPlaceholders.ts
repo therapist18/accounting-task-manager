@@ -50,7 +50,7 @@ export interface EcPlaceholder {
   // tasks-requirements/utils/placeholderProcessors.ts) inside
   // resolveEcPlaceholderValues, same shape/engine tasks-requirements' own
   // document templates use, not a second reimplementation.
-  type: 'text' | 'conditional' | 'boolean';
+  type: 'text' | 'conditional' | 'boolean' | 'image' | 'array' | 'ordinal' | 'document_checklist';
   conditions: ConditionalCondition[];
   boolean_conditions: BooleanCondition[];
   created_at: string;
@@ -88,7 +88,7 @@ export interface PlaceholderDetailsUpdate {
   // Contract Editor's Data & Values table (see ContractEditor.tsx) - set via
   // PlaceholderFormDialog's "Lock Value" checkbox (showSourceField gate).
   editable?: boolean;
-  type?: 'text' | 'conditional' | 'boolean';
+  type?: 'text' | 'conditional' | 'boolean' | 'image' | 'array' | 'ordinal' | 'document_checklist';
   conditions?: ConditionalCondition[];
   boolean_conditions?: BooleanCondition[];
 }
