@@ -288,12 +288,12 @@ const DETAIL_FIELDS: [string, string][] = [
   ["Driving", "drivingExperience"],
 ];
 
-const CONTACT_DEFS: [string, string, string][] = [
-  ["location", "⌖", "Location"],
-  ["phone", "☏", "Phone"],
-  ["email", "✉", "Email"],
-  ["linkedin", "in", "LinkedIn"],
-  ["github", "gh", "GitHub"],
+const CONTACT_DEFS: [string, string][] = [
+  ["location", "Location"],
+  ["phone", "Phone"],
+  ["email", "Email"],
+  ["linkedin", "LinkedIn"],
+  ["github", "GitHub"],
 ];
 
 // ---------------------------------------------------------------------------
@@ -310,10 +310,9 @@ function photoFrame(photoSrc: string | null, settings: any, size: number, border
 }
 
 function contactBlock(personalInfo: any, accent: string): string {
-  const lines = CONTACT_DEFS.map(([key, glyph, placeholder]) => {
-    const value = personalInfo?.[key];
-    return value ? `${glyph}&nbsp;${esc(value)}` : `<em>${glyph}&nbsp;${esc(placeholder)}</em>`;
-  }).filter((_, idx) => personalInfo?.[CONTACT_DEFS[idx][0]]);
+  const lines = CONTACT_DEFS
+    .filter(([key]) => personalInfo?.[key])
+    .map(([key]) => esc(personalInfo[key]));
   if (!lines.length) return "";
   return `<p style="color:${accent};">${lines.join("<br/>")}</p>`;
 }
@@ -500,7 +499,7 @@ function buildHeader(spec: LayoutSpec, cvData: any, settings: any, photoSrc: str
 
   const contactItems = CONTACT_DEFS
     .filter(([key]) => personalInfo[key])
-    .map(([key, glyph]) => `${glyph}&nbsp;${esc(personalInfo[key])}`);
+    .map(([key]) => esc(personalInfo[key]));
   const contactHtml = contactItems.length
     ? `<p style="color:${header.variant === "banner" ? "#e5e7eb" : "#666666"}; margin-top:8px;">${contactItems.join("&nbsp;&nbsp;|&nbsp;&nbsp;")}</p>`
     : "";
@@ -559,29 +558,12 @@ function buildBlock(block: BlockSpec, cvData: any, settings: any, layout: CvLayo
   }
 }
 
-const SECTION_ICONS: Record<BlockKind, string> = {
-  summary: "📝",
-  experience: "💼",
-  internships: "🎯",
-  projects: "📁",
-  education: "🎓",
-  certifications: "📜",
-  achievements: "🏆",
-  additional: "🗂️",
-  references: "🤝",
-  skills: "🛠️",
-  languages: "🌐",
-  contact: "📇",
-  details: "🪪",
-};
-
 function withHeading(level: "h2" | "h3", block: BlockSpec, body: string, layout: CvLayout, pri: string, acc: string): string {
   if (!body) return "";
   const { style, uppercase } = headingVisual(layout, level, pri, acc);
   const styleAttr = style ? ` style="${style}"` : "";
   const title = uppercase ? block.title.toUpperCase() : block.title;
-  const icon = SECTION_ICONS[block.kind];
-  return `<${level}${styleAttr}>${icon ? `${icon}&nbsp;` : ""}${esc(title)}</${level}>${body}`;
+  return `<${level}${styleAttr}>${esc(title)}</${level}>${body}`;
 }
 
 function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: string | null, layout: CvLayout): string {
