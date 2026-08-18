@@ -720,7 +720,7 @@ export function DocumentTemplateManager({
 
           <div className={`${panelClasses.right} h-full transition-all duration-300`}>
             <PlaceholderPanel
-              currentTemplate={currentTemplate}
+              placeholders={currentTemplate?.placeholders || []}
               placeholderSearch={placeholderSearch}
               onPlaceholderSearchChange={setPlaceholderSearch}
               onAddPlaceholder={handleAddPlaceholder}
@@ -729,6 +729,8 @@ export function DocumentTemplateManager({
               masterFields={masterFields}
               jobQuestions={jobQuestions}
               requirements={requirements}
+              variant="table"
+              showAddButton
             />
           </div>
             </>

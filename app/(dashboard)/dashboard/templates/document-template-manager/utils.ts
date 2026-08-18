@@ -349,14 +349,20 @@ export const mergePlaceholders = (
   masterFields: JobField[] = []
 ): Placeholder[] => {
   const existingMap = new Map(existingPlaceholders.map(p => [p.name, p]));
+  const seenNames = new Set<string>();
 
-  return newlyExtracted.map(newPh => {
+  return newlyExtracted.reduce((acc, newPh) => {
+    // Skip if we've already added a placeholder with this name
+    if (seenNames.has(newPh.name)) {
+      return acc;
+    }
+
     const existing = existingMap.get(newPh.name);
 
     if (existing) {
       console.log(`[MERGE] Preserving data for tag: {${newPh.name}}`);
 
-      return {
+      acc.push({
         ...existing,
         parent_name: newPh.parent_name,
         is_block_start: newPh.is_block_start,
@@ -364,11 +370,14 @@ export const mergePlaceholders = (
           ? newPh.type
           : existing.type,
         description: existing.description || newPh.description,
-      };
+      });
+    } else {
+      acc.push(newPh);
     }
 
-    return newPh;
-  });
+    seenNames.add(newPh.name);
+    return acc;
+  }, [] as Placeholder[]);
 };
 
 export const autoGeneratePlaceholders = (extracted: string[], masterFields: JobField[] = []): Placeholder[] => {

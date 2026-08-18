@@ -7,6 +7,9 @@ import TextAlign from '@tiptap/extension-text-align';
 import Highlight from '@tiptap/extension-highlight';
 import Placeholder from '@tiptap/extension-placeholder';
 import Underline from '@tiptap/extension-underline';
+import { TextStyle } from '@tiptap/extension-text-style';
+import FontSize from '@tiptap/extension-font-size';
+import FontFamily from '@tiptap/extension-font-family';
 
 // --- ROBUST IMPORTS START ---
 // We import the entire module to handle different build systems (ESM vs CJS) safely
@@ -21,7 +24,7 @@ import {
   Bold, Italic, Underline as UnderlineIcon, Highlighter, List, ListOrdered,
   AlignLeft, AlignCenter, AlignRight, Code2, Pilcrow, Heading1, Heading2,
   Image as ImageIcon, Table as TableIcon, Trash2, Plus, Minus, Split, Merge,
-  PaintBucket, Palette, Ban
+  PaintBucket, Palette, Ban, Type, Text, TextSize
 } from 'lucide-react';
 
 import {
@@ -60,6 +63,24 @@ const ToolbarButton = ({ onClick, isActive, tooltip, children, className = "" })
       >
         {children}
       </button>
+    </TooltipTrigger>
+    <TooltipContent><p>{tooltip}</p></TooltipContent>
+  </Tooltip>
+);
+
+const ToolbarSelect = ({ value, options, onChange, tooltip, className = "" }) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`h-8 px-2 py-1 text-sm rounded-md border border-border bg-background text-foreground ${className}`}
+      >
+        <option value="">Select...</option>
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
     </TooltipTrigger>
     <TooltipContent><p>{tooltip}</p></TooltipContent>
   </Tooltip>
@@ -186,6 +207,11 @@ export default function TemplateEditor({
       Highlight.configure({ multicolor: true }),
       Placeholder.configure({ placeholder: 'Start writing your letter template here…' }),
 
+      // Text formatting extensions
+      TextStyle,
+      FontSize,
+      FontFamily,
+
       // Configure Image if resolved
       ImageExt ? ImageExt.configure({
         inline: true,
@@ -270,6 +296,20 @@ export default function TemplateEditor({
           [&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:p-2 [&_th]:text-left
           [&_td]:border [&_td]:border-border [&_td]:p-2 relative
         `.replace(/\s+/g, ' ').trim(),
+      },
+      handleKeyDown: ({ event, editor }) => {
+        // Handle Tab for indentation (like Word)
+        if (event.key === 'Tab') {
+          event.preventDefault();
+          if (event.shiftKey) {
+            // Shift+Tab = Outdent
+            return editor.chain().focus().outdent().run();
+          } else {
+            // Tab = Indent
+            return editor.chain().focus().indent().run();
+          }
+        }
+        return false;
       },
     },
     immediatelyRender: false,
@@ -398,15 +438,83 @@ export default function TemplateEditor({
     { name: 'table', tooltip: 'Insert Table', icon: <TableIcon className="h-4 w-4" />, action: insertTable },
     { type: 'divider' },
     { name: 'placeholder', tooltip: 'Insert Placeholder', icon: <Code2 className="h-4 w-4" />, action: () => editor.chain().focus().insertContent('<strong>{{variable_name}}</strong> ').run() },
+    { type: 'divider' },
+    // Font Size Selector
+    {
+      name: 'fontSize',
+      tooltip: 'Font Size',
+      type: 'select',
+      options: [
+        { value: '10', label: '10px' },
+        { value: '12', label: '12px' },
+        { value: '14', label: '14px' },
+        { value: '16', label: '16px' },
+        { value: '18', label: '18px' },
+        { value: '20', label: '20px' },
+        { value: '24', label: '24px' },
+        { value: '28', label: '28px' },
+        { value: '32', label: '32px' },
+        { value: '36', label: '36px' },
+      ],
+      getValue: () => editor.getAttributes('textStyle').fontSize || '',
+      onChange: (size: string) => {
+        if (size) {
+          editor.chain().focus().setFontSize(size).run();
+        } else {
+          editor.chain().focus().unsetFontSize().run();
+        }
+      }
+    },
+    // Font Family Selector
+    {
+      name: 'fontFamily',
+      tooltip: 'Font Family',
+      type: 'select',
+      options: [
+        { value: 'system-ui', label: 'System UI' },
+        { value: 'serif', label: 'Serif' },
+        { value: 'monospace', label: 'Monospace' },
+        { value: 'Georgia, serif', label: 'Georgia' },
+        { value: '"Times New Roman", serif', label: 'Times New Roman' },
+        { value: 'Arial, sans-serif', label: 'Arial' },
+        { value: 'Helvetica, sans-serif', label: 'Helvetica' },
+        { value: '"Courier New", monospace', label: 'Courier New' },
+      ],
+      getValue: () => editor.getAttributes('textStyle').fontFamily || '',
+      onChange: (family: string) => {
+        if (family) {
+          editor.chain().focus().setFontFamily(family).run();
+        } else {
+          editor.chain().focus().unsetFontFamily().run();
+        }
+      }
+    },
   ];
 
   return (
     <div className={editorClassName}>
       <TooltipProvider>
-        <div className="flex flex-wrap gap-1 p-2 border-b bg-muted/50">
+        {/* Main Toolbar */}
+        <div className="flex flex-wrap items-center gap-2 p-2 border-b bg-muted/50">
           {toolbarItems.map((item, index) => {
             if (item.type === 'divider') {
               return <div key={`divider-${index}`} className="w-px h-8 bg-border mx-1" />;
+            }
+
+            // Handle select-type toolbar items
+            if (item.type === 'select') {
+              const currentValue = item.getValue ? item.getValue() : '';
+              return (
+                <div key={item.name} className="flex items-center gap-1">
+                  <label className="text-xs text-muted-foreground mr-1">{item.tooltip}</label>
+                  <ToolbarSelect
+                    value={currentValue}
+                    options={item.options}
+                    onChange={item.onChange}
+                    className="w-36"
+                  />
+                </div>
+              );
             }
 
             const isActive = item.name === 'heading'
