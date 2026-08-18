@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2 } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { CompaniesSidebar } from './components/CompaniesSidebar';
@@ -64,6 +64,26 @@ export default function ConsultancyContractsPage() {
       setTemplate(tmpl);
       setAllPlaceholders(ph);
     })();
+  }, []);
+
+  const handleRefresh = useCallback(async () => {
+    setLoadingCompanyData(true);
+    try {
+      const [companyList, tmpl, ph] = await Promise.all([
+        fetchCompanies(),
+        fetchDefaultTemplate(),
+        fetchPlaceholders(),
+      ]);
+      setCompanies(companyList);
+      setTemplate(tmpl);
+      setAllPlaceholders(ph);
+      toast.success('Data refreshed');
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+      toast.error('Failed to refresh data');
+    } finally {
+      setLoadingCompanyData(false);
+    }
   }, []);
 
   // ec_placeholders is a shared, module-wide registry (see the note in
@@ -213,6 +233,14 @@ export default function ConsultancyContractsPage() {
               className={cn("p-1.5 rounded-full transition-all", collapsed.preview ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm")}
             >
               {collapsed.preview ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={handleRefresh}
+              disabled={loadingCompanyData}
+              title="Refresh data"
+              className={cn("p-1.5 rounded-full transition-all", "text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800")}
+            >
+              {loadingCompanyData ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             </button>
           </div>
         </div>

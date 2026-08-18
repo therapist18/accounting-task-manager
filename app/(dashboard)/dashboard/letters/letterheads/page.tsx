@@ -15,16 +15,7 @@ import { LetterheadEditDialog } from '../components/LetterheadEditDialog';
 import { LetterheadPreviewDialog } from '../components/LetterheadPreviewDialog';
 import { LetterheadBuilderDialog } from '../components/LetterheadBuilderDialog';
 import { downloadLetterheadWord, downloadLetterheadPdf } from '../utils/letterheadDownload';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 interface Letterhead {
   id: string;
@@ -57,8 +48,6 @@ export default function LetterheadsPage() {
   const [activeCompanyId, setActiveCompanyId] = useState<string>('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(false);
-  // CompanySidebar renders the category-filter button by default but does nothing with
-  // it unless these are wired through — previously missing here entirely.
   const [categoryFilters, setCategoryFilters] = useState<FilterState | null>(DEFAULT_CATEGORY_FILTERS);
   const { toast } = useToast();
 

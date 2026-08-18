@@ -297,9 +297,9 @@ export default function TemplateEditor({
           [&_td]:border [&_td]:border-border [&_td]:p-2 relative
         `.replace(/\s+/g, ' ').trim(),
       },
-      handleKeyDown: ({ event, editor }) => {
+      handleKeyDown: (_view, event) => {
         // Handle Tab for indentation (like Word)
-        if (event.key === 'Tab') {
+        if (event.key === 'Tab' && editor) {
           event.preventDefault();
           if (event.shiftKey) {
             // Shift+Tab = Outdent
