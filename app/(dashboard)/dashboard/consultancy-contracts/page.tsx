@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { CompaniesSidebar } from './components/CompaniesSidebar';
 import { DataValuesPanel } from './components/DataValuesPanel';
 import { ContractPreview } from './components/ContractPreview';
-import { fetchCompanies, Company } from '../companies/database';
+import { fetchCompanies, fetchOwnCompany, Company } from '../companies/database';
 import { fetchDefaultTemplate, updateTemplate, CcTemplate } from './utils/ccTemplate';
 import { fetchPlaceholders, EcPlaceholder } from '../employment-contracts/utils/ecPlaceholders';
 import { resolveEcPlaceholderValues } from '../employment-contracts/utils/masterFieldResolver';
@@ -20,6 +20,11 @@ import type { JobField } from '../master-fields/components/types/database';
 
 export default function ConsultancyContractsPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
+  // Booksmart Consultancy Limited itself ("Party A") - the is_own_company-
+  // flagged companies row, distinct from the client selected from the
+  // dropdown ("Party B", selectedCompanyId below). See
+  // 20260818000000_cc_party_a_own_company.sql.
+  const [ownCompany, setOwnCompany] = useState<Company | null>(null);
   const [template, setTemplate] = useState<CcTemplate | null>(null);
   const [allPlaceholders, setAllPlaceholders] = useState<EcPlaceholder[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
@@ -55,12 +60,14 @@ export default function ConsultancyContractsPage() {
   // placeholder registry - loaded once, independent of company selection.
   useEffect(() => {
     (async () => {
-      const [companyList, tmpl, ph] = await Promise.all([
+      const [companyList, own, tmpl, ph] = await Promise.all([
         fetchCompanies(),
+        fetchOwnCompany(),
         fetchDefaultTemplate(),
         fetchPlaceholders(),
       ]);
       setCompanies(companyList);
+      setOwnCompany(own);
       setTemplate(tmpl);
       setAllPlaceholders(ph);
     })();
@@ -69,12 +76,14 @@ export default function ConsultancyContractsPage() {
   const handleRefresh = useCallback(async () => {
     setLoadingCompanyData(true);
     try {
-      const [companyList, tmpl, ph] = await Promise.all([
+      const [companyList, own, tmpl, ph] = await Promise.all([
         fetchCompanies(),
+        fetchOwnCompany(),
         fetchDefaultTemplate(),
         fetchPlaceholders(),
       ]);
       setCompanies(companyList);
+      setOwnCompany(own);
       setTemplate(tmpl);
       setAllPlaceholders(ph);
       toast.success('Data refreshed');
@@ -97,6 +106,36 @@ export default function ConsultancyContractsPage() {
     [allPlaceholders, relevantKeys]
   );
 
+  // Party A (Booksmart Consultancy Limited, ownCompany) vs Party B (the
+  // selected client) are the same template rendered for the same document,
+  // so they need two separate resolveEcPlaceholderValues calls against two
+  // different companyIds, split by the party_a_ key prefix (see
+  // 20260818000000_cc_party_a_own_company.sql) - everything else (including
+  // the existing company_* keys) resolves against the client as before.
+  const [partyAPlaceholders, partyBPlaceholders] = useMemo(() => {
+    const a: EcPlaceholder[] = [];
+    const b: EcPlaceholder[] = [];
+    for (const p of placeholders) (p.key.startsWith('party_a_') ? a : b).push(p);
+    return [a, b];
+  }, [placeholders]);
+
+  // Resolves both parties' placeholders (Party A against ownCompany, Party B
+  // against the given client id) and merges the results into one map, since
+  // the template/Data & Values panel don't care which party a value came
+  // from once resolved.
+  const resolvePartyValues = useCallback(async (clientCompanyId: string) => {
+    const [clientResult, ownResult] = await Promise.all([
+      resolveEcPlaceholderValues(partyBPlaceholders, null, clientCompanyId),
+      ownCompany && partyAPlaceholders.length > 0
+        ? resolveEcPlaceholderValues(partyAPlaceholders, null, ownCompany.id)
+        : Promise.resolve({ values: {}, masterFields: new Map<number, JobField>() }),
+    ]);
+    return {
+      values: { ...clientResult.values, ...ownResult.values },
+      masterFields: new Map([...clientResult.masterFields, ...ownResult.masterFields]),
+    };
+  }, [partyAPlaceholders, partyBPlaceholders, ownCompany]);
+
   // Per-company: resolve master-field-sourced values and load any saved
   // engagement (overrides + status) for the selected client.
   useEffect(() => {
@@ -112,7 +151,7 @@ export default function ConsultancyContractsPage() {
     setLoadingCompanyData(true);
     (async () => {
       const [{ values, masterFields: fields }, existingEngagement] = await Promise.all([
-        resolveEcPlaceholderValues(placeholders, null, selectedCompanyId),
+        resolvePartyValues(selectedCompanyId),
         fetchLatestEngagement(selectedCompanyId),
       ]);
       if (cancelled) return;
@@ -131,7 +170,7 @@ export default function ConsultancyContractsPage() {
       setLoadingCompanyData(false);
     })();
     return () => { cancelled = true; };
-  }, [selectedCompanyId, placeholders]);
+  }, [selectedCompanyId, placeholders, resolvePartyValues]);
 
   // Manual "refresh source data" trigger - re-resolves master-field values
   // for the current company without touching overrides/engagement/directors,
@@ -139,7 +178,7 @@ export default function ConsultancyContractsPage() {
   // an inline edit writes a new value back to its source record.
   const handleRefreshMasterFieldValues = async () => {
     if (!selectedCompanyId || placeholders.length === 0) return;
-    const { values, masterFields: fields } = await resolveEcPlaceholderValues(placeholders, null, selectedCompanyId);
+    const { values, masterFields: fields } = await resolvePartyValues(selectedCompanyId);
     setResolvedValues(values);
     setMasterFields(fields);
   };
