@@ -31,6 +31,94 @@ function collectPlaceholderMasterFieldIds(p: EcPlaceholder): number[] {
   return Array.from(ids);
 }
 
+// Resolves an image-type placeholder to a public Supabase storage URL by
+// walking the master field's configured sources (KYC upload tables with
+// file_path columns).  Same logic as TemplateGenerationDialog's
+// processImageField — looks up each master_field_id's sources, filters by
+// entity ID and optional document_type_ids, sorts by issue_date desc
+// (latest first), and constructs the public storage URL.
+function processImageField(
+  p: EcPlaceholder,
+  targetEntity: Record<string, any>,
+  combinedCache: Record<string, Record<string, any>>,
+  masterFields: Map<number, JobField>
+): { value: string; source: string | null } {
+  const masterFieldIds = p.master_field_links?.length
+    ? p.master_field_links.map((l) => Number(l.master_field_id))
+    : p.master_field_id
+    ? [Number(p.master_field_id)]
+    : [];
+
+  if (masterFieldIds.length === 0) return { value: '', source: null };
+
+  const candidateIds = [
+    targetEntity?.id,
+    targetEntity?.director_id,
+    targetEntity?.individual_id,
+    targetEntity?.company_id,
+  ]
+    .filter(Boolean)
+    .map(String)
+    .filter((v, i, arr) => arr.indexOf(v) === i);
+
+  if (candidateIds.length === 0) return { value: '', source: null };
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+
+  for (const mid of masterFieldIds) {
+    const mf = masterFields.get(mid);
+    if (!mf?.sources) continue;
+
+    const sortedSources = [...mf.sources].sort(
+      (a: any, b: any) => (a.priority ?? 999) - (b.priority ?? 999)
+    );
+
+    for (const source of sortedSources as any[]) {
+      const tableData = combinedCache[source.table];
+      if (!tableData) continue;
+
+      const linkingVar = source.linking_variable || 'id';
+      const docIds: string[] = Array.isArray(source.document_id)
+        ? source.document_id
+        : source.document_id
+        ? [source.document_id]
+        : [];
+
+      let matches = Object.values(tableData).filter((r: any) => {
+        if (!candidateIds.includes(String(r[linkingVar]))) return false;
+        if (docIds.length > 0) return docIds.includes(r.document_id);
+        return true;
+      });
+
+      if (matches.length === 0) continue;
+
+      matches = matches.sort((a: any, b: any) => {
+        const aDate = a.issue_date
+          ? new Date(a.issue_date).getTime()
+          : a.created_at
+          ? new Date(a.created_at).getTime()
+          : 0;
+        const bDate = b.issue_date
+          ? new Date(b.issue_date).getTime()
+          : b.created_at
+          ? new Date(b.created_at).getTime()
+          : 0;
+        return bDate - aDate;
+      });
+
+      const match: any = matches[0];
+      if (match?.file_path) {
+        return {
+          value: `${supabaseUrl}/storage/v1/object/public/kyc-documents/${match.file_path}`,
+          source: `Image: ${source.table}`,
+        };
+      }
+    }
+  }
+
+  return { value: '', source: null };
+}
+
 // Resolves every ec_placeholders row linked to a master field
 // (source_kind === 'master_field') for one employee/company pair, using the
 // same core table/path/priority resolver Document Template Manager uses
@@ -206,14 +294,19 @@ export async function resolveEcPlaceholderValues(
       const { value: results } = processBooleanField(p, scopedTargetEntity, combinedCache, masterFields, null);
       const checkedLabels: string[] = [];
       for (const r of (results as any[]) || []) {
-        // Each condition's own tag becomes its own token too (e.g.
-        // {{has_disability}} alongside the parent {{disability_status}}),
-        // matching how tasks-requirements' own boolean placeholders expose
-        // per-condition tags as separate replaceable tokens.
         if (r?.tag) result[r.tag] = r.checked ? (r.label || '') : '';
         if (r?.checked && r.label) checkedLabels.push(r.label);
       }
       if (checkedLabels.length > 0) result[p.key] = checkedLabels.join(', ');
+      continue;
+    }
+
+    // Image placeholders resolve to a public Supabase storage URL by
+    // walking the master field's configured sources (typically KYC upload
+    // tables with file_path columns) — same logic as TGD's processImageField.
+    if (p.type === 'image') {
+      const { value } = processImageField(p, scopedTargetEntity, combinedCache, masterFields);
+      if (value) result[p.key] = value;
       continue;
     }
 
@@ -484,6 +577,14 @@ export async function resolveEcArrayPlaceholderValues(
             if (r?.checked && r.label) checkedLabels.push(r.label);
           }
           rowData[child.key] = checkedLabels.join(', ');
+          continue;
+        }
+
+        // Image children resolve to Supabase storage URLs — same
+        // processImageField used by resolveEcPlaceholderValues above.
+        if (child.type === 'image') {
+          const { value } = processImageField(child, targetEntity, combinedCache, masterFields);
+          rowData[child.key] = value || '';
           continue;
         }
 

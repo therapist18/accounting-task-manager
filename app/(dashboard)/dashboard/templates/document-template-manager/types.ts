@@ -221,6 +221,10 @@ export type Placeholder = {
   group_parent_id?: string;
   // For group placeholders: the child placeholder IDs that this group represents
   group_children?: string[];
+  // Which Matrimonial Biodata section this placeholder belongs to (see
+  // matrimonial-biodata/utils/biodataStructure.ts's BIODATA_SECTIONS) - only
+  // meaningful for that module, same as company_role is EC/CC-only.
+  section_key?: string;
 };
 
 export interface DocumentTemplateManagerProps {

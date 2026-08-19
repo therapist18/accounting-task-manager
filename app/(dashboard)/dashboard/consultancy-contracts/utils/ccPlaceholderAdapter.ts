@@ -33,7 +33,7 @@ export function dtmPlaceholderToResolverInput(p: Placeholder, groupLabel: string
     default_value: p.default_value || null,
     description: p.description || null,
     required: !!p.required,
-    type: p.type === 'conditional' || p.type === 'boolean' ? p.type : 'text',
+    type: p.type === 'conditional' || p.type === 'boolean' || p.type === 'image' ? p.type : 'text',
     conditions: p.conditions || [],
     boolean_conditions: p.boolean_conditions || [],
     created_at: '',
@@ -44,6 +44,8 @@ export function dtmPlaceholderToResolverInput(p: Placeholder, groupLabel: string
     array_direction: p.array_direction || undefined,
     director_type: p.director_type || undefined,
     dependant_relationship: p.dependant_relationship || undefined,
+    image_width: p.image_width || null,
+    image_height: p.image_height || null,
   };
 }
 

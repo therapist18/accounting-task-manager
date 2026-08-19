@@ -70,9 +70,15 @@ const BASE_SECTION_STYLES = `
   [data-section="signatures"] { page-break-inside: avoid; }
   .cs-section-heading { margin-top: 20px; margin-bottom: 8px; }
 
-  /* Highlights which entity a resolved placeholder value came from */
-  .ph-entity-company { background: #dbeafe; border-radius: 3px; padding: 0 3px; }
+  /* Highlights which party a resolved placeholder value belongs to - see
+     ContractPreview.tsx's resolveHighlightCategory. One color per party so
+     an admin scanning the preview can tell at a glance whether a value came
+     from the Consultant, the Client, an individual employee/signatory, or a
+     director/shareholder array row, without opening Data & Values. */
+  .ph-entity-consultant { background: #ede9fe; border-radius: 3px; padding: 0 3px; }
+  .ph-entity-client { background: #dbeafe; border-radius: 3px; padding: 0 3px; }
   .ph-entity-employee { background: #dcfce7; border-radius: 3px; padding: 0 3px; }
+  .ph-entity-director { background: #fef3c7; border-radius: 3px; padding: 0 3px; }
   .ph-entity-missing { opacity: 0.55; font-style: italic; }
 `;
 

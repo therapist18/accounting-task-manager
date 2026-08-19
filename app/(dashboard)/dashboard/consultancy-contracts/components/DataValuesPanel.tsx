@@ -6,15 +6,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, RotateCcw, Database, PenLine, Building2, FileText, AlertCircle, ImageIcon, UploadCloud, Plus, X } from 'lucide-react';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Loader2, RotateCcw, Database, PenLine, Building2, FileText, AlertCircle, ImageIcon, UploadCloud, Plus, X, AlignLeft, AlignCenter, AlignRight, Expand } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { EcPlaceholder } from '../../employment-contracts/utils/ecPlaceholders';
 import { MasterFieldEditControl } from '../../employment-contracts/components/MasterFieldEditControl';
 import type { JobField } from '../../master-fields/components/types/database';
-import { DirectorsPicker } from './DirectorsPicker';
-import type { CompanyDirector } from '../hooks/useCompanyDirectors';
 import { UploadModal } from '@/app/generic-components/UploadModal';
 import { resolveCompanyRole } from '../utils/ccPlaceholderAdapter';
+import { blockImageFieldKey, type ImageStyle, type ImageStyleMap } from '../utils/imageStyles';
 
 interface DataValuesPanelProps {
   companySelected: boolean;
@@ -44,26 +45,30 @@ interface DataValuesPanelProps {
   companyId: string | null;
   consultantCompanyId: string | null;
   onRefresh: () => void;
-  // Directors/shareholders picker - see hooks/useCompanyDirectors.ts and
-  // utils/directorsBlock.ts.
-  directors: CompanyDirector[];
-  selectedDirectorIds: string[];
-  onDirectorsChange: (ids: string[]) => void;
+  // Array/block editing callbacks — see page.tsx for state management.
+  onCellChange?: (blockName: string, rowIdx: number, childKey: string, value: string) => void;
+  onDeleteColumn?: (blockName: string, colIdx: number) => void;
+  onAddEntity?: (blockName: string) => void;
+  // Per-instance image size/align overrides (see utils/imageStyles.ts) and
+  // the setter for this panel's image controls - see ImageSizeControls.
+  imageStyles?: ImageStyleMap;
+  onImageStyleChange?: (fieldKey: string, styleKey: keyof ImageStyle, value: any) => void;
 }
 
 // _vat_fee/_gross_fee tokens are always derived from the matching _net_fee
 // value (see utils/feeCalculations.ts) - the admin only ever types the Net
 // figure, so the computed siblings are hidden here rather than inviting a
 // manual entry that gets silently superseded. directors_acknowledgement_block
-// is likewise fully derived, from the Directors picker below rather than a
-// text field (see utils/directorsBlock.ts).
+// is likewise fully derived - from page.tsx's own directors selection state
+// via utils/directorsBlock.ts, not editable through this panel at all.
 function isComputedKey(key: string): boolean {
   return key.endsWith('_vat_fee') || key.endsWith('_gross_fee') || key === 'directors_acknowledgement_block';
 }
 
 export function DataValuesPanel({
   companySelected, loading, placeholders, allPlaceholders, resolvedValues, arrayData, overrides, onOverrideChange,
-  masterFields, companyId, consultantCompanyId, onRefresh, directors, selectedDirectorIds, onDirectorsChange,
+  masterFields, companyId, consultantCompanyId, onRefresh,
+  onCellChange, onDeleteColumn, onAddEntity, imageStyles, onImageStyleChange,
 }: DataValuesPanelProps) {
   const [dataFilter, setDataFilter] = useState<'all' | 'with' | 'missing'>('all');
 
@@ -135,11 +140,6 @@ export function DataValuesPanel({
   return (
     <ScrollArea className="h-full">
       <div className="p-5 space-y-6">
-        <div>
-          <h3 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2.5">Directors / Shareholders</h3>
-          <DirectorsPicker directors={directors} selectedIds={selectedDirectorIds} onChange={onDirectorsChange} />
-        </div>
-
         {/* Toolbar: title + All/With Data/Missing filter - same segmented
             control as employment-contracts/components/ContractEditor.tsx's
             own Contract Fields toolbar. */}
@@ -214,6 +214,8 @@ export function DataValuesPanel({
                   companyId={resolveCompanyRole(p) === 'consultant' ? consultantCompanyId : companyId}
                   onOverride={(v) => onOverrideChange(p.key, v)}
                   onRefresh={onRefresh}
+                  imageStyle={imageStyles?.[p.key]}
+                  onImageStyleChange={onImageStyleChange ? (styleKey, val) => onImageStyleChange(p.key, styleKey, val) : undefined}
                 />
               ))}
             </div>
@@ -240,6 +242,11 @@ export function DataValuesPanel({
               masterFields={masterFields}
               companyId={companyId}
               onRefresh={onRefresh}
+              onCellChange={onCellChange}
+              onDeleteColumn={onDeleteColumn}
+              onAddEntity={onAddEntity}
+              imageStyles={imageStyles}
+              onImageStyleChange={onImageStyleChange}
             />
           );
         })}
@@ -250,6 +257,7 @@ export function DataValuesPanel({
 
 function PlaceholderRow({
   placeholder: p, resolvedValue, overrideValue, isMissing, masterFields, companyId, onOverride, onRefresh,
+  imageStyle, onImageStyleChange,
 }: {
   placeholder: EcPlaceholder;
   resolvedValue: string;
@@ -259,6 +267,8 @@ function PlaceholderRow({
   companyId: string | null;
   onOverride: (val: string | undefined) => void;
   onRefresh: () => void;
+  imageStyle?: ImageStyle;
+  onImageStyleChange?: (styleKey: keyof ImageStyle, value: any) => void;
 }) {
   const isOverridden = overrideValue !== undefined;
   const effectiveVal = overrideValue ?? resolvedValue;
@@ -331,21 +341,47 @@ function PlaceholderRow({
         {p.type === 'image' ? (
           <div className="flex-1">
             {effectiveVal ? (
-              <div className="relative border rounded overflow-hidden flex items-center justify-center bg-slate-50 h-[40px] group">
-                <img src={effectiveVal} className="max-h-full object-contain" />
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
-                  {uploadTarget && (
-                    <button type="button" onClick={() => setUploadModalOpen(true)} className="h-6 bg-white/20 hover:bg-white/30 text-white rounded px-2 text-[9px]">
-                      Upload New
-                    </button>
-                  )}
-                  {isOverridden && (
-                    <button type="button" onClick={() => onOverride(undefined)} className="h-6 bg-red-500/80 hover:bg-red-500 text-white rounded px-2 text-[9px]">
-                      Reset
-                    </button>
-                  )}
+              <>
+                {/* Preview box height mirrors TemplateGenerationDialog's own
+                    PlaceholderInput (Math.min(imageHeight, 100)px). A live
+                    imageStyle override (set below via ImageSizeControls)
+                    takes priority over the placeholder's own configured
+                    image_width/image_height, same precedence TGD uses. */}
+                <div
+                  className="relative border rounded overflow-hidden flex items-center justify-center bg-slate-50 group"
+                  style={{ height: `${Math.min(imageStyle?.imageHeight || (p.image_height ? parseInt(p.image_height) : 200), 100)}px` }}
+                >
+                  <img
+                    src={effectiveVal}
+                    className="max-h-full object-contain"
+                    style={{
+                      width: `${imageStyle?.imageWidth || (p.image_width ? parseInt(p.image_width) : 300)}px`,
+                      maxWidth: imageStyle?.maxWidth || '100%',
+                      textAlign: imageStyle?.textAlign || 'center',
+                    }}
+                  />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                    {uploadTarget && (
+                      <button type="button" onClick={() => setUploadModalOpen(true)} className="h-6 bg-white/20 hover:bg-white/30 text-white rounded px-2 text-[9px]">
+                        Upload New
+                      </button>
+                    )}
+                    {isOverridden && (
+                      <button type="button" onClick={() => onOverride(undefined)} className="h-6 bg-red-500/80 hover:bg-red-500 text-white rounded px-2 text-[9px]">
+                        Reset
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
+                {onImageStyleChange && (
+                  <ImageSizeControls
+                    style={imageStyle || {}}
+                    onChange={onImageStyleChange}
+                    defaultWidth={p.image_width ? parseInt(p.image_width) : undefined}
+                    defaultHeight={p.image_height ? parseInt(p.image_height) : undefined}
+                  />
+                )}
+              </>
             ) : (
               <button
                 type="button"
@@ -420,6 +456,74 @@ function PlaceholderRow({
   );
 }
 
+// Align/size controls for one rendered image occurrence, mirroring
+// TemplateGenerationDialog's own ImagePlaceholderControls so image
+// placeholders get the same adjustable-size treatment in Consultancy
+// Contracts as they already have in Task Requirements' templates. Writes
+// through onChange (page.tsx's handleImageStyleChange) into the shared
+// imageStyles map that both this panel and ContractPreview read from.
+function ImageSizeControls({
+  style,
+  onChange,
+  defaultWidth,
+  defaultHeight,
+}: {
+  style: ImageStyle;
+  onChange: (styleKey: keyof ImageStyle, value: any) => void;
+  // The placeholder's own configured image_width/image_height (from the
+  // Settings placeholder dialog) - shown pre-filled in the number inputs
+  // until the user actually overrides one, so the dialog's specified size
+  // is what a fresh control reflects, not an empty box.
+  defaultWidth?: number;
+  defaultHeight?: number;
+}) {
+  const sizeMap: Record<string, string> = { small: '25%', medium: '50%', large: '75%', full: '100%' };
+  const currentSizeKey = Object.keys(sizeMap).find((k) => sizeMap[k] === style.maxWidth) || 'full';
+
+  return (
+    <div className="flex items-center gap-1.5 pt-1.5 mt-1.5 border-t border-slate-100 dark:border-slate-800">
+      <ToggleGroup
+        type="single"
+        value={style.textAlign || 'left'}
+        onValueChange={(align) => align && onChange('textAlign', align)}
+        className="bg-white dark:bg-slate-950 rounded border border-slate-200 dark:border-slate-800 h-6"
+      >
+        <ToggleGroupItem value="left" className="px-1.5 h-6"><AlignLeft className="h-2.5 w-2.5" /></ToggleGroupItem>
+        <ToggleGroupItem value="center" className="px-1.5 h-6"><AlignCenter className="h-2.5 w-2.5" /></ToggleGroupItem>
+        <ToggleGroupItem value="right" className="px-1.5 h-6"><AlignRight className="h-2.5 w-2.5" /></ToggleGroupItem>
+      </ToggleGroup>
+      <Select value={currentSizeKey} onValueChange={(size) => onChange('maxWidth', sizeMap[size])}>
+        <SelectTrigger className="w-12 h-6 text-[9px]"><SelectValue><Expand className="h-2.5 w-2.5" /></SelectValue></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="small">25%</SelectItem>
+          <SelectItem value="medium">50%</SelectItem>
+          <SelectItem value="large">75%</SelectItem>
+          <SelectItem value="full">100%</SelectItem>
+        </SelectContent>
+      </Select>
+      <Input
+        type="number"
+        min={20}
+        max={800}
+        placeholder="w"
+        value={style.imageWidth ?? defaultWidth ?? ''}
+        onChange={(e) => onChange('imageWidth', parseInt(e.target.value) || undefined)}
+        className="h-6 w-14 text-[9px] px-1.5"
+      />
+      <span className="text-[9px] text-slate-400">×</span>
+      <Input
+        type="number"
+        min={20}
+        max={800}
+        placeholder="h"
+        value={style.imageHeight ?? defaultHeight ?? ''}
+        onChange={(e) => onChange('imageHeight', parseInt(e.target.value) || undefined)}
+        className="h-6 w-14 text-[9px] px-1.5"
+      />
+    </div>
+  );
+}
+
 function ArrayBlockSection({
   blockName,
   blockLabel,
@@ -432,6 +536,8 @@ function ArrayBlockSection({
   onCellChange,
   onDeleteColumn,
   onAddEntity,
+  imageStyles,
+  onImageStyleChange,
 }: {
   blockName: string;
   blockLabel: string;
@@ -444,6 +550,8 @@ function ArrayBlockSection({
   onCellChange?: (blockName: string, rowIdx: number, childKey: string, value: string) => void;
   onDeleteColumn?: (blockName: string, colIdx: number) => void;
   onAddEntity?: (blockName: string) => void;
+  imageStyles?: ImageStyleMap;
+  onImageStyleChange?: (fieldKey: string, styleKey: keyof ImageStyle, value: any) => void;
 }) {
   const [editingCell, setEditingCell] = useState<{ rowIdx: number; childKey: string } | null>(null);
 
@@ -529,12 +637,25 @@ function ArrayBlockSection({
                     {rows.map((row, rowIdx) => {
                       const val = row[child.key] || '';
                       const isEditing = editingCell?.rowIdx === rowIdx && editingCell?.childKey === child.key;
+                      const isImage = child.type === 'image';
                       return (
                         <td
                           key={rowIdx}
                           className="px-2 py-1 border-r border-slate-100 dark:border-slate-850 last:border-r-0 align-middle"
                         >
-                          {isEditing && onCellChange ? (
+                          {isImage ? (
+                            <ArrayImageCell
+                              value={val}
+                              placeholderKey={child.key}
+                              imageWidth={child.image_width}
+                              imageHeight={child.image_height}
+                              rowIdx={rowIdx}
+                              blockName={blockName}
+                              onCellChange={onCellChange}
+                              style={imageStyles?.[blockImageFieldKey(blockName, rowIdx, child.key)]}
+                              onStyleChange={onImageStyleChange ? (styleKey, val2) => onImageStyleChange(blockImageFieldKey(blockName, rowIdx, child.key), styleKey, val2) : undefined}
+                            />
+                          ) : isEditing && onCellChange ? (
                             <Input
                               className="h-7 text-[11px] px-2 py-1 border-indigo-300 dark:border-indigo-700 bg-indigo-50/30 dark:bg-indigo-950/20 focus:ring-1 focus:ring-indigo-400"
                               autoFocus
@@ -570,5 +691,89 @@ function ArrayBlockSection({
         </div>
       </div>
     </div>
+  );
+}
+
+function ArrayImageCell({
+  value,
+  placeholderKey,
+  imageWidth,
+  imageHeight,
+  rowIdx,
+  blockName,
+  onCellChange,
+  style,
+  onStyleChange,
+}: {
+  value: string;
+  placeholderKey: string;
+  imageWidth?: string | null;
+  imageHeight?: string | null;
+  rowIdx: number;
+  blockName: string;
+  onCellChange?: (blockName: string, rowIdx: number, childKey: string, value: string) => void;
+  style?: ImageStyle;
+  onStyleChange?: (styleKey: keyof ImageStyle, value: any) => void;
+}) {
+  const hasValue = !!value && (value.startsWith('http') || value.startsWith('data:image'));
+  // Bounded the same way as PlaceholderRow's single-value image preview
+  // (see TemplateGenerationDialog's PlaceholderInput). A live style override
+  // (set below via ImageSizeControls) takes priority over the placeholder's
+  // own configured image_width/image_height.
+  const cellHeight = Math.min(style?.imageHeight || (imageHeight ? parseInt(imageHeight) : 200), 100);
+  const cellMaxWidth = style?.maxWidth || imageWidth || undefined;
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onCellChange) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === 'string') {
+        onCellChange(blockName, rowIdx, placeholderKey, reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleClear = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onCellChange) onCellChange(blockName, rowIdx, placeholderKey, '');
+  };
+
+  if (hasValue) {
+    return (
+      <div>
+        <div className="relative border rounded overflow-hidden bg-slate-50 dark:bg-slate-950 group" style={{ height: `${cellHeight}px` }}>
+          <img src={value} className="w-full h-full object-contain" style={{ maxWidth: cellMaxWidth, textAlign: style?.textAlign || 'left' }} />
+          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+            <label className="h-6 bg-white/20 hover:bg-white/30 text-white rounded px-2 text-[9px] cursor-pointer">
+              Replace
+              <input type="file" accept="image/jpeg,image/jpg,image/png,image/webp" className="hidden" onChange={handleFileChange} />
+            </label>
+            <button type="button" onClick={handleClear} className="h-6 bg-red-500/80 hover:bg-red-500 text-white rounded px-2 text-[9px]">
+              Clear
+            </button>
+          </div>
+        </div>
+        {onStyleChange && (
+          <ImageSizeControls
+            style={style || {}}
+            onChange={onStyleChange}
+            defaultWidth={imageWidth ? parseInt(imageWidth) : undefined}
+            defaultHeight={imageHeight ? parseInt(imageHeight) : undefined}
+          />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <label className="flex items-center justify-center h-[44px] w-full border border-dashed border-slate-300 dark:border-slate-700 rounded cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 dark:hover:bg-indigo-950/20 transition-colors">
+      <input type="file" accept="image/jpeg,image/jpg,image/png,image/webp" className="hidden" onChange={handleFileChange} />
+      <span className="flex items-center gap-1 text-[10px] text-slate-400">
+        <ImageIcon className="w-3 h-3" />
+        Upload
+      </span>
+    </label>
   );
 }

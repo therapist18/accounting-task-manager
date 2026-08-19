@@ -61,7 +61,14 @@ const navItems = [
     },
     { title: "Templates", href: "/dashboard/templates", icon: FileText, permission: "templates.view" },
     { title: "CV Generator", href: "/dashboard/cv-generator", icon: FileText },
-    { title: "Matrimonial Biodata", href: "/dashboard/matrimonial-biodata", icon: FileText },
+    {
+        title: "Matrimonial Biodata",
+        icon: Users,
+        items: [
+            { title: "Generate Biodata", href: "/dashboard/matrimonial-biodata" },
+            { title: "Settings", href: "/dashboard/matrimonial-biodata/settings" },
+        ],
+    },
     {
         title: "Employment Contracts",
         icon: FileText,

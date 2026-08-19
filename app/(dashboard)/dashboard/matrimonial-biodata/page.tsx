@@ -1,17 +1,30 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/components/ui/use-toast';
 import { BiodataSidebar } from './components/BiodataSidebar';
 import { BiodataEditor } from './components/BiodataEditor';
 import { BiodataPreview } from './components/BiodataPreview';
 import type { Individual } from '../individuals/database';
+import type { Placeholder } from '../templates/document-template-manager/types';
+import { fetchBiodataTemplate } from './utils/biodataConfig';
+import { resolveBiodataValues } from './utils/biodataResolver';
+import { fetchBiodataEntry, upsertBiodataEntry } from './utils/biodataEntry';
 
 export default function MatrimonialBiodataPage() {
+  const { toast } = useToast();
   const [selectedIndividual, setSelectedIndividual] = useState<Individual | null>(null);
-  const [biodataConfig, setBiodataConfig] = useState<any>({ theme: 'theme1' });
+
+  const [placeholders, setPlaceholders] = useState<Placeholder[]>([]);
+  const [resolvedValues, setResolvedValues] = useState<Record<string, string>>({});
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
+  const [theme, setTheme] = useState('theme1');
+  const [images, setImages] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
   const editorPanelRef = useRef<ImperativePanelHandle>(null);
@@ -24,6 +37,67 @@ export default function MatrimonialBiodataPage() {
     if (!panel) return;
     if (panel.isCollapsed()) panel.expand(); else panel.collapse();
   };
+
+  // Placeholder definitions/sections are shared across every individual, so
+  // they're loaded once, independent of which individual is selected.
+  useEffect(() => {
+    (async () => {
+      const template = await fetchBiodataTemplate();
+      setPlaceholders(template?.placeholders || []);
+    })();
+  }, []);
+
+  // Per-individual: resolve master-field values + load saved overrides/theme/images.
+  useEffect(() => {
+    if (!selectedIndividual) {
+      setResolvedValues({});
+      setOverrides({});
+      setTheme('theme1');
+      setImages([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const [{ values }, entry] = await Promise.all([
+        resolveBiodataValues(placeholders, selectedIndividual.id),
+        fetchBiodataEntry(selectedIndividual.id),
+      ]);
+      if (cancelled) return;
+      setResolvedValues(values);
+      setOverrides(entry?.overrides || {});
+      setTheme(entry?.theme || 'theme1');
+      setImages(entry?.images || []);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedIndividual, placeholders]);
+
+  const effectiveValues = useMemo(() => {
+    const defaults: Record<string, string> = {};
+    for (const p of placeholders) defaults[p.name] = p.default_value || '';
+    // full_name has no Master Field of its own worth linking - it's already
+    // the Individual's own record, read directly rather than left blank
+    // until someone links a redundant master field to it.
+    if (selectedIndividual?.full_name) defaults.full_name = selectedIndividual.full_name;
+    return { ...defaults, ...resolvedValues, ...overrides };
+  }, [placeholders, resolvedValues, overrides, selectedIndividual]);
+
+  const handleValueChange = useCallback((key: string, value: string) => {
+    setOverrides((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!selectedIndividual) return;
+    setSaving(true);
+    const saved = await upsertBiodataEntry(selectedIndividual.id, { theme, overrides, images });
+    setSaving(false);
+    if (saved) {
+      toast({ title: 'Biodata saved' });
+    } else {
+      toast({ title: 'Error', description: 'Failed to save biodata', variant: 'destructive' });
+    }
+  }, [selectedIndividual, theme, overrides, images, toast]);
 
   const handleIndividualSelect = (individual: Individual) => {
     setSelectedIndividual(individual);
@@ -72,10 +146,10 @@ export default function MatrimonialBiodataPage() {
           </div>
         </div>
       </div>
-      
+
       <div className="flex-1 min-h-0 w-full relative">
-        <PanelGroup 
-          direction="horizontal" 
+        <PanelGroup
+          direction="horizontal"
           autoSaveId="biodata-workspace-layout"
           className="h-full w-full"
         >
@@ -118,8 +192,16 @@ export default function MatrimonialBiodataPage() {
           >
             <BiodataEditor
               selectedIndividual={selectedIndividual}
-              biodataConfig={biodataConfig}
-              setBiodataConfig={setBiodataConfig}
+              placeholders={placeholders}
+              values={effectiveValues}
+              theme={theme}
+              images={images}
+              loading={loading}
+              saving={saving}
+              onValueChange={handleValueChange}
+              onThemeChange={setTheme}
+              onImagesChange={setImages}
+              onSave={handleSave}
             />
           </Panel>
 
@@ -142,7 +224,10 @@ export default function MatrimonialBiodataPage() {
           >
             <BiodataPreview
               selectedIndividual={selectedIndividual}
-              biodataConfig={biodataConfig}
+              placeholders={placeholders}
+              values={effectiveValues}
+              theme={theme}
+              images={images}
             />
           </Panel>
         </PanelGroup>

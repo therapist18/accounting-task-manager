@@ -472,12 +472,21 @@ export function DocumentTemplateManager({
     setPlaceholderDialogOpen(true);
   };
 
-  const handleEditPlaceholder = (index: number) => {
+  // PlaceholderPanel's onEdit/onRemove both call back as (placeholder, index) -
+  // see PlaceholderRow's onClick handlers in PlaceholderPanel.tsx. These two
+  // handlers only ever declared a single `index` parameter, so they were
+  // actually receiving the placeholder OBJECT in that slot (JS binds
+  // positionally) - editingPlaceholderIndex ended up set to an object,
+  // placeholders[editingPlaceholderIndex] resolved to undefined, and the
+  // dialog opened with the blank "new placeholder" fallback every time,
+  // making edits look like they were never populating and removes silently
+  // no-op (filtering by `i !== index` against an object never matches).
+  const handleEditPlaceholder = (_placeholder: Placeholder, index: number) => {
     setEditingPlaceholderIndex(index);
     setPlaceholderDialogOpen(true);
   };
 
-  const handleRemovePlaceholder = (index: number) => {
+  const handleRemovePlaceholder = (_placeholder: Placeholder, index: number) => {
     if (currentTemplateIndex === null) return;
     const newTemplates = [...templates];
     newTemplates[currentTemplateIndex] = {

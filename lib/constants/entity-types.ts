@@ -22,8 +22,9 @@ export type EntityType =
   | 'partner' 
   | 'supervisor' 
   | 'lead' 
-  | 'coordinator' 
-  | 'specialist';
+  | 'coordinator'
+  | 'specialist'
+  | 'individual';
 
 export type EntityTypeConfig = {
   value: EntityType;
@@ -61,7 +62,8 @@ export const ENTITY_TYPES: EntityTypeConfig[] = [
   { value: 'supervisor', label: 'Supervisor', description: 'Immediate team supervisor', isUserSelectable: true, isCandidate: true, synonyms: ['foreman'], roles: [], category: 'employment' },
   { value: 'lead', label: 'Lead', description: 'Team lead or technical lead', isUserSelectable: true, isCandidate: true, synonyms: ['tech_lead'], roles: [], category: 'employment' },
   { value: 'coordinator', label: 'Coordinator', description: 'Program or project coordinator', isUserSelectable: true, isCandidate: true, synonyms: ['coordination'], roles: [], category: 'employment' },
-  { value: 'specialist', label: 'Specialist', description: 'Technical or domain specialist', isUserSelectable: true, isCandidate: true, synonyms: [], roles: ['service_provider'], category: 'employment' }
+  { value: 'specialist', label: 'Specialist', description: 'Technical or domain specialist', isUserSelectable: true, isCandidate: true, synonyms: [], roles: ['service_provider'], category: 'employment' },
+  { value: 'individual', label: 'Individual', description: 'A standalone person not tied to a company role (e.g. Matrimonial Biodata)', isUserSelectable: false, isCandidate: false, synonyms: ['person'], roles: [], category: 'external' }
 ];
 
 export const ENTITY_TYPE_CATEGORIES = {

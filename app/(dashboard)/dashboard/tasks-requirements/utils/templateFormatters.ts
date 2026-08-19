@@ -192,7 +192,9 @@ export function replacePlaceholders(
   values: Record<string, any>,
   formats?: Record<string, string>
 ): string {
-  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*(?:\/([a-zA-Z0-9_]+))?\s*\}\}/g, (match, fieldName, formatSuffix) => {
+  // Matches both double-bracket {{key}} / {{key/format}} and single-bracket
+  // {key} / {key/format}, with optional whitespace around the key.
+  return template.replace(/\{+\s*([a-zA-Z0-9_]+)(?:\s*\/\s*([a-zA-Z0-9_]+))?\s*\}+/g, (match, fieldName, formatSuffix) => {
     const value = values[fieldName];
     const format = formatSuffix || formats?.[fieldName];
     

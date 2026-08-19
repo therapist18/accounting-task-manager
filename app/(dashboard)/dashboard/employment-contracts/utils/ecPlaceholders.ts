@@ -68,6 +68,12 @@ export interface EcPlaceholder {
   array_direction?: 'horizontal' | 'vertical';
   director_type?: 'all' | 'primary';
   dependant_relationship?: string[];
+  // Only meaningful for type = 'image' - the display size configured on the
+  // placeholder (e.g. "200px"), carried through from DTM's Placeholder.image_width/
+  // image_height (see ccPlaceholderAdapter.ts's dtmPlaceholderToResolverInput) so
+  // rendered <img> tags aren't stuck at a hardcoded size.
+  image_width?: string | null;
+  image_height?: string | null;
 }
 
 export async function fetchPlaceholders(): Promise<EcPlaceholder[]> {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, useCallback } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Loader2, Save, FileDown, ChevronDown, Building2, FolderCheck, Palette } from 'lucide-react';
@@ -20,6 +20,8 @@ import type { CompanyDirector } from '../hooks/useCompanyDirectors';
 import { applyThemeToHtml, type ContractThemeSettings } from '../utils/themeEngine';
 import { applyWordSafeDomFixes } from '@/lib/documentTheme';
 import type { EcPlaceholder } from '../../employment-contracts/utils/ecPlaceholders';
+import { resolveCompanyRole } from '../utils/ccPlaceholderAdapter';
+import { blockImageFieldKey, type ImageStyle, type ImageStyleMap } from '../utils/imageStyles';
 
 interface ContractPreviewProps {
   company: Company | null;
@@ -37,10 +39,49 @@ interface ContractPreviewProps {
   // the Acknowledgement section as {{directors_acknowledgement_block}}.
   selectedDirectors: CompanyDirector[];
   placeholders: EcPlaceholder[];
+  // Per-instance image size/align overrides set from Data & Values' image
+  // controls - see utils/imageStyles.ts. Takes priority over the
+  // placeholder's own configured image_width/image_height.
+  imageStyles?: ImageStyleMap;
 }
 
 const LIST_MARKUP_KEYS = new Set(['applicable_benefits', 'key_responsibilities', 'statutory_deductions_table', 'services_table', 'fee_schedule_table']);
 const MISSING_VALUE_PLACEHOLDER = '_________________';
+// Matches TemplateGenerationDialog's own top-level/block-child fallback
+// widths (see its PlaceholderInput and processBlockInText) so an image
+// placeholder with no configured image_width still renders at a sane size.
+const DEFAULT_IMAGE_WIDTH = '200px';
+const DEFAULT_BLOCK_IMAGE_WIDTH = '120px';
+
+// style (a per-instance override from the Data & Values image controls)
+// wins over the placeholder's own configured image_width, which wins over
+// fallbackWidth - same precedence as TemplateGenerationDialog's
+// `style.imageWidth || defaultWidth`.
+function imageTagFor(
+  src: string,
+  configuredWidth: string | null | undefined,
+  fallbackWidth: string,
+  style?: ImageStyle
+): string {
+  const imgWidth = style?.imageWidth ? `${style.imageWidth}px` : (configuredWidth || fallbackWidth);
+  const textAlign = style?.textAlign || 'left';
+  const maxWidth = style?.maxWidth || '100%';
+  return `<div style="text-align:${textAlign};"><img src="${src}" style="width:${imgWidth}; max-width:${maxWidth}; height:auto; display:inline-block; margin:8px 0; border-radius:2px;" /></div>`;
+}
+
+// Which of the document's parties a placeholder's value belongs to, driving
+// its .ph-entity-* highlight color in the preview (see themeEngine.ts's
+// BASE_SECTION_STYLES). Individual-scoped entity_types (director, employee)
+// are unambiguous on their own; anything company-scoped (or untyped, which
+// defaults to company) still needs resolveCompanyRole to tell the Consultant
+// side from the Client side - the same split page.tsx uses to decide which
+// companyId a placeholder resolves against, reused here purely for display.
+function resolveHighlightCategory(p: EcPlaceholder): 'consultant' | 'client' | 'employee' | 'director' | null {
+  const entity = p.entity_type?.[0];
+  if (entity === 'director') return 'director';
+  if (entity === 'individual' || entity === 'employee') return 'employee';
+  return resolveCompanyRole(p) === 'consultant' ? 'consultant' : 'client';
+}
 
 function toWordExportHtml(
   htmlText: string,
@@ -75,7 +116,7 @@ function toWordExportHtml(
 
 export function ContractPreview({
   company, templateContent, resolvedValues, arrayData, overrides, engagement,
-  themeSettings, onThemeChange, saving, onSave, selectedDirectors, placeholders
+  themeSettings, onThemeChange, saving, onSave, selectedDirectors, placeholders, imageStyles
 }: ContractPreviewProps) {
   const viewerRef = useRef<DocumentViewerHandle>(null);
   const [exporting, setExporting] = useState<'word' | 'pdf' | null>(null);
@@ -96,38 +137,136 @@ export function ContractPreview({
         });
       }
     }
-    return withDirectorsAcknowledgementBlock(
-      withDerivedFeeValues({ ...resolvedValues, ...flatArray, ...overrides }),
-      selectedDirectors
-    );
-  }, [resolvedValues, arrayData, overrides, selectedDirectors]);
+    return withDerivedFeeValues({ ...resolvedValues, ...flatArray, ...overrides });
+  }, [resolvedValues, arrayData, overrides]);
 
+  // Directors acknowledgement: if the user has edited any director row data
+  // in the DataValuesPanel, build the block HTML from those edits; otherwise
+  // fall back to the computed value from selectedDirectors.
   const mergedValues = useMemo(() => {
-    const wrap = (key: string, value: string, entity: string | undefined): string => {
+    let base = mergedValuesRaw;
+    // Check if any director block rows exist in arrayData (meaning the user
+    // has made edits or the data was resolved).
+    const directorRows = arrayData?.['directors_acknowledgement_block'] || arrayData?.['directors_block'] || [];
+    if (directorRows.length > 0) {
+      // Build acknowledgement HTML from the arrayData rows — each row's
+      // child fields become the Name/Sign/Date lines.
+      const blockHtml = directorRows.map((row) => {
+        const name = row.director_name || row.name || row.full_name || row.entity_name || '______________________';
+        const sign = row.sign || '________________________';
+        const date = row.date || '________________________';
+        return `<p>Director's Name: ${name}</p>\n<p>Sign: ${sign}  Date: ${date}</p>`;
+      }).join('\n');
+      base = { ...base, directors_acknowledgement_block: blockHtml };
+    } else {
+      // No array data — use the selectedDirectors-based computed value.
+      base = withDirectorsAcknowledgementBlock(base, selectedDirectors);
+    }
+
+    const wrap = (key: string, value: string, category: string | null): string => {
       if (LIST_MARKUP_KEYS.has(key)) return value;
       const isMissing = !value;
       const display = isMissing ? MISSING_VALUE_PLACEHOLDER : value;
       const missingClass = isMissing ? ' ph-entity-missing' : '';
-      if (entity === 'company') return `<span class="ph-entity-company${missingClass}">${display}</span>`;
-      if (entity === 'individual' || entity === 'employee') return `<span class="ph-entity-employee${missingClass}">${display}</span>`;
-      return display;
+      if (!category) return display;
+      return `<span class="ph-entity-${category}${missingClass}">${display}</span>`;
     };
 
     const highlighted: Record<string, string> = {};
     for (const p of placeholders) {
-      highlighted[p.key] = wrap(p.key, mergedValuesRaw[p.key] || '', p.entity_type?.[0]);
+      // Image placeholders carry a raw URL/data-URI that the image-rendering
+      // pass below matches on startsWith('http'/'data:image') - wrapping it
+      // in a <span> here would break that match and silently drop the image.
+      highlighted[p.key] = p.type === 'image' ? (base[p.key] || '') : wrap(p.key, base[p.key] || '', resolveHighlightCategory(p));
     }
-    for (const [key, value] of Object.entries(mergedValuesRaw)) {
+    for (const [key, value] of Object.entries(base)) {
       if (key in highlighted) continue;
-      highlighted[key] = wrap(key, value, undefined);
+      highlighted[key] = wrap(key, value, null);
     }
     return highlighted;
-  }, [mergedValuesRaw, placeholders]);
+  }, [mergedValuesRaw, arrayData, selectedDirectors, placeholders]);
+
+  // Expand any {#blockName}...{/blockName} repeating block patterns in the
+  // template content using arrayData, matching TemplateGenerationDialog's
+  // populateHtmlContent block replacement. Each occurrence of the block's
+  // inner template is repeated once per row in arrayData[blockName], with
+  // {{child_key}} placeholders replaced from each row's values.
+  const expandBlocks = useCallback((text: string): string => {
+    if (!arrayData || Object.keys(arrayData).length === 0) return text;
+    // Block children don't necessarily share one entity_type (a block could
+    // mix director fields with a company-scoped one), so each child's own
+    // highlight category is looked up individually rather than hardcoding
+    // 'director' for the whole block.
+    const categoryByKey = new Map(placeholders.map((p) => [p.key, resolveHighlightCategory(p)]));
+    const imagePlaceholderByKey = new Map(placeholders.filter((p) => p.type === 'image').map((p) => [p.key, p]));
+    let result = text;
+    for (const [blockName, rows] of Object.entries(arrayData)) {
+      if (!rows || rows.length === 0) continue;
+      const blockRegex = new RegExp(`\\{#${blockName}\\}([\\s\\S]*?)\\{/${blockName}\\}`, 'g');
+      result = result.replace(blockRegex, (_match, innerTemplate: string) => {
+        return rows.map((row, rowIdx) => {
+          let rowHtml = innerTemplate;
+          for (const [childKey, val] of Object.entries(row)) {
+            // %? allows the docxtemplater image-tag syntax ({%field_name}),
+            // which the template author uses for image fields alongside the
+            // plain {{field_name}} used for text.
+            const childRegex = new RegExp(`\\{+\\s*%?\\s*${childKey}\\s*\\}+`, 'g');
+            const display = String(val || '');
+            const imagePlaceholder = imagePlaceholderByKey.get(childKey);
+            if (imagePlaceholder && display && (display.startsWith('http') || display.startsWith('data:image'))) {
+              const style = imageStyles?.[blockImageFieldKey(blockName, rowIdx, childKey)];
+              rowHtml = rowHtml.replace(childRegex, imageTagFor(display, imagePlaceholder.image_width, DEFAULT_BLOCK_IMAGE_WIDTH, style));
+            } else {
+              const category = categoryByKey.get(childKey);
+              const wrapped = category ? `<span class="ph-entity-${category}${display ? '' : ' ph-entity-missing'}">${display || MISSING_VALUE_PLACEHOLDER}</span>` : display;
+              rowHtml = rowHtml.replace(childRegex, wrapped);
+            }
+          }
+          return rowHtml;
+        }).join('');
+      });
+    }
+    return result;
+  }, [arrayData, placeholders, imageStyles]);
+
+  // Image-aware replacement: detects image URLs in values and renders them
+  // as <img> tags instead of plain text.  Runs BEFORE the general
+  // replacePlaceholders so image tokens get proper HTML rendering; the
+  // general pass then handles all remaining text tokens.
+  const replaceImagePlaceholders = useCallback(
+    (text: string, values: Record<string, string>, imagePlaceholderByKey: Map<string, EcPlaceholder>): string => {
+      // %? allows the docxtemplater image-tag syntax ({%field_name}), same
+      // as the block child regex above.
+      return text.replace(/\{+\s*%?\s*([a-zA-Z0-9_]+)\s*\}+/g, (match, key) => {
+        const imagePlaceholder = imagePlaceholderByKey.get(key);
+        if (!imagePlaceholder) return match;
+        const val = values[key];
+        if (!val || (!val.startsWith('http') && !val.startsWith('data:image'))) return '';
+        return imageTagFor(val, imagePlaceholder.image_width, DEFAULT_IMAGE_WIDTH, imageStyles?.[key]);
+      });
+    },
+    [imageStyles]
+  );
 
   const bodyHtml = useMemo(() => {
-    const content = withTableOfContents(replacePlaceholders(templateContent || '', mergedValues));
+    const expanded = expandBlocks(templateContent || '');
+    // Build the map of image-type placeholders (keyed by name) for the image
+    // pass, so each token can be sized from its own configured image_width.
+    const imagePlaceholderByKey = new Map(
+      placeholders.filter((p) => p.type === 'image').map((p) => [p.key, p])
+    );
+    // Pass 1: render image placeholders as <img> tags.
+    const withImages = imagePlaceholderByKey.size > 0
+      ? replaceImagePlaceholders(expanded, mergedValues, imagePlaceholderByKey)
+      : expanded;
+    // Pass 2: replace all remaining text placeholders (skipping image keys
+    // that were already handled, to avoid double-rendering).
+    const textValues = imagePlaceholderByKey.size > 0
+      ? Object.fromEntries(Object.entries(mergedValues).filter(([k]) => !imagePlaceholderByKey.has(k)))
+      : mergedValues;
+    const content = withTableOfContents(replacePlaceholders(withImages, textValues));
     return content ? `<div class="cs-section">${content}</div>` : '';
-  }, [templateContent, mergedValues]);
+  }, [templateContent, mergedValues, expandBlocks, placeholders, replaceImagePlaceholders]);
 
   const themedHtml = useMemo(
     () => (bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings), mergedValues) : ''),

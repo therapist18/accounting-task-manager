@@ -663,7 +663,7 @@ function withHeading(level: "h2" | "h3", block: BlockSpec, body: string, layout:
   return `<${level}${styleAttr}>${esc(title)}</${level}>${body}`;
 }
 
-function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: string | null, layout: CvLayout): string {
+function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: string | null, layout: CvLayout, wordSafe: boolean): string {
   const pri = toCssColor(settings?.primaryColor);
   const acc = toCssColor(settings?.accentColor, "#3498db");
 
@@ -690,7 +690,7 @@ function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: 
   const sideParts: string[] = [];
   if (spec.side) {
     if (spec.hasPhoto && !spec.header?.photo) {
-      sideParts.push(`<div class="cv-photo-wrap" style="margin-bottom: 20px;">${photoFrame(photoSrc, settings, Number(settings?.photoSize) || 140, acc)}</div>`);
+      sideParts.push(`<div class="cv-photo-wrap" style="margin-bottom: 20px;">${photoFrame(photoSrc, settings, parseInt(String(settings?.photoSize || '140'), 10) || 140, acc)}</div>`);
     }
     for (const block of spec.side.blocks) {
       sideParts.push(withHeading("h3", block, buildBlock(block, cvData, settings, layout, pri, acc), layout, pri, acc));
@@ -699,18 +699,49 @@ function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: 
       const decl = declarationHtml(cvData, acc, layout);
       if (decl) sideParts.push(`<div class="cv-declaration">${decl}</div>`);
     }
+    if (wordSafe && spec.side.dark) {
+      // Word paints a <td> bgcolor only behind that cell's own flowed content,
+      // not the full row height, so once the (usually shorter) sidebar column
+      // runs out of text, the dark background stops even though the main
+      // column keeps going for another page or two - leaving a blank gap on
+      // multi-page exports. Reserve extra invisible height, scaled to how
+      // much main content there is, so the sidebar's own content stays tall
+      // enough for the background to keep pace across the same pages.
+      const mainWeight =
+        (cvData?.experience?.length || 0) * 2 +
+        (cvData?.internships?.length || 0) +
+        (cvData?.projects?.length || 0) +
+        (cvData?.education?.length || 0) +
+        (cvData?.certifications?.length || 0) +
+        (cvData?.achievements?.length || 0) +
+        (cvData?.references?.length || 0) +
+        (cvData?.additionalInfo?.length || 0) +
+        (cvData?.summary ? cvData.summary.length / 300 : 0);
+      const fillerPx = Math.max(0, Math.min(Math.round((mainWeight - 3) * 250), 3000));
+      if (fillerPx > 0) {
+        // A plain <div style="height:...px"> collapses to zero in Word's HTML
+        // import (its layout engine sizes blocks from actual line-box content,
+        // not CSS height) - a table row's legacy `height` attribute is the one
+        // sizing mechanism Word's importer honors reliably, same as the
+        // cellpadding/cellspacing/width attributes used everywhere else in
+        // this file's Word output.
+        sideParts.push(
+          `<table cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td height="${fillerPx}" bgcolor="${pri}" style="height:${fillerPx}px;font-size:1px;line-height:1px;">&nbsp;</td></tr></table>`
+        );
+      }
+    }
   }
 
   let bodyTable: string;
   if (spec.side) {
     const sideBg = spec.side.dark ? pri : "#f8fafc";
     const innerStyle = spec.side.dark ? "color:#e2e8f0;" : "";
-    const widthAttr = spec.side.widthPx
-      ? ` width="${spec.side.widthPx}" style="width:${spec.side.widthPx}px;"`
+    const widthStyle = spec.side.widthPx
+      ? `width:${spec.side.widthPx}px;`
       : spec.side.widthPct
-        ? ` width="${spec.side.widthPct}%"`
+        ? `width:${spec.side.widthPct}%;`
         : "";
-    const sideTd = `<td class="cv-sidebar" bgcolor="${sideBg}"${widthAttr} valign="top" style="padding:0;">
+    const sideTd = `<td class="cv-sidebar" bgcolor="${sideBg}"${spec.side.widthPx ? ` width="${spec.side.widthPx}"` : spec.side.widthPct ? ` width="${spec.side.widthPct}%"` : ""} valign="top" style="${widthStyle}padding:0;">
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr><td id="cv-sidebar-inner" class="cv-sidebar-inner" bgcolor="${sideBg}" valign="top" style="${innerStyle}">${sideParts.join("")}</td></tr>
       </table>
@@ -902,7 +933,7 @@ export async function buildCvDocument(
   const photoUrl = cvData?.personalInfo?.photoUrl;
   const photoSrc = cvSettings?.showPhoto !== false && photoUrl ? await cachedImageUrlToDataUrl(photoUrl) : null;
 
-  const body = assembleLayout(spec, cvData, cvSettings, photoSrc, layout);
+  const body = assembleLayout(spec, cvData, cvSettings, photoSrc, layout, !!options?.wordSafe);
   const bodyHtml = `<div class="cv-theme cv-theme-${layout}">${body}</div>`;
 
   const cssCtx = getCssCtx(primaryColor, accentColor, fontFamily, fontScale);

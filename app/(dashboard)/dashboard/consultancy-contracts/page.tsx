@@ -18,6 +18,7 @@ import { fetchLatestEngagement, createEngagement, updateEngagement, CcEngagement
 import { ContractThemeSettings, DEFAULT_CONTRACT_THEME } from './utils/themeEngine';
 import { useCompanyDirectors } from './hooks/useCompanyDirectors';
 import type { JobField } from '../master-fields/components/types/database';
+import type { ImageStyle, ImageStyleMap } from './utils/imageStyles';
 
 export default function ConsultancyContractsPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -32,6 +33,15 @@ export default function ConsultancyContractsPage() {
   const [engagement, setEngagement] = useState<CcEngagement | null>(null);
   const [engagementStatuses, setEngagementStatuses] = useState<Record<string, 'draft' | 'active' | 'superseded'>>({});
   const [selectedDirectorIds, setSelectedDirectorIds] = useState<string[]>([]);
+  // Per-instance image size/align overrides (see utils/imageStyles.ts) set
+  // from Data & Values' image controls, keyed by placeholder key or
+  // blockName_rowIdx_childKey. Runtime-only (not persisted with the rest of
+  // placeholder_overrides), so it's scoped to the currently selected
+  // company - reset alongside resolvedValues/overrides below.
+  const [imageStyles, setImageStyles] = useState<ImageStyleMap>({});
+  const handleImageStyleChange = useCallback((fieldKey: string, styleKey: keyof ImageStyle, value: any) => {
+    setImageStyles((prev) => ({ ...prev, [fieldKey]: { ...prev[fieldKey], [styleKey]: value } }));
+  }, []);
   const { directors } = useCompanyDirectors(selectedCompanyId);
   const selectedDirectors = useMemo(
     () => directors.filter((d) => selectedDirectorIds.includes(d.id)),
@@ -123,17 +133,6 @@ export default function ConsultancyContractsPage() {
     [groupedPlaceholders]
   );
 
-  // Entity source arrays built from the company's directors/shareholders.
-  // The key is the normalised entity type (matching the block's entity_type[0])
-  // so resolveEcArrayPlaceholderValues can map each block to its source list.
-  const sourceArrays = useMemo(() => {
-    const arrays: Record<string, Array<{ id: string; full_name: string; position: string }>> = {};
-    if (directors.length > 0) {
-      arrays.director = directors.map((d) => ({ id: d.id, full_name: d.name, position: d.position }));
-    }
-    return arrays;
-  }, [directors]);
-
   // The Consultant (Booksmart Consultancy Limited, picked from the dropdown
   // below and persisted on the template) vs the Client (selected from the
   // sidebar) are the same template rendered for the same document, so they
@@ -148,47 +147,108 @@ export default function ConsultancyContractsPage() {
     () => companies.find((c) => String(c.id) === String(consultantCompanyId)) || null,
     [companies, consultantCompanyId]
   );
+  // The Consultant's own directors/shareholders (e.g. its signatories block) -
+  // mirrors the `directors` hook call above, which only ever fetches the
+  // CLIENT's. Without this, any array/block placeholder scoped to the
+  // Consultant (entity_type other than 'company') had no source data to
+  // resolve against at all - see resolveContractValues below.
+  const { directors: consultantDirectors } = useCompanyDirectors(consultantCompany ? String(consultantCompany.id) : null);
   const handleConsultantChange = async (companyId: string) => {
     if (!template) return;
-    setTemplate({ ...template, consultant_company_id: companyId });
-    const updated = await updateTemplate(template.id, { consultant_company_id: companyId }, template.classification);
+    // Clearing the previous signatory too - it's a director id scoped to
+    // the OLD consultant company, meaningless (and potentially resolving to
+    // the wrong person entirely, if the id happens to collide) once the
+    // consultant company itself changes.
+    setTemplate({ ...template, consultant_company_id: companyId, consultant_signatory_id: null });
+    const updated = await updateTemplate(
+      template.id,
+      { consultant_company_id: companyId, consultant_signatory_id: null },
+      template.classification
+    );
     if (!updated) toast.error('Failed to save Consultant company');
   };
 
+  // Which of the Consultant's own directors (consultantDirectors above)
+  // signs on its behalf - explicit choice, not auto-picked (see
+  // ccTemplate.ts's consultant_signatory_id comment for why this exists:
+  // individual-scoped Consultant placeholders like consultant_signatory_name
+  // have no other way to know which individual to resolve against).
+  const consultantSignatoryId = template?.consultant_signatory_id ?? null;
+  const handleSignatoryChange = async (individualId: string) => {
+    if (!template) return;
+    setTemplate({ ...template, consultant_signatory_id: individualId });
+    const updated = await updateTemplate(template.id, { consultant_signatory_id: individualId }, template.classification);
+    if (!updated) toast.error('Failed to save Consultant signatory');
+  };
+
+  // Scoped to scalarPlaceholders (excludes block parents/children, which are
+  // resolved separately below via consultantBlockPlaceholders/
+  // clientBlockPlaceholders) - the full `placeholders` list would otherwise
+  // feed block-only keys into resolveEcPlaceholderValues too, which is
+  // harmless (they simply resolve to nothing there) but redundant.
   const [consultantPlaceholders, clientPlaceholders] = useMemo(() => {
     const consultant: EcPlaceholder[] = [];
     const client: EcPlaceholder[] = [];
-    for (const p of placeholders) (resolveCompanyRole(p) === 'consultant' ? consultant : client).push(p);
+    for (const p of scalarPlaceholders) (resolveCompanyRole(p) === 'consultant' ? consultant : client).push(p);
     return [consultant, client];
-  }, [placeholders]);
+  }, [scalarPlaceholders]);
+
+  // Same Consultant/Client split as consultantPlaceholders/clientPlaceholders
+  // above, but for BLOCK placeholders (director arrays etc.) - resolved by
+  // block, not individually, since a block's children (e.g. a plain
+  // "director_name" child key) rarely carry their own consultant_/client_
+  // prefix or explicit company_role themselves; only the block's own parent
+  // placeholder reliably does. Each block's parent+children travel together
+  // so resolveEcArrayPlaceholderValues can still find the pairing.
+  const [consultantBlockPlaceholders, clientBlockPlaceholders] = useMemo(() => {
+    const consultant: EcPlaceholder[] = [];
+    const client: EcPlaceholder[] = [];
+    for (const block of Object.values(groupedPlaceholders.blocks)) {
+      const target = resolveCompanyRole(block.config) === 'consultant' ? consultant : client;
+      target.push(block.config, ...block.children);
+    }
+    return [consultant, client];
+  }, [groupedPlaceholders]);
 
   // Resolves both sides' placeholders (Consultant against consultantCompany,
   // Client against the given client id) and merges the results into one map,
   // since the template/Data & Values panel don't care which side a value
-  // came from once resolved.  Also resolves array/block placeholders (e.g.
-  // one row per director) via the separate array resolver.
+  // came from once resolved. Also resolves array/block placeholders (e.g.
+  // one row per director) via the separate array resolver - for BOTH sides,
+  // each against its own source array (the Client's directors vs the
+  // Consultant's own), not just the Client's.
   const resolveContractValues = useCallback(async (clientCompanyId: string) => {
-    // Build client-side source arrays (directors for the client company).
-    // Consultant source arrays would go here if needed.
     const clientSourceArrays: Record<string, Array<{ id: string; [key: string]: any }>> = {};
     if (directors.length > 0) {
       clientSourceArrays.director = directors.map((d) => ({ id: d.id, full_name: d.name, position: d.position }));
     }
+    const consultantSourceArrays: Record<string, Array<{ id: string; [key: string]: any }>> = {};
+    if (consultantDirectors.length > 0) {
+      consultantSourceArrays.director = consultantDirectors.map((d) => ({ id: d.id, full_name: d.name, position: d.position }));
+    }
+
+    const consultantSignatoryIndividualId = consultantSignatoryId != null ? Number(consultantSignatoryId) : null;
 
     const [clientResult, consultantResult, clientArrayResult, consultantArrayResult] = await Promise.all([
       resolveEcPlaceholderValues(clientPlaceholders, null, clientCompanyId),
       consultantCompany && consultantPlaceholders.length > 0
-        ? resolveEcPlaceholderValues(consultantPlaceholders, null, consultantCompany.id)
+        ? resolveEcPlaceholderValues(consultantPlaceholders, consultantSignatoryIndividualId, consultantCompany.id)
         : Promise.resolve({ values: {}, masterFields: new Map<number, JobField>() }),
-      resolveEcArrayPlaceholderValues(placeholders, clientCompanyId, clientSourceArrays),
-      Promise.resolve({ arrayValues: {} as Record<string, Record<string, string>[]>, masterFields: new Map<number, JobField>() }),
+      resolveEcArrayPlaceholderValues(clientBlockPlaceholders, clientCompanyId, clientSourceArrays),
+      consultantCompany && consultantBlockPlaceholders.length > 0
+        ? resolveEcArrayPlaceholderValues(consultantBlockPlaceholders, consultantCompany.id, consultantSourceArrays)
+        : Promise.resolve({ arrayValues: {} as Record<string, Record<string, string>[]>, masterFields: new Map<number, JobField>() }),
     ]);
+
     return {
       values: { ...clientResult.values, ...consultantResult.values },
-      masterFields: new Map([...clientResult.masterFields, ...consultantResult.masterFields]),
-      arrayValues: clientArrayResult.arrayValues,
+      masterFields: new Map([
+        ...clientResult.masterFields, ...consultantResult.masterFields,
+        ...clientArrayResult.masterFields, ...consultantArrayResult.masterFields,
+      ]),
+      arrayValues: { ...clientArrayResult.arrayValues, ...consultantArrayResult.arrayValues },
     };
-  }, [consultantPlaceholders, clientPlaceholders, consultantCompany, directors, placeholders]);
+  }, [consultantPlaceholders, clientPlaceholders, consultantBlockPlaceholders, clientBlockPlaceholders, consultantCompany, consultantSignatoryId, directors, consultantDirectors]);
 
   // Per-company: resolve master-field-sourced values and load any saved
   // engagement (overrides + status) for the selected client.
@@ -200,10 +260,12 @@ export default function ConsultancyContractsPage() {
       setOverrides({});
       setEngagement(null);
       setSelectedDirectorIds([]);
+      setImageStyles({});
       return;
     }
     let cancelled = false;
     setLoadingCompanyData(true);
+    setImageStyles({});
     (async () => {
       const [{ values, masterFields: fields, arrayValues }, existingEngagement] = await Promise.all([
         resolveContractValues(selectedCompanyId),
@@ -216,6 +278,40 @@ export default function ConsultancyContractsPage() {
       setOverrides(existingEngagement?.placeholder_overrides || {});
       setEngagement(existingEngagement);
       setSelectedDirectorIds(existingEngagement?.selected_director_ids || []);
+
+      // Restore arrayData from previously saved flat overrides (keys like
+      // blockName_rowIdx_childKey) so user edits survive a page reload.
+      if (existingEngagement?.placeholder_overrides) {
+        const savedOverrides = existingEngagement.placeholder_overrides;
+        const restoredArrays: Record<string, Record<string, string>[]> = {};
+        for (const [key, val] of Object.entries(savedOverrides)) {
+          const match = key.match(/^([^_]+)_(\d+)_(.+)$/);
+          if (match) {
+            const [, blockName, idxStr, childKey] = match;
+            const idx = parseInt(idxStr, 10);
+            if (!restoredArrays[blockName]) restoredArrays[blockName] = [];
+            if (!restoredArrays[blockName][idx]) restoredArrays[blockName][idx] = {};
+            restoredArrays[blockName][idx][childKey] = val;
+          }
+        }
+        // Merge restored arrays with freshly resolved ones — user edits
+        // take priority over resolved values.
+        if (Object.keys(restoredArrays).length > 0) {
+          setArrayData((prev) => {
+            const merged = { ...prev };
+            for (const [blockName, restoredRows] of Object.entries(restoredArrays)) {
+              const prevRows = merged[blockName] || [];
+              // Only use restored rows if they have more entries than resolved
+              // (user added entities) or differ from resolved (user edited cells).
+              if (restoredRows.length >= prevRows.length || JSON.stringify(restoredRows) !== JSON.stringify(prevRows)) {
+                merged[blockName] = restoredRows;
+              }
+            }
+            return merged;
+          });
+        }
+      }
+
       if (existingEngagement) {
         setEngagementStatuses((prev) => ({ ...prev, [selectedCompanyId]: existingEngagement.status }));
       }
@@ -247,6 +343,17 @@ export default function ConsultancyContractsPage() {
     setSelectedDirectorIds((prev) => (prev.length > 0 ? prev : directors.map((d) => d.id)));
   }, [selectedCompanyId, engagement, directors]);
 
+  // Scalar overrides exclude the flat array keys (blockName_rowIdx_childKey)
+  // that are mixed into placeholder_overrides for persistence — those are
+  // only meaningful for the arrayData restore logic above.
+  const scalarOverrides = useMemo(() => {
+    const result: Record<string, string> = {};
+    for (const [key, val] of Object.entries(overrides)) {
+      if (!/^\w+_\d+_\w+$/.test(key)) result[key] = val;
+    }
+    return result;
+  }, [overrides]);
+
   const handleOverrideChange = (key: string, value: string | undefined) => {
     setOverrides((prev) => {
       const next = { ...prev };
@@ -255,6 +362,34 @@ export default function ConsultancyContractsPage() {
       return next;
     });
   };
+
+  // Array/block editing handlers — mutate arrayData in-place via state.
+  const handleArrayCellChange = useCallback((blockName: string, rowIdx: number, childKey: string, value: string) => {
+    setArrayData((prev) => {
+      const rows = prev[blockName];
+      if (!rows || !rows[rowIdx]) return prev;
+      const next = { ...prev, [blockName]: rows.map((r, i) => i === rowIdx ? { ...r, [childKey]: value } : r) };
+      return next;
+    });
+  }, []);
+
+  const handleArrayDeleteColumn = useCallback((blockName: string, colIdx: number) => {
+    setArrayData((prev) => {
+      const rows = prev[blockName];
+      if (!rows || !rows[colIdx]) return prev;
+      return { ...prev, [blockName]: rows.filter((_, i) => i !== colIdx) };
+    });
+  }, []);
+
+  // Derive the next entity label from the block config so the blank row
+  // carries sensible default keys for the user to fill.
+  const handleArrayAddEntity = useCallback((blockName: string) => {
+    setArrayData((prev) => {
+      const rows = prev[blockName] || [];
+      // New row starts empty — the user fills each field.
+      return { ...prev, [blockName]: [...rows, {}] };
+    });
+  }, []);
 
   // Persisted on cc_templates.theme_settings - a platform-wide choice, not
   // per-company, matching the "one standard format" design. Reuses
@@ -274,12 +409,24 @@ export default function ConsultancyContractsPage() {
     if (!selectedCompanyId) return;
     setSaving(true);
     try {
+      // Flatten arrayData into placeholder_overrides so it persists via the
+      // existing JSONB column (convention: blockName_rowIdx_childKey).
+      const flatArrayOverrides: Record<string, string> = {};
+      for (const [blockName, rows] of Object.entries(arrayData)) {
+        rows.forEach((row, idx) => {
+          for (const [childKey, val] of Object.entries(row)) {
+            flatArrayOverrides[`${blockName}_${idx}_${childKey}`] = val;
+          }
+        });
+      }
+      const mergedOverrides = { ...overrides, ...flatArrayOverrides };
+
       const saved = engagement
-        ? await updateEngagement(engagement.id, { placeholder_overrides: overrides, selected_director_ids: selectedDirectorIds })
+        ? await updateEngagement(engagement.id, { placeholder_overrides: mergedOverrides, selected_director_ids: selectedDirectorIds })
         : await createEngagement({
             company_id: selectedCompanyId,
             template_id: template?.id ?? null,
-            placeholder_overrides: overrides,
+            placeholder_overrides: mergedOverrides,
             selected_director_ids: selectedDirectorIds,
             status: 'active',
           });
@@ -354,6 +501,25 @@ export default function ConsultancyContractsPage() {
             className="w-64"
           />
         </div>
+
+        {/* Which of the Consultant's own directors signs on its behalf -
+            resolves consultant_signatory_name/position/signature/stamp-style
+            placeholders (individual-scoped, so they need a real person to
+            resolve against - see handleSignatoryChange above). Only
+            meaningful once a Consultant company is picked. */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Signatory</span>
+          <SearchableSelect
+            value={consultantSignatoryId ? String(consultantSignatoryId) : ''}
+            onValueChange={handleSignatoryChange}
+            options={consultantDirectors.map((d) => ({ value: String(d.id), label: `${d.name} (${d.position})` }))}
+            placeholder={consultantCompany ? 'Select signatory...' : 'Pick a Consultant first'}
+            searchPlaceholder="Search directors..."
+            buttonClassName="h-9 rounded-full text-sm"
+            className="w-64"
+            disabled={!consultantCompany}
+          />
+        </div>
       </div>
 
       <div className="flex-1 min-h-0 w-full relative">
@@ -402,15 +568,17 @@ export default function ConsultancyContractsPage() {
               allPlaceholders={placeholders}
               resolvedValues={resolvedValues}
               arrayData={arrayData}
-              overrides={overrides}
+              overrides={scalarOverrides}
               onOverrideChange={handleOverrideChange}
-              directors={directors}
-              selectedDirectorIds={selectedDirectorIds}
-              onDirectorsChange={setSelectedDirectorIds}
               masterFields={masterFields}
               companyId={selectedCompanyId}
               consultantCompanyId={consultantCompany ? String(consultantCompany.id) : null}
               onRefresh={handleRefreshMasterFieldValues}
+              onCellChange={handleArrayCellChange}
+              onDeleteColumn={handleArrayDeleteColumn}
+              onAddEntity={handleArrayAddEntity}
+              imageStyles={imageStyles}
+              onImageStyleChange={handleImageStyleChange}
             />
           </Panel>
 
@@ -435,7 +603,7 @@ export default function ConsultancyContractsPage() {
               templateContent={template?.content || ''}
               resolvedValues={resolvedValues}
               arrayData={arrayData}
-              overrides={overrides}
+              overrides={scalarOverrides}
               engagement={engagement}
               themeSettings={themeSettings}
               onThemeChange={handleThemeChange}
@@ -443,6 +611,7 @@ export default function ConsultancyContractsPage() {
               onSave={handleSave}
               selectedDirectors={selectedDirectors}
               placeholders={placeholders}
+              imageStyles={imageStyles}
             />
           </Panel>
         </PanelGroup>
