@@ -38,15 +38,38 @@ export function dtmPlaceholderToResolverInput(p: Placeholder, groupLabel: string
     boolean_conditions: p.boolean_conditions || [],
     created_at: '',
     updated_at: '',
+    company_role: p.company_role ?? null,
+    is_block_start: p.is_block_start ?? false,
+    parent_name: p.parent_name || undefined,
+    array_direction: p.array_direction || undefined,
+    director_type: p.director_type || undefined,
+    dependant_relationship: p.dependant_relationship || undefined,
   };
+}
+
+// Which of the two companies-in-one-document a placeholder resolves against.
+// An explicit company_role (set via Settings' placeholder editor - see
+// PlaceholderFormDialog.tsx's showCompanyRoleField) always wins; otherwise
+// falls back to the consultant_ key-prefix heuristic. Needed because a field
+// like {{director_name}} has no prefix to auto-detect from, but still needs
+// to resolve against ONE specific company, not silently default to the
+// client (see page.tsx's resolveContractValues / DataValuesPanel.tsx's
+// per-row company routing, both of which call this instead of re-deriving
+// the prefix check independently).
+export function resolveCompanyRole(p: { key: string; company_role?: 'client' | 'consultant' | null }): 'client' | 'consultant' {
+  if (p.company_role === 'consultant' || p.company_role === 'client') return p.company_role;
+  return p.key.startsWith('consultant_') ? 'consultant' : 'client';
 }
 
 // Consultant (Booksmart Consultancy Limited) vs Client (the selected
 // company) vs everything else (fees, dates, refs...) - purely a display
-// grouping for Data & Values, derived from the key prefix rather than a
-// group_label field DTM Placeholder doesn't have.
-export function inferGroupLabel(key: string): string {
-  if (key.startsWith('consultant_')) return 'Consultant';
-  if (key.startsWith('client_') || key.startsWith('company_')) return 'Client';
+// grouping for Data & Values. Only the fields with NO explicit company_role
+// AND no recognizable key prefix fall into "Contract Details" - an explicit
+// company_role always earns its own group, even without a matching prefix.
+export function inferGroupLabel(p: { key: string; company_role?: 'client' | 'consultant' | null }): string {
+  if (p.company_role === 'consultant') return 'Consultant';
+  if (p.company_role === 'client') return 'Client';
+  if (p.key.startsWith('consultant_')) return 'Consultant';
+  if (p.key.startsWith('client_') || p.key.startsWith('company_')) return 'Client';
   return 'Contract Details';
 }

@@ -1,25 +1,13 @@
-// CV Generator → Word (.doc) theme engine, mirroring the Employment
-// Contracts module's architecture (utils/themeEngine.ts) so preview, PDF and
-// Word all render ONE source of truth.
-//
-// Word's HTML import filter does NOT reliably apply CSS reached through
-// class-based descendant selectors (`.cv-theme-corporate .cv-name`) - confirmed
-// empirically. Therefore, every content element is a real tag, and THEME_STYLES
-// below only ever targets `<rootClass> <tag>`. Structural CONTAINERS carry
-// box-model properties only, and the most vital colors (sidebar background, 
-// name/heading color) are additionally inlined directly on the element as a 
-// second line of defense via `headingVisual()`.
-
 import { imageUrlToDataUrl } from "@/lib/documentExport";
-import { toWordSafeFontStack, makeCssWordSafe, toMsoPaddingAlt } from "@/lib/documentTheme";
+import { toWordSafeFontStack, makeCssWordSafe } from "@/lib/documentTheme";
 
 // ---------------------------------------------------------------------------
 // Types - Unified & Curated Layouts
 // ---------------------------------------------------------------------------
 
-export type CvLayout = 'corporate' | 'legal' | 'modern' | 'minimal' | 'letterhead' | 'editorial';
+export type CvLayout = 'corporate' | 'legal' | 'modern' | 'executive' | 'minimal' | 'letterhead' | 'bold' | 'editorial';
 
-export const CV_LAYOUTS: CvLayout[] = ['corporate', 'legal', 'modern', 'minimal', 'letterhead', 'editorial'];
+export const CV_LAYOUTS: CvLayout[] = ['corporate', 'legal', 'modern', 'executive', 'minimal', 'letterhead', 'bold', 'editorial'];
 
 export interface CvDocument {
   bodyHtml: string;
@@ -78,15 +66,14 @@ interface LayoutSpec {
 }
 
 // ---------------------------------------------------------------------------
-// Per-theme Layout Configurations
+// Per-theme Layout Configurations (Aligned with the 8 document themes)
 // ---------------------------------------------------------------------------
 const LAYOUT_SPECS: Record<CvLayout, LayoutSpec> = {
   corporate: {
-    // Professional, structured, Fortune 500 split-layout.
     hasPhoto: true,
     nameInMain: true,
     bodyPadding: "0",
-    mainPadding: "24px 24px 24px 16px", // Reduced padding between sidebar & main
+    mainPadding: "24px 24px 24px 16px",
     mainSections: [
       { kind: "summary", title: "Professional Profile" },
       { kind: "experience", title: "Professional Experience" },
@@ -114,7 +101,6 @@ const LAYOUT_SPECS: Record<CvLayout, LayoutSpec> = {
     footerPadding: "0",
   },
   legal: {
-    // Traditional, strict execution copy style. Single column, nested centered header.
     header: { variant: "centered", padding: "0" },
     hasPhoto: false,
     nameInMain: false,
@@ -138,7 +124,6 @@ const LAYOUT_SPECS: Record<CvLayout, LayoutSpec> = {
     footerPadding: "20px 60px 40px",
   },
   modern: {
-    // Sleek, tech-forward. Banner header, soft muted sidebar right.
     header: { variant: "banner", padding: "32px" },
     hasPhoto: true,
     nameInMain: false,
@@ -168,8 +153,26 @@ const LAYOUT_SPECS: Record<CvLayout, LayoutSpec> = {
     declarationIn: "footer",
     footerPadding: "24px 32px 24px",
   },
+  executive: {
+    header: { variant: "centered", padding: "32px 0 16px" },
+    hasPhoto: false,
+    nameInMain: false,
+    bodyPadding: "0",
+    mainPadding: "12px 40px 32px",
+    mainSections: [
+      { kind: "summary", title: "Executive Summary" },
+      { kind: "experience", title: "Professional History" },
+      { kind: "education", title: "Education" },
+      { kind: "skills", title: "Core Competencies" },
+      { kind: "languages", title: "Languages" },
+      { kind: "certifications", title: "Certifications & Credentials" },
+      { kind: "references", title: "Professional References" },
+      { kind: "details", title: "Personal Details" },
+    ],
+    declarationIn: "footer",
+    footerPadding: "24px 40px",
+  },
   minimal: {
-    // Ultra-clean, whitespace heavy, thin lines. Open side-split.
     hasPhoto: true,
     nameInMain: true,
     bodyPadding: "0",
@@ -201,7 +204,6 @@ const LAYOUT_SPECS: Record<CvLayout, LayoutSpec> = {
     footerPadding: "0",
   },
   letterhead: {
-    // Subtle classic stationery style. Centered elegant header.
     header: { variant: "centered", padding: "0" },
     hasPhoto: false,
     nameInMain: false,
@@ -224,8 +226,34 @@ const LAYOUT_SPECS: Record<CvLayout, LayoutSpec> = {
     declarationIn: "footer",
     footerPadding: "24px 40px",
   },
+  bold: {
+    hasPhoto: true,
+    nameInMain: true,
+    bodyPadding: "0",
+    mainPadding: "24px",
+    mainSections: [
+      { kind: "summary", title: "Profile Summary" },
+      { kind: "experience", title: "Work Experience" },
+      { kind: "projects", title: "Key Projects" },
+      { kind: "education", title: "Education Background" },
+      { kind: "certifications", title: "Certifications" },
+    ],
+    side: {
+      widthPx: 260,
+      padding: "24px",
+      dark: false,
+      blocks: [
+        { kind: "contact", title: "Contact Details" },
+        { kind: "skills", title: "Proficiencies" },
+        { kind: "languages", title: "Languages" },
+        { kind: "details", title: "Personal Info" },
+      ],
+    },
+    sideFirst: false,
+    declarationIn: "main",
+    footerPadding: "0",
+  },
   editorial: {
-    // Magazine style, text-heavy, beautiful serifs.
     header: { variant: "centered", padding: "40px 0 24px" },
     hasPhoto: false,
     nameInMain: false,
@@ -251,7 +279,31 @@ const LAYOUT_SPECS: Record<CvLayout, LayoutSpec> = {
 };
 
 // ---------------------------------------------------------------------------
-// Small helpers
+// Shared Font Mappings & Helper Options
+// ---------------------------------------------------------------------------
+
+export const FONT_OPTIONS = [
+  { name: 'Georgia', family: 'Georgia, "Times New Roman", serif', desc: 'Elegant serif' },
+  { name: 'Times New Roman', family: '"Times New Roman", Times, serif', desc: 'Classic legal' },
+  { name: 'Garamond', family: 'Garamond, "EB Garamond", serif', desc: 'Formal serif' },
+  { name: 'Merriweather', family: 'Merriweather, serif', desc: 'Readable serif' },
+  { name: 'Inter', family: 'Inter, sans-serif', desc: 'Clean modern' },
+  { name: 'Arial', family: 'Arial, Helvetica, sans-serif', desc: 'Plain sans' },
+];
+
+const STRICT_FONT_MAP: Record<CvLayout, string> = {
+  corporate: "Arial, Helvetica, sans-serif",
+  legal: '"Times New Roman", Times, serif',
+  modern: '"Helvetica Neue", Helvetica, Arial, sans-serif',
+  executive: "Georgia, serif",
+  minimal: "system-ui, -apple-system, sans-serif",
+  letterhead: "Calibri, Arial, sans-serif",
+  bold: "Arial, Helvetica, sans-serif",
+  editorial: 'Georgia, "Times New Roman", serif',
+};
+
+// ---------------------------------------------------------------------------
+// Component Assembly Helpers
 // ---------------------------------------------------------------------------
 
 function esc(v: unknown): string {
@@ -296,9 +348,6 @@ const CONTACT_DEFS: [string, string][] = [
   ["github", "GitHub"],
 ];
 
-// Small inline SVGs (self-contained, no external icon-font request) standing in for the
-// FontAwesome glyphs used by the corporate theme's reference design. Scoped to corporate
-// only - other themes stay icon-free per standing convention.
 const CONTACT_ICONS: Record<string, string> = {
   location: `<svg viewBox="0 0 20 20" width="11" height="11" fill="currentColor" style="vertical-align:-1px;"><path d="M10 20s6-5.686 6-10a6 6 0 10-12 0c0 4.314 6 10 6 10zm0-7a3 3 0 110-6 3 3 0 010 6z"/></svg>`,
   phone: `<svg viewBox="0 0 20 20" width="11" height="11" fill="currentColor" style="vertical-align:-1px;"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"/></svg>`,
@@ -309,21 +358,17 @@ const CONTACT_ICONS: Record<string, string> = {
 
 const CHECK_CIRCLE_SVG = `<svg viewBox="0 0 20 20" width="11" height="11" fill="currentColor" style="vertical-align:-1px;"><path fill-rule="evenodd" clip-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/></svg>`;
 
-// ---------------------------------------------------------------------------
-// Shared content-block builders
-// ---------------------------------------------------------------------------
-
 function photoFrame(photoSrc: string | null, settings: any, size: number, borderColor: string): string {
   const radius = settings.photoShape === "circle" ? "50%" : settings.photoShape === "rounded" ? "12px" : "0";
   const style = `width:${size}px;height:${size}px;border:3px solid ${borderColor};border-radius:${radius};display:block;overflow:hidden;background:#ffffff;`;
   const img = photoSrc
     ? `<img src="${photoSrc}" alt="Profile" width="${size}" height="${size}" style="width:${size}px;height:${size}px;object-fit:${settings.photoFit || "cover"};" />`
-    : "";
+    : `&nbsp;`;
   return `<div class="cv-photo" style="${style}">${img}</div>`;
 }
 
 function contactBlock(personalInfo: any, accent: string, layout: CvLayout): string {
-  if (layout === "corporate") {
+  if (layout === "corporate" || layout === "bold") {
     const lines = CONTACT_DEFS
       .filter(([key]) => personalInfo?.[key])
       .map(([key]) => `<div class="cv-contact-item" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span style="color:${accent};display:inline-flex;">${CONTACT_ICONS[key] || ""}</span><span>${esc(personalInfo[key])}</span></div>`);
@@ -362,7 +407,6 @@ function skillsBlock(categories: any[], layout: CvLayout, pri: string, acc: stri
   return categories
     .map((grp: any) => {
       const items = splitItems(grp.items);
-      // Renders large skill lists gracefully as inline separated text to prevent massive vertical overflow.
       const list = items.length ? `<p style="line-height:1.6; margin-bottom:12px;">${items.map(i => esc(i)).join(separator)}</p>` : "";
       const title = String(grp.category || "");
       return `<h4${styleAttr}>${esc(uppercase ? title.toUpperCase() : title)}</h4>${list}`;
@@ -388,7 +432,7 @@ function expEntry(exp: any, layout: CvLayout): string {
     .join("");
   const ul = respList ? `<ul>${respList}</ul>` : "";
 
-  if (layout === "corporate") {
+  if (layout === "corporate" || layout === "bold") {
     const head = `<table class="cv-exp-head" cellpadding="0" cellspacing="0" border="0" style="width:100%;"><tr><td><strong>${company}</strong>${loc}</td><td align="right"><em>${dates}</em></td></tr></table>`;
     const roleLine = `<p class="cv-exp-role">${role}</p>`;
     return `${head}${roleLine}${companyDesc}${ul}`;
@@ -415,7 +459,7 @@ function eduEntries(entries: any[]): string {
 function projectsBlock(projects: any[], layout: CvLayout): string {
   if (!projects.length) return "<p><em>No projects added yet.</em></p>";
 
-  if (layout === "corporate") {
+  if (layout === "corporate" || layout === "bold") {
     const card = (p: any) => `<td class="cv-project-card" valign="top" width="50%" style="border:1px solid #eeeeee;padding:12px;">
       <strong>${esc(p.title || "Project Title")}${p.year ? ` (${esc(p.year)})` : ""}</strong>
       ${p.description ? `<p>${esc(p.description)}</p>` : ""}
@@ -474,8 +518,8 @@ function declarationHtml(cvData: any, accent: string, layout: CvLayout): string 
   if (!cvData.includeDeclaration || !declaration) return "";
   let badge = "";
   if (cvData.verifiedBadge) {
-    badge = layout === "corporate"
-      ? `<p><span class="cv-verified-badge">${CHECK_CIRCLE_SVG}&nbsp;CV Verified &amp; Up-to-date ${verifiedDateLabel()}</span></p>`
+    badge = layout === "corporate" || layout === "bold"
+      ? `<p><span class="cv-verified-badge">${CHECK_CIRCLE_SVG} &nbsp;CV Verified &amp; Up-to-date ${verifiedDateLabel()}</span></p>`
       : `<p style="color:${accent};"><strong>✓ CV Verified &amp; Up-to-date ${verifiedDateLabel()}</strong></p>`;
   }
   return `<p><em>${esc(declaration)}</em></p>${badge}`;
@@ -489,8 +533,10 @@ const H1_UPPERCASE: Record<CvLayout, boolean> = {
   corporate: true,
   legal: true,
   modern: false,
+  executive: false,
   minimal: false,
   letterhead: true,
+  bold: true,
   editorial: false,
 };
 
@@ -506,17 +552,23 @@ function headingVisual(layout: CvLayout, level: "h2" | "h3" | "h4", pri: string,
       return { style: "", uppercase: false };
     case "modern":
       if (level === "h2") return { style: `color:${pri};`, uppercase: false };
-      // Word hack: mimic the pill badge using solid background and padding
       if (level === "h3") return { style: `color:${acc};background:${acc}15;padding:4px 12px;display:inline-block;border-radius:20px;`, uppercase: false };
       return { style: `color:#1e293b;`, uppercase: false };
+    case "executive":
+      if (level === "h2") return { style: `color:${pri};text-transform:uppercase;letter-spacing:0.15em;`, uppercase: true };
+      if (level === "h3") return { style: `color:${acc};font-style:italic;`, uppercase: false };
+      return { style: "", uppercase: false };
     case "minimal":
       if (level === "h2") return { style: `color:${pri};border-bottom:1px solid #f4f4f5;padding-bottom:8px;`, uppercase: false };
       if (level === "h3") return { style: `color:${acc};`, uppercase: true };
       return { style: "", uppercase: false };
     case "letterhead":
-      // Solid block banner/ribbon for H2
       if (level === "h2") return { style: `color:#ffffff;background:${pri};padding:4px 16px;`, uppercase: true };
       if (level === "h3") return { style: `color:${acc};`, uppercase: false };
+      return { style: "", uppercase: false };
+    case "bold":
+      if (level === "h2") return { style: `color:#000000;border:2px solid #000000;padding:4px 12px;box-shadow:3px 3px 0px ${acc};background:#ffffff;`, uppercase: true };
+      if (level === "h3") return { style: `color:${pri};`, uppercase: true };
       return { style: "", uppercase: false };
     case "editorial":
       if (level === "h2") return { style: `color:${pri};text-align:center;letter-spacing:0.2em;`, uppercase: true };
@@ -531,7 +583,7 @@ function headingVisual(layout: CvLayout, level: "h2" | "h3" | "h4", pri: string,
 // Header builder
 // ---------------------------------------------------------------------------
 
-function buildHeader(spec: LayoutSpec, cvData: any, settings: any, photoSrc: string | null, pri: string, acc: string, layout: CvLayout, wordSafe?: boolean): string {
+function buildHeader(spec: LayoutSpec, cvData: any, settings: any, photoSrc: string | null, pri: string, acc: string, layout: CvLayout): string {
   const header = spec.header;
   if (!header) return "";
   const { personalInfo = {} } = cvData;
@@ -553,7 +605,6 @@ function buildHeader(spec: LayoutSpec, cvData: any, settings: any, photoSrc: str
 
   let extraStyle = "";
   if (header.variant === "banner") {
-    // Ensures text stays visible on a sleek block background
     extraStyle = `background:${pri}; margin-bottom:16px; border-radius: 4px;`;
     return `<div id="cv-header-banner" class="cv-header cv-header-banner"${extraStyle ? ` style="${extraStyle}"` : ""}>${nameBlock}</div>`;
   }
@@ -567,7 +618,7 @@ function buildHeader(spec: LayoutSpec, cvData: any, settings: any, photoSrc: str
 }
 
 // ---------------------------------------------------------------------------
-// Main / sidebar content assemblers
+// Main / Sidebar content assemblers
 // ---------------------------------------------------------------------------
 
 function buildBlock(block: BlockSpec, cvData: any, settings: any, layout: CvLayout, pri: string, acc: string): string {
@@ -612,39 +663,11 @@ function withHeading(level: "h2" | "h3", block: BlockSpec, body: string, layout:
   return `<${level}${styleAttr}>${esc(title)}</${level}>${body}`;
 }
 
-function paddingStyle(value: string, wordSafe?: boolean): string {
-  if (!wordSafe) return `padding:${value};`;
-
-  const tokens = value.trim().split(/\s+/);
-  if (tokens.length === 0) return '';
-  let top, right, bottom, left;
-  if (tokens.length === 1) {
-    top = right = bottom = left = tokens[0];
-  } else if (tokens.length === 2) {
-    top = bottom = tokens[0];
-    right = left = tokens[1];
-  } else if (tokens.length === 3) {
-    top = tokens[0];
-    right = left = tokens[1];
-    bottom = tokens[2];
-  } else {
-    [top, right, bottom, left] = tokens;
-  }
-
-  const toPt = (pxStr: string) => {
-    if (pxStr === '0' || pxStr === '0px') return '0pt';
-    const m = /^(-?\d*\.?\d+)px$/.exec(pxStr);
-    return m ? `${(parseFloat(m[1]) * 0.75).toFixed(1)}pt` : pxStr;
-  };
-
-  return `padding-top:${toPt(top)}; padding-right:${toPt(right)}; padding-bottom:${toPt(bottom)}; padding-left:${toPt(left)};`;
-}
-
-function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: string | null, layout: CvLayout, wordSafe?: boolean): string {
+function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: string | null, layout: CvLayout): string {
   const pri = toCssColor(settings?.primaryColor);
   const acc = toCssColor(settings?.accentColor, "#3498db");
 
-  const headerHtml = buildHeader(spec, cvData, settings, photoSrc, pri, acc, layout, wordSafe);
+  const headerHtml = buildHeader(spec, cvData, settings, photoSrc, pri, acc, layout);
 
   const mainParts: string[] = [];
   if (spec.nameInMain) {
@@ -652,7 +675,7 @@ function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: 
     const nameText = personalInfo.fullName || "Your Name";
     const nameH1 = `<h1 style="color:${pri};">${esc(H1_UPPERCASE[layout] ? nameText.toUpperCase() : nameText)}</h1>`;
     const titleP = `<p class="cv-title" style="color:${acc};"><strong>${esc((personalInfo.title || "Professional Title").toUpperCase())}</strong></p>`;
-    mainParts.push(layout === "corporate" ? `<div class="cv-header-box">${nameH1}${titleP}</div>` : `${nameH1}${titleP}`);
+    mainParts.push(layout === "corporate" || layout === "bold" ? `<div class="cv-header-box">${nameH1}${titleP}</div>` : `${nameH1}${titleP}`);
   }
 
   for (const block of spec.mainSections) {
@@ -687,7 +710,6 @@ function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: 
       : spec.side.widthPct
         ? ` width="${spec.side.widthPct}%"`
         : "";
-    // Nested table to prevent Word from rendering div backgrounds as tight text highlights
     const sideTd = `<td class="cv-sidebar" bgcolor="${sideBg}"${widthAttr} valign="top" style="padding:0;">
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr><td id="cv-sidebar-inner" class="cv-sidebar-inner" bgcolor="${sideBg}" valign="top" style="${innerStyle}">${sideParts.join("")}</td></tr>
@@ -709,93 +731,7 @@ function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: 
 }
 
 // ---------------------------------------------------------------------------
-// Theme CSS 
-// ---------------------------------------------------------------------------
-
-const BASE_CV_STYLES = `
-  table { width: 100%; border-collapse: collapse; }
-  td { vertical-align: top; }
-  p { margin: 0 0 10px; }
-  ul { margin: 0 0 10px 20px; padding: 0; }
-  li { margin-bottom: 3px; }
-  h1, h2, h3, h4 { page-break-after: avoid; }
-  h1 { margin: 0 0 4px; }
-  h2 { margin: 20px 0 8px; }
-  h3 { margin: 16px 0 6px; }
-  h4 { margin: 10px 0 2px; }
-`;
-
-const THEME_STYLES: Record<CvLayout, (a: CssCtx) => string> = {
-  corporate: ({ pri, acc, fam, S }) => `
-    font-family: ${fam}; color: #334155; font-size: ${S(11.5)}; line-height: 1.7;
-    .cv-header-box { border-bottom: 4px solid ${pri}; padding-bottom: 20px; margin-bottom: 25px; }
-    h1 { color: ${pri}; font-weight: 900; font-size: ${S(30)}; text-transform: uppercase; letter-spacing: -0.02em; margin: 0; }
-    .cv-title { font-size: ${S(14)}; font-weight: 700; margin-top: 5px; margin-bottom: 0; }
-    h2 { color: ${pri}; font-weight: 800; font-size: ${S(12.5)}; text-transform: uppercase; letter-spacing: 0.02em; background: #e8f4fd; border-left: 5px solid ${acc}; padding: 8px 15px; margin-top: 28px; margin-bottom: 15px; }
-    h3 { color: ${acc}; font-weight: 800; font-size: ${S(11)}; margin-top: 24px; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid ${acc}; padding-bottom: 5px; }
-    h4 { font-size: ${S(10)}; font-weight: 800; color: #ffffff; text-decoration: underline; text-underline-offset: 3px; margin-bottom: 5px; }
-    p { margin-bottom: 16px; text-align: justify; }
-    table td { font-size: ${S(11.5)}; }
-    .cv-exp-head strong { color: #000000; font-weight: 800; font-size: ${S(12.5)}; }
-    .cv-exp-role { color: ${acc}; font-weight: 700; font-size: ${S(11.5)}; margin: 2px 0 6px; }
-    .cv-project-card strong { color: ${pri}; font-size: ${S(12)}; }
-    .cv-project-card p { color: #555555; font-size: ${S(10.5)}; line-height: 1.4; margin: 4px 0 0; }
-    .cv-sidebar p strong { color: ${acc}; }
-    .cv-verified-badge { display: inline-block; background: #27ae60; color: #ffffff; padding: 4px 12px; border-radius: 4px; font-weight: 800; font-size: ${S(10)}; text-transform: uppercase; }
-  `,
-  legal: ({ pri, fam, S }) => `
-    font-family: ${fam}; color: #000000; font-size: ${S(11)}; line-height: 2.0; text-align: justify;
-    .cv-header { text-align: center; border-top: 2px double ${pri}; border-bottom: 2px double ${pri}; padding: 12px 0; margin-bottom: 20px; }
-    .cv-header h1 { line-height: 1.2; }
-    .cv-header p { line-height: 1.4; margin-bottom: 4px; }
-    h1 { font-size: ${S(22)}; font-weight: bold; color: ${pri}; text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 8px 0; padding: 0; }
-    h2 { text-transform: uppercase; font-size: ${S(12)}; font-weight: bold; color: ${pri}; margin-top: 40px; margin-bottom: 16px; text-align: center; }
-    h3 { font-size: ${S(11)}; font-weight: bold; text-decoration: underline; margin-top: 24px; margin-bottom: 12px; }
-    h4 { font-size: ${S(11)}; font-weight: bold; }
-    p { margin-bottom: 20px; }
-    ul { list-style-type: disc; padding-left: 32px; margin-bottom: 20px; }
-  `,
-  modern: ({ pri, acc, fam, S }) => `
-    font-family: ${fam}; color: #4b5563; font-size: ${S(10.5)}; line-height: 1.75;
-    h1 { font-size: ${S(28)}; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 8px; }
-    h2 { color: ${pri}; font-weight: 700; font-size: ${S(14)}; margin-top: 24px; margin-bottom: 12px; display: flex; align-items: center; }
-    h2::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: ${acc}; margin-right: 12px; }
-    h3 { color: ${acc}; font-weight: 600; font-size: ${S(11.5)}; margin-top: 24px; margin-bottom: 10px; background: ${acc}10; display: inline-block; padding: 4px 12px; border-radius: 20px; }
-    h4 { font-size: ${S(10.5)}; font-weight: 700; color: ${pri}; }
-    table td { font-size: ${S(10.5)}; }
-  `,
-  minimal: ({ pri, acc, fam, S }) => `
-    font-family: ${fam}; color: #27272a; font-size: ${S(10.5)}; line-height: 1.6;
-    h1 { font-weight: 300; font-size: ${S(24)}; margin-bottom: 24px; letter-spacing: -0.02em; color: ${pri}; }
-    h2 { font-weight: 500; font-size: ${S(12)}; margin-top: 32px; margin-bottom: 16px; color: ${pri}; border-bottom: 1px solid #f4f4f5; padding-bottom: 8px; }
-    h3 { font-weight: 400; font-size: ${S(10.5)}; margin-top: 20px; margin-bottom: 8px; color: ${acc}; text-transform: uppercase; letter-spacing: 0.05em; }
-    h4 { font-size: ${S(10)}; font-weight: 500; color: #52525b; }
-    p { margin-bottom: 16px; color: #3f3f46; font-weight: 300; }
-  `,
-  letterhead: ({ pri, acc, fam, S }) => `
-    font-family: ${fam}; color: #1f2937; font-size: ${S(11)}; line-height: 1.65;
-    .cv-header { text-align: center; border-top: 3px solid ${pri}; border-bottom: 2px solid ${acc}; padding: 16px 0 12px; margin-bottom: 12px; }
-    .cv-header h1 { line-height: 1.2; }
-    .cv-header p { line-height: 1.4; }
-    h1 { font-weight: 700; font-size: ${S(26)}; text-transform: uppercase; letter-spacing: 0.1em; color: ${pri}; margin: 0 0 8px 0; }
-    h2 { color: #ffffff; background: ${pri}; font-weight: 700; font-size: ${S(12)}; padding: 6px 12px; margin: 32px 0 16px; letter-spacing: 0.05em; text-transform: uppercase; }
-    h3 { font-weight: 700; font-size: ${S(11.5)}; color: ${acc}; margin-top: 24px; margin-bottom: 12px; }
-    h4 { font-size: ${S(11)}; font-weight: 700; color: ${pri}; }
-    p { margin-bottom: 18px; }
-  `,
-  editorial: ({ pri, acc, fam, S }) => `
-    font-family: ${fam}; color: #292524; font-size: ${S(11.5)}; line-height: 1.8;
-    h1 { font-weight: 400; font-style: italic; font-size: ${S(32)}; color: ${pri}; text-align: center; margin-bottom: 16px; letter-spacing: -0.02em; }
-    h1::after { content: ''; display: block; width: 120px; height: 1px; background: ${acc}; margin: 24px auto 32px; }
-    h2 { font-weight: 600; font-size: ${S(12)}; color: ${pri}; text-transform: uppercase; letter-spacing: 0.2em; margin-top: 40px; margin-bottom: 20px; text-align: center; }
-    h3 { font-weight: 700; font-style: italic; font-size: ${S(12)}; color: ${acc}; margin-top: 24px; margin-bottom: 12px; border-left: 3px solid ${acc}; padding-left: 12px; }
-    h4 { font-size: ${S(11)}; font-weight: 600; color: ${pri}; }
-    p { margin-bottom: 20px; text-align: justify; }
-  `,
-};
-
-// ---------------------------------------------------------------------------
-// Word-safe transform + flat CSS
+// Flat nested CSS flattener
 // ---------------------------------------------------------------------------
 
 function flattenNestedCss(rootSelector: string, css: string): string {
@@ -822,7 +758,111 @@ function flattenNestedCss(rootSelector: string, css: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Document builder
+// Base Common Styles & Dynamic Themes CSS definitions
+// ---------------------------------------------------------------------------
+
+const BASE_CV_STYLES = `
+  table { width: 100%; border-collapse: collapse; }
+  td { vertical-align: top; }
+  p { margin-top: 0; margin-bottom: 10px; }
+  ul { margin-top: 0; margin-bottom: 10px; padding-left: 20px; }
+  li { margin-bottom: 3px; }
+  h1, h2, h3, h4 { page-break-after: avoid; }
+  h1 { margin-bottom: 4px; }
+  h2 { margin-top: 20px; margin-bottom: 8px; }
+  h3 { margin-top: 16px; margin-bottom: 6px; }
+  h4 { margin-top: 10px; margin-bottom: 2px; }
+`;
+
+const THEME_STYLES: Record<CvLayout, (a: CssCtx) => string> = {
+  corporate: ({ pri, acc, fam, S }) => `
+    font-family: ${fam}; color: #334155; font-size: ${S(11.5)}; line-height: 1.7;
+    .cv-header-box { border-bottom: 4px solid ${pri}; padding-bottom: 20px; margin-bottom: 25px; }
+    h1 { color: ${pri}; font-weight: 900; font-size: ${S(30)}; text-transform: uppercase; letter-spacing: -0.02em; margin: 0; }
+    .cv-title { font-size: ${S(14)}; font-weight: 700; margin-top: 5px; margin-bottom: 0; }
+    h2 { color: ${pri}; font-weight: 800; font-size: ${S(12.5)}; text-transform: uppercase; letter-spacing: 0.02em; background: #e8f4fd; border-left: 5px solid ${acc}; padding: 8px 15px; margin-top: 28px; margin-bottom: 15px; }
+    h3 { color: ${acc}; font-weight: 800; font-size: ${S(11)}; margin-top: 24px; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid ${acc}; padding-bottom: 5px; }
+    h4 { font-size: ${S(10)}; font-weight: 800; color: #ffffff; text-decoration: underline; text-underline-offset: 3px; margin-bottom: 5px; }
+    p { margin-bottom: 16px; text-align: justify; }
+    table td { font-size: ${S(11.5)}; }
+    .cv-exp-head strong { color: #000000; font-weight: 800; font-size: ${S(12.5)}; }
+    .cv-exp-role { color: ${acc}; font-weight: 700; font-size: ${S(11.5)}; margin-top: 2px; margin-bottom: 6px; }
+    .cv-project-card strong { color: ${pri}; font-size: ${S(12)}; }
+    .cv-project-card p { color: #555555; font-size: ${S(10.5)}; line-height: 1.4; margin-top: 4px; }
+    .cv-sidebar p strong { color: ${acc}; }
+    .cv-verified-badge { display: inline-block; background: #27ae60; color: #ffffff; padding: 4px 12px; border-radius: 4px; font-weight: 800; font-size: ${S(10)}; text-transform: uppercase; }
+  `,
+  legal: ({ pri, fam, S }) => `
+    font-family: ${fam}; color: #000000; font-size: ${S(11)}; line-height: 2.0; text-align: justify;
+    .cv-header { text-align: center; border-top: 2px double ${pri}; border-bottom: 2px double ${pri}; padding: 12px 0; margin-bottom: 20px; }
+    .cv-header h1 { line-height: 1.2; }
+    .cv-header p { line-height: 1.4; margin-bottom: 4px; }
+    h1 { font-size: ${S(22)}; font-weight: bold; color: ${pri}; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; padding: 0; }
+    h2 { text-transform: uppercase; font-size: ${S(12)}; font-weight: bold; color: ${pri}; margin-top: 40px; margin-bottom: 16px; text-align: center; }
+    h3 { font-size: ${S(11)}; font-weight: bold; text-decoration: underline; margin-top: 24px; margin-bottom: 12px; }
+    h4 { font-size: ${S(11)}; font-weight: bold; }
+    p { margin-bottom: 20px; }
+    ul { list-style-type: disc; padding-left: 32px; margin-bottom: 20px; }
+  `,
+  modern: ({ pri, acc, fam, S }) => `
+    font-family: ${fam}; color: #4b5563; font-size: ${S(10.5)}; line-height: 1.75;
+    h1 { font-size: ${S(28)}; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 8px; }
+    h2 { color: ${pri}; font-weight: 700; font-size: ${S(14)}; margin-top: 24px; margin-bottom: 12px; display: flex; align-items: center; }
+    h2::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: ${acc}; margin-right: 12px; }
+    h3 { color: ${acc}; font-weight: 600; font-size: ${S(11.5)}; margin-top: 24px; margin-bottom: 10px; background: ${acc}10; display: inline-block; padding: 4px 12px; border-radius: 20px; }
+    h4 { font-size: ${S(10.5)}; font-weight: 700; color: ${pri}; }
+    table td { font-size: ${S(10.5)}; }
+  `,
+  executive: ({ pri, acc, fam, S }) => `
+    font-family: ${fam}; color: #1e293b; line-height: 1.8; font-size: ${S(11)};
+    h1 { color: ${pri}; font-weight: 400; font-size: ${S(24)}; text-align: center; border-top: 1px solid ${acc}; border-bottom: 1px solid ${acc}; padding: 24px 0; margin-bottom: 32px; letter-spacing: 0.05em; background: rgba(0,0,0,0.02); }
+    h2 { color: ${pri}; font-weight: 700; font-size: ${S(12)}; text-transform: uppercase; letter-spacing: 0.15em; margin-top: 48px; margin-bottom: 20px; text-align: center; }
+    h2::after { content: ''; display: block; width: 40px; height: 2px; background: ${acc}; margin: 12px auto 0; }
+    h3 { color: ${acc}; font-style: italic; font-weight: normal; font-size: ${S(11.5)}; margin-top: 24px; margin-bottom: 12px; }
+    p { margin-bottom: 20px; text-align: justify; }
+  `,
+  minimal: ({ pri, acc, fam, S }) => `
+    font-family: ${fam}; color: #27272a; font-size: ${S(10.5)}; line-height: 1.6;
+    h1 { font-weight: 300; font-size: ${S(24)}; margin-bottom: 24px; letter-spacing: -0.02em; color: ${pri}; }
+    h2 { font-weight: 500; font-size: ${S(12)}; margin-top: 32px; margin-bottom: 16px; color: ${pri}; border-bottom: 1px solid #f4f4f5; padding-bottom: 8px; }
+    h3 { font-weight: 400; font-size: ${S(10.5)}; margin-top: 20px; margin-bottom: 8px; color: ${acc}; text-transform: uppercase; letter-spacing: 0.05em; }
+    h4 { font-size: ${S(10)}; font-weight: 500; color: #52525b; }
+    p { margin-bottom: 16px; color: #3f3f46; font-weight: 300; }
+  `,
+  letterhead: ({ pri, acc, fam, S }) => `
+    font-family: ${fam}; color: #1f2937; font-size: ${S(11)}; line-height: 1.65;
+    .cv-header { text-align: center; border-top: 3px solid ${pri}; border-bottom: 2px solid ${acc}; padding: 16px 0 12px; margin-bottom: 12px; }
+    .cv-header h1 { line-height: 1.2; }
+    .cv-header p { line-height: 1.4; }
+    h1 { font-weight: 700; font-size: ${S(26)}; text-transform: uppercase; letter-spacing: 0.1em; color: ${pri}; margin-bottom: 8px; }
+    h2 { color: #ffffff; background: ${pri}; font-weight: 700; font-size: ${S(12)}; padding: 6px 12px; margin-top: 32px; margin-bottom: 16px; letter-spacing: 0.05em; text-transform: uppercase; }
+    h3 { font-weight: 700; font-size: ${S(11.5)}; color: ${acc}; margin-top: 24px; margin-bottom: 12px; }
+    h4 { font-size: ${S(11)}; font-weight: 700; color: ${pri}; }
+    p { margin-bottom: 18px; }
+  `,
+  bold: ({ pri, acc, fam, S }) => `
+    font-family: ${fam}; color: #000000; font-size: ${S(10.5)}; line-height: 1.6;
+    .cv-header-box { border-bottom: 4px solid ${pri}; padding-bottom: 20px; margin-bottom: 25px; }
+    h1 { background: ${pri}; color: #ffffff; font-weight: 900; font-size: ${S(24)}; text-transform: uppercase; letter-spacing: 0.05em; padding: 24px 32px; margin-bottom: 48px; border: 4px solid #000000; box-shadow: 8px 8px 0px ${acc}; }
+    h2 { color: #000000; display: inline-block; font-weight: 900; font-size: ${S(14)}; padding: 8px 16px; margin-top: 40px; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.05em; border: 3px solid #000000; box-shadow: 4px 4px 0px ${acc}; background: #ffffff; }
+    h3 { color: ${pri}; font-weight: 900; font-size: ${S(12)}; margin-top: 24px; margin-bottom: 12px; text-transform: uppercase; border-bottom: 4px solid ${acc}; display: inline-block; }
+    h4 { font-size: ${S(10.5)}; font-weight: 700; color: ${pri}; }
+    p { margin-bottom: 20px; font-weight: 500; }
+    table td { font-size: ${S(10.5)}; }
+  `,
+  editorial: ({ pri, acc, fam, S }) => `
+    font-family: ${fam}; color: #292524; font-size: ${S(11.5)}; line-height: 1.8;
+    h1 { font-weight: 400; font-style: italic; font-size: ${S(32)}; color: ${pri}; text-align: center; margin-bottom: 16px; letter-spacing: -0.02em; }
+    h1::after { content: ''; display: block; width: 120px; height: 1px; background: ${acc}; margin: 24px auto 32px; }
+    h2 { font-weight: 600; font-size: ${S(12)}; color: ${pri}; text-transform: uppercase; letter-spacing: 0.2em; margin-top: 40px; margin-bottom: 20px; text-align: center; }
+    h3 { font-weight: 700; font-style: italic; font-size: ${S(12)}; color: ${acc}; margin-top: 24px; margin-bottom: 12px; border-left: 3px solid ${acc}; padding-left: 12px; }
+    h4 { font-size: ${S(11)}; font-weight: 600; color: ${pri}; }
+    p { margin-bottom: 20px; text-align: justify; }
+  `,
+};
+
+// ---------------------------------------------------------------------------
+// Main Public Export (Re-establishes the `buildCvDocument` signature)
 // ---------------------------------------------------------------------------
 
 const dataUrlCache = new Map<string, string>();
@@ -843,20 +883,6 @@ function getCssCtx(primaryColor: string, accentColor: string, fontFamily: string
   };
 }
 
-// Enforces a strict, singular typography mapping ensuring no mixed font families
-const STRICT_FONT_MAP: Record<CvLayout, string> = {
-  corporate: "Arial, Helvetica, sans-serif",
-  legal: '"Times New Roman", Times, serif',
-  modern: '"Helvetica Neue", Helvetica, Arial, sans-serif',
-  minimal: "system-ui, -apple-system, sans-serif",
-  letterhead: "Calibri, Arial, sans-serif",
-  editorial: 'Georgia, "Times New Roman", serif',
-};
-
-// Builds the single source-of-truth themed CV document. The returned
-// bodyHtml/styleHtml render the live preview (CvPreviewPanel), and the same
-// bodyHtml/css feed buildWordDocBlob for the .doc download — identical markup
-// and CSS in both, so Word preserves the on-screen theme styling.
 export async function buildCvDocument(
   cvData: any,
   cvSettings: any,
@@ -869,16 +895,14 @@ export async function buildCvDocument(
   const primaryColor = toCssColor(cvSettings?.primaryColor);
   const accentColor = toCssColor(cvSettings?.accentColor, "#3498db");
 
-  // Strictly bind a single font family to entirely standardize the document's aesthetic
   const baseFontFamily = cvSettings?.fontFamily || STRICT_FONT_MAP[layout];
-  
   const fontFamily = options?.wordSafe ? toWordSafeFontStack(baseFontFamily) : baseFontFamily;
   const fontScale = Number(cvSettings?.fontScale) || 1;
 
   const photoUrl = cvData?.personalInfo?.photoUrl;
   const photoSrc = cvSettings?.showPhoto !== false && photoUrl ? await cachedImageUrlToDataUrl(photoUrl) : null;
 
-  const body = assembleLayout(spec, cvData, cvSettings, photoSrc, layout, options?.wordSafe);
+  const body = assembleLayout(spec, cvData, cvSettings, photoSrc, layout);
   const bodyHtml = `<div class="cv-theme cv-theme-${layout}">${body}</div>`;
 
   const cssCtx = getCssCtx(primaryColor, accentColor, fontFamily, fontScale);
@@ -912,7 +936,7 @@ export async function buildCvDocument(
     css,
     title: `${applicantName} CV`,
     pageSize: "8.27in 11.69in",
-    pageMargin: options?.wordSafe ? "0in" : "0.4in",
+    pageMargin: layout === "corporate" ? "0" : "0.4in",
     fileName: `${applicantName.replace(/\s+/g, "_")}_CV.doc`,
     layout,
     fontFamily,

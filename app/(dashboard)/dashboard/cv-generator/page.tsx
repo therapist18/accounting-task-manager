@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { printElementAsPdf, buildWordDocBlob, downloadBlob } from "@/lib/documentExport";
+import { applyWordSafeDomFixes } from "@/lib/documentTheme";
 import { buildCvDocument } from "@/app/(dashboard)/dashboard/cv-generator/utils/cvThemeEngine";
 import { type DocumentViewerHandle } from "@/components/contracts/DocumentViewer";
 import { toast } from "sonner";
@@ -46,16 +47,6 @@ import {
   isJustYear,
   mergeAiEnhancedCv,
 } from "./utils/cvGeneratorData";
-
-// Pulls one flattened, scoped declaration block out of buildCvDocument's
-// word-safe stylesheet so its declarations can be copied onto the matching
-// element verbatim - same helper Employment Contracts' ContractPreview.tsx
-// keeps at file scope for the identical purpose.
-function extractCssRule(css: string, selector: string): string {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = css.match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'));
-  return match ? match[1].trim() : '';
-}
 
 export default function CVGeneratorPage() {
   const [cvData, setCvData] = useState<CvData>(initialCVData);
@@ -1542,40 +1533,11 @@ export default function CVGeneratorPage() {
       const parser = new DOMParser();
       const parsed = parser.parseFromString(`<div>${bodyContent}</div>`, 'text/html');
 
-      parsed.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((h) => {
-        const div = parsed.createElement('div');
-        for (const attr of Array.from(h.attributes)) div.setAttribute(attr.name, attr.value);
-        div.className = `mso-${h.tagName.toLowerCase()} ${div.className || ''}`.trim();
-        // Some headings (the CV name/title) already carry an inline
-        // style="color:..." baked in by assembleLayout() as a "second line of
-        // defense" color. Appending via the `.style.fontFamily =` CSSOM
-        // setter forces the browser to re-parse and re-serialize that WHOLE
-        // copied style attribute - which rewrites hex colors to rgb(...)
-        // (Word's importer only reliably reads hex) and can leave duplicate/
-        // malformed declarations behind, causing Word to silently drop the
-        // entire style attribute rather than just the font. Appending the
-        // property as a plain string sidesteps the CSSOM entirely.
-        const existingStyle = div.getAttribute('style');
-        div.setAttribute('style', `${existingStyle ? `${existingStyle};` : ''}font-family: ${doc.fontFamily};`);
-        while (h.firstChild) div.appendChild(h.firstChild);
-        h.replaceWith(div);
-      });
-
-      parsed.querySelectorAll('table').forEach((table) => {
-        table.setAttribute('cellpadding', '0');
-        table.setAttribute('cellspacing', '0');
-        table.setAttribute('width', '100%');
-      });
-
-      // Inline the CSS rules onto the headings to guarantee they win over Word's defaults.
-      parsed.querySelectorAll('.mso-h1, .mso-h2, .mso-h3, .mso-h4, .mso-h5, .mso-h6').forEach((h) => {
-        const tagMatch = h.className.match(/mso-(h[1-6])/);
-        if (!tagMatch) return;
-        const tag = tagMatch[1];
-        const baseDecls = extractCssRule(doc.css, `.cv-theme .mso-${tag}`);
-        const themeDecls = extractCssRule(doc.css, `.cv-theme-${doc.layout} .mso-${tag}`);
-        const prev = h.getAttribute('style') ? `${h.getAttribute('style')};` : '';
-        h.setAttribute('style', `${prev}${baseDecls ? `; ${baseDecls}` : ''}${themeDecls ? `; ${themeDecls}` : ''}`.trim());
+      applyWordSafeDomFixes(parsed, {
+        rootSelector: `.cv-theme-${doc.layout}`,
+        themeCss: doc.css,
+        fontFamily: doc.fontFamily,
+        bookmarkSelector: '.__no-op__',
       });
 
       bodyContent = parsed.body.firstElementChild?.innerHTML ?? bodyContent;

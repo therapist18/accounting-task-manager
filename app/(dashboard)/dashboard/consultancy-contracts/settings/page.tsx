@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { fetchDefaultTemplate, updateTemplate, CcTemplate, CC_DOCUMENT_ID } from '../utils/ccTemplate';
 import { fetchContractDocumentTypes, createContractDocumentType, ContractDocumentType } from '../utils/contractDocumentTypes';
 import { ContractTypesSidebar } from '../components/ContractTypesSidebar';
+import { resolveCompanyRole } from '../utils/ccPlaceholderAdapter';
 import { extractPlaceholders, mergePlaceholders, validateTemplate } from '../../templates/document-template-manager/utils';
 import { useTemplateData } from '../../templates/document-template-manager/hooks/useTemplateData';
 import { PlaceholderPanel } from '../../templates/document-template-manager/components/PlaceholderPanel';
@@ -305,6 +306,11 @@ export default function ConsultancyContractSettingsPage() {
                 onAddPlaceholder={handleAddPlaceholder}
                 onEditPlaceholder={handleEditPlaceholder}
                 onRemovePlaceholder={handleRemovePlaceholder}
+                belongsToLabel={(p) => {
+                  const role = resolveCompanyRole({ key: p.name, company_role: p.company_role });
+                  const label = role === 'consultant' ? 'Consultant' : 'Client';
+                  return p.company_role ? label : `${label} (auto)`;
+                }}
               />
             </div>
           </Panel>
@@ -338,6 +344,7 @@ export default function ConsultancyContractSettingsPage() {
         onSave={handleSavePlaceholder}
         onChange={(updates) => setEditingPlaceholder(prev => prev ? { ...prev, ...updates } : null)}
         isEditing={!!editingPlaceholder}
+        showCompanyRoleField
       />
     </div>
   );

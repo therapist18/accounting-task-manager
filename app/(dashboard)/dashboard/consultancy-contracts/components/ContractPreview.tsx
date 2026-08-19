@@ -25,6 +25,8 @@ interface ContractPreviewProps {
   company: Company | null;
   templateContent: string;
   resolvedValues: Record<string, string>;
+  // Resolved array/block data — block name → array of row objects.
+  arrayData?: Record<string, Record<string, string>[]>;
   overrides: Record<string, string>;
   engagement: CcEngagement | null;
   themeSettings: ContractThemeSettings;
@@ -72,7 +74,7 @@ function toWordExportHtml(
 }
 
 export function ContractPreview({
-  company, templateContent, resolvedValues, overrides, engagement,
+  company, templateContent, resolvedValues, arrayData, overrides, engagement,
   themeSettings, onThemeChange, saving, onSave, selectedDirectors, placeholders
 }: ContractPreviewProps) {
   const viewerRef = useRef<DocumentViewerHandle>(null);
@@ -80,10 +82,25 @@ export function ContractPreview({
   const [filingToProfile, setFilingToProfile] = useState(false);
   const [themePanelOpen, setThemePanelOpen] = useState(false);
 
-  const mergedValuesRaw = useMemo(
-    () => withDirectorsAcknowledgementBlock(withDerivedFeeValues({ ...resolvedValues, ...overrides }), selectedDirectors),
-    [resolvedValues, overrides, selectedDirectors]
-  );
+  const mergedValuesRaw = useMemo(() => {
+    // Flatten array/block data into individual placeholder values so
+    // replacePlaceholders can substitute them.  Convention:
+    //   blockName_0_childKey, blockName_1_childKey, …
+    const flatArray: Record<string, string> = {};
+    if (arrayData) {
+      for (const [blockName, rows] of Object.entries(arrayData)) {
+        rows.forEach((row, idx) => {
+          for (const [childKey, val] of Object.entries(row)) {
+            flatArray[`${blockName}_${idx}_${childKey}`] = val;
+          }
+        });
+      }
+    }
+    return withDirectorsAcknowledgementBlock(
+      withDerivedFeeValues({ ...resolvedValues, ...flatArray, ...overrides }),
+      selectedDirectors
+    );
+  }, [resolvedValues, arrayData, overrides, selectedDirectors]);
 
   const mergedValues = useMemo(() => {
     const wrap = (key: string, value: string, entity: string | undefined): string => {

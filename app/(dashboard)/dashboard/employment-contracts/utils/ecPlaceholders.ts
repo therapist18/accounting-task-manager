@@ -55,6 +55,19 @@ export interface EcPlaceholder {
   boolean_conditions: BooleanCondition[];
   created_at: string;
   updated_at: string;
+  // Only meaningful for Consultancy Contracts (its only producer -
+  // ccPlaceholderAdapter.ts's dtmPlaceholderToResolverInput carries this
+  // through from Placeholder.company_role, see document-template-manager/
+  // types.ts). EC has one company, not two, so this is always undefined here.
+  company_role?: 'client' | 'consultant' | null;
+  // Array/block placeholder support — carried through from DTM's Placeholder
+  // type so Consultancy Contracts can group child placeholders under a block
+  // parent and resolve them per-entity (e.g. one row per director).
+  is_block_start?: boolean;
+  parent_name?: string;
+  array_direction?: 'horizontal' | 'vertical';
+  director_type?: 'all' | 'primary';
+  dependant_relationship?: string[];
 }
 
 export async function fetchPlaceholders(): Promise<EcPlaceholder[]> {

@@ -36,6 +36,7 @@ import {
 import { cn } from "@/lib/utils"
 import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types"
 
+import Link from "next/link"
 import { DepartmentSidebar } from "../departments/main-shared-components/department-sidebar"
 import { fetchDepartments } from "../departments/departments/database"
 import { DocumentTemplateManager } from "./document-template-manager/page"
@@ -201,6 +202,16 @@ useEffect(() => {
   const handleEditTemplate = (template: any) => { setEditingTemplate(template); setTemplateDialogOpen(true); };
   const closeTemplateDialog = () => { setTemplateDialogOpen(false); setEditingTemplate(null); };
 
+  const createRequirementUrl = useMemo(() => {
+    if (!jobLevelObject) return "/dashboard/departments?tab=requirements";
+    const params = new URLSearchParams({ tab: "requirements" });
+    if (jobLevelObject.department_id) params.set("deptId", String(jobLevelObject.department_id));
+    if (jobLevelObject.subdepartment_id) params.set("subdeptId", String(jobLevelObject.subdepartment_id));
+    if (jobLevelObject.class_id) params.set("classId", String(jobLevelObject.class_id));
+    if (jobLevelObject.subclass_id) params.set("subclassId", String(jobLevelObject.subclass_id));
+    return `/dashboard/departments?${params.toString()}`;
+  }, [jobLevelObject]);
+
   const breadcrumb = useMemo(() => {
     const d = departments.find(d => String(d.id) === selectedDepartment);
     const sd = d?.tm_subdepartments?.find(s => String(s.id) === selectedSubdepartment);
@@ -316,7 +327,19 @@ useEffect(() => {
                           })}
                         </div>
                       ) : (
-                        <div className="text-center py-10 text-xs text-slate-400">No template types found.</div>
+                        <div className="flex flex-col items-center justify-center py-10 text-center space-y-3">
+                          <FileText className="h-8 w-8 text-slate-300" />
+                          <p className="text-xs text-slate-400 max-w-[200px]">No template types found for this selection.</p>
+                          <p className="text-[10px] text-slate-400 max-w-[220px]">
+                            Create a requirement with a template in the Upload Requirements section first.
+                          </p>
+                          <Link href={createRequirementUrl}>
+                            <Button size="sm" variant="outline" className="mt-1 text-xs gap-1.5 border-blue-200 text-blue-600 hover:bg-blue-50">
+                              <PlusCircle className="h-3.5 w-3.5" />
+                              Create Requirement
+                            </Button>
+                          </Link>
+                        </div>
                       )}
                     </ScrollArea>
                   </CardContent>

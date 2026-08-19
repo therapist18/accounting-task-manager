@@ -301,3 +301,223 @@ export async function saveEcMasterFieldValue(
     newValue
   );
 }
+
+// ---------------------------------------------------------------------------
+// Array / block placeholder resolution
+// ---------------------------------------------------------------------------
+// Consultancy Contracts (and potentially Employment Contracts in the future)
+// needs to resolve repeating block placeholders (e.g. one row per director)
+// against a list of entities.  Each block is a "parent" placeholder whose
+// `is_block_start` flag is true; its children carry `parent_name` pointing
+// back to the block.  The caller supplies a `sourceArrays` map keyed by
+// entity type (e.g. "director") containing the list of entities to iterate
+// over.  Each entity must have at least an `id` field.
+//
+// This function builds its own combined cache (same pattern as
+// resolveEcPlaceholderValues above) covering ALL entities in ALL source
+// arrays so the tables are fetched once, then resolves each child
+// placeholder per-entity using processTextField.
+
+export interface ResolveEcArrayResult {
+  /** Block name → array of row objects, each keyed by child placeholder key */
+  arrayValues: Record<string, Record<string, string>[]>;
+  masterFields: Map<number, JobField>;
+}
+
+export async function resolveEcArrayPlaceholderValues(
+  ecPlaceholders: EcPlaceholder[],
+  companyId: number | string | null | undefined,
+  sourceArrays: Record<string, Array<{ id: string | number; [key: string]: any }>>
+): Promise<ResolveEcArrayResult> {
+  const empty: ResolveEcArrayResult = { arrayValues: {}, masterFields: new Map() };
+
+  // 1. Build block → children map
+  const blockMap = new Map<string, { config: EcPlaceholder; children: EcPlaceholder[] }>();
+  for (const p of ecPlaceholders) {
+    if (p.is_block_start) {
+      blockMap.set(p.key, { config: p, children: [] });
+    } else if (p.parent_name && blockMap.has(p.parent_name)) {
+      blockMap.get(p.parent_name)!.children.push(p);
+    }
+  }
+  if (blockMap.size === 0) return empty;
+
+  // 2. Collect master field ids from all block children
+  const allFieldIds = new Set<number>();
+  for (const block of blockMap.values()) {
+    for (const child of block.children) {
+      collectPlaceholderMasterFieldIds(child).forEach((id) => allFieldIds.add(id));
+    }
+  }
+  if (allFieldIds.size === 0) return empty;
+
+  // 3. Fetch master fields
+  const { data: fieldRows, error: fieldsError } = await supabase
+    .from('tm_job_fields')
+    .select('*')
+    .in('id', Array.from(allFieldIds));
+  if (fieldsError || !fieldRows) return empty;
+
+  const masterFields = new Map<number, JobField>(
+    fieldRows.map((f: any) => [f.id, f as JobField])
+  );
+
+  // 4. Build combined cache — same logic as resolveEcPlaceholderValues but
+  //    iterating over every entity in every source array instead of a single
+  //    individualId.
+  const tableConfigs = new Map<string, Map<string, Set<string | number>>>();
+  for (const mf of masterFields.values()) {
+    for (const source of (mf.sources || []) as JobFieldSource[]) {
+      if (
+        source.source_type !== 'individual' &&
+        source.source_type !== 'company' &&
+        source.source_type !== 'document'
+      ) continue;
+      if (!source.table) continue;
+
+      const linkingVar = (source.linking_variable as string | null | undefined) || 'id';
+
+      if (linkingVar === 'company_id' || source.source_type === 'company') {
+        if (companyId == null) continue;
+        if (!tableConfigs.has(source.table)) tableConfigs.set(source.table, new Map());
+        const byLv = tableConfigs.get(source.table)!;
+        if (!byLv.has(linkingVar)) byLv.set(linkingVar, new Set());
+        byLv.get(linkingVar)!.add(companyId);
+      } else {
+        // Individual / document sources — collect ids from every source array
+        if (!tableConfigs.has(source.table)) tableConfigs.set(source.table, new Map());
+        const byLv = tableConfigs.get(source.table)!;
+        if (!byLv.has(linkingVar)) byLv.set(linkingVar, new Set());
+        const ids = byLv.get(linkingVar)!;
+        for (const entities of Object.values(sourceArrays)) {
+          for (const entity of entities) {
+            ids.add(entity.id);
+          }
+        }
+      }
+    }
+  }
+
+  const combinedCache: Record<string, Record<string, any>> = {};
+  await Promise.all(
+    Array.from(tableConfigs.entries()).map(async ([table, byLinkingVar]) => {
+      const linkingVars = Array.from(byLinkingVar.keys());
+      let query = supabase.from(table).select('*');
+
+      if (linkingVars.length === 1) {
+        const ids = Array.from(byLinkingVar.get(linkingVars[0])!);
+        query =
+          ids.length === 1
+            ? query.eq(linkingVars[0], ids[0])
+            : query.in(linkingVars[0], ids as any);
+      } else {
+        const orExpr = linkingVars
+          .map((lv) => {
+            const ids = Array.from(byLinkingVar.get(lv)!);
+            return ids.length === 1
+              ? `${lv}.eq.${ids[0]}`
+              : `${lv}.in.(${ids.join(',')})`;
+          })
+          .join(',');
+        query = query.or(orExpr);
+      }
+
+      const { data, error } = await query;
+      if (error || !data) return;
+
+      const rowsByKey: Record<string, any> = {};
+      data.forEach((row: any, idx: number) => {
+        rowsByKey[row.id ?? idx] = row;
+      });
+      combinedCache[table] = rowsByKey;
+    })
+  );
+
+  // 5. Resolve each block
+  const arrayValues: Record<string, Record<string, string>[]> = {};
+
+  for (const [blockName, block] of blockMap) {
+    const entityTypeRaw = Array.isArray(block.config.entity_type)
+      ? block.config.entity_type[0]
+      : block.config.entity_type || 'director';
+    const normType = entityTypeRaw.toLowerCase().trim();
+    const sourceArray = sourceArrays[normType] || sourceArrays[entityTypeRaw] || [];
+    const isPrimaryOnly = block.config.director_type === 'primary';
+
+    if (sourceArray.length === 0) continue;
+
+    const effectiveArray = isPrimaryOnly ? sourceArray.slice(0, 1) : sourceArray;
+
+    const rows = effectiveArray.map((entity) => {
+      const rowData: Record<string, string> = {};
+
+      for (const child of block.children) {
+        const scope = resolveEntityScope(child.entity_type);
+        const targetEntity =
+          scope === 'company'
+            ? { company_id: companyId ?? undefined }
+            : { id: entity.id };
+
+        // Handle conditional / boolean children
+        if (child.type === 'conditional' && (child.conditions?.length ?? 0) > 0) {
+          const { value } = processConditionalField(
+            child,
+            targetEntity,
+            combinedCache,
+            masterFields,
+            null
+          );
+          rowData[child.key] = value ? String(value) : '';
+          continue;
+        }
+
+        if (child.type === 'boolean' && (child.boolean_conditions?.length ?? 0) > 0) {
+          const { value: results } = processBooleanField(
+            child,
+            targetEntity,
+            combinedCache,
+            masterFields,
+            null
+          );
+          const checkedLabels: string[] = [];
+          for (const r of (results as any[]) || []) {
+            if (r?.checked && r.label) checkedLabels.push(r.label);
+          }
+          rowData[child.key] = checkedLabels.join(', ');
+          continue;
+        }
+
+        // Standard master_field_links resolution
+        const links =
+          child.master_field_links && child.master_field_links.length > 0
+            ? [...child.master_field_links].sort(
+                (a, b) => a.display_priority - b.display_priority
+              )
+            : child.master_field_id
+            ? [{ master_field_id: child.master_field_id, display_priority: 1, strategy: 'fallback' as const }]
+            : [];
+
+        const collected: string[] = [];
+        for (const link of links) {
+          const id = Number(link.master_field_id);
+          const mf = masterFields.get(id) as
+            | (JobField & { date_config?: { useCurrentDate?: boolean } })
+            | undefined;
+          const { value } = mf?.date_config?.useCurrentDate
+            ? processCurrentDateField([id], masterFields)
+            : processTextField([id], targetEntity, combinedCache, masterFields, null);
+          if (!value) continue;
+          collected.push(value);
+          if (link.strategy !== 'merge') break;
+        }
+        rowData[child.key] = collected.join(' ');
+      }
+
+      return rowData;
+    });
+
+    arrayValues[blockName] = rows;
+  }
+
+  return { arrayValues, masterFields };
+}

@@ -31,6 +31,14 @@ export interface PlaceholderPanelProps {
   searchPlaceholder?: string;
   className?: string;
   disabled?: boolean;
+  // Opt-in "Belongs To" column (table variant only) - only Consultancy
+  // Contracts has a per-placeholder company_role to show (see
+  // Placeholder.company_role in ../types.ts and ccPlaceholderAdapter.ts's
+  // resolveCompanyRole). A callback rather than a boolean flag so this
+  // generic, multi-module component doesn't need to import CC-specific
+  // resolution logic itself - the column only renders when a caller
+  // supplies one.
+  belongsToLabel?: (placeholder: Placeholder) => string;
 }
 
 function PlaceholderRow({
@@ -41,7 +49,8 @@ function PlaceholderRow({
   jobQuestions,
   requirements,
   onEdit,
-  onRemove
+  onRemove,
+  belongsToLabel
 }: {
   placeholder: Placeholder;
   index: number;
@@ -51,6 +60,7 @@ function PlaceholderRow({
   requirements?: Requirement[];
   onEdit?: (placeholder: Placeholder, index: number) => void;
   onRemove?: (placeholder: Placeholder, index: number) => void;
+  belongsToLabel?: (placeholder: Placeholder) => string;
 }) {
   const isChild = !!placeholder.parent_name;
   const isBlock = placeholder.is_block_start;
@@ -153,6 +163,14 @@ function PlaceholderRow({
         </Badge>
       </TableCell>
 
+      {belongsToLabel && (
+        <TableCell className="border-r">
+          <Badge variant="outline" className="text-[10px] bg-slate-50 dark:bg-slate-800">
+            {belongsToLabel(placeholder)}
+          </Badge>
+        </TableCell>
+      )}
+
       <TableCell className="border-r">
         <div className="space-y-1">
           {fieldIds.length > 0 && (
@@ -235,7 +253,8 @@ export function PlaceholderPanel({
   emptyMessage = 'No placeholders found.',
   searchPlaceholder = 'Search placeholders...',
   className = '',
-  disabled = false
+  disabled = false,
+  belongsToLabel
 }: PlaceholderPanelProps) {
   const masterFieldMap = new Map(masterFields.map(f => [f.id, f.label]));
 
@@ -307,6 +326,9 @@ export function PlaceholderPanel({
                   <TableHead className="border-r font-bold text-gray-700 dark:text-gray-300">Display Value</TableHead>
                   <TableHead className="border-r font-bold text-gray-700 dark:text-gray-300">Type</TableHead>
                   <TableHead className="border-r font-bold text-gray-700 dark:text-gray-300">Entity</TableHead>
+                  {belongsToLabel && (
+                    <TableHead className="border-r font-bold text-gray-700 dark:text-gray-300">Belongs To</TableHead>
+                  )}
                   <TableHead className="border-r font-bold text-gray-700 dark:text-gray-300">Linked Master Field</TableHead>
                   <TableHead className="border-r font-bold text-gray-700 dark:text-gray-300">Default Value</TableHead>
                   {(onEditPlaceholder || onRemovePlaceholder) && (
@@ -326,6 +348,7 @@ export function PlaceholderPanel({
                     requirements={requirements}
                     onEdit={onEditPlaceholder}
                     onRemove={onRemovePlaceholder}
+                    belongsToLabel={belongsToLabel}
                   />
                 ))}
               </TableBody>

@@ -8,7 +8,7 @@ import { Pencil, Loader2, Save, X } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { SearchableSelect, type SearchableSelectOption } from './SearchableSelect';
 import { ecPlaceholderToDtmPlaceholder } from '../utils/ecPlaceholderAdapter';
-import { saveEcMasterFieldValue, resolveEntityScope } from '../utils/masterFieldResolver';
+import { saveEcMasterFieldValue, resolveEcPlaceholderValues, resolveEntityScope } from '../utils/masterFieldResolver';
 import type { EcPlaceholder } from '../utils/ecPlaceholders';
 import type { JobField } from '../../master-fields/components/types/database';
 
@@ -41,6 +41,7 @@ export function MasterFieldEditControl({ placeholder, masterFields, individualId
   const [editingFieldId, setEditingFieldId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
+  const [loadingValue, setLoadingValue] = useState(false);
 
   const linkedIds = ecPlaceholderToDtmPlaceholder(placeholder).master_field_ids || [];
   if (linkedIds.length === 0) return null;
@@ -60,10 +61,42 @@ export function MasterFieldEditControl({ placeholder, masterFields, individualId
   const editableIds = linkedIds.filter(canEditWith);
   if (editableIds.length === 0) return null; // no valid target for any linked field here
 
-  const startEdit = (id: number) => {
+  // currentValue is the whole PLACEHOLDER's resolved value - for a field
+  // linked to multiple master fields (e.g. an address merged from building
+  // name + town + country), that's the concatenated string, not any single
+  // source's own value. Pre-filling the edit box with it meant picking
+  // "Town" to edit showed the entire merged address instead of just the
+  // town - for a type='select' field, nothing in the options list matches
+  // that string, so the dropdown opens with nothing selected and, worse,
+  // saving would overwrite the town's source column with the full merged
+  // text. Fetching this one field's own value (via the same resolver, with
+  // a synthetic single-field placeholder) fixes both.
+  const startEdit = async (id: number) => {
     setEditingFieldId(id);
-    setEditValue(currentValue);
     setPickerOpen(false);
+    if (linkedIds.length === 1) {
+      // Only one source at all - it's exactly currentValue, no fetch needed.
+      setEditValue(currentValue);
+      return;
+    }
+    setLoadingValue(true);
+    setEditValue('');
+    try {
+      const synthetic: EcPlaceholder = {
+        ...placeholder,
+        id: `__edit_${id}`,
+        key: '__value__',
+        master_field_id: String(id),
+        master_field_links: [{ master_field_id: String(id), display_priority: 1, strategy: 'fallback' }],
+        type: 'text',
+        conditions: [],
+        boolean_conditions: [],
+      };
+      const { values } = await resolveEcPlaceholderValues([synthetic], individualId, companyId);
+      setEditValue(values['__value__'] ?? '');
+    } finally {
+      setLoadingValue(false);
+    }
   };
 
   const cancelEdit = () => {
@@ -90,7 +123,11 @@ export function MasterFieldEditControl({ placeholder, masterFields, individualId
     const options = normalizeOptions(mf);
     return (
       <div className="flex items-center gap-1.5 flex-1 min-w-0">
-        {options.length > 0 ? (
+        {loadingValue ? (
+          <div className="h-8 flex-1 flex items-center px-3 rounded-md border border-slate-200 bg-slate-50">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />
+          </div>
+        ) : options.length > 0 ? (
           <SearchableSelect
             // EC's SearchableSelect matches/returns by option `value`, but
             // (like TemplateGenerationDialog's own select-edit handling)
@@ -119,7 +156,7 @@ export function MasterFieldEditControl({ placeholder, masterFields, individualId
             autoFocus
           />
         )}
-        <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-emerald-600 hover:bg-emerald-50" onClick={handleSave} disabled={saving} title="Save to source record">
+        <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-emerald-600 hover:bg-emerald-50" onClick={handleSave} disabled={saving || loadingValue} title="Save to source record">
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
         </Button>
         <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-slate-400 hover:text-red-500" onClick={cancelEdit} disabled={saving} title="Cancel">

@@ -179,10 +179,17 @@ export type Placeholder = {
   // `source` above - this has no meaning for a DTM template placeholder
   // outside EC's per-contract override concept (offer.placeholder_overrides).
   editable?: boolean;
+  // Which of Consultancy Contracts' two companies-in-one-document this
+  // placeholder belongs to - null/undefined means "auto-detect from the key
+  // prefix" (consultant_* vs everything else, see
+  // consultancy-contracts/utils/ccPlaceholderAdapter.ts's resolveCompanyRole).
+  // Explicit here overrides that heuristic, for keys like {{director_name}}
+  // that don't carry a consultant_/client_ prefix. Only rendered by
+  // PlaceholderFormDialog when showCompanyRoleField is passed - meaningless
+  // for any other Placeholder consumer (EC has one company, not two).
+  company_role?: 'client' | 'consultant' | null;
   linked_job_question_id?: string;
   linked_requirement_id?: string;
-  linked_job_question_option?: string;
-  group_parent_id?: string;
   computed_function?: string;
   execution_mode?: 'all' | 'latest';
   source_table?: string;

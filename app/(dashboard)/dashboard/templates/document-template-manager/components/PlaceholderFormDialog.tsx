@@ -57,6 +57,11 @@ interface PlaceholderFormDialogProps {
   // showing it by default would add a meaningless input to every other
   // Placeholder consumer of this dialog.
   showSourceField?: boolean;
+  // Opt-in (default off) - only Consultancy Contracts has two companies in
+  // one document (Consultant/Client) needing an explicit per-placeholder
+  // override of the consultant_* key-prefix auto-detection. See
+  // Placeholder.company_role in ../types.ts.
+  showCompanyRoleField?: boolean;
 }
 
 export function PlaceholderFormDialog({
@@ -74,7 +79,8 @@ export function PlaceholderFormDialog({
   onChange,
   isEditing,
   hiddenSections = {},
-  showSourceField = false
+  showSourceField = false,
+  showCompanyRoleField = false
 }: PlaceholderFormDialogProps) {
   const [directorType, setDirectorType] = useState<DirectorType>('all');
   const [dependantRelationship, setDependantRelationship] = useState<string[]>([]);
@@ -214,6 +220,37 @@ export function PlaceholderFormDialog({
                       When off, this field is locked: the resolved value is always rendered as-is and can't be edited or overridden per contract.
                     </p>
                   </div>
+                </div>
+              )}
+              {showCompanyRoleField && (
+                <div className="col-span-2 space-y-2">
+                  <Label className="text-[11px] font-black uppercase text-slate-400">Belongs To</Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {([
+                      { value: null, label: 'Auto-detect', hint: 'consultant_* prefix = Consultant, everything else = Client' },
+                      { value: 'client', label: 'Client', hint: 'Resolves against the selected client company' },
+                      { value: 'consultant', label: 'Consultant', hint: 'Resolves against the chosen Consultant company' },
+                    ] as const).map((opt) => {
+                      const isActive = (placeholder.company_role ?? null) === opt.value;
+                      return (
+                        <button
+                          key={opt.label}
+                          type="button"
+                          onClick={() => onChange({ company_role: opt.value })}
+                          title={opt.hint}
+                          className={cn(
+                            "p-2 rounded-lg border-2 text-left transition-all",
+                            isActive ? "border-custom-blue bg-blue-50" : "border-slate-200 hover:border-slate-300"
+                          )}
+                        >
+                          <div className="text-xs font-bold text-slate-700">{opt.label}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Which company this field resolves against when a document has more than one (e.g. Consultancy Contracts' Consultant vs Client). Overrides the consultant_* key-prefix auto-detection when set.
+                  </p>
                 </div>
               )}
               <div className="col-span-2 space-y-2">

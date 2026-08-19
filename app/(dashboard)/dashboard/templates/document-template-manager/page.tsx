@@ -631,8 +631,8 @@ export function DocumentTemplateManager({
     }
   };
 
-  const currentPlaceholder = editingPlaceholderIndex !== null && currentTemplate
-    ? currentTemplate.placeholders?.[editingPlaceholderIndex]
+  const currentPlaceholder = editingPlaceholderIndex !== null && currentTemplate && currentTemplate.placeholders?.[editingPlaceholderIndex]
+    ? currentTemplate.placeholders[editingPlaceholderIndex]
     : {
         id: crypto.randomUUID(),
         name: '',

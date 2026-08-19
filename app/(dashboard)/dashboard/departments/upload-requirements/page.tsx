@@ -163,7 +163,7 @@ interface RequirementTableEntry extends ApiRequirement {
   tempId?: string
 }
 
-export default function UploadRequirements({ departments: initialDepartments }: { departments: Department[] }) {
+export default function UploadRequirements({ departments: initialDepartments, autoSelectJobLevel }: { departments: Department[]; autoSelectJobLevel?: { deptId?: string; subdeptId?: string; classId?: string; subclassId?: string; highlight?: boolean } | null }) {
   const [departments, setDepartments] = useState<Department[]>(initialDepartments || [])
   const [activeDept, setActiveDept] = useState<string>('')
   const [activeSubdept, setActiveSubdept] = useState<Record<string, string>>({})

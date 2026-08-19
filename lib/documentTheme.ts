@@ -114,7 +114,7 @@ export function makeCssWordSafe(css: string, rootSelector: string, fontFamily: s
 // <nav>), so applyWordSafeDomFixes below re-expresses those rules as inline
 // styles instead. The leading `\s*` tolerates the indentation the stylesheet
 // is rendered with.
-function extractCssRule(css: string, selector: string): string {
+export function extractCssRule(css: string, selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = css.match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'));
   return match ? match[1].trim() : '';
@@ -194,7 +194,7 @@ export function applyWordSafeDomFixes(doc: Document, options: WordSafeDomFixOpti
     el.insertBefore(bookmark, el.firstChild);
   });
 
-  doc.querySelectorAll('h1, h2, h3').forEach((h) => {
+  doc.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((h) => {
     const div = doc.createElement('div');
     for (const attr of Array.from(h.attributes)) div.setAttribute(attr.name, attr.value);
     div.className = `mso-${h.tagName.toLowerCase()} ${div.className || ''}`.trim();
@@ -251,8 +251,10 @@ export function applyWordSafeDomFixes(doc: Document, options: WordSafeDomFixOpti
     });
   }
 
-  doc.querySelectorAll('.mso-h1, .mso-h2, .mso-h3').forEach((h) => {
-    const tag = h.classList.contains('mso-h1') ? 'h1' : h.classList.contains('mso-h2') ? 'h2' : 'h3';
+  doc.querySelectorAll('.mso-h1, .mso-h2, .mso-h3, .mso-h4, .mso-h5, .mso-h6').forEach((h) => {
+    const tagMatch = h.className.match(/mso-(h[1-6])/);
+    if (!tagMatch) return;
+    const tag = tagMatch[1];
     const themeDecls = extractCssRule(themeCss, `${rootSelector} .mso-${tag}`);
     if (!themeDecls) return;
     const headingDecls = h.classList.contains('cs-section-heading')

@@ -2,6 +2,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { supabase } from "@/lib/supabase/client"
 import Rates from "./rates/page"
@@ -47,9 +48,18 @@ type Department = {
 }
 
 export default function DepartmentsPage() {
+  const searchParams = useSearchParams()
   const [departments, setDepartments] = useState<Department[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "departments")
+  const [autoSelectJobLevel, setAutoSelectJobLevel] = useState<{
+    deptId?: string
+    subdeptId?: string
+    classId?: string
+    subclassId?: string
+    highlight?: boolean
+  } | null>(null)
 
   useEffect(() => {
     const fetchDepartments = async () => {
@@ -82,6 +92,27 @@ export default function DepartmentsPage() {
     fetchDepartments()
   }, [])
 
+  useEffect(() => {
+    const tab = searchParams.get("tab")
+    if (tab) setActiveTab(tab)
+
+    const deptId = searchParams.get("deptId")
+    const subdeptId = searchParams.get("subdeptId")
+    const classId = searchParams.get("classId")
+    const subclassId = searchParams.get("subclassId")
+
+    if (deptId || subdeptId) {
+      setAutoSelectJobLevel({
+        deptId: deptId || undefined,
+        subdeptId: subdeptId || undefined,
+        classId: classId || undefined,
+        subclassId: subclassId || undefined,
+        highlight: true,
+      })
+      setActiveTab("requirements")
+    }
+  }, [searchParams])
+
   if (loading) {
     return <div className="flex items-center justify-center p-8">Loading departments...</div>
   }
@@ -91,7 +122,7 @@ export default function DepartmentsPage() {
   }
 
   return (
-    <Tabs defaultValue="departments">
+    <Tabs value={activeTab} onValueChange={setActiveTab}>
       <TabsList>
         <TabsTrigger value="departments" >Departments</TabsTrigger>
         <TabsTrigger value="stages">Stages</TabsTrigger>
@@ -109,7 +140,7 @@ export default function DepartmentsPage() {
         <Stages />
       </TabsContent>
       <TabsContent value="requirements" className="h-screen">
-        <UploadRequirements departments={departments} />
+        <UploadRequirements departments={departments} autoSelectJobLevel={autoSelectJobLevel} />
       </TabsContent>  
       <TabsContent value="webdata">
         <WebData departments={departments} />
