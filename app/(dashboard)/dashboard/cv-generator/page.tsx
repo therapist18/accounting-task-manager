@@ -1100,31 +1100,37 @@ export default function CVGeneratorPage() {
           const parsedData = await response.json();
           setExtractionProgress("Populating CV fields...");
 
+          // Merge onto EMPTY_CV_DATA, not initialCVData (the Ajay Yadav demo
+          // profile) — otherwise any field Gemini didn't extract silently
+          // keeps the sample data instead of coming through blank. Also clear
+          // the localStorage cache so a stale previous upload/edit can't leak
+          // into this one, matching the other prefill flows in this file.
           const cleanedData = {
-            ...initialCVData,
+            ...EMPTY_CV_DATA,
             ...parsedData,
-            personalInfo: { ...initialCVData.personalInfo, ...(parsedData.personalInfo || {}) },
-            personalDetails: { ...initialCVData.personalDetails, ...(parsedData.personalDetails || {}) },
+            personalInfo: { ...EMPTY_CV_DATA.personalInfo, ...(parsedData.personalInfo || {}) },
+            personalDetails: { ...EMPTY_CV_DATA.personalDetails, ...(parsedData.personalDetails || {}) },
             skills: Array.isArray(parsedData.skills)
               ? parsedData.skills.map((s: any) => ({
                   category: s.category || "",
                   items: Array.isArray(s.items) ? s.items.join(", ") : String(s.items || "")
                 }))
-              : initialCVData.skills,
-            experience: Array.isArray(parsedData.experience) ? parsedData.experience : initialCVData.experience,
-            internships: Array.isArray(parsedData.internships) ? parsedData.internships : initialCVData.internships,
-            projects: Array.isArray(parsedData.projects) ? parsedData.projects : initialCVData.projects,
-            education: Array.isArray(parsedData.education) ? parsedData.education : initialCVData.education,
-            references: Array.isArray(parsedData.references) ? parsedData.references : initialCVData.references,
-            languages: Array.isArray(parsedData.languages) ? parsedData.languages : initialCVData.languages,
-            certifications: Array.isArray(parsedData.certifications) ? parsedData.certifications : initialCVData.certifications,
+              : EMPTY_CV_DATA.skills,
+            experience: Array.isArray(parsedData.experience) ? parsedData.experience : EMPTY_CV_DATA.experience,
+            internships: Array.isArray(parsedData.internships) ? parsedData.internships : EMPTY_CV_DATA.internships,
+            projects: Array.isArray(parsedData.projects) ? parsedData.projects : EMPTY_CV_DATA.projects,
+            education: Array.isArray(parsedData.education) ? parsedData.education : EMPTY_CV_DATA.education,
+            references: Array.isArray(parsedData.references) ? parsedData.references : EMPTY_CV_DATA.references,
+            languages: Array.isArray(parsedData.languages) ? parsedData.languages : EMPTY_CV_DATA.languages,
+            certifications: Array.isArray(parsedData.certifications) ? parsedData.certifications : EMPTY_CV_DATA.certifications,
             // Declaration is a fixed BCL statement, never something the AI should extract
             // or overwrite from the uploaded document — keep our own default here.
-            declaration: initialCVData.declaration,
+            declaration: EMPTY_CV_DATA.declaration,
             includeDeclaration: true,
             verifiedBadge: true,
           };
 
+          try { localStorage.removeItem('cv_generator_cvData'); } catch {}
           setCvData(cleanedData);
           const enhancedLabel = enhancementLevel !== "none" ? ` (${enhancementLevel} enhancement applied)` : "";
           toast.success(`CV parsed successfully!${enhancedLabel}`);

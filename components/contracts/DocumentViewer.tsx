@@ -60,10 +60,17 @@ export interface DocumentViewerProps {
   loading?: boolean;
   // Modules that don't want the docked pagination footer can hide it.
   showPagination?: boolean;
+  // CSS margin for the print-only @page rule below. Defaults to the
+  // Contracts modules' 0.5in gutter; CV Generator overrides this to "0" since
+  // its themes already carry their own full-page padding (see
+  // cv-generator/utils/cvThemeEngine.ts), so a second physical page margin on
+  // top of that just doubles the whitespace and stops the PDF matching the
+  // on-screen preview.
+  printPageMargin?: string;
 }
 
 export const DocumentViewer = forwardRef<DocumentViewerHandle, DocumentViewerProps>(function DocumentViewer(
-  { html, printHtml, contentKey = '', className, leading, actions, empty, loading = false, showPagination = true },
+  { html, printHtml, contentKey = '', className, leading, actions, empty, loading = false, showPagination = true, printPageMargin = '0.5in' },
   ref
 ) {
   const hasOutput = !!html;
@@ -363,7 +370,7 @@ export const DocumentViewer = forwardRef<DocumentViewerHandle, DocumentViewerPro
           <>
             <style>{`
               @media print {
-                @page { size: A4; margin: 0.5in; }
+                @page { size: A4; margin: ${printPageMargin}; }
                 html, body { margin: 0; height: auto !important; overflow: visible !important; }
                 body > * { visibility: hidden !important; }
                 .ec-print-area, .ec-print-area * { visibility: visible !important; }

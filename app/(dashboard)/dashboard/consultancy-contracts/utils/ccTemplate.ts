@@ -21,6 +21,12 @@ export interface CcTemplate {
 
   // Computed property for theme settings (stored in classification.theme_settings)
   theme_settings?: Record<string, any>;
+
+  // Which companies row is "the Consultant" (our own company, as opposed to
+  // the Client selected per-engagement) - a single platform-wide choice like
+  // theme_settings, stored in classification.consultant_company_id rather
+  // than a dedicated column so no migration is needed to introduce it.
+  consultant_company_id?: string | number | null;
 }
 
 // This module keeps exactly one standard document (no per-company variants,
@@ -42,6 +48,7 @@ export async function fetchDefaultTemplate(): Promise<CcTemplate | null> {
   if (data) {
       const template = data as CcTemplate;
       template.theme_settings = template.classification?.theme_settings || {};
+      template.consultant_company_id = template.classification?.consultant_company_id ?? null;
       return template;
     }
 
@@ -69,16 +76,21 @@ export async function fetchDefaultTemplate(): Promise<CcTemplate | null> {
 
 export async function updateTemplate(
   id: string,
-  patch: Partial<Pick<CcTemplate, 'file_name' | 'content' | 'file_path' | 'file_type' | 'file_size' | 'placeholders' | 'entity_types' | 'classification' | 'use_letterhead' | 'theme_settings'>>
+  patch: Partial<Pick<CcTemplate, 'file_name' | 'content' | 'file_path' | 'file_type' | 'file_size' | 'placeholders' | 'entity_types' | 'classification' | 'use_letterhead' | 'theme_settings' | 'consultant_company_id'>>,
+  existingClassification?: Record<string, any>
 ): Promise<CcTemplate | null> {
-  const { theme_settings, ...restPatch } = patch;
-  
-  // If theme_settings is provided, merge it into classification
+  const { theme_settings, consultant_company_id, ...restPatch } = patch;
+
+  // theme_settings/consultant_company_id both live inside classification -
+  // merge onto whatever the caller already has loaded (existingClassification)
+  // so patching one doesn't clobber the other when only one is passed.
   let finalPatch = { ...restPatch };
-  if (theme_settings) {
+  if (theme_settings !== undefined || consultant_company_id !== undefined) {
     finalPatch.classification = {
+      ...existingClassification,
       ...restPatch.classification,
-      theme_settings,
+      ...(theme_settings !== undefined && { theme_settings }),
+      ...(consultant_company_id !== undefined && { consultant_company_id }),
     };
   }
 
@@ -93,8 +105,9 @@ export async function updateTemplate(
     console.error('Error updating consultancy contract template:', error);
     throw error;
   }
-  
+
   const template = data as CcTemplate;
   template.theme_settings = template.classification?.theme_settings || {};
+  template.consultant_company_id = template.classification?.consultant_company_id ?? null;
   return template;
 }

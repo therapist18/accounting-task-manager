@@ -45,6 +45,7 @@ export function CvPreviewPanel({
       ref={previewRef}
       html={combinedHtml}
       loading={loading}
+      printPageMargin="0"
       leading={
         <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider ml-2 hidden sm:inline">
           {title}

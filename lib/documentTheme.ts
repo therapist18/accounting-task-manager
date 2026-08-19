@@ -45,25 +45,37 @@ export function toWordSafeFontStack(fontFamily: string): string {
   return primary || 'Calibri';
 }
 
-// Word's HTML filter only reads block-element spacing through its own mso-*
-// directives - plain CSS `padding`/`margin` on a block element is ignored.
-// Restate every px padding/margin as the matching mso directive in points (0.75pt
-// per px).
-export function addMsoSpatialAlt(css: string): string {
+// Converts one CSS padding shorthand value (1-4 px tokens, e.g. "24px 24px
+// 24px 16px") into the "top right bottom left" pt string mso-padding-alt
+// expects, or null if the value isn't a plain px shorthand. Shared by
+// addMsoSpatialAlt below (for padding declared in a <style> block) and by
+// callers that build mso-padding-alt directly onto an inline style="" -
+// Word's table-cell renderer ignores plain CSS/inline `padding` on <td>
+// unconditionally (ignoring where it came from), so both need the fallback.
+export function toMsoPaddingAlt(paddingValue: string): string | null {
   const toPt = (v: string): string | null => {
     if (v === '0') return '0pt';
     const m = /^(-?\d*\.?\d+)px$/.exec(v);
     return m ? `${(parseFloat(m[1]) * 0.75).toFixed(1)}pt` : null;
   };
 
+  const tokens = paddingValue.trim().split(/\s+/);
+  if (tokens.length < 1 || tokens.length > 4) return null;
+  const pts = tokens.map(toPt);
+  if (pts.some((p) => p === null)) return null;
+  const [a, b, c, d] = pts as string[];
+  const top = a, right = b ?? a, bottom = c ?? a, left = d ?? b ?? a;
+  return `${top} ${right} ${bottom} ${left}`;
+}
+
+// Word's HTML filter only reads block-element spacing through its own mso-*
+// directives - plain CSS `padding`/`margin` on a block element is ignored.
+// Restate every px padding/margin as the matching mso directive in points (0.75pt
+// per px).
+export function addMsoSpatialAlt(css: string): string {
   let out = css.replace(/padding:\s*([^;]+);/g, (full, rawValue: string) => {
-    const tokens = rawValue.trim().split(/\s+/);
-    if (tokens.length < 1 || tokens.length > 4) return full;
-    const pts = tokens.map(toPt);
-    if (pts.some((p) => p === null)) return full;
-    const [a, b, c, d] = pts as string[];
-    const top = a, right = b ?? a, bottom = c ?? a, left = d ?? b ?? a;
-    return `${full} mso-padding-alt: ${top} ${right} ${bottom} ${left};`;
+    const alt = toMsoPaddingAlt(rawValue);
+    return alt ? `${full} mso-padding-alt: ${alt};` : full;
   });
 
   out = out.replace(

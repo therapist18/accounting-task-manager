@@ -292,9 +292,9 @@ const CC_COVER_HTML = `
       <div class="cc-cover-subtitle">Bookkeeping, Accountancy and Financial Advisory Services</div>
       <div class="cc-cover-connector">Between</div>
       <div class="cc-cover-parties">
-        <span class="cc-cover-party">Booksmart Consultancy Limited</span>
+        <span class="cc-cover-party">{consultant_name}</span>
         <span class="cc-cover-and">and</span>
-        <span class="cc-cover-party">{{company_name}}</span>
+        <span class="cc-cover-party">{company_name}</span>
       </div>
     </div>`;
 

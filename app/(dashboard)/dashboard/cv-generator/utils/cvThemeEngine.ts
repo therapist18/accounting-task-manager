@@ -11,7 +11,7 @@
 // second line of defense via `headingVisual()`.
 
 import { imageUrlToDataUrl } from "@/lib/documentExport";
-import { toWordSafeFontStack, makeCssWordSafe } from "@/lib/documentTheme";
+import { toWordSafeFontStack, makeCssWordSafe, toMsoPaddingAlt } from "@/lib/documentTheme";
 
 // ---------------------------------------------------------------------------
 // Types - Unified & Curated Layouts
@@ -531,7 +531,7 @@ function headingVisual(layout: CvLayout, level: "h2" | "h3" | "h4", pri: string,
 // Header builder
 // ---------------------------------------------------------------------------
 
-function buildHeader(spec: LayoutSpec, cvData: any, settings: any, photoSrc: string | null, pri: string, acc: string, layout: CvLayout): string {
+function buildHeader(spec: LayoutSpec, cvData: any, settings: any, photoSrc: string | null, pri: string, acc: string, layout: CvLayout, wordSafe?: boolean): string {
   const header = spec.header;
   if (!header) return "";
   const { personalInfo = {} } = cvData;
@@ -554,7 +554,8 @@ function buildHeader(spec: LayoutSpec, cvData: any, settings: any, photoSrc: str
   let extraStyle = "";
   if (header.variant === "banner") {
     // Ensures text stays visible on a sleek block background
-    extraStyle = `background:${pri}; padding:${header.padding}; margin-bottom:16px; border-radius: 4px;`;
+    extraStyle = `background:${pri}; margin-bottom:16px; border-radius: 4px;`;
+    return `<div class="cv-header cv-header-banner"${extraStyle ? ` style="${extraStyle}"` : ""}>${nameBlock}</div>`;
   }
 
   if (!header.photo) {
@@ -562,7 +563,7 @@ function buildHeader(spec: LayoutSpec, cvData: any, settings: any, photoSrc: str
   }
 
   const photoTd = `<td width="100" style="width:100px;">${photoFrame(photoSrc, settings, 90, "#ffffff")}</td>`;
-  return `<div class="cv-header"${extraStyle ? ` style="${extraStyle}"` : ""}><table cellpadding="0" cellspacing="0" border="0" style="width:100%;"><tr>${photoTd}<td style="padding-left: 20px;">${nameBlock}</td></tr></table></div>`;
+  return `<div class="cv-header"${extraStyle ? ` style="${extraStyle}"` : ""}><table cellpadding="0" cellspacing="0" border="0" style="width:100%;"><tr>${photoTd}<td class="cv-header-text">${nameBlock}</td></tr></table></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -611,11 +612,11 @@ function withHeading(level: "h2" | "h3", block: BlockSpec, body: string, layout:
   return `<${level}${styleAttr}>${esc(title)}</${level}>${body}`;
 }
 
-function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: string | null, layout: CvLayout): string {
+function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: string | null, layout: CvLayout, wordSafe?: boolean): string {
   const pri = toCssColor(settings?.primaryColor);
   const acc = toCssColor(settings?.accentColor, "#3498db");
 
-  const headerHtml = buildHeader(spec, cvData, settings, photoSrc, pri, acc, layout);
+  const headerHtml = buildHeader(spec, cvData, settings, photoSrc, pri, acc, layout, wordSafe);
 
   const mainParts: string[] = [];
   if (spec.nameInMain) {
@@ -652,7 +653,7 @@ function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: 
   let bodyTable: string;
   if (spec.side) {
     const sideBg = spec.side.dark ? pri : "#f8fafc";
-    const innerStyle = `padding:${spec.side.padding};${spec.side.dark ? "color:#e2e8f0;" : ""}`;
+    const innerStyle = spec.side.dark ? "color:#e2e8f0;" : "";
     const widthAttr = spec.side.widthPx
       ? ` width="${spec.side.widthPx}" style="width:${spec.side.widthPx}px;"`
       : spec.side.widthPct
@@ -661,22 +662,22 @@ function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: 
     // Nested table to prevent Word from rendering div backgrounds as tight text highlights
     const sideTd = `<td class="cv-sidebar" bgcolor="${sideBg}"${widthAttr} valign="top" style="padding:0;">
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
-        <tr><td bgcolor="${sideBg}" valign="top" style="${innerStyle}">${sideParts.join("")}</td></tr>
+        <tr><td class="cv-sidebar-inner" bgcolor="${sideBg}" valign="top" style="${innerStyle}">${sideParts.join("")}</td></tr>
       </table>
     </td>`;
-    const mainTd = `<td class="cv-main" valign="top" style="padding:${spec.mainPadding};">${mainHtml}</td>`;
+    const mainTd = `<td class="cv-main" valign="top">${mainHtml}</td>`;
     const row = spec.sideFirst ? `${sideTd}${mainTd}` : `${mainTd}${sideTd}`;
     bodyTable = `<table cellpadding="0" cellspacing="0" border="0" style="width:100%;"><tr>${row}</tr></table>`;
   } else {
-    bodyTable = `<div class="cv-main" style="padding:${spec.mainPadding};">${mainHtml}</div>`;
+    bodyTable = `<div class="cv-main">${mainHtml}</div>`;
   }
 
   const footer = spec.declarationIn === "footer" ? (() => {
     const decl = declarationHtml(cvData, acc, layout);
-    return decl ? `<div class="cv-declaration" style="padding:${spec.footerPadding};">${decl}</div>` : "";
+    return decl ? `<div class="cv-declaration cv-footer-decl">${decl}</div>` : "";
   })() : "";
 
-  return `<div class="cv-body" style="padding:${spec.bodyPadding};">${headerHtml}${bodyTable}</div>${footer}`;
+  return `<div class="cv-body">${headerHtml}${bodyTable}</div>${footer}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -849,11 +850,30 @@ export async function buildCvDocument(
   const photoUrl = cvData?.personalInfo?.photoUrl;
   const photoSrc = cvSettings?.showPhoto !== false && photoUrl ? await cachedImageUrlToDataUrl(photoUrl) : null;
 
-  const body = assembleLayout(spec, cvData, cvSettings, photoSrc, layout);
+  const body = assembleLayout(spec, cvData, cvSettings, photoSrc, layout, options?.wordSafe);
   const bodyHtml = `<div class="cv-theme cv-theme-${layout}">${body}</div>`;
 
   const cssCtx = getCssCtx(primaryColor, accentColor, fontFamily, fontScale);
   let css = flattenNestedCss(".cv-theme", BASE_CV_STYLES) + "\n" + flattenNestedCss(`.cv-theme-${layout}`, THEME_STYLES[layout](cssCtx));
+
+  // Inject the structural paddings for this layout into the CSS so makeCssWordSafe
+  // can convert them into Word-compatible mso-padding-alt directives.
+  let layoutCss = `
+    .cv-body { padding: ${spec.bodyPadding}; }
+    .cv-main { padding: ${spec.mainPadding}; }
+  `;
+  if (spec.side) {
+    layoutCss += `\n    .cv-sidebar-inner { padding: ${spec.side.padding}; }`;
+  }
+  if (spec.header?.padding) {
+    layoutCss += `\n    .cv-header-banner { padding: ${spec.header.padding}; }`;
+    layoutCss += `\n    .cv-header-text { padding: 0 0 0 20px; }`;
+  }
+  if (spec.footerPadding) {
+    layoutCss += `\n    .cv-footer-decl { padding: ${spec.footerPadding}; }`;
+  }
+  
+  css += "\n" + flattenNestedCss(`.cv-theme-${layout}`, layoutCss);
 
   if (options?.wordSafe) {
     css = makeCssWordSafe(css, `.cv-theme-${layout}`, fontFamily);

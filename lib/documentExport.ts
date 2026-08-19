@@ -58,8 +58,9 @@ export function buildWordDocBlob(opts: WordDocOptions): Blob {
 </xml>
 <![endif]-->
 <style>
+  html, body { margin: 0; padding: 0; }
 ${css}
-  @page ${WORD_SECTION} { size: ${pageSize}; margin: ${pageMargin}; mso-page-orientation: portrait; }
+  @page ${WORD_SECTION} { size: ${pageSize}; margin: ${pageMargin}; mso-header-margin: 0in; mso-footer-margin: 0in; mso-page-orientation: portrait; }
   div.${WORD_SECTION} { page: ${WORD_SECTION}; }
 </style>
 </head>
