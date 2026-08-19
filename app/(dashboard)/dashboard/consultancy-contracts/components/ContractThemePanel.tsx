@@ -19,9 +19,8 @@ const TABS = [
 
 const BRANDING_OPTIONS: { id: BrandingStrategy; label: string; description: string }[] = [
   { id: 'none', label: 'None', description: 'No header, just the contract body' },
-  { id: 'theme_header', label: 'Theme Header', description: "Use the selected theme's own styled header" },
   { id: 'company_letterhead', label: 'Company Letterhead', description: "Prepend the client company's name and address" },
-  { id: 'embedded', label: 'Embedded', description: 'Use whatever header is already in the template content' },
+  { id: 'embedded', label: 'Embedded', description: 'Type your own heading directly in the template body (e.g. an H1) - each theme styles it automatically' },
 ];
 
 // This module's own theme/color/font/header editor - deliberately a

@@ -4,7 +4,7 @@
 // same design language, typography, and visual aura.
 
 export type DocumentTheme = 'corporate' | 'legal' | 'modern' | 'minimal' | 'letterhead' | 'editorial';
-export type BrandingStrategy = 'embedded' | 'company_letterhead' | 'theme_header' | 'none';
+export type BrandingStrategy = 'embedded' | 'company_letterhead' | 'none';
 
 export interface ContractThemeSettings {
   theme: DocumentTheme;
@@ -32,7 +32,7 @@ export const DEFAULT_CONTRACT_THEME: ContractThemeSettings = {
   accentColor: THEME_DEFAULTS.corporate.accentColor,
   fontFamily: THEME_DEFAULTS.corporate.fontFamily,
   fontScale: 1,
-  brandingStrategy: 'theme_header',
+  brandingStrategy: 'embedded',
 };
 
 import { COLOR_PRESETS, toWordSafeFontStack, makeCssWordSafe } from '@/lib/documentTheme';
@@ -95,13 +95,6 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     .signature-line { border-bottom: 1px solid #94a3b8; height: 50px; margin-bottom: 12px; position: relative; }
     .signature-line::after { content: 'Signature'; position: absolute; bottom: 4px; left: 0; font-size: 9px; color: #cbd5e1; text-transform: uppercase; font-family: sans-serif; letter-spacing: 0.1em; }
     .signature-label { font-size: 10pt; color: ${primaryColor}; font-weight: 700; text-transform: uppercase; }
-    .cc-cover { text-align: center; margin-bottom: 40px; padding-bottom: 28px; border-bottom: 2px solid #e2e8f0; }
-    .cc-cover-kicker { display: inline-block; color: #ffffff; background: ${accentColor}; font-weight: 700; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.15em; padding: 5px 14px; border-radius: 999px; margin-bottom: 18px; }
-    .cc-cover-connector { font-size: 8pt; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.25em; margin: 10px 0; }
-    .cc-cover-subtitle { color: ${primaryColor}; font-weight: 800; font-size: ${17 * fontScale}pt; text-transform: uppercase; letter-spacing: 0.03em; line-height: 1.45; margin-bottom: 20px; }
-    .cc-cover-parties { font-size: ${12 * fontScale}pt; font-weight: 700; color: #334155; }
-    .cc-cover-party { color: ${primaryColor}; }
-    .cc-cover-and { display: inline-block; margin: 0 10px; color: ${accentColor}; font-weight: 600; font-style: italic; text-transform: lowercase; }
   `,
   legal: ({ primaryColor, fontFamily, fontScale }) => `
     font-family: ${fontFamily}; color: #000000; line-height: 2.0; font-size: ${11 * fontScale}pt; text-align: justify;
@@ -118,12 +111,6 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     .signature-column { flex: 1; }
     .signature-line { border-bottom: 1px solid ${primaryColor}; height: 40px; margin-bottom: 8px; }
     .signature-label { font-weight: bold; font-size: 10pt; text-transform: uppercase; }
-    .cc-cover { text-align: center; margin-bottom: 40px; }
-    .cc-cover-kicker { font-size: 10pt; font-weight: bold; letter-spacing: 0.25em; text-transform: uppercase; color: ${primaryColor}; margin-bottom: 10px; }
-    .cc-cover-connector { font-size: 8.5pt; font-weight: bold; color: #6b7280; text-transform: uppercase; letter-spacing: 0.3em; margin: 8px 0; }
-    .cc-cover-subtitle { font-size: ${15 * fontScale}pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.08em; color: ${primaryColor}; border-top: 4px double ${primaryColor}; border-bottom: 4px double ${primaryColor}; padding: 18px 0; margin-bottom: 20px; line-height: 1.5; }
-    .cc-cover-parties { font-size: ${12 * fontScale}pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; }
-    .cc-cover-and { display: inline-block; margin: 0 12px; font-weight: normal; font-style: italic; text-transform: lowercase; }
   `,
   modern: ({ primaryColor, accentColor, fontFamily, fontScale }) => `
     font-family: ${fontFamily}; color: #4b5563; line-height: 1.75; font-size: ${10.5 * fontScale}pt;
@@ -142,14 +129,6 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     .signature-column::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; background: ${accentColor}; }
     .signature-line { border-bottom: 2px dashed #d1d5db; height: 40px; margin-bottom: 16px; }
     .signature-label { font-size: 11pt; color: ${primaryColor}; font-weight: 800; }
-    .cc-cover { text-align: center; margin-bottom: 40px; }
-    .cc-cover-kicker { display: inline-flex; align-items: center; gap: 8px; font-size: 9.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: ${accentColor}; margin-bottom: 14px; }
-    .cc-cover-kicker::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: ${accentColor}; }
-    .cc-cover-connector { font-size: 8pt; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.15em; margin: 8px 0; }
-    .cc-cover-subtitle { font-size: ${20 * fontScale}pt; font-weight: 800; letter-spacing: -0.02em; color: ${primaryColor}; margin-bottom: 24px; line-height: 1.3; }
-    .cc-cover-parties { display: inline-flex; align-items: center; gap: 14px; font-size: ${11.5 * fontScale}pt; font-weight: 700; background: #f9fafb; border: 1px solid #f3f4f6; border-radius: 999px; padding: 10px 24px; }
-    .cc-cover-party { color: ${primaryColor}; }
-    .cc-cover-and { color: ${accentColor}; font-weight: 600; }
   `,
   minimal: ({ primaryColor, accentColor, fontFamily, fontScale }) => `
     font-family: ${fontFamily}; color: #27272a; line-height: 1.6; font-size: ${10 * fontScale}pt;
@@ -164,13 +143,6 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     .signature-column { flex: 1; }
     .signature-line { border-bottom: 1px solid #d4d4d8; height: 40px; margin-bottom: 12px; }
     .signature-label { font-size: 9pt; color: #52525b; font-weight: 500; }
-    .cc-cover { margin-bottom: 48px; }
-    .cc-cover-kicker { font-size: 9pt; font-weight: 500; letter-spacing: 0.15em; text-transform: uppercase; color: ${accentColor}; margin-bottom: 8px; }
-    .cc-cover-connector { font-size: 7.5pt; font-weight: 400; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.2em; margin: 6px 0; }
-    .cc-cover-subtitle { font-weight: 300; font-size: ${18 * fontScale}pt; letter-spacing: -0.01em; color: ${primaryColor}; margin-bottom: 20px; line-height: 1.4; }
-    .cc-cover-parties { font-size: ${11 * fontScale}pt; font-weight: 400; color: #52525b; border-top: 1px solid #f4f4f5; padding-top: 16px; }
-    .cc-cover-party { color: ${primaryColor}; font-weight: 500; }
-    .cc-cover-and { margin: 0 8px; font-style: italic; color: #a1a1aa; }
   `,
   letterhead: ({ primaryColor, accentColor, fontFamily, fontScale }) => `
     font-family: ${fontFamily}; color: #1f2937; line-height: 1.65; font-size: ${11 * fontScale}pt; text-align: justify;
@@ -185,13 +157,6 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     .signature-column { flex: 1; border-top: 1px solid #e5e7eb; padding-top: 24px; }
     .signature-line { border-bottom: 1px solid ${primaryColor}; height: 40px; margin-bottom: 12px; }
     .signature-label { font-size: 10pt; font-weight: 700; color: ${primaryColor}; }
-    .cc-cover { text-align: center; margin-bottom: 40px; }
-    .cc-cover-kicker { font-size: 9.5pt; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: ${accentColor}; margin-bottom: 10px; }
-    .cc-cover-connector { font-size: 8pt; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.2em; margin: 8px 0; }
-    .cc-cover-subtitle { font-weight: 700; font-size: ${18 * fontScale}pt; text-transform: uppercase; letter-spacing: 0.08em; color: ${primaryColor}; margin-bottom: 20px; line-height: 1.4; }
-    .cc-cover-parties { display: inline-block; border: 1px solid ${primaryColor}; padding: 10px 24px; font-size: ${11.5 * fontScale}pt; font-weight: 700; }
-    .cc-cover-party { color: ${primaryColor}; }
-    .cc-cover-and { margin: 0 12px; font-weight: 400; text-transform: lowercase; color: ${accentColor}; }
   `,
   editorial: ({ primaryColor, accentColor, fontFamily, fontScale }) => `
     font-family: ${fontFamily}; color: #292524; line-height: 1.8; font-size: ${11.5 * fontScale}pt;
@@ -207,14 +172,6 @@ const THEME_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
     .signature-column { flex: 1; text-align: center; }
     .signature-line { border-bottom: 1px solid ${primaryColor}; height: 48px; margin-bottom: 16px; }
     .signature-label { font-size: 11pt; font-style: italic; color: ${primaryColor}; font-weight: 600; }
-    .cc-cover { text-align: center; margin-bottom: 48px; }
-    .cc-cover-kicker { font-size: 10pt; font-weight: 700; letter-spacing: 0.35em; text-transform: uppercase; color: ${accentColor}; margin-bottom: 20px; }
-    .cc-cover-connector { font-size: 9pt; font-weight: 400; font-style: italic; color: #a8a29e; letter-spacing: 0.1em; margin: 10px 0; }
-    .cc-cover-subtitle { font-weight: 400; font-style: italic; font-size: ${26 * fontScale}pt; color: ${primaryColor}; line-height: 1.35; letter-spacing: -0.01em; margin-bottom: 24px; }
-    .cc-cover-subtitle::after { content: ''; display: block; width: 100px; height: 1px; background: ${accentColor}; margin: 24px auto 0; }
-    .cc-cover-parties { font-size: ${13 * fontScale}pt; font-style: italic; color: #57534e; }
-    .cc-cover-party { color: ${primaryColor}; font-weight: 600; }
-    .cc-cover-and { margin: 0 10px; }
   `,
 };
 
@@ -272,41 +229,6 @@ const THEME_TOC_STYLES: Record<DocumentTheme, (args: ThemeCssArgs) => string> = 
   `,
 };
 
-// The "Theme Header" branding strategy (ContractThemePanel.tsx's Header tab)
-// injects this ahead of the body - the UI-driven alternative to hand-typing
-// a styled title into the template body (which the shared TipTap
-// TemplateEditor can't preserve custom classes/HTML on anyway). Styled
-// entirely through the .cc-cover* classes each theme already defines in
-// THEME_STYLES above, rather than the ad hoc inline-styled markup this used
-// to carry per theme - one shared shape, six looks, no duplicated color
-// logic to keep in sync with THEME_STYLES by hand. {{company_name}} here
-// relies on applyThemeToHtml's caller re-running replacePlaceholders AFTER
-// theming (see ContractPreview.tsx's themedHtml/wordSafeHtml) - this header
-// is injected inside applyThemeToHtml itself, after the body's own
-// placeholder pass already ran, so a token embedded here would otherwise
-// never resolve.
-const CC_COVER_HTML = `
-    <div class="cc-cover">
-      <div class="cc-cover-kicker">Consultancy Agreement</div>
-      <div class="cc-cover-connector">For</div>
-      <div class="cc-cover-subtitle">Bookkeeping, Accountancy and Financial Advisory Services</div>
-      <div class="cc-cover-connector">Between</div>
-      <div class="cc-cover-parties">
-        <span class="cc-cover-party">{consultant_name}</span>
-        <span class="cc-cover-and">and</span>
-        <span class="cc-cover-party">{company_name}</span>
-      </div>
-    </div>`;
-
-const THEME_HEADERS: Record<DocumentTheme, (args: ThemeCssArgs) => string> = {
-  corporate: () => CC_COVER_HTML,
-  legal: () => CC_COVER_HTML,
-  modern: () => CC_COVER_HTML,
-  minimal: () => CC_COVER_HTML,
-  letterhead: () => CC_COVER_HTML,
-  editorial: () => CC_COVER_HTML,
-};
-
 function flattenNestedCss(rootSelector: string, css: string): string {
   const blockPattern = /([^{}]+)\{([^{}]*)\}/g;
   const rules: string[] = [];
@@ -346,10 +268,15 @@ export function applyThemeToHtml(content: string, settings: ContractThemeSetting
 
   let finalContent = content;
 
-  if (settings.brandingStrategy === 'theme_header') {
-    const header = THEME_HEADERS[theme]?.(args) || '';
-    finalContent = `${header}\n<div class="document-body">${finalContent}</div>`;
-  } else if (settings.brandingStrategy === 'company_letterhead') {
+  // The contract heading isn't injected here at all - the admin types it
+  // directly into the template body as an <h1> (TipTap's native Heading 1
+  // format), and each theme's own h1 { ... } rule above (already distinct
+  // per theme - a colored accent box for corporate, a double-border box for
+  // legal, italic serif for editorial, ...) styles it automatically. No
+  // special "theme header" branding strategy needed for this, unlike the
+  // company_letterhead case below, which really does need HTML this shared
+  // TipTap editor can't hand-author (a two-column name/address bar).
+  if (settings.brandingStrategy === 'company_letterhead') {
     // Elegant two-column embedded letterhead based on the active theme
     const companyHeader = `<div style="font-family: sans-serif; padding-bottom: 12px; margin-bottom: 20px; border-bottom: 2px solid ${args.primaryColor}; display: flex; justify-content: space-between; align-items: flex-end; gap: 16px;">
         <div style="font-size: 17px; font-weight: 800; color: ${args.primaryColor};">${theme === 'legal' || theme === 'letterhead' ? '{{company_name}}'.toUpperCase() : '{{company_name}}'}</div>

@@ -29,14 +29,22 @@ export interface CcTemplate {
   consultant_company_id?: string | number | null;
 }
 
-// This module keeps exactly one standard document (no per-company variants,
-// no clause library) - the default row is "the" template. Auto-creates it on
-// first read so Settings/Preview never have to special-case "no template yet".
-export async function fetchDefaultTemplate(): Promise<CcTemplate | null> {
+// This module keeps exactly one standard template per contract-type document
+// (no per-company variants, no clause library) - the earliest row for a given
+// document_id is "the" template for that contract type. Defaults to the
+// original Consultancy Agreement document so existing callers (the main
+// generation page) keep working unchanged; Settings passes whichever
+// contract type is selected in its sidebar - see contractDocumentTypes.ts.
+// Auto-creates the row on first read so Settings/Preview never have to
+// special-case "no template yet".
+export async function fetchDefaultTemplate(
+  documentId: string = CC_DOCUMENT_ID,
+  defaultFileName: string = 'Standard Bookkeeping & Consultancy Agreement'
+): Promise<CcTemplate | null> {
   const { data, error } = await supabase
     .from('acc_portal_templates')
     .select('*')
-    .eq('document_id', CC_DOCUMENT_ID)
+    .eq('document_id', documentId)
     .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle();
@@ -55,8 +63,8 @@ export async function fetchDefaultTemplate(): Promise<CcTemplate | null> {
   const { data: created, error: createError } = await supabase
     .from('acc_portal_templates')
     .insert([{
-      document_id: CC_DOCUMENT_ID,
-      file_name: 'Standard Bookkeeping & Consultancy Agreement',
+      document_id: documentId,
+      file_name: defaultFileName,
       content: '',
       file_type: 'text/html',
       placeholders: [],

@@ -555,7 +555,7 @@ function buildHeader(spec: LayoutSpec, cvData: any, settings: any, photoSrc: str
   if (header.variant === "banner") {
     // Ensures text stays visible on a sleek block background
     extraStyle = `background:${pri}; margin-bottom:16px; border-radius: 4px;`;
-    return `<div class="cv-header cv-header-banner"${extraStyle ? ` style="${extraStyle}"` : ""}>${nameBlock}</div>`;
+    return `<div id="cv-header-banner" class="cv-header cv-header-banner"${extraStyle ? ` style="${extraStyle}"` : ""}>${nameBlock}</div>`;
   }
 
   if (!header.photo) {
@@ -563,7 +563,7 @@ function buildHeader(spec: LayoutSpec, cvData: any, settings: any, photoSrc: str
   }
 
   const photoTd = `<td width="100" style="width:100px;">${photoFrame(photoSrc, settings, 90, "#ffffff")}</td>`;
-  return `<div class="cv-header"${extraStyle ? ` style="${extraStyle}"` : ""}><table cellpadding="0" cellspacing="0" border="0" style="width:100%;"><tr>${photoTd}<td class="cv-header-text">${nameBlock}</td></tr></table></div>`;
+  return `<div class="cv-header"${extraStyle ? ` style="${extraStyle}"` : ""}><table cellpadding="0" cellspacing="0" border="0" style="width:100%;"><tr>${photoTd}<td id="cv-header-text" class="cv-header-text">${nameBlock}</td></tr></table></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -610,6 +610,34 @@ function withHeading(level: "h2" | "h3", block: BlockSpec, body: string, layout:
   const styleAttr = style ? ` style="${style}"` : "";
   const title = uppercase ? block.title.toUpperCase() : block.title;
   return `<${level}${styleAttr}>${esc(title)}</${level}>${body}`;
+}
+
+function paddingStyle(value: string, wordSafe?: boolean): string {
+  if (!wordSafe) return `padding:${value};`;
+
+  const tokens = value.trim().split(/\s+/);
+  if (tokens.length === 0) return '';
+  let top, right, bottom, left;
+  if (tokens.length === 1) {
+    top = right = bottom = left = tokens[0];
+  } else if (tokens.length === 2) {
+    top = bottom = tokens[0];
+    right = left = tokens[1];
+  } else if (tokens.length === 3) {
+    top = tokens[0];
+    right = left = tokens[1];
+    bottom = tokens[2];
+  } else {
+    [top, right, bottom, left] = tokens;
+  }
+
+  const toPt = (pxStr: string) => {
+    if (pxStr === '0' || pxStr === '0px') return '0pt';
+    const m = /^(-?\d*\.?\d+)px$/.exec(pxStr);
+    return m ? `${(parseFloat(m[1]) * 0.75).toFixed(1)}pt` : pxStr;
+  };
+
+  return `padding-top:${toPt(top)}; padding-right:${toPt(right)}; padding-bottom:${toPt(bottom)}; padding-left:${toPt(left)};`;
 }
 
 function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: string | null, layout: CvLayout, wordSafe?: boolean): string {
@@ -662,22 +690,22 @@ function assembleLayout(spec: LayoutSpec, cvData: any, settings: any, photoSrc: 
     // Nested table to prevent Word from rendering div backgrounds as tight text highlights
     const sideTd = `<td class="cv-sidebar" bgcolor="${sideBg}"${widthAttr} valign="top" style="padding:0;">
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
-        <tr><td class="cv-sidebar-inner" bgcolor="${sideBg}" valign="top" style="${innerStyle}">${sideParts.join("")}</td></tr>
+        <tr><td id="cv-sidebar-inner" class="cv-sidebar-inner" bgcolor="${sideBg}" valign="top" style="${innerStyle}">${sideParts.join("")}</td></tr>
       </table>
     </td>`;
-    const mainTd = `<td class="cv-main" valign="top">${mainHtml}</td>`;
+    const mainTd = `<td id="cv-main" class="cv-main" valign="top">${mainHtml}</td>`;
     const row = spec.sideFirst ? `${sideTd}${mainTd}` : `${mainTd}${sideTd}`;
     bodyTable = `<table cellpadding="0" cellspacing="0" border="0" style="width:100%;"><tr>${row}</tr></table>`;
   } else {
-    bodyTable = `<div class="cv-main">${mainHtml}</div>`;
+    bodyTable = `<div id="cv-main" class="cv-main">${mainHtml}</div>`;
   }
 
   const footer = spec.declarationIn === "footer" ? (() => {
     const decl = declarationHtml(cvData, acc, layout);
-    return decl ? `<div class="cv-declaration cv-footer-decl">${decl}</div>` : "";
+    return decl ? `<div id="cv-footer-decl" class="cv-declaration cv-footer-decl">${decl}</div>` : "";
   })() : "";
 
-  return `<div class="cv-body">${headerHtml}${bodyTable}</div>${footer}`;
+  return `<div id="cv-body" class="cv-body">${headerHtml}${bodyTable}</div>${footer}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -856,24 +884,21 @@ export async function buildCvDocument(
   const cssCtx = getCssCtx(primaryColor, accentColor, fontFamily, fontScale);
   let css = flattenNestedCss(".cv-theme", BASE_CV_STYLES) + "\n" + flattenNestedCss(`.cv-theme-${layout}`, THEME_STYLES[layout](cssCtx));
 
-  // Inject the structural paddings for this layout into the CSS so makeCssWordSafe
-  // can convert them into Word-compatible mso-padding-alt directives.
   let layoutCss = `
-    .cv-body { padding: ${spec.bodyPadding}; }
-    .cv-main { padding: ${spec.mainPadding}; }
-  `;
+#cv-body { padding: ${spec.bodyPadding}; }
+#cv-main { padding: ${spec.mainPadding}; }`;
   if (spec.side) {
-    layoutCss += `\n    .cv-sidebar-inner { padding: ${spec.side.padding}; }`;
+    layoutCss += `\n#cv-sidebar-inner { padding: ${spec.side.padding}; }`;
   }
   if (spec.header?.padding) {
-    layoutCss += `\n    .cv-header-banner { padding: ${spec.header.padding}; }`;
-    layoutCss += `\n    .cv-header-text { padding: 0 0 0 20px; }`;
+    layoutCss += `\n#cv-header-banner { padding: ${spec.header.padding}; }`;
+    layoutCss += `\n#cv-header-text { padding: 0 0 0 20px; }`;
   }
   if (spec.footerPadding) {
-    layoutCss += `\n    .cv-footer-decl { padding: ${spec.footerPadding}; }`;
+    layoutCss += `\n#cv-footer-decl { padding: ${spec.footerPadding}; }`;
   }
   
-  css += "\n" + flattenNestedCss(`.cv-theme-${layout}`, layoutCss);
+  css += "\n" + layoutCss;
 
   if (options?.wordSafe) {
     css = makeCssWordSafe(css, `.cv-theme-${layout}`, fontFamily);
