@@ -342,16 +342,20 @@ export async function fetchSourceDataImpl(params: FetchSourceDataParams): Promis
       }
     }));
   }
-  await Promise.all(fetchPromises);
 
+  // Same wave as the loop above, not a separate awaited step - neededDocTypes/
+  // remainingPeople only depend on computedRequirements (built purely from field
+  // metadata above), never on the standardFetchQueue results, so there's no reason
+  // to wait for that batch to land before firing these off too.
   const neededDocTypes = Array.from(computedRequirements.documentIds);
   if (neededDocTypes.length > 0) {
     const remainingPeople = Array.from(computedRequirements.individualIds);
-    await Promise.all([
+    fetchPromises.push(
       supabase.from('acc_portal_kyc').select('*').in('id', neededDocTypes).then(({ data }: { data: any[] | null }) => { if (data) documentCache.docTypes = data; }),
       supabase.from('acc_portal_directors_documents').select('*').in('director_id', remainingPeople).in('document_id', neededDocTypes).neq('status', 'deleted').then(({ data }: { data: any[] | null }) => { if (data) documentCache.documents.push(...data); })
-    ]);
+    );
   }
+  await Promise.all(fetchPromises);
 
   let newComputedValues: Record<string, any> | null = null;
   if (computedMasterFields.length > 0) {

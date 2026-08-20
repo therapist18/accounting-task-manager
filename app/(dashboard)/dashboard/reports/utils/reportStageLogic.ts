@@ -2,7 +2,7 @@
 // Shared "canonical current stage" / officer-perspective / client-perspective filtering
 // logic, extracted from reports/page.tsx so it has a single implementation instead of
 // being duplicated across report-style pages (e.g. summary-reports).
-import { isValid } from "date-fns";
+import { isValid, differenceInDays } from "date-fns";
 import { calculateStageDate } from "../../tasks/utils/dateUtils";
 
 export const parseDateSafe = (s: string | null | undefined): Date | null => {
@@ -203,4 +203,35 @@ export const computeStageDateInfo = (
   const isPending = !isCompleted && !isSkipped;
 
   return { stageData, isSkipped, isCompleted, isPending, docsForStage, linkedDocument, documentFields, dateValue, immigrationDateValue, effectiveDateValue, isOverdue };
+};
+
+// Lightweight "which date does this stage show" — task.stages[stageId].date/completedAt only,
+// the same coarse lookup SummaryTable/DepartmentTasksManager already use for quick stage-date
+// display elsewhere (not computeStageDateInfo's full document-field resolution above, which
+// needs per-stage document/field data this Δ-column call site doesn't have on hand). Used by
+// "Show Δ" in DepartmentTasksManager's EnhancedTable/StandardTable.
+export const getSimpleStageDate = (task: any, stageId: string): Date | null => {
+  const stageData = task?.stages?.[stageId];
+  const raw = stageData?.date || stageData?.completedAt;
+  return raw ? parseDateSafe(raw) : null;
+};
+
+// Day-gap between two stages' effective dates for a "Show Δ" column/row — walks back through
+// `priorStages` (ordered, nearest-first) to find the nearest dated stage before `nextStage` if
+// its immediate predecessor isn't dated yet. Same bridging behavior as
+// reports/components/StandardReportView.tsx's Δ column and summary-reports/SummaryTable.tsx's
+// milestone Δ column.
+export const computeStageDeltaDays = (
+  task: any,
+  priorStages: any[],
+  nextStage: any
+): { days: number | null; bridgedFrom: any | null } => {
+  const nextDate = getSimpleStageDate(task, nextStage.id);
+  if (!nextDate) return { days: null, bridgedFrom: null };
+  for (let i = priorStages.length - 1; i >= 0; i--) {
+    const candidate = priorStages[i];
+    const d = getSimpleStageDate(task, candidate.id);
+    if (d) return { days: differenceInDays(nextDate, d), bridgedFrom: candidate };
+  }
+  return { days: null, bridgedFrom: null };
 };

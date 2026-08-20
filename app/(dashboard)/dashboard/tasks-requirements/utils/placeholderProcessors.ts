@@ -2,6 +2,20 @@
 
 import { formatDate, parseJsonValue } from './templateUtils';
 
+export const getCompanyRegistryCandidates = (normType: string, companyAssociates: any[] | null) => {
+  if (!companyAssociates?.length || !normType) return [];
+  return companyAssociates.filter((ind: any) =>
+    (ind.associations || []).some((a: any) => a.individual_type?.toLowerCase()?.includes(normType))
+  );
+};
+
+const resolveCompanyRegistryFallback = (normType: string, companyAssociates: any[] | null, entityOverrides: Record<string, string> | null) => {
+  const candidates = getCompanyRegistryCandidates(normType, companyAssociates);
+  if (candidates.length === 0) return null;
+  const overrideId = entityOverrides?.[normType];
+  return (overrideId && candidates.find((c: any) => String(c.id) === String(overrideId))) || candidates[0];
+};
+
 export const getTargetEntity = (
   placeholder: any,
   relationshipData: any,
@@ -10,7 +24,9 @@ export const getTargetEntity = (
   entityIdMap: any = null,
   combinedCache: any = null,
   extractedData: any = null,
-  companyData: any = null
+  companyData: any = null,
+  companyAssociates: any[] | null = null,
+  entityOverrides: Record<string, string> | null = null,
 ): any => {
   if (sourceArray && arrayIndex !== null && sourceArray[arrayIndex]) {
     return sourceArray[arrayIndex];
@@ -23,71 +39,136 @@ export const getTargetEntity = (
     entityType = placeholder.entity_type;
   }
   const normType = entityType?.toLowerCase()?.trim();
-  if (entityIdMap) {
-    if (normType === 'director' && entityIdMap.director) {
-      const dirId = entityIdMap.director;
-      return relationshipData?.directors?.find((d: any) => String(d.id) === String(dirId)) ||
-        combinedCache?.['registry_individuals']?.[dirId];
-    }
-    if (normType === 'principal' && entityIdMap.principal) {
-      return relationshipData?.principal || extractedData;
-    }
-  }
-  if (normType === 'principal') {
-    return relationshipData?.principal || extractedData;
-  }
 
-  if (normType === 'sponsor') {
-    if (entityIdMap?.sponsor) {
-      if (relationshipData?.sponsor && String(relationshipData.sponsor.id) === String(entityIdMap.sponsor)) {
-        return relationshipData.sponsor;
+  const resolveFromTaskParticipants = () => {
+    if (entityIdMap) {
+      if (normType === 'director' && entityIdMap.director) {
+        const dirId = entityIdMap.director;
+        return relationshipData?.directors?.find((d: any) => String(d.id) === String(dirId)) ||
+          combinedCache?.['registry_individuals']?.[dirId];
+      }
+      if (normType === 'principal' && entityIdMap.principal) {
+        return relationshipData?.principal || extractedData;
+      }
+      if (normType === 'shareholder' && entityIdMap.shareholder) {
+        const shareId = entityIdMap.shareholder;
+        return relationshipData?.shareholders?.find((s: any) => String(s.id) === String(shareId)) ||
+          combinedCache?.['registry_individuals']?.[shareId];
+      }
+      if (normType === 'employee' && entityIdMap.employee) {
+        const empId = entityIdMap.employee;
+        return relationshipData?.employees?.find((e: any) => String(e.id) === String(empId)) ||
+          combinedCache?.['employment_data']?.[empId];
+      }
+      if (normType === 'understudy' && entityIdMap.understudy) {
+        const underId = entityIdMap.understudy;
+        return relationshipData?.understudies?.find((u: any) => String(u.id) === String(underId)) ||
+          combinedCache?.['registry_individuals']?.[underId];
       }
     }
-    const sponsorResult = relationshipData?.sponsor || null;
-    return sponsorResult;
-  }
 
-  if (['dependant', 'dependant', 'spouse', 'child'].includes(normType)) {
-    if (placeholder.dependant_relationship?.[0]) {
-      const targetRel = placeholder.dependant_relationship[0].toLowerCase();
-      return relationshipData?.dependants?.find((d: any) => d.relationship?.toLowerCase() === targetRel);
+    if (normType === 'principal') {
+      return relationshipData?.principal || extractedData;
     }
-    return relationshipData?.dependants?.[0];
-  }
 
-  if (normType === 'director') {
-    const dir = placeholder.director_type === 'primary'
-      ? relationshipData?.directors?.find((d: any) => d.is_primary)
-      : relationshipData?.directors?.[0];
-    return dir || null;
-  }
+    if (normType === 'sponsor') {
+      if (entityIdMap?.sponsor) {
+        if (relationshipData?.sponsor && String(relationshipData.sponsor.id) === String(entityIdMap.sponsor)) {
+          return relationshipData.sponsor;
+        }
+      }
+      return relationshipData?.sponsor || null;
+    }
 
-  if (normType === 'company') {
-    return relationshipData?.company || companyData || extractedData;
-  }
+    if (['dependant', 'spouse', 'child'].includes(normType)) {
+      if (placeholder.dependant_relationship?.[0]) {
+        const targetRel = placeholder.dependant_relationship[0].toLowerCase();
+        return relationshipData?.dependants?.find((d: any) => d.relationship?.toLowerCase() === targetRel);
+      }
+      return relationshipData?.dependants?.[0];
+    }
 
-  // Generic third-party role lookup (e.g. signatory, approver, witness)
-  if (entityIdMap && entityIdMap[normType]) {
-    const tpId = entityIdMap[normType];
-    return relationshipData?.directors?.find((d: any) => String(d.id) === String(tpId)) ||
-      combinedCache?.['registry_individuals']?.[tpId] ||
-      combinedCache?.['employment_data']?.[tpId];
-  }
+    if (normType === 'director') {
+      const dir = placeholder.director_type === 'primary'
+        ? relationshipData?.directors?.find((d: any) => d.is_primary)
+        : relationshipData?.directors?.[0];
+      return dir || null;
+    }
 
-  const fallbackLower = String(normType).toLowerCase().trim();
-  const companyRegistries = ['registry_individuals', 'employment_data'];
-  for (const reg of companyRegistries) {
-    if (!combinedCache?.[reg]) continue;
-    for (const item of Object.values(combinedCache[reg])) {
-      const matches = item.associations?.some((a: any) =>
+    if (normType === 'company') {
+      return relationshipData?.company || companyData || extractedData;
+    }
+
+    // Generic third-party role lookup (e.g. signatory, approver, witness)
+    if (entityIdMap && entityIdMap[normType]) {
+      const tpId = entityIdMap[normType];
+      return relationshipData?.directors?.find((d: any) => String(d.id) === String(tpId)) ||
+        combinedCache?.['registry_individuals']?.[tpId] ||
+        combinedCache?.['employment_data']?.[tpId] ||
+        companyAssociates?.find((c: any) => String(c.id) === String(tpId));
+    }
+
+    return null;
+  };
+
+  const taskResult = resolveFromTaskParticipants();
+  if (taskResult) return taskResult;
+
+  if (normType && normType !== 'company') {
+    const fallback = resolveCompanyRegistryFallback(normType, companyAssociates, entityOverrides);
+    if (fallback) return fallback;
+
+    const fallbackLower = String(normType).toLowerCase().trim();
+    const companyRegistries = ['registry_individuals', 'employment_data'];
+    for (const reg of companyRegistries) {
+      if (!combinedCache?.[reg]) continue;
+      for (const item of Object.values(combinedCache[reg])) {
+        const matches = item.associations?.some((a: any) =>
           a.individual_type?.toLowerCase().includes(fallbackLower)
-      );
-      if (matches) return item;
+        );
+        if (matches) return item;
+      }
     }
   }
 
   return null;
 };
+
+const toNumber = (v: any): number => {
+  const n = parseFloat(String(v ?? '').replace(/,/g, ''));
+  return Number.isFinite(n) ? n : 0;
+};
+
+const formatComputed = (n: number): string =>
+  n.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Same-row formula for a `calculation` placeholder (op !== 'sum') - combines
+// its operand siblings' values from the given row/formData scope.
+export const computeRowCalculation = (calculation: any, row: Record<string, any>): string => {
+  const nums = (calculation?.operands || []).map((name: string) => toNumber(row[name]));
+  if (nums.length === 0) return '';
+
+  let result: number;
+  switch (calculation.op) {
+    case 'subtract':
+      result = nums.reduce((a, b) => a - b);
+      break;
+    case 'multiply':
+      result = nums.reduce((a, b) => a * b, 1);
+      break;
+    case 'divide':
+      result = nums.reduce((a, b) => (b === 0 ? a : a / b));
+      break;
+    default:
+      result = nums.reduce((a, b) => a + b, 0);
+  }
+  return formatComputed(result);
+};
+
+// Cross-row aggregate for a top-level `calculation` placeholder (op === 'sum') -
+// totals `field` across every row of an array block.
+export const sumBlockField = (rows: Record<string, any>[], field: string): string =>
+  formatComputed((rows || []).reduce((sum, row) => sum + toNumber(row?.[field]), 0));
 
 export const processOrdinalField = (placeholder: any, arrayIndex: number | null) => {
   if (arrayIndex === null) return { value: '', source: null };
@@ -97,6 +178,11 @@ export const processOrdinalField = (placeholder: any, arrayIndex: number | null)
   if (ordinalFormat === 'word') {
     return {
       value: getOrdinalWord(arrayIndex),
+      source: 'Ordinal Generator'
+    };
+  } else if (ordinalFormat === 'plain') {
+    return {
+      value: String(arrayIndex + 1),
       source: 'Ordinal Generator'
     };
   } else if (ordinalFormat === 'custom') {
@@ -694,12 +780,14 @@ export const processPlaceholderValue = (
   arrayIndex: number | null = null,
   sourceArray: any[] | null = null,
   task: any = null,
-  computedFieldCache: Record<string, any> | null = null
+  computedFieldCache: Record<string, any> | null = null,
+  companyAssociates: any[] | null = null,
+  entityOverrides: Record<string, string> | null = null,
 ): { value: any; source: string | null } => {
   const logic = placeholder.source_logic || 'priority';
   const collectedValues: string[] = [];
   const sourceMetadata: string[] = [];
-  const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData);
+  const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData, companyAssociates, entityOverrides);
   const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
 
   // Check for current date fields first (don't require targetEntity)

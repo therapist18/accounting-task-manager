@@ -14,7 +14,7 @@ import { fetchTasks, fetchStages, fetchCompanies } from "../tasks/utils/taskMana
 import { fetchCompanies as fetchAllCompanies, type Company } from "../companies/database";
 import { fetchIndividuals, type Individual } from "../individuals/database";
 import { enhanceTasksWithIndividualData } from "../tasks/overall-view/tableUtils";
-import { isStageApplicableToTask } from "../reports/utils/reportStageLogic";
+import { isStageApplicableToTask } from "../summary-reports/utils/reportStageLogic";
 import { CompanySidebar } from "./components/CompanySidebar";
 import { IndividualSidebar } from "./components/IndividualSidebar";
 import { TaskListTable } from "./components/TaskListTable";

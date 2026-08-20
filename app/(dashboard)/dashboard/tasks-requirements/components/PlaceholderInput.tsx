@@ -168,6 +168,26 @@ export const PlaceholderInput = ({
     );
   }
 
+  // --- 0. Computed View (read-only, auto-calculated) ---
+  if (placeholder.calculation) {
+    const isMissing = !isValidValue(value);
+    return (
+      <Layout>
+        <div className={cn(
+          "text-xs h-10 flex items-center gap-2 px-3 rounded-lg border bg-slate-50 dark:bg-slate-900",
+          isMissing
+            ? "border-red-200 text-red-400 dark:border-red-900/50"
+            : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300"
+        )}>
+          <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 bg-blue-50 text-blue-600 border-blue-200 shrink-0">
+            Σ Auto
+          </Badge>
+          <span className="truncate font-semibold tracking-tight">{isMissing ? '—' : value}</span>
+        </div>
+      </Layout>
+    );
+  }
+
   // --- 1. Multi-Source View (Popover) ---
   if (totalSources > 1 && placeholder.type !== 'image' && placeholder.type !== 'boolean') {
     const isMissing = !isValidValue(value);

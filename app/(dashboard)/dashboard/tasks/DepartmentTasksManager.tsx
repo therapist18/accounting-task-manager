@@ -5,7 +5,7 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { unstable_batchedUpdates } from 'react-dom'
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Settings, Search, X, TableProperties, RotateCcw, Edit, AlertCircle, Plus, Minus, Download, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2, LinkIcon, RefreshCw, UserPlus, LayoutGrid, Settings2 } from "lucide-react"
+import { Settings, Search, X, TableProperties, RotateCcw, Edit, AlertCircle, Plus, Minus, Download, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2, LinkIcon, RefreshCw, UserPlus, LayoutGrid, Settings2, Clock, GitCompare } from "lucide-react"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { CancelConfirmationDialog } from "./components/CancelConfirmationDialog"
 import { EnquiryDialog } from "./components/EnquiryDialog"
@@ -25,7 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import * as XLSX from 'xlsx'
-import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchKycDocument, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document, fetchTasksDuplicate, fetchDocumentWorkflowLogs, REQUIREMENTS_LOCK_STAGE_IDS, STAGE_TAB_LINKS, captureRequirementsDocumentsSnapshot, fetchUploadedDocumentsForTasks } from "./utils/taskManagerData"
+import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchKycDocument, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document, fetchTasksDuplicate, fetchDocumentWorkflowLogs, REQUIREMENTS_LOCK_STAGE_IDS, STAGE_TAB_LINKS, captureRequirementsDocumentsSnapshot, fetchUploadedDocumentsForTasks, getLinkedDocumentsForTaskStage } from "./utils/taskManagerData"
 import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog';
 import { StandardTable } from './overall-view/StandardTable';
 import { EnhancedTable } from './overall-view/EnhancedTable';
@@ -45,6 +45,14 @@ import { determineCurrentStage, getStageProgress } from './utils/stageUtils'
 import { calculateStageDate } from './utils/dateUtils'
 import { fetchUserAssignmentData, hasJobLevelAccess, getOfficerDisplayName, userService } from "@/lib/shared-user-assignment-service"
 import { cn } from "@/lib/utils"
+import {
+  getCanonicalCurrentStage,
+  getCurrentOfficerStage,
+  getStageOfficerIds,
+  taskHasStageOfficer,
+  isTaskWithClient,
+  computeStageDeltaDays,
+} from "../reports/utils/reportStageLogic"
 
 // Same terminal-status list summary-reports/page.tsx uses to scope its Department/Sub-department
 // tab counts to the "live pipeline" — tasks that are still enquiry/WIP, not already wrapped up.
@@ -60,8 +68,18 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [activeSubTab, setActiveSubTab] = useState<string>("wip-stages")
   const [activeSubdepartmentTab, setActiveSubdepartmentTab] = useState<string>("")
   const initialSubDeptApplied = useRef(false)
-  const [activeFollowUpFilter, setActiveFollowUpFilter] = useState<string>("all")
+  // Overview/Officers/Managers/Clients perspective — replaces the old activeFollowUpFilter
+  // (All/BCL/Officer/Client) toggle, which had no live UI wired to it (setActiveFollowUpFilter
+  // was never called outside its own useState default) and only worked within the WIP tab.
+  // This applies across every status tab, same as reports/page.tsx's activePerspective.
+  const [activePerspective, setActivePerspective] = useState<'overview' | 'officers' | 'managers' | 'clients'>('overview')
+  const [officerFilterMode, setOfficerFilterMode] = useState<'current' | 'history'>('current')
+  const [activeOfficerTab, setActiveOfficerTab] = useState<string>('all')
+  const [taskManagerFilterMode, setTaskManagerFilterMode] = useState<'current' | 'history'>('current')
+  const [activeTaskManagerTab, setActiveTaskManagerTab] = useState<string>('all')
   const [isTransposedView, setIsTransposedView] = useState<boolean>(true)
+  const [showTime, setShowTime] = useState<boolean>(true)
+  const [showDelta, setShowDelta] = useState<boolean>(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<any>(null)
   const [tasks, setTasks] = useState<UtilTask[]>([])
@@ -128,9 +146,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     setVisibleHeaders(new Set(filteredHeaders.filter(h => h.default && h.id !== 'cancellation_reason').map(h => h.id)));
   }, [activeDepartmentTab, activeSubTab]);
   const [tmUsers, setTmUsers] = useState<Map<number, any>>(new Map())
-  const [activeOfficerTab, setActiveOfficerTab] = useState<string | null>(null)
-  const [activeManagerTab, setActiveManagerTab] = useState<string | null>(null)
-  const [activeAssistantTab, setActiveAssistantTab] = useState<string | null>(null)
   const [subdepartmentOfficers, setSubdepartmentOfficers] = useState<Array<{ id: string, name: string }>>([])
   const [subdepartmentManagers, setSubdepartmentManagers] = useState<Array<{ id: string, name: string }>>([])
   const [subdepartmentAssistants, setSubdepartmentAssistants] = useState<Array<{ id: string, name: string }>>([])
@@ -345,40 +360,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         }>;
       }>
     },
-  ): Document[] => {
-    const linkedDocumentData = task.source_document_id?.[stage.id];
-
-    if (!linkedDocumentData) {
-      return [];
-    }
-
-    const taskClassId = task.class_id?.toString();
-    const taskSubdeptId = task.subdepartment?.id?.toString() || task.subdepartment_id?.toString();
-    const documentRefs = Array.isArray(linkedDocumentData)
-      ? linkedDocumentData
-      : [linkedDocumentData];
-
-    const linkedDocs = documentRefs
-      .map(ref => {
-        const documentId = typeof ref === 'string' ? ref : ref.id;
-        const doc = allDocuments.find(doc => doc.id.toString() === documentId.toString());
-        if (!doc) return null;
-        if (!doc.isSpecial) return doc;
-        if (Array.isArray(doc.targetEntities) && doc.targetEntities.length > 0) {
-          const isApplicable = doc.targetEntities.some(entity => {
-            const classMatch = !entity.class_id || entity.class_id.toString() === taskClassId;
-            const subdeptMatch = !entity.subdept_id || entity.subdept_id.toString() === taskSubdeptId;
-            return classMatch && subdeptMatch;
-          });
-
-          return isApplicable ? doc : null;
-        }
-        return doc;
-      })
-      .filter((doc): doc is Document => !!doc);
-
-    return linkedDocs;
-  }, [allDocuments]);
+  ): Document[] => getLinkedDocumentsForTaskStage(task, stage, allDocuments), [allDocuments]);
 
   const fetchOfficersFromApi = useCallback(async () => {
     try {
@@ -896,124 +878,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       )
     }
 
-    if (activeSubTab === 'wip-stages') {
-      if (activeFollowUpFilter === 'bcl') {
-        if (activeManagerTab) {
-          filteredTasks = filteredTasks.filter(task =>
-            task.task_assistant_id?.toString() === activeAssistantTab
-          );
-        }
-      } else if (activeFollowUpFilter === 'officer') {
-        if (activeOfficerTab) {
-          filteredTasks = filteredTasks.filter(task =>
-            (task.officer_ids && Array.isArray(task.officer_ids) && task.officer_ids.includes(activeOfficerTab)) ||
-            task.officer_id?.toString() === activeOfficerTab
-          );
-        }
-      }
-    }
-
     return filteredTasks
-  }, [tasks, departments, activeDepartmentTab, activeSubdepartmentTab, activeSubTab, activeFollowUpFilter, activeManagerTab, activeAssistantTab, activeOfficerTab])
-
-  const getAssistantsForManager = useCallback((managerId: string) => {
-    if (!managerId) return [];
-
-    const managerTasks = tasks.filter(task =>
-      task.task_manager_id?.toString() === managerId &&
-      task.task_assistant_id
-    );
-
-    const assistantIds = [...new Set(
-      managerTasks.map(task => task.task_assistant_id?.toString())
-    )].filter(Boolean);
-
-    return assistantIds.map(assistantId => {
-      const user = tmUsers.get(parseInt(assistantId || '0'));
-      const taskCount = managerTasks.filter(
-        task => task.task_assistant_id?.toString() === assistantId
-      ).length;
-
-      return {
-        id: assistantId,
-        name: user?.name || `Assistant ${assistantId}`,
-        taskCount
-      };
-    });
-  }, [tasks, tmUsers]);
-
-  const getTaskCountForManager = useCallback((managerId: string) => {
-    const managerTasks = getFilteredTasks('in_progress').filter(task =>
-      task.task_manager_id?.toString() === managerId
-    );
-    return managerTasks.length;
-  }, [getFilteredTasks]);
-
-  const getTaskCountForAssistant = useCallback((assistantId: string) => {
-    const assistantTasks = getFilteredTasks('in_progress').filter(task =>
-      task.task_assistant_id?.toString() === assistantId
-    );
-    return assistantTasks.length;
-  }, [getFilteredTasks]);
-
-  const getTaskCountForManagerWithoutAssistant = useCallback((managerId: string) => {
-    const managerOnlyTasks = getFilteredTasks('in_progress').filter(task =>
-      task.task_manager_id?.toString() === managerId && !task.task_assistant_id
-    );
-    return managerOnlyTasks.length;
-  }, [getFilteredTasks]);
-
-  const getTaskCountForOfficer = useCallback((officerId: string) => {
-    const officerTasks = getFilteredTasks('in_progress').filter(task =>
-      (task.officer_ids && Array.isArray(task.officer_ids) && task.officer_ids.includes(officerId)) ||
-      task.officer_id?.toString() === officerId
-    );
-    return officerTasks.length;
-  }, [getFilteredTasks]);
-
-  const getWIPTasksByFollowUp = useCallback((followUpFilter: string) => {
-    const wipTasks = getFilteredTasks('in_progress')
-    if (followUpFilter === 'all') return wipTasks
-
-    return wipTasks.filter(task => {
-      const currentStage = determineCurrentStage(task, stages)
-      if (!currentStage) return false
-      const stageFollowUp = currentStage.follow_up?.toLowerCase() || null
-
-      switch (followUpFilter) {
-        case 'bcl': return stageFollowUp === 'bcl'
-        case 'officer': return stageFollowUp === 'officer'
-        case 'client': return stageFollowUp === 'client'
-        default: return true
-      }
-    })
-  }, [getFilteredTasks, stages, determineCurrentStage])
-
-  // Extract officers from stages marked as "officer" follow-up
-  const getOfficersFromOfficerFollowUpStages = useCallback(() => {
-    if (!stages || !stages.length) return []
-
-    const officerFollowUpStages = stages.filter(stage =>
-      stage.follow_up?.toLowerCase() === 'officer'
-    )
-
-    // Collect all unique officer IDs from these stages
-    const officerIdSet = new Set<string>()
-    officerFollowUpStages.forEach(stage => {
-      if (stage.officer_ids && Array.isArray(stage.officer_ids)) {
-        stage.officer_ids.forEach(id => officerIdSet.add(id.toString()))
-      } else if (stage.officer_id) {
-        officerIdSet.add(stage.officer_id.toString())
-      }
-    })
-
-    // Map officer IDs to officer objects
-    const officers = Array.from(officerIdSet)
-      .map(id => realOfficers.find(officer => officer.id?.toString() === id))
-      .filter(Boolean)
-
-    return officers
-  }, [stages, realOfficers])
+  }, [tasks, departments, activeDepartmentTab, activeSubdepartmentTab])
 
   const filterTasksBySearchWrapper = useCallback((tasks: any[]) => {
     return filterTasksBySearch(
@@ -1028,14 +894,23 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   }, [globalSearchTerm, enhancedTasksData, taskDependants, companies, getTaskHierarchy, getUserDisplayName]);
 
   const enquiryTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('enquiry')), [getFilteredTasks, filterTasksBySearchWrapper])
-  const wipTasks = useMemo(() => filterTasksBySearchWrapper(getWIPTasksByFollowUp(activeFollowUpFilter)), [getWIPTasksByFollowUp, activeFollowUpFilter, filterTasksBySearchWrapper])
+  const wipTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('in_progress')), [getFilteredTasks, filterTasksBySearchWrapper])
   const completedTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('write_up_completed')), [getFilteredTasks, filterTasksBySearchWrapper])
   const endorsedTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('endorsed')), [getFilteredTasks, filterTasksBySearchWrapper])
   const cancelledTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('cancelled')), [getFilteredTasks, filterTasksBySearchWrapper])
+  // "All Enquiry + WIP" — same TERMINAL_STATUSES-based union summary-reports/page.tsx's
+  // STATUS_LABELS.active tab uses, scoped through the same department/subdepartment filter as
+  // every other status tab.
+  const activeEnquiryWipTasks = useMemo(
+    () => filterTasksBySearchWrapper(getFilteredTasks().filter((task: any) => !TERMINAL_STATUSES.includes(task.status))),
+    [getFilteredTasks, filterTasksBySearchWrapper]
+  )
   const activeTabConfig = useMemo(() => {
     switch (activeSubTab) {
       case 'enquiries':
         return { tasks: enquiryTasks, title: 'Enquiries' }
+      case 'active':
+        return { tasks: activeEnquiryWipTasks, title: 'All Enquiry + WIP' }
       case 'endorsed':
         return { tasks: endorsedTasks, title: 'Endorsement Completed' }
       case 'cancelled':
@@ -1046,9 +921,86 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       default:
         return { tasks: wipTasks, title: 'WIP Stages' }
     }
-  }, [activeSubTab, enquiryTasks, wipTasks, completedTasks, endorsedTasks, cancelledTasks])
-  const displayedTasks = activeTabConfig.tasks
+  }, [activeSubTab, enquiryTasks, wipTasks, activeEnquiryWipTasks, completedTasks, endorsedTasks, cancelledTasks])
+
+  // Layered on top of the status tab's task list, exactly like reports/page.tsx's
+  // tasksByFilters — 'overview' passes everything through untouched.
+  const tasksByPerspective = useMemo(() => {
+    return activeTabConfig.tasks.filter((task: any) => {
+      if (activePerspective === 'officers') {
+        if (officerFilterMode === 'current') {
+          if (!getCurrentOfficerStage(task, stages, departments)) return false
+          if (activeOfficerTab === '__unallocated__') {
+            if (getStageOfficerIds(task, stages, 'current', departments).length !== 0) return false
+          } else if (activeOfficerTab !== 'all' && !taskHasStageOfficer(task, stages, [activeOfficerTab], 'current', departments)) return false
+        } else {
+          if (activeOfficerTab === '__unallocated__') {
+            if (getStageOfficerIds(task, stages, 'history', departments).length !== 0) return false
+          } else if (activeOfficerTab !== 'all' && !taskHasStageOfficer(task, stages, [activeOfficerTab], 'history', departments)) return false
+        }
+      }
+      if (activePerspective === 'managers') {
+        if (getCanonicalCurrentStage(task, stages, departments)?.follow_up?.toLowerCase() !== 'bcl') return false
+        if (activeTaskManagerTab === '__unallocated__') {
+          if (task.task_manager_id) return false
+        } else if (activeTaskManagerTab !== 'all' && task.task_manager_id?.toString() !== activeTaskManagerTab) return false
+      }
+      if (activePerspective === 'clients' && !isTaskWithClient(task, stages, departments)) return false
+      return true
+    })
+  }, [activeTabConfig.tasks, activePerspective, activeOfficerTab, officerFilterMode, activeTaskManagerTab, stages, departments])
+
+  const displayedTasks = tasksByPerspective
   const activeTabTitle = activeTabConfig.title
+
+  // Officers/managers actually relevant to the active department/subdepartment scope — same
+  // userService.getDepartmentUsers narrowing reports/page.tsx uses for its person pill lists.
+  const perspectiveDepartmentUsers = useMemo(() => {
+    if (!activeDepartmentTab) return { officers: [], managers: [] }
+    const allUsers = [...unifiedOfficers, ...unifiedManagers]
+    return activeSubdepartmentTab
+      ? userService.getSubdepartmentUsers(allUsers, activeDepartmentTab, activeSubdepartmentTab)
+      : userService.getDepartmentUsers(allUsers, activeDepartmentTab)
+  }, [activeDepartmentTab, activeSubdepartmentTab, unifiedOfficers, unifiedManagers])
+
+  // Badge counts for the Officers/Managers/Clients perspective pills — deliberately sourced
+  // from activeTabConfig.tasks (the status tab's own pool, not narrowed by whichever person tab
+  // is currently selected) so switching officer/manager tabs never zeroes out other tabs' counts,
+  // same as reports/page.tsx's officerTaskCounts/taskManagerTaskCounts.
+  const officerTaskCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: 0 }
+    const pool = officerFilterMode === 'current'
+      ? activeTabConfig.tasks.filter((t: any) => getCurrentOfficerStage(t, stages, departments) !== null)
+      : activeTabConfig.tasks
+    perspectiveDepartmentUsers.officers.forEach((o: any) => {
+      const oTasks = pool.filter((t: any) => getStageOfficerIds(t, stages, officerFilterMode, departments).includes(o.id.toString()))
+      counts[o.id.toString()] = oTasks.length
+      counts.all += oTasks.length
+    })
+    const unallocated = pool.filter((t: any) => getStageOfficerIds(t, stages, officerFilterMode, departments).length === 0)
+    counts.__unallocated__ = unallocated.length
+    counts.all += unallocated.length
+    return counts
+  }, [activeTabConfig.tasks, perspectiveDepartmentUsers.officers, officerFilterMode, stages, departments])
+
+  const taskManagerTaskCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: 0 }
+    const pool = activeTabConfig.tasks.filter((t: any) => getCanonicalCurrentStage(t, stages, departments)?.follow_up?.toLowerCase() === 'bcl')
+    perspectiveDepartmentUsers.managers.forEach((m: any) => {
+      const mTasks = pool.filter((t: any) => t.task_manager_id?.toString() === m.id.toString())
+      counts[m.id.toString()] = mTasks.length
+      counts.all += mTasks.length
+    })
+    const unallocated = pool.filter((t: any) => !t.task_manager_id)
+    counts.__unallocated__ = unallocated.length
+    counts.all += unallocated.length
+    return counts
+  }, [activeTabConfig.tasks, perspectiveDepartmentUsers.managers, stages, departments])
+
+  const clientsAwaitingCount = useMemo(
+    () => activeTabConfig.tasks.filter((t: any) => isTaskWithClient(t, stages, departments)).length,
+    [activeTabConfig.tasks, stages, departments]
+  )
 
   const getClassesForSubdepartment = useCallback((deptId: number, subDeptId: number) => {
     const department = departments.find(d => d.id === deptId);
@@ -1832,6 +1784,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       stageIds: stages.map(s => s.id).sort(),
       visibleStageIds: Array.from(visibleStageIds).sort(),
       showNAStages,
+      showDelta,
       expandedSections: Array.from(expandedSections).sort(),
       visibleStats: Array.from(visibleStats).sort()
     });
@@ -1913,10 +1866,28 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     rows.push({ key: 'section_header_stages', type: 'section_header', label: 'Stages', id: 'stages', icon: Briefcase });
 
     if (expandedSections.has('stages')) {
-      for (const stage of allStages) {
+      let lastRenderedStage: any = null;
+      for (let stageIdx = 0; stageIdx < allStages.length; stageIdx++) {
+        const stage = allStages[stageIdx];
         const isApplicableToAnyTask = tasks.some(task => isStageApplicableToTask(stage, task, departments));
 
         if (showNAStages || isApplicableToAnyTask) {
+          // "Show Δ" — one row per gap between two rendered stage rows, showing the day-count
+          // between them per task (walking back through every stage since lastRenderedStage if
+          // this stage's immediate predecessor isn't dated yet). Same algorithm as
+          // reports/StandardReportView.tsx's Δ column — see computeStageDeltaDays.
+          if (showDelta && lastRenderedStage) {
+            const priorStages = allStages.slice(0, stageIdx);
+            rows.push({
+              key: `delta_${lastRenderedStage.id}_${stage.id}`,
+              label: 'Δ',
+              type: 'delta',
+              isSubRow: false,
+              getValue: (task: UtilTask) => computeStageDeltaDays(task, priorStages, stage)
+            });
+          }
+          lastRenderedStage = stage;
+
           rows.push({
             key: `stage_${stage.id}`,
             label: `${stage.name}`,
@@ -2049,7 +2020,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     });
 
     return rows
-  }, [stages, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage, departments])
+  }, [stages, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage, departments, showDelta])
 
   const handleStageDocumentUpload = useCallback((task: any, stage: any) => {
     const enrichedTask = {
@@ -2577,6 +2548,19 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     if (row.type === 'report_doc') {
       return renderReportDocCell(row, task, columnType || 'combined');
     }
+    // "Show Δ" row/column — day-gap between two stage dates (computeStageDeltaDays).
+    if (row.type === 'delta') {
+      const { days } = value as { days: number | null; bridgedFrom: any | null };
+      if (days === null) return <span className="text-slate-300 text-sm">—</span>;
+      return (
+        <span className={cn(
+          "text-sm font-bold tabular-nums",
+          days < 0 ? "text-red-600" : days > 30 ? "text-rose-500" : days > 14 ? "text-amber-500" : "text-slate-500"
+        )}>
+          {days >= 0 ? `+${days}d` : `${days}d`}
+        </span>
+      );
+    }
     // Handle field type
     if (row.type === 'field') {
       return renderFieldContent(row, value);
@@ -2673,6 +2657,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         onOfficerChange={isReadOnly ? undefined : updateTaskOfficer}
         readOnly={isReadOnly}
         onOpenRequirements={handleOpenRequirements}
+        showTime={showTime}
       />
     );
   };
@@ -3122,218 +3107,6 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     setSortConfig({ key, direction })
   }
 
-  const renderStaffTabs = () => {
-    if (activeFollowUpFilter === 'bcl' && activeSubdepartmentTab) {
-      return (
-        <div className="space-y-3">
-          {/* Manager Tabs */}
-          {subdepartmentManagers.length > 0 && (
-            <div>
-              <Label className="text-sm font-medium text-gray-700 mb-2 block">Task Managers</Label>
-              <div className="flex space-x-2 overflow-x-auto pb-2">
-                <Button
-                  variant={!activeManagerTab ? "default" : "outline"}
-                  onClick={() => setActiveManagerTab(null)}
-                  className="whitespace-nowrap text-sm"
-                  size="sm"
-                >
-                  All Managers
-                </Button>
-                {subdepartmentManagers.map((manager) => (
-                  <Button
-                    key={`manager-${manager.id}`}
-                    variant={activeManagerTab === manager.id ? "default" : "outline"}
-                    onClick={() => setActiveManagerTab(manager.id)}
-                    className="whitespace-nowrap text-sm flex items-center gap-2"
-                    size="sm"
-                  >
-                    {manager.name}
-                    <Badge variant="secondary" className="text-xs">
-                      {getTaskCountForManager(manager.id)}
-                    </Badge>
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Assistant Tabs - Show when a manager is selected */}
-          {activeManagerTab && (
-            <div>
-              <Label className="text-sm font-medium text-gray-700 mb-2 block">Task Assistants</Label>
-              <div className="flex space-x-2 overflow-x-auto pb-2">
-                <Button
-                  variant={!activeAssistantTab ? "default" : "outline"}
-                  onClick={() => setActiveAssistantTab(null)}
-                  className="whitespace-nowrap text-sm"
-                  size="sm"
-                >
-                  All Tasks (Manager + Assistants)
-                </Button>
-                <Button
-                  variant={activeAssistantTab === 'no-assistant' ? "default" : "outline"}
-                  onClick={() => setActiveAssistantTab('no-assistant')}
-                  className="whitespace-nowrap text-sm flex items-center gap-2"
-                  size="sm"
-                >
-                  No Assistant (Manager Only)
-                  <Badge variant="secondary" className="text-xs">
-                    {getTaskCountForManagerWithoutAssistant(activeManagerTab)}
-                  </Badge>
-                </Button>
-                {subdepartmentAssistants.map((assistant) => (
-                  <Button
-                    key={`assistant-${assistant.id}`}
-                    variant={activeAssistantTab === assistant.id ? "default" : "outline"}
-                    onClick={() => setActiveAssistantTab(assistant.id)}
-                    className="whitespace-nowrap text-sm flex items-center gap-2"
-                    size="sm"
-                  >
-                    {assistant.name}
-                    <Badge variant="secondary" className="text-xs">
-                      {getTaskCountForAssistant(assistant.id)}
-                    </Badge>
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Show assistant tabs without manager selection for overview */}
-          {!activeManagerTab && subdepartmentAssistants.length > 0 && (
-            <div>
-              <Label className="text-sm font-medium text-gray-700 mb-2 block">Task Assistants (All Managers)</Label>
-              <div className="flex space-x-2 overflow-x-auto pb-2">
-                <Button
-                  variant={!activeAssistantTab ? "default" : "outline"}
-                  onClick={() => setActiveAssistantTab(null)}
-                  className="whitespace-nowrap text-sm"
-                  size="sm"
-                >
-                  All Assistants
-                </Button>
-                {subdepartmentAssistants.map((assistant) => (
-                  <Button
-                    key={`assistant-${assistant.id}`}
-                    variant={activeAssistantTab === assistant.id ? "default" : "outline"}
-                    onClick={() => setActiveAssistantTab(assistant.id)}
-                    className="whitespace-nowrap text-sm flex items-center gap-2"
-                    size="sm"
-                  >
-                    {assistant.name}
-                    <Badge variant="secondary" className="text-xs">
-                      {getTaskCountForAssistant(assistant.id)}
-                    </Badge>
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* No staff message */}
-          {subdepartmentManagers.length === 0 && subdepartmentAssistants.length === 0 && (
-            <div className="text-center text-gray-500 text-sm py-4">
-              No BCL staff assigned to this subdepartment
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    if (activeFollowUpFilter === 'officer' && activeSubdepartmentTab) {
-      const stageOfficers = getOfficersFromOfficerFollowUpStages();
-
-      return (
-        <div className="space-y-3">
-          {/* Officer Dropdown - populated by stages with follow_up === 'officer' */}
-          <div>
-            <Label className="text-sm font-medium text-gray-700 mb-2 block">
-              Officers from Officer Follow-up Stages
-            </Label>
-            {stageOfficers.length > 0 ? (
-              <div className="flex items-center gap-2">
-                <Select
-                  value={activeOfficerTab || "all"}
-                  onValueChange={(value) => setActiveOfficerTab(value === "all" ? null : value)}
-                >
-                  <SelectTrigger className="w-[300px]">
-                    <SelectValue placeholder="Select an officer" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Officers</SelectItem>
-                    {stageOfficers.map((officer) => (
-                      <SelectItem key={officer.id} value={officer.id?.toString()}>
-                        <div className="flex items-center gap-2">
-                          <span>{officer.name || officer.display_name || officer.email}</span>
-                          <Badge variant="secondary" className="text-xs">
-                            {getTaskCountForOfficer(officer.id)}
-                          </Badge>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {activeOfficerTab && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setActiveOfficerTab(null)}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <div className="text-center text-gray-500 text-sm py-4 bg-amber-50 rounded-lg border border-amber-200">
-                No officers assigned to stages marked as "Officer" follow-up
-              </div>
-            )}
-          </div>
-
-          {/* Show subdepartment officers as fallback if no stage officers */}
-          {stageOfficers.length === 0 && subdepartmentOfficers.length > 0 && (
-            <div className="mt-3">
-              <Label className="text-sm font-medium text-gray-700 mb-2 block">
-                Subdepartment Officers (Fallback)
-              </Label>
-              <div className="flex space-x-2 overflow-x-auto pb-2">
-                <Button
-                  variant={!activeOfficerTab ? "default" : "outline"}
-                  onClick={() => setActiveOfficerTab(null)}
-                  className="whitespace-nowrap text-sm"
-                  size="sm"
-                >
-                  All Officers
-                </Button>
-                {subdepartmentOfficers.map((officer) => (
-                  <Button
-                    key={`officer-${officer.id}`}
-                    variant={activeOfficerTab === officer.id ? "default" : "outline"}
-                    onClick={() => setActiveOfficerTab(officer.id)}
-                    className="whitespace-nowrap text-sm flex items-center gap-2"
-                    size="sm"
-                  >
-                    {officer.name}
-                    {officer.isInherited && (
-                      <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200">
-                        Inherited
-                      </Badge>
-                    )}
-                    <Badge variant="secondary" className="text-xs">
-                      {getTaskCountForOfficer(officer.id)}
-                    </Badge>
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    return null;
-  };
-
   const handleNewEnquiryClick = () => {
     // Determine which dialog to open based on department entity types
     const currentDept = departments.find(d => String(d.id) === activeDepartmentTab);
@@ -3564,58 +3337,29 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     }
   }, [activeDepartmentTab, departments])
 
+  // Populates subdepartmentOfficers/Managers/Assistants — still consumed by getStaffName's
+  // userId->display-name resolution even though the old per-manager/assistant tab UI that used
+  // to also live here (activeManagerTab/activeAssistantTab, dead — no button ever set them) is
+  // gone.
   useEffect(() => {
     if (activeSubdepartmentTab && tmUsers.size > 0) {
       const staffData = getActiveStaffFromSubdepartment(activeSubdepartmentTab);
       setSubdepartmentOfficers(staffData.officers);
       setSubdepartmentManagers(staffData.managers);
       setSubdepartmentAssistants(staffData.assistants);
-
-      if (activeManagerTab && !activeAssistantTab) {
-        const managerAssistants = getAssistantsForManager(activeManagerTab);
-        if (managerAssistants.length === 1) {
-          setActiveAssistantTab(managerAssistants[0].id);
-        }
-      }
     } else {
       setSubdepartmentOfficers([]);
       setSubdepartmentManagers([]);
       setSubdepartmentAssistants([]);
     }
-  }, [
-    activeSubdepartmentTab,
-    activeManagerTab,
-    activeAssistantTab,
-    getActiveStaffFromSubdepartment,
-    tmUsers,
-    getAssistantsForManager
-  ]);
+  }, [activeSubdepartmentTab, getActiveStaffFromSubdepartment, tmUsers]);
 
+  // Reset perspective's person selection whenever the perspective itself changes — same as
+  // reports/page.tsx switching activePerspective clearing its own officer/manager tab.
   useEffect(() => {
-    if (activeManagerTab) {
-      const managerAssistants = getAssistantsForManager(activeManagerTab);
-      setSubdepartmentAssistants(managerAssistants);
-      if (managerAssistants.length === 1) {
-        setActiveAssistantTab(managerAssistants[0].id);
-      } else {
-        setActiveAssistantTab(null);
-      }
-    } else {
-      if (activeSubdepartmentTab && tmUsers.size > 0) {
-        const staffData = getActiveStaffFromSubdepartment(activeSubdepartmentTab);
-        setSubdepartmentAssistants(staffData.assistants);
-      } else {
-        setSubdepartmentAssistants([]);
-      }
-      setActiveAssistantTab(null);
-    }
-  }, [activeManagerTab, activeSubdepartmentTab, getAssistantsForManager, getActiveStaffFromSubdepartment, tmUsers]);
-
-  useEffect(() => {
-    setActiveOfficerTab(null);
-    setActiveManagerTab(null);
-    setActiveAssistantTab(null);
-  }, [activeFollowUpFilter]);
+    setActiveOfficerTab('all');
+    setActiveTaskManagerTab('all');
+  }, [activePerspective]);
 
   if (!departments.length) {
     return (
@@ -3632,26 +3376,24 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const activeSubDept = defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab);
   const activeStatus = {
     'enquiries': 'Enquiries',
+    'active': 'All Enquiry + WIP',
     'wip-stages': 'WIP Stages',
     'write_up_completed': 'Write Up Completed',
     'endorsed': 'Endorsement Completed'
   }[activeSubTab] || '';
 
-  let wipFilter = '';
-  if (activeSubTab === 'wip-stages') {
-    wipFilter = {
-      'all': 'All Follow-ups',
-      'bcl': 'BCL Follow-up',
-      'officer': 'Officer Follow-up',
-      'client': 'Client Follow-up'
-    }[activeFollowUpFilter] || '';
-  }
+  const activePerspectiveLabel = {
+    'overview': null,
+    'officers': 'Officers',
+    'managers': 'Managers',
+    'clients': 'Clients'
+  }[activePerspective];
 
   const breadcrumbParts = [
     activeDept?.name,
     activeSubDept?.name || (defaultSubdepartments.length > 0 ? 'All Subdepartments' : null),
     activeStatus,
-    (activeSubTab === 'wip-stages' ? wipFilter : null)
+    activePerspectiveLabel
   ].filter(Boolean);
 
   return (
@@ -3797,6 +3539,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
             <div className="flex gap-1.5">
               {[
                 { id: 'enquiries', label: 'Enquiries', count: enquiryTasks.length, active: 'bg-sky-600', badgeIdle: 'bg-sky-100 text-sky-700' },
+                { id: 'active', label: 'All Enquiry + WIP', count: activeEnquiryWipTasks.length, active: 'bg-teal-600', badgeIdle: 'bg-teal-100 text-teal-700' },
                 { id: 'wip-stages', label: 'WIP Stages', count: wipTasks.length, active: 'bg-amber-500', badgeIdle: 'bg-amber-100 text-amber-700' },
                 { id: 'write_up_completed', label: 'Write Up Completed', count: completedTasks.length, active: 'bg-emerald-600', badgeIdle: 'bg-emerald-100 text-emerald-700' },
                 { id: 'endorsed', label: 'Endorsed', count: endorsedTasks.length, active: 'bg-violet-600', badgeIdle: 'bg-violet-100 text-violet-700' },
@@ -3901,6 +3644,32 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
               {isAllExpanded ? 'Collapse All' : 'Expand All'}
             </Button>
           )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(
+              "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+              showTime ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+            )}
+            onClick={() => setShowTime(!showTime)}
+          >
+            <Clock className="h-3.5 w-3.5" />
+            {showTime ? 'Hide Time' : 'Show Time'}
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(
+              "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+              showDelta ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+            )}
+            onClick={() => setShowDelta(!showDelta)}
+          >
+            <GitCompare className="h-3.5 w-3.5" />
+            {showDelta ? 'Hide Δ' : 'Show Δ'}
+          </Button>
 
           <Button
             variant="outline"
@@ -4027,6 +3796,108 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         </div>
       </div>
 
+      {/* Overview/Officers/Managers/Clients perspective — layered on top of the status tab
+          above, same as reports/page.tsx's activePerspective + PersonFilterStrip. */}
+      {areTabsVisible && (
+        <div className="border-b border-slate-200 bg-white px-8 py-2.5 flex flex-col gap-2.5">
+          <div className="flex items-center gap-1.5">
+            {[
+              { id: 'overview' as const, label: 'Overview' },
+              { id: 'officers' as const, label: 'Officers', count: officerTaskCounts.all },
+              { id: 'managers' as const, label: 'Managers', count: taskManagerTaskCounts.all },
+              { id: 'clients' as const, label: 'Clients', count: clientsAwaitingCount },
+            ].map(p => {
+              const isActive = activePerspective === p.id
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => setActivePerspective(p.id)}
+                  className={cn(
+                    "h-8 px-3.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5",
+                    isActive ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-500 border border-slate-200 hover:border-slate-300 hover:text-slate-700"
+                  )}
+                >
+                  {p.label}
+                  {typeof p.count === 'number' && (
+                    <span className={cn(
+                      "font-normal tabular-nums px-1.5 py-0.5 rounded text-[11px] min-w-[1.25rem] text-center",
+                      isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                    )}>
+                      {p.count}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+
+          {activePerspective === 'officers' && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <Select value={officerFilterMode} onValueChange={(v) => setOfficerFilterMode(v as 'current' | 'history')}>
+                <SelectTrigger className="h-7 w-[180px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="current">Current Assignments</SelectItem>
+                  <SelectItem value="history">Historical Activity</SelectItem>
+                </SelectContent>
+              </Select>
+              <button
+                onClick={() => setActiveOfficerTab('all')}
+                className={cn("h-7 px-3 text-xs font-semibold rounded-md", activeOfficerTab === 'all' ? "bg-violet-100 text-violet-700" : "bg-slate-50 text-slate-500 hover:bg-slate-100")}
+              >
+                All ({officerTaskCounts.all})
+              </button>
+              {perspectiveDepartmentUsers.officers.map((o: any) => (
+                <button
+                  key={o.id}
+                  onClick={() => setActiveOfficerTab(o.id.toString())}
+                  className={cn("h-7 px-3 text-xs font-semibold rounded-md", activeOfficerTab === o.id.toString() ? "bg-violet-100 text-violet-700" : "bg-slate-50 text-slate-500 hover:bg-slate-100")}
+                >
+                  {getOfficerDisplayName(o)} ({officerTaskCounts[o.id.toString()] || 0})
+                </button>
+              ))}
+              {officerTaskCounts.__unallocated__ > 0 && (
+                <button
+                  onClick={() => setActiveOfficerTab('__unallocated__')}
+                  className={cn("h-7 px-3 text-xs font-semibold rounded-md", activeOfficerTab === '__unallocated__' ? "bg-amber-100 text-amber-700" : "bg-amber-50 text-amber-600 hover:bg-amber-100")}
+                >
+                  Unallocated ({officerTaskCounts.__unallocated__})
+                </button>
+              )}
+            </div>
+          )}
+
+          {activePerspective === 'managers' && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => setActiveTaskManagerTab('all')}
+                className={cn("h-7 px-3 text-xs font-semibold rounded-md", activeTaskManagerTab === 'all' ? "bg-indigo-100 text-indigo-700" : "bg-slate-50 text-slate-500 hover:bg-slate-100")}
+              >
+                All ({taskManagerTaskCounts.all})
+              </button>
+              {perspectiveDepartmentUsers.managers.map((m: any) => (
+                <button
+                  key={m.id}
+                  onClick={() => setActiveTaskManagerTab(m.id.toString())}
+                  className={cn("h-7 px-3 text-xs font-semibold rounded-md", activeTaskManagerTab === m.id.toString() ? "bg-indigo-100 text-indigo-700" : "bg-slate-50 text-slate-500 hover:bg-slate-100")}
+                >
+                  {getOfficerDisplayName(m)} ({taskManagerTaskCounts[m.id.toString()] || 0})
+                </button>
+              ))}
+              {taskManagerTaskCounts.__unallocated__ > 0 && (
+                <button
+                  onClick={() => setActiveTaskManagerTab('__unallocated__')}
+                  className={cn("h-7 px-3 text-xs font-semibold rounded-md", activeTaskManagerTab === '__unallocated__' ? "bg-amber-100 text-amber-700" : "bg-amber-50 text-amber-600 hover:bg-amber-100")}
+                >
+                  Unallocated ({taskManagerTaskCounts.__unallocated__})
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Content Area */}
       <div className="flex-1">
         {activeDept && (
@@ -4123,6 +3994,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                 tableType={activeTabTitle}
                 ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
                 stages={stages}
+                showDelta={showDelta}
                 companies={companies}
                 visibleHeaders={visibleHeaders}
                 visibleStageIds={visibleStageIds}

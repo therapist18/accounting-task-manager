@@ -7,13 +7,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, ArrowLeftRight, Layers, AlertTriangle, Edit, X, RefreshCw, Trash2 } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, ArrowLeftRight, Layers, AlertTriangle, Edit, X, RefreshCw, Trash2, ExternalLink } from "lucide-react";
 import { differenceInDays } from "date-fns";
 import { cn } from "@/lib/utils";
-import { formatDateCell, formatEstimatedMins } from "../../reports/components/reportCellRenderers";
-import { parseDateSafe } from "../../reports/utils/reportStageLogic";
+import { formatDateCell, formatEstimatedMins } from "./reportCellRenderers";
+import { parseDateSafe } from "../utils/reportStageLogic";
 import { getSubDepartmentDisplay, getClassDisplay, getSubClassDisplay, getCompanyPrefixFromParticipants, getSponsorName } from "../../tasks/overall-view/tableUtils";
+import { getLinkedDocumentsForTaskStage } from "../../tasks/utils/taskManagerData";
 import { SUMMARY_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS } from "../stageColumnConfig";
+import EditableStageCell from "../../tasks/components/EditableStageCell";
 
 const DEFAULT_COL_WIDTH = 170;
 const INDEX_COL_WIDTH = 48;
@@ -218,6 +221,7 @@ const RowActionsCell = ({ task, onEditTask, onRequestCancel, onRequestUncancel, 
 export function SummaryTable({
   tasks, companies, departments = [],
   activeDeptId = 'all',
+  activeSubDeptId = 'all',
   showEmptyGroups = true,
   showTime = false, showDelta = false,
   sortConfig, handleSort,
@@ -227,11 +231,17 @@ export function SummaryTable({
   getCurrentStageNameForTask,
   visibleColumnIds = DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS,
   onEditTask, onRequestCancel, onRequestUncancel, onRequestDelete,
+  allDocuments = [],
+  kycDocuments = new Map(),
+  stagesByDept = new Map(),
+  dynamicStageColumns = [],
+  getKycFields,
 }: {
   tasks: any[];
   companies: Map<number, { name: string; prefix: string }>;
   departments?: any[];
   activeDeptId?: string;
+  activeSubDeptId?: string;
   showEmptyGroups?: boolean;
   showTime?: boolean;
   showDelta?: boolean;
@@ -249,11 +259,24 @@ export function SummaryTable({
   onRequestCancel?: (task: any) => void;
   onRequestUncancel?: (task: any) => void;
   onRequestDelete?: (task: any) => void;
+  dynamicStageColumns?: any[];
+  getKycFields?: (doc: any) => Promise<any[]>;
 }) {
-  const columns = useMemo(() => SUMMARY_COLUMNS.filter(c => visibleColumnIds.includes(c.id)), [visibleColumnIds]);
+  // dynamicStageColumns (built by page.tsx from the applied report's non-milestone stage
+  // selections, see stageColumnConfig.ts's 'report_stage' column type) are appended after the
+  // static SUMMARY_COLUMNS so a report's arbitrary stage picks get their own columns instead of
+  // being silently dropped.
+  const columns = useMemo(
+    () => [...SUMMARY_COLUMNS, ...dynamicStageColumns].filter(c => visibleColumnIds.includes(c.id)),
+    [visibleColumnIds, dynamicStageColumns]
+  );
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
+  const [pendingRedirectTask, setPendingRedirectTask] = useState<any>(null);
+
+  // Stages lookup for EditableStageCell in milestone columns
+  const tasksStagesByDept = stagesByDept;
 
   // Group (sub-department) headers pin directly beneath the sticky column header instead of
   // just being a divider line — measured (not hardcoded) so it stays correct if the header
@@ -334,10 +357,15 @@ export function SummaryTable({
     const milestoneDates: Record<string, string | null> = {};
     const milestoneDateObjs: Record<string, Date | null> = {};
     columns.forEach(col => {
-      if (col.type !== 'milestone') return;
-      const raw = resolveMilestoneDate(task, col.milestone.stageId);
-      milestoneDates[col.milestone.key] = raw;
-      milestoneDateObjs[col.milestone.key] = raw ? parseDateSafe(raw) : null;
+      if (col.type === 'milestone') {
+        const raw = resolveMilestoneDate(task, col.milestone.stageId);
+        milestoneDates[col.milestone.key] = raw;
+        milestoneDateObjs[col.milestone.key] = raw ? parseDateSafe(raw) : null;
+      } else if (col.type === 'report_stage') {
+        const raw = resolveMilestoneDate(task, col.reportStage.stageId);
+        milestoneDates[col.id] = raw;
+        milestoneDateObjs[col.id] = raw ? parseDateSafe(raw) : null;
+      }
     });
     return { task, milestoneDates, milestoneDateObjs };
   }), [tasks, columns]);
@@ -416,6 +444,13 @@ export function SummaryTable({
   }, [paginatedRows, departments, orderedSubDeptNames, subDeptTotalCounts, showEmptyGroups]);
 
   const sectionedRows = useMemo(() => {
+    // When a specific sub-department is selected, skip section grouping entirely — just
+    // render a flat list of rows. The user already filtered to this sub-department via the
+    // tab, so showing a section header for it is redundant.
+    if (activeSubDeptId && activeSubDeptId !== 'all') {
+      return paginatedRows.map((row, i) => ({ type: 'row' as const, row, globalIdx: i }));
+    }
+
     const result: ({ type: 'section'; name: string; count: number } | { type: 'empty'; name: string } | { type: 'row'; row: any; globalIdx: number })[] = [];
     let globalIdx = 0;
     for (const group of subDeptGroups) {
@@ -427,11 +462,18 @@ export function SummaryTable({
       }
     }
     return result;
-  }, [subDeptGroups]);
+  }, [subDeptGroups, activeSubDeptId, paginatedRows]);
 
   const resolveCellValue = (col: any, task: any): React.ReactNode => {
     if (col.id === 'current_stage') return getCurrentStageNameForTask?.(task) ?? null;
     if (col.type === 'field') return resolveFieldValue(col.id, task, companies, enhancedTasksData, departments);
+    if (col.type === 'report_field' && col.reportField) {
+      const { stageId, kycId, fieldName } = col.reportField;
+      const linkedDocs = getLinkedDocumentsForTaskStage(task, { id: stageId }, allDocuments);
+      const doc: any = linkedDocs.find((d: any) => d.document_id === kycId) || linkedDocs[0];
+      const value = doc?.extracted_details?.[fieldName] ?? doc?.edited_details?.[fieldName] ?? doc?.extracted_data?.[fieldName];
+      return value !== null && value !== undefined && value !== '' ? String(value) : null;
+    }
     if (col.type === 'computed_time') {
       if (col.id === 'promised_time') {
         const resolution = getPromisedTimeResolutionForTask?.(task);
@@ -641,7 +683,7 @@ export function SummaryTable({
                     <TableRow
                       key={task.id}
                       className={cn("group border-0 transition-colors cursor-pointer", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "hover:bg-blue-50/50")}
-                      onClick={() => window.open(buildTaskManagerHref(task), '_blank', 'noopener,noreferrer')}
+                      onClick={() => setPendingRedirectTask(task)}
                     >
                       <TableCell className={cn("sticky left-0 z-20 border-r border-b border-slate-200 text-center py-2.5", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "group-hover:bg-blue-50/50")}>
                         <span className="text-sm font-semibold text-slate-400 group-hover:text-slate-600 transition-colors">
@@ -702,8 +744,32 @@ export function SummaryTable({
                         const isSticky = !!col.sticky;
                         const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
                         let value: React.ReactNode;
-                        if (col.type === 'milestone') {
-                          value = formatDateCell(milestoneDates[col.milestone.key], showTime);
+                        if ((col.type === 'milestone' || col.type === 'report_stage') && (col.milestone || col.reportStage)) {
+                          const stageId = col.milestone?.stageId || col.reportStage?.stageId;
+                          const stage = tasksStagesByDept.get(task.department_id?.toString())?.find((s: any) => s.id === stageId);
+                          if (stage) {
+                            const stageData = task.stages?.[stage.id];
+                            const cellValue = stageData?.date || stageData?.completedAt || stageData?.status || null;
+                            const linkedDocs = getLinkedDocumentsForTaskStage(task, stage, allDocuments);
+
+                            value = (
+                              <EditableStageCell
+                                stage={stage}
+                                stages={tasksStagesByDept.get(task.department_id?.toString()) || []}
+                                task={task}
+                                value={cellValue}
+                                allDocuments={allDocuments}
+                                linkedDocuments={linkedDocs}
+                                departments={departments}
+                                getKycFields={getKycFields}
+                                readOnly={true}
+                                renderMode="combined"
+                                showTime={showTime}
+                              />
+                            );
+                          } else {
+                            value = formatDateCell(milestoneDates[col.milestone?.key ?? col.id], showTime);
+                          }
                         } else {
                           value = resolveCellValue(col, task);
                         }
@@ -797,6 +863,36 @@ export function SummaryTable({
           </div>
         </div>
       </div>
+
+      <AlertDialog open={!!pendingRedirectTask} onOpenChange={(open) => { if (!open) setPendingRedirectTask(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <ExternalLink className="h-4 w-4 text-custom-blue" />
+              Open Task in New Tab
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRedirectTask && (
+                <>You are about to open <span className="font-semibold text-slate-900">{pendingRedirectTask.job_description || `Task #${pendingRedirectTask.id}`}</span> in the Task Manager. Continue?</>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-custom-blue hover:bg-[#2d5a94] text-white"
+              onClick={() => {
+                if (pendingRedirectTask) {
+                  window.open(buildTaskManagerHref(pendingRedirectTask), '_blank', 'noopener,noreferrer');
+                }
+                setPendingRedirectTask(null);
+              }}
+            >
+              Open Task
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

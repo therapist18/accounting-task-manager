@@ -10,7 +10,7 @@ import { Loader2, FileText, Save, RefreshCw, Star } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { fetchTemplateById, updateTemplate, setDefaultTemplateVariant, CcTemplate } from '../utils/ccTemplate';
-import { resolveCompanyRole } from '../utils/ccPlaceholderAdapter';
+import { resolveCompanyRole } from '../utils/ccResolver';
 import { extractPlaceholders, mergePlaceholders } from '../../templates/document-template-manager/utils';
 import { useTemplateData } from '../../templates/document-template-manager/hooks/useTemplateData';
 import { PlaceholderPanel } from '../../templates/document-template-manager/components/PlaceholderPanel';

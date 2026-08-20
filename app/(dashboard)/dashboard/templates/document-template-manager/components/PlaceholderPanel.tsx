@@ -318,7 +318,7 @@ export function PlaceholderPanel({
     return (
       <CardContent className="flex-1 overflow-y-auto min-h-[400px]">
         {hasFiltered ? (
-          <div className="h-[950px] overflow-auto">
+          <div className="h-full overflow-auto">
             <Table className="border">
               <TableHeader className="bg-gray-100 dark:bg-slate-800 sticky top-0 z-10">
                 <TableRow>

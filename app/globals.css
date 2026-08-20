@@ -7,9 +7,11 @@
     font-size: 16px;
   }
 
-  /* High-density enterprise layout */
+  /* High-density enterprise layout — internal staff dashboards only.
+     Skipped when html carries .cv-portal-view (the public-facing CV
+     Client Portal), which needs normal, candidate-friendly text sizing. */
   @media (min-width: 1024px) {
-    html {
+    html:not(.cv-portal-view) {
       font-size: 11px;
     }
   }

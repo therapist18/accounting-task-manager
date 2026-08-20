@@ -226,6 +226,15 @@ export default function ReportsPage() {
         const depts = await fetchDepartments();
         setDepartments(depts);
 
+        // Seed activeDeptId here, independent of whether any report exists yet —
+        // it previously only got set inside refreshData(), which itself refuses to run
+        // without an activeReport. With zero memorized reports (or none matching this
+        // user), activeDeptId stayed "" forever, so the `department` prop passed to
+        // MemorizedReportDialog resolved to null and its fetch effect never fired.
+        const seedReport = usersDefaultReport || reports?.[0];
+        const seedDeptId = seedReport?.department_id?.toString() || (depts.length > 0 ? depts[0].id.toString() : '');
+        if (seedDeptId) setActiveDeptId(seedDeptId);
+
         const unifiedUserData = await userService.getAllUserData({ payrollAccess: true }, depts);
         setUnifiedOfficers(unifiedUserData.officers || []);
         setUnifiedManagers(unifiedUserData.managers || []);

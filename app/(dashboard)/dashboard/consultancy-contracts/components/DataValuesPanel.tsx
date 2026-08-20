@@ -10,20 +10,22 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Loader2, RotateCcw, Database, PenLine, Building2, FileText, AlertCircle, ImageIcon, UploadCloud, Plus, X, AlignLeft, AlignCenter, AlignRight, Expand } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { EcPlaceholder } from '../../employment-contracts/utils/ecPlaceholders';
+import type { Placeholder } from '../../templates/document-template-manager/types';
 import { MasterFieldEditControl } from '../../employment-contracts/components/MasterFieldEditControl';
 import type { JobField } from '../../master-fields/components/types/database';
 import { UploadModal } from '@/app/generic-components/UploadModal';
-import { resolveCompanyRole } from '../utils/ccPlaceholderAdapter';
+import { resolveCompanyRole } from '../utils/ccResolver';
 import { blockImageFieldKey, type ImageStyle, type ImageStyleMap } from '../utils/imageStyles';
+
+type CcPlaceholder = Placeholder & { key: string };
 
 interface DataValuesPanelProps {
   companySelected: boolean;
   loading: boolean;
-  placeholders: EcPlaceholder[];
+  placeholders: CcPlaceholder[];
   // Full placeholder list including block parents (used to derive block
   // configurations for array rendering).
-  allPlaceholders?: EcPlaceholder[];
+  allPlaceholders?: CcPlaceholder[];
   // Values resolved from linked master fields for the selected company.
   resolvedValues: Record<string, string>;
   // Resolved array/block data — block name → array of row objects keyed by
@@ -111,7 +113,7 @@ export function DataValuesPanel({
   }, [scopedPlaceholders, dataFilter, placeholderIsMissing]);
 
   const grouped = useMemo(() => {
-    const groups = new Map<string, EcPlaceholder[]>();
+    const groups = new Map<string, CcPlaceholder[]>();
     for (const p of dataFilteredPlaceholders) {
       if (!groups.has(p.group_label)) groups.set(p.group_label, []);
       groups.get(p.group_label)!.push(p);
@@ -259,7 +261,7 @@ function PlaceholderRow({
   placeholder: p, resolvedValue, overrideValue, isMissing, masterFields, companyId, onOverride, onRefresh,
   imageStyle, onImageStyleChange,
 }: {
-  placeholder: EcPlaceholder;
+  placeholder: CcPlaceholder;
   resolvedValue: string;
   overrideValue: string | undefined;
   isMissing: boolean;
@@ -542,7 +544,7 @@ function ArrayBlockSection({
   blockName: string;
   blockLabel: string;
   entityLabel: string;
-  childrenPlaceholders: EcPlaceholder[];
+  childrenPlaceholders: CcPlaceholder[];
   rows: Record<string, string>[];
   masterFields: Map<number, JobField>;
   companyId: string | null;

@@ -7,8 +7,8 @@ import { ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, LayoutGrid, Rows3, Clock
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { formatDateCell, formatEstimatedMins } from "../../reports/components/reportCellRenderers";
-import { getCanonicalCurrentStage, isStageApplicableToTask, parseDateSafe } from "../../reports/utils/reportStageLogic";
+import { formatDateCell, formatEstimatedMins } from "../../summary-reports/components/reportCellRenderers";
+import { getCanonicalCurrentStage, isStageApplicableToTask, parseDateSafe } from "../../summary-reports/utils/reportStageLogic";
 import { MILESTONE_STAGE_COLUMNS } from "../../summary-reports/stageColumnConfig";
 import { getCompanyPrefixFromParticipants, getSponsorName } from "../../tasks/overall-view/tableUtils";
 

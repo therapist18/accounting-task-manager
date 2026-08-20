@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { executeComputedField } from '../tasks/utils/automationComputedFunctions';
 import { parseJsonValue, processTextField, formatDate, processCurrentDateField, writeMasterFieldSourceValue, pickMasterFieldSource } from '../master-fields/utils/masterFieldValueResolver';
+import { getTargetEntity, processOrdinalField, processConditionalField, processBooleanField, processDocumentChecklistField, processImageField, isValidValue, processPlaceholderValue, getCompanyRegistryCandidates, computeRowCalculation, sumBlockField } from './utils/placeholderProcessors';
 import { PreviewPanel } from './components/PreviewPanel';
 import { UploadModal } from '@/app/generic-components/UploadModal';
 import { SearchableSelect } from '@/components/ui/searchable-select';
@@ -358,26 +359,6 @@ const findPrimaryDirector = (relationshipData) => {
     return directors.find(d => d.is_primary) || directors[0];
 };
 
-const getOrdinalNumber = (index: number): string => {
-    const num = index + 1;
-
-    if (num % 100 >= 11 && num % 100 <= 13) {
-        return `${num}th`;
-    }
-
-    switch (num % 10) {
-        case 1: return `${num}st`;
-        case 2: return `${num}nd`;
-        case 3: return `${num}rd`;
-        default: return `${num}th`;
-    }
-};
-
-const getOrdinalWord = (index: number): string => {
-    const words = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth'];
-    return words[index] || getOrdinalNumber(index);
-};
-
 const parseImageDimension = (dimension: string | undefined): number | null => {
     if (!dimension) return null;
 
@@ -387,763 +368,6 @@ const parseImageDimension = (dimension: string | undefined): number | null => {
     if (isNaN(numericValue)) return null;
 
     return numericValue;
-};
-
-const checkDocumentStatus = (
-    documentId: string,
-    entityId: string,
-    entityType: string,
-    sourceDataCache: Record<string, Record<number, any>>,
-    dataSourceConfig?: {
-        table: string;
-        linking_variable: string;
-        document_id_field: string;
-    }
-): boolean => {
-    // Use provided config or fallback to defaults
-    const config = dataSourceConfig || {
-        table: 'acc_portal_kyc_uploads',
-        linking_variable: entityType === 'company' ? 'company_id' : 'individual_id',
-        document_id_field: 'document_id'
-    };
-    const uploads = sourceDataCache[config.table] || {};
-    const documentFound = Object.values(uploads).some(upload => {
-        const uploadDocId = upload[config.document_id_field];
-        const uploadEntityId = upload[config.linking_variable];
-        return uploadDocId === documentId && uploadEntityId === entityId;
-    });
-    return documentFound;
-};
-
-const generateDocumentChecklist = (
-    placeholder: any,
-    entityId: string,
-    entityType: string,
-    sourceDataCache: Record<string, Record<number, any>>,
-    availableDocuments: Array<{ id: string; display_name: string; name: string }>
-): string => {
-    const linkedDocs = placeholder.linked_document_ids || [];
-    const format = placeholder.checklist_display_format || 'checkboxes';
-    const dataSourceConfig = placeholder.checklist_data_source;
-    if (linkedDocs.length === 0) {
-        return '';
-    }
-    const checklist = linkedDocs.map(docId => {
-        const doc = availableDocuments.find(d => d.id === docId);
-        const isFound = checkDocumentStatus(
-            docId,
-            entityId,
-            entityType,
-            sourceDataCache,
-            dataSourceConfig
-        );
-
-        const docName = doc?.display_name || doc?.name || 'Unknown Document';
-        const symbol = isFound ? '✓' : '';
-
-        switch (format) {
-            case 'bullets':
-                return `• ${docName}${isFound ? ' ✓' : ''}`;
-            case 'table':
-                return `| ${symbol} | ${docName} | ${isFound ? 'Submitted' : 'Pending'} |`;
-            default: // checkboxes
-                return `${symbol}`;
-        }
-    });
-
-    if (format === 'table') {
-        return `| Status | Document | Notes |\n|--------|----------|-------|\n${checklist.join('\n')}`;
-    }
-
-    return checklist.join('\n');
-};
-
-const getCompanyRegistryCandidates = (normType, companyAssociates) => {
-    if (!companyAssociates?.length || !normType) return [];
-    return companyAssociates.filter((ind: any) =>
-        (ind.associations || []).some((a: any) => a.individual_type?.toLowerCase()?.includes(normType))
-    );
-};
-
-const resolveCompanyRegistryFallback = (normType, companyAssociates, entityOverrides) => {
-    const candidates = getCompanyRegistryCandidates(normType, companyAssociates);
-    if (candidates.length === 0) return null;
-    const overrideId = entityOverrides?.[normType];
-    return (overrideId && candidates.find((c: any) => String(c.id) === String(overrideId))) || candidates[0];
-};
-
-const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourceArray = null, entityIdMap = null, combinedCache = null, extractedData = null, companyData = null, companyAssociates = null, entityOverrides = null) => {
-    if (sourceArray && arrayIndex !== null && sourceArray[arrayIndex]) {
-        return sourceArray[arrayIndex];
-    }
-
-    let entityType = 'company';
-    if (Array.isArray(placeholder.entity_type)) {
-        entityType = placeholder.entity_type[0];
-    } else if (placeholder.entity_type) {
-        entityType = placeholder.entity_type;
-    }
-    const normType = entityType?.toLowerCase()?.trim();
-
-    const resolveFromTaskParticipants = () => {
-        if (entityIdMap) {
-            if (normType === 'director' && entityIdMap.director) {
-                const dirId = entityIdMap.director;
-                return relationshipData?.directors?.find(d => String(d.id) === String(dirId)) ||
-                    combinedCache?.['registry_individuals']?.[dirId];
-            }
-            if (normType === 'principal' && entityIdMap.principal) {
-                return relationshipData?.principal || extractedData;
-            }
-            if (normType === 'shareholder' && entityIdMap.shareholder) {
-                const shareId = entityIdMap.shareholder;
-                return relationshipData?.shareholders?.find(s => String(s.id) === String(shareId)) ||
-                    combinedCache?.['registry_individuals']?.[shareId];
-            }
-            if (normType === 'employee' && entityIdMap.employee) {
-                const empId = entityIdMap.employee;
-                return relationshipData?.employees?.find(e => String(e.id) === String(empId)) ||
-                    combinedCache?.['employment_data']?.[empId];
-            }
-            if (normType === 'understudy' && entityIdMap.understudy) {
-                const underId = entityIdMap.understudy;
-                return relationshipData?.understudies?.find(u => String(u.id) === String(underId)) ||
-                    combinedCache?.['registry_individuals']?.[underId];
-            }
-        }
-        if (normType === 'principal') {
-            return relationshipData?.principal || extractedData;
-        }
-
-        if (normType === 'sponsor') {
-            if (entityIdMap?.sponsor) {
-                if (relationshipData?.sponsor && String(relationshipData.sponsor.id) === String(entityIdMap.sponsor)) {
-                    return relationshipData.sponsor;
-                }
-            }
-            return relationshipData?.sponsor || null;
-        }
-
-        if (['dependant', 'spouse', 'child'].includes(normType)) {
-            if (placeholder.dependant_relationship?.[0]) {
-                const targetRel = placeholder.dependant_relationship[0].toLowerCase();
-                return relationshipData?.dependants?.find(d => d.relationship?.toLowerCase() === targetRel);
-            }
-            return relationshipData?.dependants?.[0];
-        }
-
-        if (normType === 'director') {
-            return placeholder.director_type === 'primary'
-                ? relationshipData?.directors?.find(d => d.is_primary)
-                : relationshipData?.directors?.[0];
-        }
-
-        if (normType === 'company') {
-            return relationshipData?.company || companyData || extractedData;
-        }
-
-        // Generic third-party role lookup (e.g. signatory, approver, witness)
-        if (entityIdMap && entityIdMap[normType]) {
-            const tpId = entityIdMap[normType];
-            return relationshipData?.directors?.find(d => String(d.id) === String(tpId)) ||
-                combinedCache?.['registry_individuals']?.[tpId] ||
-                combinedCache?.['employment_data']?.[tpId] ||
-                companyAssociates?.find((c: any) => String(c.id) === String(tpId));
-        }
-
-        return null;
-    };
-
-    const taskResult = resolveFromTaskParticipants();
-    if (taskResult) return taskResult;
-
-    if (normType && normType !== 'company') {
-        const fallback = resolveCompanyRegistryFallback(normType, companyAssociates, entityOverrides);
-        if (fallback) return fallback;
-
-        const fallbackLower = String(normType).toLowerCase().trim();
-        const companyRegistries = ['registry_individuals', 'employment_data'];
-        for (const reg of companyRegistries) {
-            if (!combinedCache?.[reg]) continue;
-            for (const item of Object.values(combinedCache[reg])) {
-                const matches = item.associations?.some((a: any) =>
-                    a.individual_type?.toLowerCase().includes(fallbackLower)
-                );
-                if (matches) return item;
-            }
-        }
-    }
-
-    return null;
-};
-
-const processOrdinalField = (placeholder, arrayIndex) => {
-    const ordinalFormat = placeholder.ordinal_format || 'number';
-
-    if (ordinalFormat === 'word') {
-        return {
-            value: getOrdinalWord(arrayIndex),
-            source: 'Ordinal Generator'
-        };
-    } else if (ordinalFormat === 'custom') {
-        const customFormat = placeholder.custom_ordinal_format || '.';
-        const num = arrayIndex + 1;
-        return {
-            value: `${num}${customFormat}`,
-            source: 'Custom Ordinal Generator'
-        };
-    } else {
-        return {
-            value: getOrdinalNumber(arrayIndex),
-            source: 'Ordinal Generator'
-        };
-    }
-};
-
-const evaluateComparisonClause = (clause, targetEntity, targetId, combinedCache, masterFields, computedFieldCache) => {
-    const { field, operator, value: compareValue, master_field_id } = clause;
-    if (!field && !master_field_id) return false;
-
-    let fieldValue = null;
-
-    if (master_field_id) {
-        const mf = masterFields.get(parseInt(master_field_id, 10));
-        if (!mf) {
-            console.log(`[cond-debug] master_field_id=${master_field_id} not found in masterFields map`);
-        } else if (!mf?.sources?.length) {
-            console.log(`[cond-debug] master_field_id=${master_field_id} (${mf.label || mf.field_key}) has no sources configured`);
-        }
-        if (mf?.sources) {
-            for (const source of mf.sources) {
-                // Handle computed fields
-                if (source.is_computed && computedFieldCache) {
-                    const extractionMode = 'latest';
-                    const cacheKey = `${mf.id}_${targetId}_${extractionMode}`;
-                    const computedVal = computedFieldCache[cacheKey];
-
-                    if (computedVal !== undefined && computedVal !== null && computedVal !== '' &&
-                        !['Document Not Found', 'Missing Document', 'Field Not Found', 'Missing', 'No Source'].includes(computedVal)) {
-                        fieldValue = computedVal;
-                        break;
-                    }
-                    continue;
-                }
-
-                // Handle regular database fields
-                const tableData = combinedCache[source.table];
-                if (!tableData) {
-                    console.log(`[cond-debug] master_field_id=${master_field_id}: table "${source.table}" not in combinedCache (never fetched) - targetId=${targetId}`);
-                    continue;
-                }
-
-                const linkingVar = source.linking_variable || 'id';
-                const docIds: string[] = Array.isArray(source.document_id)
-                    ? source.document_id
-                    : (source.document_id ? [source.document_id] : []);
-                const record = Object.values(tableData).find(rec => {
-                    if (String(rec[linkingVar] || rec.id) !== targetId) return false;
-                    return docIds.length === 0 || docIds.includes(rec.document_id);
-                });
-
-                if (!record) {
-                    console.log(`[cond-debug] master_field_id=${master_field_id}: no row in "${source.table}" matching ${linkingVar}=${targetId}${docIds.length ? ` + document_id in [${docIds.join(',')}]` : ''}`);
-                    continue;
-                }
-
-                if (record) {
-                    fieldValue = source.path
-                        ? parseJsonValue(record, source.path)
-                        : record[field || mf.field_key];
-
-                    if (fieldValue && typeof fieldValue === 'object') {
-                        fieldValue = fieldValue.number || fieldValue.value || fieldValue.name || String(fieldValue);
-                    }
-                    console.log(`[cond-debug] master_field_id=${master_field_id}: field "${field || mf.field_key}" on "${source.table}" = ${JSON.stringify(fieldValue)}`);
-                    break;
-                }
-            }
-        }
-    } else {
-        fieldValue = targetEntity[field];
-        console.log(`[cond-debug] direct field "${field}" on targetEntity = ${JSON.stringify(fieldValue)}`);
-    }
-
-    if (fieldValue === null || fieldValue === undefined) return false;
-
-    const strFieldValue = String(fieldValue).trim().toLowerCase();
-    const strCompareValue = String(compareValue || '').trim().toLowerCase();
-
-    let result;
-    switch (operator) {
-        case 'equals': result = strFieldValue === strCompareValue; break;
-        case 'not_equals': result = strFieldValue !== strCompareValue; break;
-        case 'contains': result = strFieldValue.includes(strCompareValue); break;
-        default: result = Boolean(fieldValue);
-    }
-    console.log(`[cond-debug] "${strFieldValue}" ${operator} "${strCompareValue}" -> ${result}`);
-    return result;
-};
-
-const processConditionalField = (placeholder, targetEntity, combinedCache, masterFields, computedFieldCache) => {
-    if (!placeholder.conditions || !targetEntity) return { value: '', source: null };
-
-    const targetId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
-
-    for (const condition of placeholder.conditions) {
-        if (condition.comparison) {
-            const primaryClause = {
-                ...condition.comparison,
-                master_field_id: condition.comparison.master_field_id ?? condition.master_field_id,
-            };
-            const clauses = [primaryClause, ...(condition.additional_comparisons || [])];
-            const allMatch = clauses.every(clause =>
-                evaluateComparisonClause(clause, targetEntity, targetId, combinedCache, masterFields, computedFieldCache)
-            );
-
-            if (allMatch) {
-                return {
-                    value: condition.label || '',
-                    source: 'Conditional Match'
-                };
-            }
-        } else if (condition.master_field_id) {
-            const mf = masterFields.get(parseInt(condition.master_field_id, 10));
-            if (!mf?.sources) continue;
-
-            for (const source of mf.sources) {
-                // Handle computed fields
-                if (source.is_computed && computedFieldCache) {
-                    const extractionMode = 'latest';
-                    const cacheKey = `${mf.id}_${targetId}_${extractionMode}`;
-                    const computedVal = computedFieldCache[cacheKey];
-
-                    if (computedVal !== undefined && computedVal !== null && computedVal !== '' &&
-                        !['Document Not Found', 'Missing Document', 'Field Not Found', 'Missing', 'No Source'].includes(computedVal)) {
-                        return {
-                            value: `${condition.label || ''}${computedVal}`,
-                            source: `Conditional: ${mf.label || 'Computed'}`
-                        };
-                    }
-                    continue;
-                }
-
-                // Handle regular database fields
-                const tableData = combinedCache[source.table];
-                if (!tableData) continue;
-
-                const linkingVar = source.linking_variable || 'id';
-                const docIds: string[] = Array.isArray(source.document_id)
-                    ? source.document_id
-                    : (source.document_id ? [source.document_id] : []);
-                const record = Object.values(tableData).find(rec => {
-                    if (String(rec[linkingVar] || rec.id) !== targetId) return false;
-                    return docIds.length === 0 || docIds.includes(rec.document_id);
-                });
-
-                if (record) {
-                    let rawVal = source.path
-                        ? parseJsonValue(record, source.path)
-                        : record[condition.tag || mf.field_key];
-
-                    if (rawVal && typeof rawVal === 'object') {
-                        rawVal = rawVal.number || rawVal.value || rawVal.name || JSON.stringify(rawVal);
-                    }
-
-                    if (rawVal && String(rawVal).trim() !== '' && String(rawVal) !== '[object Object]') {
-                        return {
-                            value: `${condition.label || ''}${rawVal}`,
-                            source: `Conditional: ${mf.label || source.table}`
-                        };
-                    }
-                }
-            }
-        }
-    }
-    return { value: '', source: null };
-};
-
-const processBooleanField = (placeholder, targetEntity, combinedCache, masterFields, task) => {
-    if (!placeholder.boolean_conditions) return { value: [], source: null };
-
-    const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
-    const taskRecord = (combinedCache?.['tm_tasks'] && Object.values(combinedCache['tm_tasks'])[0]) || task;
-    const jobAnswers = taskRecord?.job_specific_answers || {};
-
-    const results = placeholder.boolean_conditions.map(condition => {
-        let isChecked = false;
-
-        // 1. Job Questions (Keep existing)
-        const qId = condition.linked_job_question_id || placeholder.linked_job_question_id;
-        if (qId && jobAnswers[qId]) {
-            const actualAnswer = String(jobAnswers[qId]).trim().toLowerCase();
-            const targetValue = String(condition.comparison?.value || '').trim().toLowerCase();
-            if (condition.comparison?.operator === 'equals') isChecked = actualAnswer === targetValue;
-            else if (condition.comparison?.operator === 'contains') isChecked = actualAnswer.includes(targetValue);
-        }
-        // 2. Master Field Logic
-        else if (condition.master_field_id && targetId) {
-            const mf = masterFields.get(parseInt(condition.master_field_id, 10));
-            if (mf?.sources) {
-                for (const source of mf.sources) {
-                    const tableData = combinedCache[source.table];
-                    if (!tableData) continue;
-
-                    // Improved record lookup
-                    const record = Object.values(tableData).find(r =>
-                        String(r[source.linking_variable || 'id']) === targetId ||
-                        String(r.id) === targetId ||
-                        String(r.individual_id) === targetId
-                    );
-
-                    if (record) {
-                        const fieldValue = source.path
-                            ? parseJsonValue(record, source.path)
-                            : record[condition.comparison?.field || mf.field_key || condition.tag];
-
-                        if (fieldValue !== undefined && fieldValue !== null) {
-                            if (condition.comparison) {
-                                const { operator, value } = condition.comparison;
-                                const strFieldValue = String(fieldValue).trim().toLowerCase();
-                                const compareValue = String(value || '').trim().toLowerCase();
-
-                                switch (operator) {
-                                    case 'equals': isChecked = strFieldValue === compareValue; break;
-                                    case 'not_equals': isChecked = strFieldValue !== compareValue; break;
-                                    case 'contains': isChecked = strFieldValue.includes(compareValue); break;
-                                    default: isChecked = Boolean(fieldValue);
-                                }
-                            } else {
-                                isChecked = Boolean(fieldValue);
-                            }
-                        }
-                        if (isChecked) break;
-                    }
-                }
-            }
-        }
-
-        return {
-            ...condition,
-            checked: isChecked,
-            hasDbLink: !!(qId || condition.master_field_id)
-        };
-    });
-
-    return {
-        value: results,
-        source: results.some(r => r.checked) ? 'Logic Resolved' : null
-    };
-};
-
-const processDocumentChecklistField = (placeholder, targetEntity, combinedCache) => {
-    const checklistDataSources = placeholder.checklist_data_sources || [];
-    const displayFormat = placeholder.checklist_display_format || 'bullets';
-    const successLabel = placeholder.checklist_success_label || '✔';
-    const notFoundLabel = placeholder.checklist_not_found_label || '✗';
-
-    if (checklistDataSources.length === 0) {
-        return { value: '', source: null };
-    }
-
-    const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
-    const checklistResults = [];
-    for (const dataSource of checklistDataSources) {
-        const { table, linking_variable, linked_document_ids = [], execution_mode = 'latest', label } = dataSource;
-        const tableData = combinedCache[table];
-        if (!tableData) {
-            const itemLabel = label || placeholder.display_value || placeholder.name;
-            checklistResults.push(`${notFoundLabel} ${itemLabel}`);
-            continue;
-        }
-        let matches = Object.values(tableData).filter(d => {
-            const entityIdMatch = String(d[linking_variable] || d.id) === searchId;
-            if (!entityIdMatch) return false;
-
-            if (linked_document_ids.length > 0) {
-                return linked_document_ids.includes(d.document_id);
-            }
-
-            return true;
-        });
-        if (execution_mode === 'latest' && matches.length > 0) {
-            matches = matches.sort((a, b) => {
-                const aDate = a.issue_date ? new Date(a.issue_date).getTime() : 0;
-                const bDate = b.issue_date ? new Date(b.issue_date).getTime() : 0;
-                return bDate - aDate;
-            });
-            matches = [matches[0]];
-        }
-
-        const itemLabel = label || placeholder.display_value || placeholder.name;
-
-        if (matches.length > 0) {
-            checklistResults.push(`${successLabel} ${itemLabel}`);
-        } else {
-            checklistResults.push(`${notFoundLabel} ${itemLabel}`);
-        }
-    }
-
-    if (checklistResults.length === 0) {
-        return { value: '', source: null };
-    }
-
-    return {
-        value: checklistResults.join('\n'),
-        source: 'Document Checklist'
-    };
-};
-
-const processImageField = (placeholder, targetEntity, combinedCache, masterFields) => {
-    if (placeholder.master_field_ids?.length > 0 && targetEntity) {
-        const candidateIds = [
-            targetEntity?.id,
-            targetEntity?.director_id,
-            targetEntity?.individual_id,
-            targetEntity?.company_id,
-        ]
-            .filter(Boolean)
-            .map(String)
-            .filter((v, i, arr) => arr.indexOf(v) === i);
-
-        if (candidateIds.length > 0) {
-            for (const mid of placeholder.master_field_ids) {
-                const mf = masterFields.get(parseInt(mid, 10));
-                if (!mf?.sources) continue;
-
-                const sortedSources = [...mf.sources].sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999));
-
-                for (const source of sortedSources) {
-                    const tableData = combinedCache[source.table];
-                    if (!tableData) continue;
-
-                    const linkingVar = source.linking_variable || 'id';
-                    const docIds: string[] = Array.isArray(source.document_id)
-                        ? source.document_id
-                        : (source.document_id ? [source.document_id] : []);
-
-                    let matches = Object.values(tableData).filter((r: any) => {
-                        if (!candidateIds.includes(String(r[linkingVar]))) return false;
-                        if (docIds.length > 0) return docIds.includes(r.document_id);
-                        return true;
-                    });
-
-                    if (matches.length === 0) continue;
-
-                    matches = matches.sort((a: any, b: any) => {
-                        const aDate = a.issue_date ? new Date(a.issue_date).getTime() : (a.created_at ? new Date(a.created_at).getTime() : 0);
-                        const bDate = b.issue_date ? new Date(b.issue_date).getTime() : (b.created_at ? new Date(b.created_at).getTime() : 0);
-                        return bDate - aDate;
-                    });
-
-                    const match: any = matches[0];
-                    if (match?.file_path) {
-                        return {
-                            value: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`,
-                            source: `Image: ${source.table}`,
-                        };
-                    }
-                }
-            }
-        }
-    }
-
-    const sourceTable = placeholder.source_table;
-    const linkingVariable = placeholder.linking_variable;
-    const documentTypeIds = placeholder.document_type_ids || [];
-    const computedFunction = placeholder.computed_function || 'none';
-    const executionMode = placeholder.execution_mode || 'latest';
-
-    if (!sourceTable || !linkingVariable) {
-        return { value: '', source: null };
-    }
-
-    const tableData = combinedCache[sourceTable];
-    if (!tableData) {
-        return { value: '', source: null };
-    }
-
-    const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
-
-    let matches = Object.values(tableData).filter(d => {
-        const entityIdMatch = String(d[linkingVariable] || d.id) === searchId;
-        if (!entityIdMatch) return false;
-
-        if (documentTypeIds.length > 0) {
-            return documentTypeIds.includes(d.document_id);
-        }
-
-        return true;
-    });
-
-    if (matches.length === 0) {
-        return { value: '', source: null };
-    }
-
-    if (executionMode === 'latest' || computedFunction.includes('Latest')) {
-        matches = matches.sort((a, b) => {
-            const aDate = a.issue_date ? new Date(a.issue_date).getTime() : 0;
-            const bDate = b.issue_date ? new Date(b.issue_date).getTime() : 0;
-            return bDate - aDate;
-        });
-    }
-
-    const match = matches[0];
-    if (match?.file_path) {
-        const imageUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`;
-        return {
-            value: imageUrl,
-            source: `Image: ${sourceTable}`
-        };
-    }
-
-    return { value: '', source: null };
-};
-
-const isValidValue = (val: any, placeholderType?: string): boolean => {
-    if (val === null || val === undefined) return false;
-
-    // FIX: For booleans, an array of options is only valid if one is checked
-    if (placeholderType === 'boolean' && Array.isArray(val)) {
-        return val.some(opt => opt && opt.checked === true);
-    }
-
-    if (Array.isArray(val)) {
-        return val.length > 0;
-    }
-    if (typeof val === 'string') {
-        if (val === '') return false;
-        const errorStrings = ['Missing', 'Missing Config', 'No Source', 'Computing...', 'Document Not Found', 'Field Not Found'];
-        return !errorStrings.includes(val);
-    }
-    return Boolean(val);
-};
-
-const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null, task = null, computedFieldCache = null, companyAssociates = null, entityOverrides = null) => {
-    const logic = placeholder.source_logic || 'priority';
-    const collectedValues: string[] = [];
-    const sourceMetadata: string[] = [];
-    const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData, companyAssociates, entityOverrides);
-    const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
-
-    if (placeholder.master_field_ids?.length > 0 && masterFields) {
-        for (const mid of placeholder.master_field_ids) {
-            const mf = masterFields.get(parseInt(mid, 10));
-            if (mf?.date_config?.useCurrentDate) {
-                const result = processCurrentDateField([mid], masterFields);
-                if (isValidValue(result.value, placeholder.type)) {
-                    if (logic === 'priority') {
-                        return result;
-                    }
-                    collectedValues.push(String(result.value));
-                    sourceMetadata.push(result.source || 'System Date');
-                }
-            }
-        }
-    }
-
-    if (placeholder.master_field_ids?.length > 0 && targetEntity) {
-        for (const mid of placeholder.master_field_ids) {
-            let result = { value: '', source: null };
-            const mf = masterFields.get(parseInt(mid, 10));
-            if (mf?.date_config?.useCurrentDate) {
-                continue; // already resolved above, independent of targetEntity
-            } else {
-                if (placeholder.type === 'ordinal') {
-                    result = processOrdinalField(placeholder, arrayIndex);
-                } else if (placeholder.type === 'image') {
-                    result = processImageField(placeholder, targetEntity, combinedCache, masterFields);
-                } else if (placeholder.type === 'boolean') {
-                    result = processBooleanField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields);
-                } else {
-                    result = processTextField([mid], targetEntity, combinedCache, masterFields, computedFieldCache);
-                }
-            }
-            if (isValidValue(result.value, placeholder.type)) {
-                if (logic === 'priority') {
-                    return result;
-                }
-                collectedValues.push(String(result.value));
-                sourceMetadata.push(result.source || 'DB');
-            }
-        }
-    }
-    if (placeholder.type === 'boolean' && placeholder.boolean_conditions?.length > 0 && targetEntity) {
-        const result = processBooleanField(placeholder, targetEntity, combinedCache, masterFields, task);
-        if (isValidValue(result.value, placeholder.type)) {
-            const matchedLabel = result.value.find(v => v.checked)?.label;
-            if (logic === 'priority') { return result; }
-            collectedValues.push(result.value);
-            sourceMetadata.push(result.source || 'Boolean (DB)');
-        }
-    }
-
-    if (placeholder.type === 'conditional' && placeholder.conditions?.length > 0 && targetEntity) {
-        const result = processConditionalField(placeholder, targetEntity, combinedCache, masterFields, computedFieldCache);
-        if (isValidValue(result.value)) {
-            if (logic === 'priority') { return result; }
-            collectedValues.push(String(result.value));
-            sourceMetadata.push(result.source || 'Conditional (DB)');
-        }
-    }
-
-    if (placeholder.type === 'document_checklist' && placeholder.checklist_data_sources?.length > 0 && targetEntity) {
-        const result = processDocumentChecklistField(placeholder, targetEntity, combinedCache);
-        if (isValidValue(result.value)) {
-            if (logic === 'priority') { return result; }
-            collectedValues.push(String(result.value));
-            sourceMetadata.push(result.source || 'Document Checklist');
-        }
-    }
-
-    if (placeholder.type === 'image' && placeholder.source_table && placeholder.linking_variable && targetEntity) {
-        const result = processImageField(placeholder, targetEntity, combinedCache, masterFields);
-        if (isValidValue(result.value)) {
-            if (logic === 'priority') { return result; }
-            collectedValues.push(String(result.value));
-            sourceMetadata.push(result.source || 'Image');
-        }
-    }
-
-    const qIds = placeholder.linked_job_question_ids || (placeholder.linked_job_question_id ? [placeholder.linked_job_question_id] : []);
-    if (qIds.length > 0) {
-        const taskRecord = (combinedCache?.['tm_tasks'] && Object.values(combinedCache['tm_tasks'])[0]) || task;
-        const answers = taskRecord?.job_specific_answers || {};
-
-        for (const qId of qIds) {
-            const answer = answers[String(qId)] ?? answers[Number(qId)];
-            if (isValidValue(answer)) {
-                if (logic === 'priority') return { value: String(answer), source: 'Job Question' };
-                collectedValues.push(String(answer));
-                sourceMetadata.push('Job Question');
-            }
-        }
-    }
-    const reqIds = placeholder.linked_requirement_ids || [];
-    if (reqIds.length > 0 && targetId) {
-        for (const rId of reqIds) {
-            const isFound = checkDocumentStatus(rId, targetId, placeholder.entity_type?.[0] || 'company', combinedCache);
-            if (isFound) {
-                const val = "✓ Submitted";
-                if (logic === 'priority') return { value: val, source: 'Requirement' };
-                collectedValues.push(val);
-                sourceMetadata.push('Requirement');
-            }
-        }
-    }
-    if (logic === 'all' && collectedValues.length > 0) {
-        const finalResult = {
-            value: collectedValues.join(' '),
-            source: `Merged (${sourceMetadata[0]})`
-        };
-        return finalResult;
-    }
-    if (placeholder.default_value) {
-        const defaultResult = { value: placeholder.default_value, source: 'Default' };
-        return defaultResult;
-    }
-
-    const emptyResult = { value: '', source: null };
-    return emptyResult;
 };
 
 const extractDisplayValue = (value) => {
@@ -3229,6 +2453,17 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 });
             }
 
+            // TOP-LEVEL CALCULATIONS:
+            // Recompute any top-level `calculation` placeholder (row-scoped op, not
+            // 'sum') whose operands are other top-level fields - same idea as
+            // applyCalculations does for fields inside an array block, e.g.
+            // {sample_total} = {sample_one} + {two}, all outside any {#block}.
+            groupedPlaceholders.topLevel.forEach(p => {
+                if (p.calculation && p.calculation.op !== 'sum') {
+                    newState[p.name] = computeRowCalculation(p.calculation, newState);
+                }
+            });
+
             if (docxTemplateBuffer.current) {
                 updateWordPreview(newState, imageStyles);
             } else {
@@ -3275,13 +2510,43 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         });
     };
 
+    // Recomputes any `calculation` placeholders tied to a block: same-row
+    // formulas on its children (e.g. total = amount + interest), then
+    // top-level cross-row sums that read that block (e.g. grand_total).
+    // Shared by handleArrayInputChange and the Add/Remove Row handlers so
+    // totals stay correct on every edit, not just field edits.
+    const applyCalculations = (blockName, rows) => {
+        const block = groupedPlaceholders.blocks[blockName];
+        const rowCalcFields = (block?.children || []).filter(c => c.calculation && c.calculation.op !== 'sum');
+
+        const nextRows = rowCalcFields.length > 0
+            ? rows.map(row => {
+                const updated = { ...row };
+                rowCalcFields.forEach(field => {
+                    updated[field.name] = computeRowCalculation(field.calculation, updated);
+                });
+                return updated;
+            })
+            : rows;
+
+        const aggregateUpdates = {};
+        groupedPlaceholders.topLevel.forEach(p => {
+            if (p.calculation?.op === 'sum' && p.calculation.source_block === blockName) {
+                aggregateUpdates[p.name] = sumBlockField(nextRows, p.calculation.source_field);
+            }
+        });
+
+        return { rows: nextRows, aggregateUpdates };
+    };
+
     const handleArrayInputChange = (blockName, index, fieldName, value) => {
         setFormData(prev => {
             const updatedArray = [...(prev[blockName] || [])];
             if (!updatedArray[index]) updatedArray[index] = {};
             updatedArray[index] = { ...updatedArray[index], [fieldName]: value };
 
-            const newState = { ...prev, [blockName]: updatedArray };
+            const { rows, aggregateUpdates } = applyCalculations(blockName, updatedArray);
+            const newState = { ...prev, [blockName]: rows, ...aggregateUpdates };
 
             if (docxTemplateBuffer.current) {
                 updateWordPreview(newState, imageStyles);
@@ -3422,7 +2687,10 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                             className="h-6 text-[10px] px-2 text-blue-600 border-blue-200"
                             onClick={() => {
                                 const emptyRow = children.reduce((acc, child) => ({ ...acc, [child.name]: '' }), {});
-                                setFormData(prev => ({ ...prev, [blockName]: [...(prev[blockName] || []), emptyRow] }));
+                                setFormData(prev => {
+                                    const { rows, aggregateUpdates } = applyCalculations(blockName, [...(prev[blockName] || []), emptyRow]);
+                                    return { ...prev, [blockName]: rows, ...aggregateUpdates };
+                                });
                             }}
                         >
                             + Add Row
@@ -3454,8 +2722,11 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                                     size="icon"
                                                     className="h-4 w-4 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full shrink-0"
                                                     onClick={() => {
-                                                        const newRows = rows.filter((_, i) => i !== idx);
-                                                        setFormData(prev => ({ ...prev, [blockName]: newRows }));
+                                                        setFormData(prev => {
+                                                            const newRows = (prev[blockName] || []).filter((_, i) => i !== idx);
+                                                            const { rows, aggregateUpdates } = applyCalculations(blockName, newRows);
+                                                            return { ...prev, [blockName]: rows, ...aggregateUpdates };
+                                                        });
                                                     }}
                                                 >
                                                     <X className="h-2.5 w-2.5" />

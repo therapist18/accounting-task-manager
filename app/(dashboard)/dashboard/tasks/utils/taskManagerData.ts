@@ -913,6 +913,44 @@ export const fetchAllDocuments = async (): Promise<DirectorDocument[]> => {
   }
 }
 
+// Resolves the document(s) linked to a task's stage, filtering out any `isSpecial` document
+// whose `targetEntities` don't match the task's class/subdepartment. Extracted from
+// DepartmentTasksManager.tsx's original inline `getDocumentForTaskStage` so every module
+// resolving a stage's linked document (DepartmentTasksManager, SummaryTable, ...) applies the
+// same applicability rule instead of some doing a plain id lookup that ignores it. Named
+// distinctly from the pre-existing `getDocumentForTaskStage` below (an unrelated, older
+// director_id+kycId lookup used by StandardTable.tsx/ReportTable.tsx) to avoid colliding with it.
+export const getLinkedDocumentsForTaskStage = (
+  task: { source_document_id?: Record<string, any>; class_id?: string | number; subdepartment?: { id?: string | number }; subdepartment_id?: string | number },
+  stage: { id: string },
+  allDocuments: DirectorDocument[]
+): DirectorDocument[] => {
+  const linkedDocumentData = task.source_document_id?.[stage.id];
+  if (!linkedDocumentData) return [];
+
+  const taskClassId = task.class_id?.toString();
+  const taskSubdeptId = task.subdepartment?.id?.toString() || task.subdepartment_id?.toString();
+  const documentRefs = Array.isArray(linkedDocumentData) ? linkedDocumentData : [linkedDocumentData];
+
+  return documentRefs
+    .map((ref: any) => {
+      const documentId = typeof ref === 'string' ? ref : ref.id;
+      const doc: any = allDocuments.find((d: any) => d.id.toString() === documentId?.toString());
+      if (!doc) return null;
+      if (!doc.isSpecial) return doc;
+      if (Array.isArray(doc.targetEntities) && doc.targetEntities.length > 0) {
+        const isApplicable = doc.targetEntities.some((entity: any) => {
+          const classMatch = !entity.class_id || entity.class_id.toString() === taskClassId;
+          const subdeptMatch = !entity.subdept_id || entity.subdept_id.toString() === taskSubdeptId;
+          return classMatch && subdeptMatch;
+        });
+        return isApplicable ? doc : null;
+      }
+      return doc;
+    })
+    .filter((doc: any): doc is DirectorDocument => !!doc);
+};
+
 /**
  * Fetch all KYC fields for all document types
  */

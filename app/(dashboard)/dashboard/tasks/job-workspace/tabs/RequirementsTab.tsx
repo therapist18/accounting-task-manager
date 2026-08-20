@@ -578,11 +578,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
     try {
       const documentPreviews = await Promise.all(docs.map(async (doc) => {
         const { data: signData } = await supabase.storage.from('kyc-documents').createSignedUrl(doc.file_path, 3600);
-        let fields = [];
-        if (doc.document_id) {
-          const { data: kycData } = await supabase.from('acc_portal_kyc').select('fields').eq('id', doc.document_id).single();
-          if (kycData) fields = kycData.fields || [];
-        }
+        const fields = doc.document_id ? (kycDocsMap.get(doc.document_id)?.fields || []) : [];
         return {
           id: doc.id,
           fileUrl: signData?.signedUrl,

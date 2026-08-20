@@ -30,6 +30,11 @@ interface PlaceholderFormDialogProps {
   isOpen: boolean;
   onClose: () => void;
   placeholder: Placeholder;
+  // Full placeholder list of the template being edited, so the Calculated
+  // Value section can offer sibling fields / blocks to compute from. Only
+  // needed to configure `placeholder.calculation` - omit where that's out
+  // of scope for the caller's Placeholder model.
+  allPlaceholders?: Placeholder[];
   masterFields: JobField[];
   jobQuestions: JobQuestion[];
   requirements: Requirement[];
@@ -68,6 +73,7 @@ export function PlaceholderFormDialog({
   isOpen,
   onClose,
   placeholder,
+  allPlaceholders = [],
   masterFields,
   jobQuestions,
   requirements,
@@ -84,6 +90,34 @@ export function PlaceholderFormDialog({
 }: PlaceholderFormDialogProps) {
   const [directorType, setDirectorType] = useState<DirectorType>('all');
   const [dependantRelationship, setDependantRelationship] = useState<string[]>([]);
+  const [calcPickerOpen, setCalcPickerOpen] = useState(false);
+  const [calcSearch, setCalcSearch] = useState('');
+
+  // Calculated Value helpers - siblings this placeholder can combine (same
+  // parent_name block, or other top-level fields when it's not in a block),
+  // and the array blocks/child fields available for a cross-row sum.
+  const calcSiblings = allPlaceholders.filter(p =>
+    p.name !== placeholder.name &&
+    !p.is_block_start &&
+    (placeholder.parent_name ? p.parent_name === placeholder.parent_name : !p.parent_name)
+  );
+  const calcBlocks = allPlaceholders.filter(p => p.type === 'array' && p.is_block_start);
+  const calcSumOp = placeholder.calculation?.op === 'sum';
+  const calcSumFields = calcSumOp
+    ? allPlaceholders.filter(p => p.parent_name === placeholder.calculation?.source_block)
+    : [];
+  const calcSelectedSiblings = (placeholder.calculation?.operands || [])
+    .map(name => calcSiblings.find(s => s.name === name))
+    .filter(Boolean) as Placeholder[];
+  const calcFilteredSiblings = calcSearch.trim()
+    ? calcSiblings.filter(s => (s.display_value || s.name).toLowerCase().includes(calcSearch.toLowerCase()))
+    : calcSiblings;
+
+  const toggleCalcOperand = (name: string) => {
+    const current = placeholder.calculation?.operands || [];
+    const next = current.includes(name) ? current.filter(n => n !== name) : [...current, name];
+    onChange({ calculation: { ...placeholder.calculation, op: placeholder.calculation?.op || 'add', operands: next } });
+  };
 
   const handleAddCondition = () => {
     const newCondition: ConditionalCondition = {
@@ -263,6 +297,155 @@ export function PlaceholderFormDialog({
                   className="min-h-[60px] resize-none bg-slate-50"
                 />
               </div>
+            </div>
+
+            {/* Calculated Value */}
+            <div className="space-y-3 bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+              <div className="flex items-center space-x-3">
+                <Checkbox
+                  id="calc-enabled"
+                  checked={!!placeholder.calculation}
+                  onCheckedChange={(c) => onChange({
+                    calculation: c ? { op: 'add', operands: [] } : undefined
+                  })}
+                />
+                <div>
+                  <Label htmlFor="calc-enabled" className="text-sm font-semibold text-slate-700">Auto-calculate this value</Label>
+                  <p className="text-[11px] text-slate-400">
+                    Renders read-only and updates automatically instead of being typed in.
+                  </p>
+                </div>
+              </div>
+
+              {placeholder.calculation && (
+                <div className="space-y-3 pl-7">
+                  <div className="space-y-2">
+                    <Label className="text-[11px] font-black uppercase text-slate-400">Operation</Label>
+                    <Select
+                      value={placeholder.calculation.op}
+                      onValueChange={(op: any) => onChange({ calculation: { op, operands: op === 'sum' ? undefined : (placeholder.calculation?.operands || []) } })}
+                    >
+                      <SelectTrigger className="bg-slate-50 text-sm"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="add">Add</SelectItem>
+                        <SelectItem value="subtract">Subtract</SelectItem>
+                        <SelectItem value="multiply">Multiply</SelectItem>
+                        <SelectItem value="divide">Divide</SelectItem>
+                        {!placeholder.parent_name && (
+                          <SelectItem value="sum">Sum across rows of a block</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {calcSumOp ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label className="text-[11px] font-black uppercase text-slate-400">Block</Label>
+                        <Select
+                          value={placeholder.calculation?.source_block || ''}
+                          onValueChange={(v) => onChange({ calculation: { ...placeholder.calculation, op: 'sum', source_block: v, source_field: undefined } })}
+                        >
+                          <SelectTrigger className="bg-slate-50 text-sm"><SelectValue placeholder="Select block..." /></SelectTrigger>
+                          <SelectContent>
+                            {calcBlocks.map(b => (
+                              <SelectItem key={b.id} value={b.name}>{b.display_value || b.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px] font-black uppercase text-slate-400">Field to sum</Label>
+                        <Select
+                          value={placeholder.calculation?.source_field || ''}
+                          onValueChange={(v) => onChange({ calculation: { ...placeholder.calculation, op: 'sum', source_field: v } })}
+                          disabled={!placeholder.calculation?.source_block}
+                        >
+                          <SelectTrigger className="bg-slate-50 text-sm"><SelectValue placeholder="Select field..." /></SelectTrigger>
+                          <SelectContent>
+                            {calcSumFields.map(f => (
+                              <SelectItem key={f.id} value={f.name}>{f.display_value || f.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label className="text-[11px] font-black uppercase text-slate-400">Fields to combine (in order)</Label>
+                      <Popover open={calcPickerOpen} onOpenChange={setCalcPickerOpen}>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" role="combobox" aria-expanded={calcPickerOpen} className="w-full justify-between bg-slate-50 font-normal">
+                            <span className="truncate">
+                              {calcSelectedSiblings.length > 0
+                                ? `${calcSelectedSiblings.length} field${calcSelectedSiblings.length > 1 ? 's' : ''} selected`
+                                : "Select fields..."}
+                            </span>
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                          <Command shouldFilter={false}>
+                            <CommandInput
+                              placeholder="Search fields..."
+                              value={calcSearch}
+                              onValueChange={setCalcSearch}
+                            />
+                            <CommandList>
+                              <CommandEmpty>No fields found.</CommandEmpty>
+                              <CommandGroup className="max-h-[260px] overflow-y-auto">
+                                {calcFilteredSiblings.map(s => {
+                                  const order = (placeholder.calculation?.operands || []).indexOf(s.name);
+                                  const isSelected = order !== -1;
+                                  return (
+                                    <CommandItem
+                                      key={s.id}
+                                      value={s.name}
+                                      onSelect={() => toggleCalcOperand(s.name)}
+                                      className="cursor-pointer"
+                                    >
+                                      <div className="flex items-center">
+                                        <div className={cn(
+                                          "mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary shrink-0",
+                                          isSelected ? "bg-primary text-primary-foreground" : "opacity-50"
+                                        )}>
+                                          {isSelected && <Check className="h-3 w-3" />}
+                                        </div>
+                                        <span>{isSelected && `${order + 1}. `}{s.display_value || s.name}</span>
+                                      </div>
+                                    </CommandItem>
+                                  );
+                                })}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+
+                      {calcSelectedSiblings.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {calcSelectedSiblings.map((s, idx) => (
+                            <Badge
+                              key={s.id}
+                              variant="secondary"
+                              className="flex items-center gap-1.5 pr-1.5 bg-blue-50 text-blue-700 border-blue-200"
+                            >
+                              <span>{idx + 1}. {s.display_value || s.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => toggleCalcOperand(s.name)}
+                                className="ml-1 rounded-full p-0.5 hover:bg-blue-100"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Source Manager */}
@@ -1069,11 +1252,25 @@ export function PlaceholderFormDialog({
                       <Select value={placeholder.ordinal_format} onValueChange={v => onChange({ ordinal_format: v })}>
                         <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="plain">1, 2, 3...</SelectItem>
                           <SelectItem value="number">1st, 2nd, 3rd...</SelectItem>
                           <SelectItem value="word">First, Second, Third...</SelectItem>
                           <SelectItem value="custom">Custom Pattern</SelectItem>
                         </SelectContent>
                       </Select>
+                      {placeholder.ordinal_format === 'custom' && (
+                        <div className="space-y-1.5 pt-1">
+                          <Input
+                            placeholder="e.g. ) or . or -"
+                            value={placeholder.custom_ordinal_format || ''}
+                            onChange={e => onChange({ custom_ordinal_format: e.target.value })}
+                            className="bg-white font-mono text-sm"
+                          />
+                          <p className="text-[11px] text-slate-400">
+                            Appended straight after the row number - e.g. &quot;)&quot; renders as 1), 2), 3)...
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

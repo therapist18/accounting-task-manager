@@ -12,15 +12,17 @@ import { withDerivedFeeValues } from '../utils/feeCalculations';
 import { withDirectorsAcknowledgementBlock } from '../utils/directorsBlock';
 import { withTableOfContents } from '../utils/tableOfContents';
 import { saveContractToProfile } from '../utils/kycUpload';
-import { ContractThemePanel } from './ContractThemePanel';
+import { ContractThemePanel, type ContractThemePanelTab } from './ContractThemePanel';
 import { DocumentViewer, type DocumentViewerHandle } from '@/components/contracts/DocumentViewer';
 import type { Company } from '../../companies/database';
 import type { CcEngagement } from '../utils/ccEngagements';
 import type { CompanyDirector } from '../hooks/useCompanyDirectors';
 import { applyThemeToHtml, type ContractThemeSettings } from '../utils/themeEngine';
 import { applyWordSafeDomFixes } from '@/lib/documentTheme';
-import type { EcPlaceholder } from '../../employment-contracts/utils/ecPlaceholders';
-import { resolveCompanyRole } from '../utils/ccPlaceholderAdapter';
+import type { Placeholder } from '../../templates/document-template-manager/types';
+import { resolveCompanyRole } from '../utils/ccResolver';
+
+type CcPlaceholder = Placeholder & { key: string };
 import { blockImageFieldKey, type ImageStyle, type ImageStyleMap } from '../utils/imageStyles';
 
 interface ContractPreviewProps {
@@ -38,11 +40,28 @@ interface ContractPreviewProps {
   // Directors/shareholders chosen in the Directors picker - rendered into
   // the Acknowledgement section as {{directors_acknowledgement_block}}.
   selectedDirectors: CompanyDirector[];
-  placeholders: EcPlaceholder[];
+  placeholders: CcPlaceholder[];
   // Per-instance image size/align overrides set from Data & Values' image
   // controls - see utils/imageStyles.ts. Takes priority over the
   // placeholder's own configured image_width/image_height.
   imageStyles?: ImageStyleMap;
+  // Contract Settings panel (Theme/Color/Font/Header/Consultant) - open
+  // state and target tab are owned by page.tsx (not local state here)
+  // so its "Consultant" toolbar label can jump straight to the Consultant
+  // tab, not just the Palette button below.
+  themePanelOpen: boolean;
+  themePanelTab: ContractThemePanelTab;
+  onThemePanelOpen: (tab: ContractThemePanelTab) => void;
+  onThemePanelClose: () => void;
+  // Consultant company/signatory config, rendered inside the Contract
+  // Settings panel's "Consultant" tab (see ContractThemePanel.tsx) - owned
+  // by page.tsx like everything else Consultant-related.
+  companies: Company[];
+  consultantCompanyId: string | number | null;
+  onConsultantChange: (companyId: string) => void;
+  consultantDirectors: CompanyDirector[];
+  consultantSignatoryId: string | number | null;
+  onSignatoryChange: (individualId: string) => void;
 }
 
 const LIST_MARKUP_KEYS = new Set(['applicable_benefits', 'key_responsibilities', 'statutory_deductions_table', 'services_table', 'fee_schedule_table']);
@@ -76,7 +95,7 @@ function imageTagFor(
 // defaults to company) still needs resolveCompanyRole to tell the Consultant
 // side from the Client side - the same split page.tsx uses to decide which
 // companyId a placeholder resolves against, reused here purely for display.
-function resolveHighlightCategory(p: EcPlaceholder): 'consultant' | 'client' | 'employee' | 'director' | null {
+function resolveHighlightCategory(p: CcPlaceholder): 'consultant' | 'client' | 'employee' | 'director' | null {
   const entity = p.entity_type?.[0];
   if (entity === 'director') return 'director';
   if (entity === 'individual' || entity === 'employee') return 'employee';
@@ -116,12 +135,13 @@ function toWordExportHtml(
 
 export function ContractPreview({
   company, templateContent, resolvedValues, arrayData, overrides, engagement,
-  themeSettings, onThemeChange, saving, onSave, selectedDirectors, placeholders, imageStyles
+  themeSettings, onThemeChange, saving, onSave, selectedDirectors, placeholders, imageStyles,
+  themePanelOpen, themePanelTab, onThemePanelOpen, onThemePanelClose,
+  companies, consultantCompanyId, onConsultantChange, consultantDirectors, consultantSignatoryId, onSignatoryChange,
 }: ContractPreviewProps) {
   const viewerRef = useRef<DocumentViewerHandle>(null);
   const [exporting, setExporting] = useState<'word' | 'pdf' | null>(null);
   const [filingToProfile, setFilingToProfile] = useState(false);
-  const [themePanelOpen, setThemePanelOpen] = useState(false);
 
   const mergedValuesRaw = useMemo(() => {
     // Flatten array/block data into individual placeholder values so
@@ -234,7 +254,7 @@ export function ContractPreview({
   // replacePlaceholders so image tokens get proper HTML rendering; the
   // general pass then handles all remaining text tokens.
   const replaceImagePlaceholders = useCallback(
-    (text: string, values: Record<string, string>, imagePlaceholderByKey: Map<string, EcPlaceholder>): string => {
+    (text: string, values: Record<string, string>, imagePlaceholderByKey: Map<string, CcPlaceholder>): string => {
       // %? allows the docxtemplater image-tag syntax ({%field_name}), same
       // as the block child regex above.
       return text.replace(/\{+\s*%?\s*([a-zA-Z0-9_]+)\s*\}+/g, (match, key) => {
@@ -378,8 +398,8 @@ export function ContractPreview({
         actions={
           <>
             <button
-              onClick={() => setThemePanelOpen(true)}
-              title="Customize theme"
+              onClick={() => onThemePanelOpen('theme')}
+              title="Contract settings"
               className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
             >
               <Palette className="w-4 h-4" />
@@ -425,9 +445,18 @@ export function ContractPreview({
 
       <ContractThemePanel
         open={themePanelOpen}
-        onClose={() => setThemePanelOpen(false)}
+        onClose={onThemePanelClose}
         settings={themeSettings}
         onChange={onThemeChange}
+        initialTab={themePanelTab}
+        consultant={{
+          companies,
+          consultantCompanyId,
+          onConsultantChange,
+          consultantDirectors,
+          consultantSignatoryId,
+          onSignatoryChange,
+        }}
       />
     </>
   );

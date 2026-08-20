@@ -4,7 +4,7 @@
 // Planned/Actual Execution dates, or overdue statuses depending on which page you're on.
 // Each page wraps these in its own useCallback (closing over its own promisedTimeByJobLevel/
 // enhancedTasksData state) — see getPromisedTimeResolutionForTask etc. in page.tsx.
-import { parseDateSafe } from "../../reports/utils/reportStageLogic";
+import { parseDateSafe } from "./reportStageLogic";
 import { REQ_RECEIVED_COMPLETED_STAGE_ID } from "../stageColumnConfig";
 
 export type PromisedTimeEntry = { defaultMinutes: number | null; conditions: { value: string; minutes: number }[] };

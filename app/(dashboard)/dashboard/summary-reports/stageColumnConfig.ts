@@ -50,12 +50,29 @@ export const MILESTONE_STAGE_COLUMNS: MilestoneStageColumn[] = [
 export interface SummaryColumnDef {
   id: string;
   label: string;
-  type: 'field' | 'milestone' | 'computed_time';
+  type: 'field' | 'milestone' | 'computed_time' | 'report_stage' | 'report_field';
   highlight?: boolean;
   sticky?: boolean;
   primary?: boolean;
   milestone?: MilestoneStageColumn;
+  // Set only on 'report_stage' columns — stages a memorized report selected that aren't one
+  // of the 4 built-in MILESTONE_STAGE_COLUMNS. Resolved/rendered the same way as a milestone
+  // (SummaryTable.tsx's <EditableStageCell> call), just for an arbitrary stage id.
+  reportStage?: { stageId: string; label: string };
+  // Set only on 'report_field' columns — a specific extracted document field a memorized
+  // report selected under one of its stages (MemorizedReportDialog's per-document field
+  // pickers, configuration.stages[stageId].documents[kycId].fields). Renders the raw
+  // extracted value, not a date/EditableStageCell.
+  reportField?: { stageId: string; kycId: string; fieldId: string; fieldName: string };
 }
+
+// Column id for a dynamic (non-milestone) report-selected stage — namespaced so it can never
+// collide with a static SUMMARY_COLUMNS id or a milestone key.
+export const reportStageColumnId = (stageId: string): string => `report_stage_${stageId}`;
+
+// Column id for a dynamic report-selected document field within a stage.
+export const reportFieldColumnId = (stageId: string, kycId: string, fieldId: string): string =>
+  `report_field_${stageId}_${kycId}_${fieldId}`;
 
 export const SUMMARY_COLUMNS: SummaryColumnDef[] = [
   { id: 'company', label: 'Company Name', type: 'field', primary: true, sticky: true },
@@ -92,3 +109,130 @@ const DEFAULT_HIDDEN_SUMMARY_COLUMN_IDS = new Set([
 export const DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS = SUMMARY_COLUMNS
   .map(c => c.id)
   .filter(id => !DEFAULT_HIDDEN_SUMMARY_COLUMN_IDS.has(id));
+
+// Memorized Reports (tm_memorized_reports) are built against ENHANCED_TABLE_HEADERS_IMMIGRATION
+// field ids — the vocabulary the /reports page's fully dynamic column builder uses — not
+// against SUMMARY_COLUMNS ids. SummaryTable only understands SUMMARY_COLUMNS, so a report's
+// configuration.taskFields can't be applied directly: it needs translating through this map.
+// Only fields with a real SUMMARY_COLUMNS equivalent are listed; anything else (per-stage
+// document fields, immigration-expiry columns, task manager/assistant, etc.) has no
+// representation in the fixed Summary Reports column set yet and is dropped on Apply.
+const TASK_FIELD_TO_SUMMARY_COLUMN_ID: Record<string, string> = {
+  applicant_name: 'applicant',
+  company_name: 'company',
+  company_prefix: 'company_prefix',
+  sub_department: 'subdepartment',
+  job_level: 'class_name',
+  duration: 'duration',
+  job_description: 'job_description',
+  current_stage_name: 'current_stage',
+  current_stage_status_value: 'current_stage',
+};
+
+// Always kept visible regardless of what the applied report selected — without these two,
+// rows in the resulting table can't be identified at all.
+const ALWAYS_VISIBLE_SUMMARY_COLUMN_IDS = ['company', 'applicant'];
+
+export interface ApplyReportToSummaryColumnsResult {
+  visibleColumnIds: string[];
+  matchedCount: number;
+  droppedCount: number;
+}
+
+type ReportStageConfig = {
+  isStageDateSelected?: boolean;
+  documents?: Record<string, { fields?: { id: string }[] }>;
+};
+
+// Translates a memorized report's configuration into the subset of SUMMARY_COLUMNS ids
+// SummaryTable can actually render: task fields via TASK_FIELD_TO_SUMMARY_COLUMN_ID, per-stage
+// "Stage Completion Date" selections via MILESTONE_STAGE_COLUMNS, and per-stage document-field
+// selections (configuration.stages[stageId].documents[kycId].fields). A selected stage/field
+// that isn't one of the 4 built-in milestones is no longer dropped — it maps to
+// reportStageColumnId/reportFieldColumnId, which SummaryTable renders once the caller also
+// builds the matching SummaryColumnDef via buildDynamicReportColumns and passes it in as
+// `dynamicStageColumns`. Only task fields with no SUMMARY_COLUMNS equivalent at all still count
+// as dropped.
+export const applyReportToSummaryColumns = (configuration: {
+  taskFields?: { id: string }[];
+  stages?: Record<string, ReportStageConfig>;
+}): ApplyReportToSummaryColumnsResult => {
+  const mapped = new Set<string>(ALWAYS_VISIBLE_SUMMARY_COLUMN_IDS);
+  let matchedCount = 0;
+  let droppedCount = 0;
+
+  (configuration.taskFields || []).forEach(field => {
+    const summaryId = TASK_FIELD_TO_SUMMARY_COLUMN_ID[field.id];
+    if (summaryId) { mapped.add(summaryId); matchedCount++; }
+    else droppedCount++;
+  });
+
+  Object.entries(configuration.stages || {}).forEach(([stageId, stageConfig]) => {
+    if (stageConfig?.isStageDateSelected) {
+      const milestone = MILESTONE_STAGE_COLUMNS.find(m => m.stageId === stageId);
+      mapped.add(milestone ? milestone.key : reportStageColumnId(stageId));
+      matchedCount++;
+    }
+    Object.entries(stageConfig?.documents || {}).forEach(([kycId, docConfig]) => {
+      (docConfig?.fields || []).forEach(field => {
+        mapped.add(reportFieldColumnId(stageId, kycId, field.id));
+        matchedCount++;
+      });
+    });
+  });
+
+  return {
+    visibleColumnIds: [
+      ...SUMMARY_COLUMNS.map(c => c.id).filter(id => mapped.has(id)),
+      ...Array.from(mapped).filter(id => id.startsWith('report_stage_') || id.startsWith('report_field_')),
+    ],
+    matchedCount,
+    droppedCount,
+  };
+};
+
+// Builds the SummaryColumnDef[] for a report's non-milestone stage-date selections AND its
+// per-document-field selections — the `dynamicStageColumns` SummaryTable merges alongside
+// SUMMARY_COLUMNS. Stage/field names are looked up across every department's stage list and
+// the passed-in kycDocuments map (stage ids are shared across departments the same way
+// MILESTONE_STAGE_COLUMNS's are — see that constant's own comment), so this works regardless of
+// which department(s) are currently loaded.
+export const buildDynamicReportStageColumns = (
+  configuration: { stages?: Record<string, ReportStageConfig> },
+  stagesByDept: Map<string, any[]>,
+  kycDocuments: Map<string, any> = new Map()
+): SummaryColumnDef[] => {
+  const allStages = Array.from(stagesByDept.values()).flat();
+  const columns: SummaryColumnDef[] = [];
+
+  Object.entries(configuration.stages || {}).forEach(([stageId, stageConfig]) => {
+    const stage = allStages.find((s: any) => s.id === stageId);
+    const stageLabel = stage?.name || 'Stage';
+
+    if (stageConfig?.isStageDateSelected && !MILESTONE_STAGE_COLUMNS.some(m => m.stageId === stageId)) {
+      const label = stageLabel.toUpperCase();
+      columns.push({
+        id: reportStageColumnId(stageId),
+        label,
+        type: 'report_stage',
+        reportStage: { stageId, label },
+      });
+    }
+
+    Object.entries(stageConfig?.documents || {}).forEach(([kycId, docConfig]) => {
+      const kycDoc = kycDocuments.get(kycId);
+      (docConfig?.fields || []).forEach(field => {
+        const fieldInfo = kycDoc?.fields?.find((f: any) => f.id === field.id);
+        const fieldName = fieldInfo?.fieldName || field.id;
+        columns.push({
+          id: reportFieldColumnId(stageId, kycId, field.id),
+          label: `${stageLabel} — ${fieldName}`.toUpperCase(),
+          type: 'report_field',
+          reportField: { stageId, kycId, fieldId: field.id, fieldName },
+        });
+      });
+    });
+  });
+
+  return columns;
+};

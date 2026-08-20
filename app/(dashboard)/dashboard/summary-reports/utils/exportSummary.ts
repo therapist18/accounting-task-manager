@@ -7,7 +7,7 @@
 // (title/subtitle banner, colored group headers, chunked landscape PDF columns, status-colored
 // cell text), just themed in this page's own accent (#376BAE) instead of per-report-type ones.
 import ExcelJS from "exceljs";
-import { formatDateCell, formatEstimatedMins } from "../../reports/components/reportCellRenderers";
+import { formatDateCell, formatEstimatedMins } from "../components/reportCellRenderers";
 import { resolveFieldValue, resolveMilestoneDate } from "../components/SummaryTable";
 import { getSubDepartmentDisplay } from "../../tasks/overall-view/tableUtils";
 import type { SummaryColumnDef } from "../stageColumnConfig";

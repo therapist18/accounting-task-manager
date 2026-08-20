@@ -1,10 +1,9 @@
 // @ts-nocheck
 "use client";
 
-import React, { useRef, useState, useEffect, useMemo } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { useToast } from "@/components/ui/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { Loader2, Save, RefreshCw, ChevronDown, FileText, Code, Hash, View } from "lucide-react";
 import supabase from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -17,6 +16,7 @@ import { TemplateEditorPanel } from "./components/TemplateEditorPanel";
 import { PlaceholderPanel } from "./components/PlaceholderPanel";
 import { PlaceholderFormDialog } from "./components/PlaceholderFormDialog";
 import { Button } from "@/components/ui/button";
+import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from "react-resizable-panels";
 
 interface DocumentTemplateManagerProps {
   document: { id: string; name: string; display_name?: string; };
@@ -67,6 +67,10 @@ export function DocumentTemplateManager({
   }, [templateFiles]);
   
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
+
+  const leftPanelRef = useRef<ImperativePanelHandle>(null);
+  const middlePanelRef = useRef<ImperativePanelHandle>(null);
+  const rightPanelRef = useRef<ImperativePanelHandle>(null);
   const [panelsVisible, setPanelsVisible] = useState({
     left: true,
     middle: true,
@@ -75,66 +79,26 @@ export function DocumentTemplateManager({
 
   const currentTemplate = currentTemplateIndex !== null ? templates[currentTemplateIndex] : null;
 
+  const panelRefs = { left: leftPanelRef, middle: middlePanelRef, right: rightPanelRef } as const;
+
   const togglePanel = (panel: 'left' | 'middle' | 'right') => {
+    const ref = panelRefs[panel];
+    const handle = ref.current;
+    if (!handle) return;
+
+    const isCollapsed = handle.isCollapsed();
+    if (isCollapsed) {
+      handle.expand();
+      return;
+    }
+
     const currentlyVisibleCount = Object.values(panelsVisible).filter(Boolean).length;
-    if (currentlyVisibleCount === 1 && panelsVisible[panel]) {
+    if (currentlyVisibleCount === 1) {
       toast({ title: "Cannot hide the last visible panel." });
       return;
     }
-    setPanelsVisible(prev => ({ ...prev, [panel]: !prev[panel] }));
+    handle.collapse();
   };
-
-  const panelClasses = useMemo(() => {
-    const { left, middle, right } = panelsVisible;
-    const visibleCount = [left, middle, right].filter(Boolean).length;
-
-    const getClass = (className: string) => className.replace(/\s+/g, ' ').trim();
-
-    if (visibleCount === 3) return {
-      left: getClass('col-span-3'),
-      middle: getClass('col-span-5'),
-      right: getClass('col-span-4')
-    };
-    if (visibleCount === 2) {
-      if (!left) return {
-        left: getClass('hidden'),
-        middle: getClass('col-span-7'),
-        right: getClass('col-span-5')
-      };
-      if (!middle) return {
-        left: getClass('col-span-12'),
-        middle: getClass('hidden'),
-        right: getClass('hidden')
-      };
-      if (!right) return {
-        left: getClass('col-span-7'),
-        middle: getClass('col-span-5'),
-        right: getClass('hidden')
-      };
-    }
-    if (visibleCount === 1) {
-      if (left) return {
-        left: getClass('col-span-12'),
-        middle: getClass('hidden'),
-        right: getClass('hidden')
-      };
-      if (middle) return {
-        left: getClass('hidden'),
-        middle: getClass('col-span-12'),
-        right: getClass('hidden')
-      };
-      if (right) return {
-        left: getClass('hidden'),
-        middle: getClass('hidden'),
-        right: getClass('col-span-12')
-      };
-    }
-    return {
-      left: getClass('hidden'),
-      middle: getClass('hidden'),
-      right: getClass('hidden')
-    };
-  }, [panelsVisible]);
 
   // Fetch existing templates for the document when dialog opens
   // Only fetch if we're creating a new template (initialTemplates is empty)
@@ -664,7 +628,13 @@ export function DocumentTemplateManager({
                 Manage templates for <span className="font-semibold">{document.display_name || document.name}</span>
               </DialogDescription>
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5 pr-3 mr-1 border-r">
+                <View className="h-4 w-4 text-muted-foreground mr-1" />
+                <Button variant={panelsVisible.left ? 'secondary' : 'ghost'} size="sm" onClick={() => togglePanel('left')}>Templates</Button>
+                <Button variant={panelsVisible.middle ? 'secondary' : 'ghost'} size="sm" onClick={() => togglePanel('middle')}>Editor</Button>
+                <Button variant={panelsVisible.right ? 'secondary' : 'ghost'} size="sm" onClick={() => togglePanel('right')}>Placeholders</Button>
+              </div>
               <Button variant="outline" onClick={handleRescanPlaceholders} disabled={!currentTemplate || isProcessing}>
                 {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                 Re-scan
@@ -677,25 +647,29 @@ export function DocumentTemplateManager({
           </div>
         </DialogHeader>
 
-        <div className="flex items-center gap-2 px-6 py-2 border-b border-t">
-          <View className="h-4 w-4 text-muted-foreground" />
-          <Label className="mr-2">View Panels:</Label>
-          <Button variant={panelsVisible.left ? 'secondary' : 'ghost'} size="sm" onClick={() => togglePanel('left')}>Templates</Button>
-          <Button variant={panelsVisible.middle ? 'secondary' : 'ghost'} size="sm" onClick={() => togglePanel('middle')}>Editor</Button>
-          <Button variant={panelsVisible.right ? 'secondary' : 'ghost'} size="sm" onClick={() => togglePanel('right')}>Placeholders</Button>
-        </div>
-
-        <div className="grid grid-cols-12 gap-6 py-4 flex-1 overflow-y-auto h-[calc(90vh-150px)]">
+        <div className="flex-1 min-h-0 py-4 h-[calc(90vh-100px)]">
           {isLoadingTemplates ? (
-            <div className="col-span-12 flex items-center justify-center">
+            <div className="h-full flex items-center justify-center">
               <div className="text-center">
                 <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">Loading templates...</p>
               </div>
             </div>
           ) : (
-            <>
-              <div className={`${panelClasses.left} flex flex-col gap-6 h-full transition-all duration-300`}>
+            <PanelGroup direction="horizontal" autoSaveId="document-template-manager-panels" className="h-full w-full">
+              <Panel
+                ref={leftPanelRef}
+                id="dtm-templates"
+                order={1}
+                defaultSize={25}
+                minSize={15}
+                maxSize={40}
+                collapsible
+                collapsedSize={0}
+                onCollapse={() => setPanelsVisible(prev => ({ ...prev, left: false }))}
+                onExpand={() => setPanelsVisible(prev => ({ ...prev, left: true }))}
+                className="flex flex-col gap-6 h-full overflow-hidden pr-3"
+              >
                 <TemplateListPanel
                   templates={templates}
                   currentTemplateIndex={currentTemplateIndex}
@@ -706,43 +680,73 @@ export function DocumentTemplateManager({
                   isProcessing={isProcessing}
                   fileInputRef={fileInputRef}
                 />
-              </div>
+              </Panel>
 
-          <div className={`${panelClasses.middle} h-full transition-all duration-300`}>
-            <TemplateEditorPanel
-              currentTemplate={currentTemplate}
-              templateFiles={templateFiles}
-              onTemplateNameChange={handleTemplateNameChange}
-              onTemplateFieldChange={handleTemplateFieldChange}
-              onClassificationFieldChange={handleClassificationFieldChange}
-              onEditorChange={handleEditorChange}
-              onEditorBlur={handleEditorBlur}
-              onRescanPlaceholders={handleRescanPlaceholders}
-              onManualRescan={handleManualRescan}
-              onEntityTypeToggle={handleEntityTypeToggle}
-              onClearEntityTypes={handleClearEntityTypes}
-              onDownloadTemplate={handleDownloadTemplate}
-              onToggleLetterhead={handleToggleLetterhead}
-              isProcessing={isProcessing}
-            />
-          </div>
+              <PanelResizeHandle className="relative flex w-2 items-center justify-center group outline-none cursor-col-resize z-20">
+                <div className="h-full w-[2px] bg-slate-200/50 dark:bg-slate-800/50 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500 dark:group-hover:bg-blue-500 dark:group-active:bg-blue-600 delay-75" />
+              </PanelResizeHandle>
 
-          <div className={`${panelClasses.right} h-full transition-all duration-300`}>
-            <PlaceholderPanel
-              placeholders={currentTemplate?.placeholders || []}
-              placeholderSearch={placeholderSearch}
-              onPlaceholderSearchChange={setPlaceholderSearch}
-              onAddPlaceholder={handleAddPlaceholder}
-              onEditPlaceholder={handleEditPlaceholder}
-              onRemovePlaceholder={handleRemovePlaceholder}
-              masterFields={masterFields}
-              jobQuestions={jobQuestions}
-              requirements={requirements}
-              variant="table"
-              showAddButton
-            />
-          </div>
-            </>
+              <Panel
+                ref={middlePanelRef}
+                id="dtm-editor"
+                order={2}
+                defaultSize={42}
+                minSize={25}
+                collapsible
+                collapsedSize={0}
+                onCollapse={() => setPanelsVisible(prev => ({ ...prev, middle: false }))}
+                onExpand={() => setPanelsVisible(prev => ({ ...prev, middle: true }))}
+                className="h-full overflow-hidden px-3"
+              >
+                <TemplateEditorPanel
+                  currentTemplate={currentTemplate}
+                  templateFiles={templateFiles}
+                  onTemplateNameChange={handleTemplateNameChange}
+                  onTemplateFieldChange={handleTemplateFieldChange}
+                  onClassificationFieldChange={handleClassificationFieldChange}
+                  onEditorChange={handleEditorChange}
+                  onEditorBlur={handleEditorBlur}
+                  onRescanPlaceholders={handleRescanPlaceholders}
+                  onManualRescan={handleManualRescan}
+                  onEntityTypeToggle={handleEntityTypeToggle}
+                  onClearEntityTypes={handleClearEntityTypes}
+                  onDownloadTemplate={handleDownloadTemplate}
+                  onToggleLetterhead={handleToggleLetterhead}
+                  isProcessing={isProcessing}
+                />
+              </Panel>
+
+              <PanelResizeHandle className="relative flex w-2 items-center justify-center group outline-none cursor-col-resize z-20">
+                <div className="h-full w-[2px] bg-slate-200/50 dark:bg-slate-800/50 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500 dark:group-hover:bg-blue-500 dark:group-active:bg-blue-600 delay-75" />
+              </PanelResizeHandle>
+
+              <Panel
+                ref={rightPanelRef}
+                id="dtm-placeholders"
+                order={3}
+                defaultSize={33}
+                minSize={20}
+                collapsible
+                collapsedSize={0}
+                onCollapse={() => setPanelsVisible(prev => ({ ...prev, right: false }))}
+                onExpand={() => setPanelsVisible(prev => ({ ...prev, right: true }))}
+                className="h-full overflow-hidden pl-3"
+              >
+                <PlaceholderPanel
+                  placeholders={currentTemplate?.placeholders || []}
+                  placeholderSearch={placeholderSearch}
+                  onPlaceholderSearchChange={setPlaceholderSearch}
+                  onAddPlaceholder={handleAddPlaceholder}
+                  onEditPlaceholder={handleEditPlaceholder}
+                  onRemovePlaceholder={handleRemovePlaceholder}
+                  masterFields={masterFields}
+                  jobQuestions={jobQuestions}
+                  requirements={requirements}
+                  variant="table"
+                  showAddButton
+                />
+              </Panel>
+            </PanelGroup>
           )}
         </div>
 
@@ -753,6 +757,7 @@ export function DocumentTemplateManager({
             setEditingPlaceholderIndex(null);
           }}
           placeholder={currentPlaceholder}
+          allPlaceholders={currentTemplateIndex !== null ? (templates[currentTemplateIndex]?.placeholders || []) : []}
           masterFields={masterFields}
           jobQuestions={jobQuestions}
           requirements={requirements}

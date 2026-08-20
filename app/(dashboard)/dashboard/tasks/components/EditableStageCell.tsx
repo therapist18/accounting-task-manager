@@ -42,6 +42,7 @@ interface EditableStageCellProps {
   onOfficerChange?: (taskId: string, officerId: string | null) => Promise<void>
   readOnly?: boolean
   onOpenRequirements?: (task: any) => void
+  showTime?: boolean
 }
 
 const documentFieldsCache = new Map<string, { fields: any[], timestamp: number }>();
@@ -98,7 +99,7 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[] = [])
   }
 };
 
-export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, renderMode = 'date', taskName, clientName, getKycFields, onFetchData, officers = [], onOfficerChange, readOnly = false, onOpenRequirements }: EditableStageCellProps) {
+export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, renderMode = 'date', taskName, clientName, getKycFields, onFetchData, officers = [], onOfficerChange, readOnly = false, onOpenRequirements, showTime = true }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -241,20 +242,43 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   const effectiveStartTime = useMemo(() => {
     if (!stages?.length || !task?.created_at) return task.date_initiated;
 
-    const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+    const sortedStages = [...stages].sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
     const currentIndex = sortedStages.findIndex(s => s.id === stage.id);
 
     if (currentIndex <= 0) return task.created_at || task.date_initiated;
 
+    const stageCompletionDate = (stageId: string) => {
+      const stageData = task.stages?.[stageId];
+      return stageData?.date || stageData?.completedAt || stageData?.date_completed;
+    };
+
     let previousStage = sortedStages[currentIndex - 1];
-    while (previousStage && !task.stages?.[previousStage.id]?.date_completed) {
+    while (previousStage && !stageCompletionDate(previousStage.id)) {
       const prevIndex = sortedStages.findIndex(s => s.id === previousStage.id);
       if (prevIndex <= 0) break;
       previousStage = sortedStages[prevIndex - 1];
     }
 
-    return previousStage?.id ? task.stages?.[previousStage.id]?.date_completed : task.created_at || task.date_initiated;
+    return previousStage?.id ? stageCompletionDate(previousStage.id) : task.created_at || task.date_initiated;
   }, [stages, stage?.id, task?.created_at, task?.date_initiated, task?.stages]);
+
+  // Overdue detection — mirrors reports/page.tsx computeStageDateInfo's isOverdue logic:
+  // a completed stage is overdue if the duration between its effective start and completion
+  // date exceeds the stage's estimated_time.
+  const isStageOverdue = useMemo(() => {
+    const stageData = task?.stages?.[stage?.id];
+    const stageStatus = stageData?.status;
+    if (stageStatus !== 'completed' && stageData?.documentsUploaded !== true) return false;
+    if (!stage.estimated_time) return false;
+    const completionDate = stageData?.date || stageData?.completedAt;
+    if (!completionDate || !effectiveStartTime) return false;
+    const start = parseDate(effectiveStartTime);
+    const end = parseDate(completionDate);
+    if (!start || !end) return false;
+    const durationMs = end.getTime() - start.getTime();
+    const durationMinutes = Math.floor(durationMs / (1000 * 60));
+    return durationMinutes > stage.estimated_time;
+  }, [task?.stages, stage?.id, stage?.estimated_time, effectiveStartTime]);
 
   const timeStatus = useMemo(() => {
     return getTimeStatus(effectiveStartTime, stage.estimated_time);
@@ -288,7 +312,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       if (skippedAt) {
         try {
           const date = new Date(skippedAt);
-          if (isValid(date)) return `Skipped (${format(date, 'dd/MM/yyyy')})`; // Shortened for inline view
+          if (isValid(date)) return `Skipped (${format(date, 'dd/MM/yyyy')})`;
         } catch (e) {}
       }
       return 'Skipped';
@@ -299,15 +323,17 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     const desiredFormatRegex = /^\d{2}\/\d{2}\/\d{4}( \d{2}:\d{2})?$/;
     if (desiredFormatRegex.test(dateStr)) return dateStr;
 
+    const dateFmt = showTime ? 'dd/MM/yyyy HH:mm' : 'dd/MM/yyyy';
+
     try {
       const date = new Date(dateStr);
-      if (isValid(date)) return format(date, 'dd/MM/yyyy HH:mm');
+      if (isValid(date)) return format(date, dateFmt);
     } catch (e) {}
 
     const formats = ['MM/dd/yyyy HH:mm', 'MM/dd/yyyy', 'yyyy-MM-dd', 'dd-MM-yyyy'];
     for (const fmt of formats) {
       const parsed = parse(dateStr, fmt, new Date());
-      if (isValid(parsed)) return format(parsed, 'dd/MM/yyyy HH:mm');
+      if (isValid(parsed)) return format(parsed, dateFmt);
     }
     return dateStr;
   };
@@ -910,12 +936,35 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       const isLegacyCompleted = !stageStatus && (!!value || stageData?.documentsUploaded === true);
 
       if ((isExplicitlyCompleted || isLegacyCompleted) && stageDate && stageDate !== 'NaN/NaN/NaN') {
-        const textColorClass = "text-emerald-600";
-        return (
-          <div className={`flex items-center gap-1 font-semibold text-xs ${textColorClass} truncate`}>
-            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate" title={formatDateDisplay(stageDate)}>{formatDateDisplay(stageDate)}</span>
+        const completedBlock = (
+          <div className="flex items-center gap-1.5 cursor-default select-none min-w-0">
+            {isStageOverdue
+              ? <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+              : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />}
+            <span className={cn("text-sm font-semibold whitespace-nowrap tracking-tight truncate", isStageOverdue ? "text-amber-700" : "text-slate-800")} title={formatDateDisplay(stageDate)}>
+              {formatDateDisplay(stageDate)}
+            </span>
+            {isStageOverdue && (
+              <span className="text-[8px] font-black text-amber-600 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded uppercase shrink-0">LATE</span>
+            )}
           </div>
+        );
+        return (
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>{completedBlock}</TooltipTrigger>
+              <TooltipContent
+                side="top"
+                className={cn(
+                  "border shadow-lg text-xs rounded-lg px-3 py-2 z-[9999]",
+                  isStageOverdue ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-emerald-50 border-emerald-200 text-emerald-900"
+                )}
+              >
+                <p className="font-bold mb-0.5">{isStageOverdue ? "Completed — Overdue" : "Completed On Time"}</p>
+                <p className="text-slate-600 text-sm">{formatDateDisplay(stageDate)}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         );
       }
 

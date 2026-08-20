@@ -28,6 +28,10 @@ interface AutomationTabProps {
   highlightAutomationId?: string | number
   onNavigateToRequirement?: (requirementId: string) => void
   onNavigateToTemplate?: (documentId: string) => void
+  // Raw automation_jobs rows for this task, fetched once by the parent
+  // JobWorkspace (it needs them too, for the tab-bar badge) - avoids this tab
+  // re-running the identical query itself.
+  automationJobs?: any[] | null
 }
 
 interface ColDef {
@@ -167,7 +171,7 @@ function isFieldApplicable(field: any, col: ColDef): boolean {
   return false
 }
 
-export function AutomationTab({ data, onRefresh, highlightAutomationId, onNavigateToRequirement, onNavigateToTemplate }: AutomationTabProps) {
+export function AutomationTab({ data, onRefresh, highlightAutomationId, onNavigateToRequirement, onNavigateToTemplate, automationJobs }: AutomationTabProps) {
   const { task, automations, automationLinkSources = {}, kycDocsMap } = data
   const [expandedAutomations, setExpandedAutomations] = useState<Set<number>>(new Set(automations?.map(a => a.id) || []))
   const [highlightedRowId, setHighlightedRowId] = useState<string | number | null>(null)
@@ -354,14 +358,16 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       const results: Record<string, any[]> = {}
       const addDoc = (key: any, doc: any) => { const k = String(key); if (!results[k]) results[k] = []; results[k].push(doc) }
       try {
-        if (personIds.length > 0) {
-          const { data } = await supabase.from('acc_portal_directors_documents').select('id, document_id, director_id, file_path').in('director_id', personIds).in('document_id', Array.from(reqKycIds)).neq('status', 'deleted')
-            ; (data || []).forEach((d: any) => addDoc(d.director_id, d))
-        }
-        if (companyIds.length > 0) {
-          const { data } = await supabase.from('acc_portal_kyc_uploads').select('id, document_id, company_id, file_path').in('company_id', companyIds).in('document_id', Array.from(reqKycIds)).neq('status', 'deleted')
-            ; (data || []).forEach((d: any) => addDoc(d.company_id, d))
-        }
+        await Promise.all([
+          personIds.length > 0
+            ? supabase.from('acc_portal_directors_documents').select('id, document_id, director_id, file_path').in('director_id', personIds).in('document_id', Array.from(reqKycIds)).neq('status', 'deleted')
+              .then(({ data }) => { (data || []).forEach((d: any) => addDoc(d.director_id, d)) })
+            : Promise.resolve(),
+          companyIds.length > 0
+            ? supabase.from('acc_portal_kyc_uploads').select('id, document_id, company_id, file_path').in('company_id', companyIds).in('document_id', Array.from(reqKycIds)).neq('status', 'deleted')
+              .then(({ data }) => { (data || []).forEach((d: any) => addDoc(d.company_id, d)) })
+            : Promise.resolve(),
+        ]);
         setDocStatusByEntity(results)
       } catch (err) { console.error('Error checking document status:', err) } finally { setDocStatusLoaded(true) }
     }
@@ -724,54 +730,39 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
     };
   }, [pollingInterval]);
 
-  // On mount (and whenever we land on a different task), pull this task's automation
-  // job history so "last run" status/audit survives a page refresh, and transparently
-  // resume live polling if a job is still in flight - otherwise a refresh mid-run looks
-  // like the automation was never started.
+  // Whenever the parent's automation job history arrives/changes (fetched once in
+  // JobWorkspace and passed down, rather than this tab re-querying automation_jobs
+  // itself), derive "last run" status per automation so it survives a page refresh,
+  // and transparently resume live polling if a job is still in flight - otherwise a
+  // refresh mid-run looks like the automation was never started.
   useEffect(() => {
-    if (!task?.id) return;
-    let cancelled = false;
-    const loadJobHistory = async () => {
-      try {
-        const { data: jobs, error } = await supabase
-          .from('automation_jobs')
-          .select('*')
-          .eq('context->>task_id', String(task.id))
-          .order('created_at', { ascending: false })
-          .limit(200);
-        if (error || !jobs || cancelled) return;
+    if (!task?.id || !automationJobs?.length) return;
 
-        const latest: Record<string, any> = {};
-        jobs.forEach((j: any) => {
-          const autoId = j.context?.automation_id;
-          if (autoId && !latest[autoId]) latest[autoId] = j;
-        });
-        setLastRunByAutomation(latest);
+    const latest: Record<string, any> = {};
+    automationJobs.forEach((j: any) => {
+      const autoId = j.context?.automation_id;
+      if (autoId && !latest[autoId]) latest[autoId] = j;
+    });
+    setLastRunByAutomation(latest);
 
-        const activeJob = jobs.find((j: any) => ['pending', 'claiming', 'running'].includes(j.status));
-        if (activeJob) {
-          setAutomationJobId(activeJob.id);
-          setRunningAutomationId(activeJob.context?.automation_id);
-          setShowConsole(true);
-          setAutomationProgress({
-            isRunning: true,
-            progress: activeJob.progress || 0,
-            currentStep: activeJob.current_step || '',
-            message: activeJob.message || 'Resuming...',
-            logs: activeJob.logs || [],
-            evidence: activeJob.evidence || [],
-            status: activeJob.status,
-          });
-          const interval = setInterval(() => pollSupabaseJob(activeJob.id), 2000);
-          setPollingInterval(interval);
-        }
-      } catch (err) {
-        console.error('Error loading automation job history:', err);
-      }
-    };
-    loadJobHistory();
-    return () => { cancelled = true; };
-  }, [task?.id, pollSupabaseJob]);
+    const activeJob = automationJobs.find((j: any) => ['pending', 'claiming', 'running'].includes(j.status));
+    if (activeJob) {
+      setAutomationJobId(activeJob.id);
+      setRunningAutomationId(activeJob.context?.automation_id);
+      setShowConsole(true);
+      setAutomationProgress({
+        isRunning: true,
+        progress: activeJob.progress || 0,
+        currentStep: activeJob.current_step || '',
+        message: activeJob.message || 'Resuming...',
+        logs: activeJob.logs || [],
+        evidence: activeJob.evidence || [],
+        status: activeJob.status,
+      });
+      const interval = setInterval(() => pollSupabaseJob(activeJob.id), 2000);
+      setPollingInterval(interval);
+    }
+  }, [task?.id, automationJobs, pollSupabaseJob]);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -989,11 +980,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
 
       const documentPreviews = await Promise.all(docs.map(async (doc: any) => {
         const { data: signData } = await supabase.storage.from('kyc-documents').createSignedUrl(doc.file_path, 3600)
-        let fields: any[] = []
-        if (doc.document_id) {
-          const { data: kycData } = await supabase.from('acc_portal_kyc').select('fields').eq('id', doc.document_id).single()
-          if (kycData) fields = kycData.fields || []
-        }
+        const fields: any[] = doc.document_id ? (kycDocsMap?.get?.(doc.document_id)?.fields || []) : []
         return {
           id: doc.id,
           fileUrl: signData?.signedUrl,
@@ -1012,7 +999,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
     } finally {
       setDocPreviewLoading(null)
     }
-  }, []);
+  }, [kycDocsMap]);
 
   const cleanFormData = (data: Record<string, any>): Record<string, any> => {
     const cleaned: Record<string, any> = {};
@@ -1287,13 +1274,17 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       if (!indId) return;
       const relData = relationshipData[0];
       if (relData?.principal?.full_name) { setIndividualName(relData.principal.full_name); return; }
+      if (data.individual?.full_name && String(data.individual.id) === String(indId)) {
+        setIndividualName(data.individual.full_name);
+        return;
+      }
       try {
         const { data: individual } = await supabase.from('registry_individuals').select('full_name').eq('id', indId).single();
         if (individual) setIndividualName(individual.full_name);
       } catch (error) { console.error('Error fetching individual name:', error); }
     };
     fetchIndividualName();
-  }, [task?.individual_id, relationshipData]);
+  }, [task?.individual_id, relationshipData, data.individual]);
 
   // Auto-compute computed fields
   useEffect(() => {

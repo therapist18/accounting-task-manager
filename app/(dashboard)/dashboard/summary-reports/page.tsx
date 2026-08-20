@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Loader2, Building2, Clock, GitCompare, FileDown, FileSpreadsheet, FileText, ChevronDown, ListFilter } from "lucide-react";
+import { Loader2, Building2, Clock, GitCompare, FileDown, FileSpreadsheet, FileText, ChevronDown, ListFilter, TableIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -23,10 +23,13 @@ import {
   isTaskWithClient,
   isStageApplicableToTask,
   parseDateSafe,
-} from "../reports/utils/reportStageLogic";
+} from "./utils/reportStageLogic";
+import { MemorizedReportDialog, type MemorizedReport } from "./components/MemorizedReportDialog";
+import { ENHANCED_TABLE_HEADERS_IMMIGRATION } from "../tasks/overall-view/tableUtils";
+import { fetchAllDocuments, fetchAllKycFields, fetchUploadedDocumentsForTasks, type Document } from "../tasks/utils/taskManagerData";
 import { StatusTabs, PerspectiveTabs, HierarchyTabs, ColumnVisibilityDialog, } from "./components/PageHeader";
 import { SummaryTable, resolveCompanyName } from "./components/SummaryTable";
-import { MILESTONE_STAGE_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS, SUMMARY_COLUMNS } from "./stageColumnConfig";
+import { MILESTONE_STAGE_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS, SUMMARY_COLUMNS, applyReportToSummaryColumns, buildDynamicReportStageColumns } from "./stageColumnConfig";
 import { exportSummaryReportToExcel, exportSummaryReportToPDF } from "./utils/exportSummary";
 import {
   buildJobLevelKey,
@@ -69,7 +72,7 @@ export default function SummaryReportsPage() {
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
   const [activeClassIds, setActiveClassIds] = useState<string[]>([]);
   const [activeSubClassIds, setActiveSubClassIds] = useState<string[]>([]);
-  const [activeTaskStatus, setActiveTaskStatus] = useState<'all' | 'active' | 'enquiry' | 'wip' | 'completed' | 'overdue'>('enquiry');
+  const [activeTaskStatus, setActiveTaskStatus] = useState<'all' | 'active' | 'enquiry' | 'wip' | 'completed' | 'overdue'>('all');
 
   const [activePerspective, setActivePerspective] = useState<'all' | 'officers' | 'managers' | 'clients'>('all');
   const [officerFilterMode, setOfficerFilterMode] = useState<'current' | 'history'>('current');
@@ -85,6 +88,15 @@ export default function SummaryReportsPage() {
   const [isExporting, setIsExporting] = useState<'excel' | 'pdf' | null>(null);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS);
+
+  // Document data for EditableStageCell (read-only preview)
+  const [allDocuments, setAllDocuments] = useState<Document[]>([]);
+  const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map());
+
+  // Memorized Reports
+  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
+  const [activeReport, setActiveReport] = useState<MemorizedReport | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // ── Row actions (Edit / Cancel / Reactivate / Delete) — same dialogs and tm_tasks writes
   // DepartmentTasksManager's renderActionButtons uses, driven from this page's own allTasks
@@ -102,6 +114,14 @@ export default function SummaryReportsPage() {
   const loadAllData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
+      // Doesn't depend on (or get depended on by) anything else in this function — kick it
+      // off now instead of waiting until the very end, so it resolves concurrently with the
+      // rest of the load instead of adding its own round trip on top.
+      const sessionPromise = fetch('/api/auth/session')
+        .then(res => res.json())
+        .then(json => setCurrentUserId(json?.authenticated && json?.user ? (json.user.id || null) : null))
+        .catch(sessionErr => console.error('[SummaryReports] Failed to fetch current user session:', sessionErr));
+
       // Departments and companies don't depend on each other — fetch both up front in
       // parallel instead of chaining them, since fetchTasks/fetchStages/getAllUserData all
       // need depts (and fetchTasks additionally needs comps).
@@ -209,6 +229,16 @@ export default function SummaryReportsPage() {
       }
       setExpectedTimeByJobLevel(newExpectedTimeMap);
       setPromisedTimeByJobLevel(newPromisedTimeMap);
+
+      // Load document data for EditableStageCell preview (read-only document viewing)
+      const [documentsData, { kycDocsMap }] = await Promise.all([
+        fetchAllDocuments(),
+        fetchAllKycFields(),
+      ]);
+      setAllDocuments(documentsData);
+      setKycDocuments(kycDocsMap);
+
+      await sessionPromise;
     } catch (err) {
       toast({ title: "Error", description: "Could not load summary reports data.", variant: "destructive" });
     } finally {
@@ -234,11 +264,15 @@ export default function SummaryReportsPage() {
     setEditDialogOpen(true);
   }, []);
 
-  const handleTaskUpdated = useCallback((updatedTask: any) => {
-    setAllTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
+  const handleTaskUpdated = useCallback(async (_updatedTask: any) => {
     setEditDialogOpen(false);
     setEditingTask(null);
-  }, []);
+    // Re-fetch all data so the task picks up its enriched fields (company_name,
+    // job_level, participants_details, etc.) that the raw Supabase row returned by
+    // EnquiryDialog doesn't carry — a naive state.replace would lose those fields and
+    // cause the task to vanish from the filtered table.
+    await loadAllData(true);
+  }, [loadAllData]);
 
   const handleRequestCancel = useCallback((task: any) => {
     setTaskToCancel(task);
@@ -337,6 +371,20 @@ export default function SummaryReportsPage() {
   // getCanonicalCurrentStageForTask for the Officers/Managers/Clients perspective tabs, just
   // never exposed the stage's own name as a column until now.
   const getCurrentStageNameForTask = useCallback((task: any) => getCanonicalCurrentStageForTask(task)?.name || null, [getCanonicalCurrentStageForTask]);
+
+  // Fed into SummaryTable's <EditableStageCell> calls so document-backed stage dates resolve
+  // the same "isImmigrationDate"-prioritized field as DepartmentTasksManager's own getKycFields
+  // (DepartmentTasksManager.tsx:658-661) instead of falling back to the weaker heuristics
+  // calculateStageDate uses when documentFields is empty.
+  const getKycFields = useCallback((doc: any) => Promise.resolve(kycDocuments.get(doc.kycId)?.fields || []), [kycDocuments]);
+
+  // Stages a memorized report selected beyond the 4 built-in MILESTONE_STAGE_COLUMNS — see
+  // stageColumnConfig.ts's 'report_stage' column type. Previously these were silently dropped
+  // by applyReportToSummaryColumns; now they get their own SummaryTable column.
+  const dynamicStageColumns = useMemo(
+    () => activeReport ? buildDynamicReportStageColumns(activeReport.configuration, stagesByDept, kycDocuments) : [],
+    [activeReport, stagesByDept, kycDocuments]
+  );
 
   // "Stages Time Expected" — sum of applicable stage.estimated_time (the Stages module's
   // "Overall Expected Time"). Purely informational now; no longer feeds Planned/Actual
@@ -658,9 +706,17 @@ export default function SummaryReportsPage() {
           <div className="min-w-0 flex items-center gap-4">
             <span className="h-9 w-1.5 rounded-full bg-custom-blue shrink-0" />
             <div className="min-w-0 flex flex-col gap-1.5">
-              <h1 className="text-[28px] font-black text-slate-900 uppercase tracking-tight truncate leading-none">
-                Summary Reports Dashboard
-              </h1>
+              <div className="flex items-center gap-2.5 min-w-0">
+                <h1 className="text-[28px] font-black text-slate-900 uppercase tracking-tight truncate leading-none">
+                  Summary Reports Dashboard
+                </h1>
+                {activeReport && (
+                  <span className="inline-flex items-center gap-1.5 shrink-0 text-xs font-bold text-white px-2.5 py-1 rounded-full" style={{ backgroundColor: '#376bae' }}>
+                    <TableIcon className="h-3 w-3" />
+                    {activeReport.name}
+                  </span>
+                )}
+              </div>
               <div className="flex items-center text-sm text-slate-500 font-semibold gap-1">
                 <Building2 className="h-3.5 w-3.5 shrink-0" style={{ color: '#376bae' }} />
                 <span className="font-bold" style={{ color: '#376bae' }}>{activeDepartment?.name || "All Departments"}</span>
@@ -672,6 +728,14 @@ export default function SummaryReportsPage() {
 
           {/* Secondary controls — normal squared buttons matching the tab design above. */}
           <div className="flex items-center gap-2.5 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsReportDialogOpen(true)}
+              className="h-9 px-4 rounded-md text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 shrink-0 transition-all"
+            >
+              <TableIcon className="h-3.5 w-3.5" /> Reports
+            </Button>
             <ColumnVisibilityDialog visibleColumnIds={visibleColumnIds} setVisibleColumnIds={setVisibleColumnIds} />
             <Button
               variant="outline"
@@ -766,6 +830,7 @@ export default function SummaryReportsPage() {
 
       <SummaryTable
         tasks={sortedTasks} companies={companies} departments={departments} activeDeptId={activeDeptId}
+        activeSubDeptId={activeSubDeptId}
         showEmptyGroups={showEmptySubDepts}
         showTime={showTime} showDelta={showDelta}
         sortConfig={sortConfig} handleSort={handleSort}
@@ -781,6 +846,11 @@ export default function SummaryReportsPage() {
         onRequestCancel={handleRequestCancel}
         onRequestUncancel={handleRequestUncancel}
         onRequestDelete={handleRequestDelete}
+        allDocuments={allDocuments}
+        kycDocuments={kycDocuments}
+        stagesByDept={stagesByDept}
+        dynamicStageColumns={dynamicStageColumns}
+        getKycFields={getKycFields}
       />
 
       {/* Edit dialog — the exact EnquiryDialog DepartmentTasksManager reuses for editing,
@@ -828,6 +898,31 @@ export default function SummaryReportsPage() {
         title="Delete Task"
         description="This action cannot be undone. This will permanently delete this task."
         loading={isMutatingTask}
+      />
+
+      <MemorizedReportDialog
+        open={isReportDialogOpen} onOpenChange={setIsReportDialogOpen}
+        department={departments.find((d: any) => d.id.toString() === activeDeptId) || null}
+        stages={Array.from(stagesByDept.values()).flat()}
+        kycDocuments={kycDocuments}
+        onApplyReport={(report) => {
+          setActiveReport(report);
+          const { visibleColumnIds: mappedIds, matchedCount, droppedCount } = applyReportToSummaryColumns(report.configuration);
+          setVisibleColumnIds(mappedIds);
+          setIsReportDialogOpen(false);
+          toast({
+            title: "Report applied",
+            description: droppedCount > 0
+              ? `Showing ${matchedCount} matched column${matchedCount === 1 ? '' : 's'} from "${report.name}". ${droppedCount} field${droppedCount === 1 ? '' : 's'} in this report have no equivalent column in Summary Reports yet and were skipped.`
+              : `Showing ${matchedCount} column${matchedCount === 1 ? '' : 's'} from "${report.name}".`,
+          });
+        }}
+        tableHeaders={ENHANCED_TABLE_HEADERS_IMMIGRATION}
+        availableJobLevels={[]}
+        departments={departments}
+        subdepartments={departments.flatMap((d: any) => d.tm_subdepartments || [])}
+        classes={departments.flatMap((d: any) => (d.tm_subdepartments || []).flatMap((s: any) => s.classes || []))}
+        currentUserId={currentUserId}
       />
     </div>
   );

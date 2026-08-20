@@ -82,18 +82,18 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
   // without a page reload - tabs stay mounted, data stays in memory.
   const [requirementHighlightId, setRequirementHighlightId] = useState(initialRequirementId)
   const [templateHighlightId, setTemplateHighlightId] = useState(initialTemplateDocId)
-  const [automationSummary, setAutomationSummary] = useState<{ failed: number; needsReview: number; running: number } | null>(null)
   // Populated by TemplatesTab itself once visited (see its onSummaryChange prop) - stays
   // populated across tab switches since it lives here, not in the (lazily-mounted) tab.
   const [templatesSummary, setTemplatesSummary] = useState<{ ready: number; total: number } | null>(null)
 
-  // Lightweight, tab-bar-only summary of automation run state (failed/needs-review/running),
-  // scoped to this task's own automations - independent of whether the Automation tab has been
-  // opened, so the badge is accurate even before the (heavier) tab itself ever mounts.
+  // Raw automation job history for this task - fetched once here (independent of
+  // whether the Automation tab has been opened, so the tab-bar badge is accurate
+  // even before the tab ever mounts) and passed down to AutomationTab as a prop
+  // instead of it running the exact same query itself.
+  const [automationJobs, setAutomationJobs] = useState<any[] | null>(null)
   useEffect(() => {
-    if (!task?.id || !data.automations?.length) { setAutomationSummary(null); return }
+    if (!task?.id) { setAutomationJobs(null); return }
     let cancelled = false
-    const knownAutomationIds = new Set(data.automations.map((a: any) => String(a.id)))
     supabase
       .from("automation_jobs")
       .select("*")
@@ -102,22 +102,30 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
       .limit(200)
       .then(({ data: jobs, error }) => {
         if (error || !jobs || cancelled) return
-        const latest: Record<string, any> = {}
-        jobs.forEach((j: any) => {
-          const autoId = j.context?.automation_id != null ? String(j.context.automation_id) : null
-          if (autoId && knownAutomationIds.has(autoId) && !latest[autoId]) latest[autoId] = j
-        })
-        const summary = { failed: 0, needsReview: 0, running: 0 }
-        Object.values(latest).forEach((job: any) => {
-          const { isFailed, needsReview, isRunning } = classifyAutomationJob(job)
-          if (isFailed) summary.failed++
-          else if (needsReview) summary.needsReview++
-          else if (isRunning) summary.running++
-        })
-        if (!cancelled) setAutomationSummary(summary)
+        setAutomationJobs(jobs)
       })
     return () => { cancelled = true }
-  }, [task?.id, data.automations])
+  }, [task?.id])
+
+  // Lightweight, tab-bar-only summary of automation run state (failed/needs-review/running),
+  // derived from the same automationJobs fetched above.
+  const automationSummary = useMemo(() => {
+    if (!automationJobs?.length || !data.automations?.length) return null
+    const knownAutomationIds = new Set(data.automations.map((a: any) => String(a.id)))
+    const latest: Record<string, any> = {}
+    automationJobs.forEach((j: any) => {
+      const autoId = j.context?.automation_id != null ? String(j.context.automation_id) : null
+      if (autoId && knownAutomationIds.has(autoId) && !latest[autoId]) latest[autoId] = j
+    })
+    const summary = { failed: 0, needsReview: 0, running: 0 }
+    Object.values(latest).forEach((job: any) => {
+      const { isFailed, needsReview, isRunning } = classifyAutomationJob(job)
+      if (isFailed) summary.failed++
+      else if (needsReview) summary.needsReview++
+      else if (isRunning) summary.running++
+    })
+    return summary
+  }, [automationJobs, data.automations])
 
   // Sync activeTab when URL-driven initialTab prop changes (e.g. from zap icon redirect)
   useEffect(() => {
@@ -361,6 +369,7 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
               highlightAutomationId={activeTab === "automation" ? initialAutomationId : undefined}
               onNavigateToRequirement={handleNavigateToRequirement}
               onNavigateToTemplate={handleNavigateToTemplate}
+              automationJobs={automationJobs}
             />
           </div>
         )}

@@ -43,8 +43,9 @@ import {
   CONSENT_VERSION,
   loadFromLocalStorage,
   saveToLocalStorage,
+  LS_PREFIX,
   getCVDiffs,
-  isJustYear,
+  needsFullDate,
   mergeAiEnhancedCv,
 } from "./utils/cvGeneratorData";
 
@@ -217,7 +218,6 @@ export default function CVGeneratorPage() {
     companyDesc: false,
     dates: false,
     responsibilities: false,
-    kenyaStatus: false,
     linkedin: false,
     github: false,
     initiallyNonKenyan: false // Track if user was initially non-Kenyan
@@ -279,11 +279,10 @@ export default function CVGeneratorPage() {
         dob: !data.personalDetails?.dateOfBirth,
         maritalStatus: !data.personalDetails?.maritalStatus,
         companyDesc: (data.experience || []).some((e: any) => !e.companyDesc || e.companyDesc.trim().length < 5),
-        dates: (data.experience || []).some((e: any) => isJustYear(e.startDate) || isJustYear(e.endDate)),
+        dates: (data.experience || []).some((e: any) => needsFullDate(e.startDate) || needsFullDate(e.endDate)),
         responsibilities: (data.experience || []).some((e: any) => !e.responsibilities || e.responsibilities.length === 0),
-        kenyaStatus: false, // Will be set based on country and nationality
-        linkedin: !data.contactInfo?.linkedin,
-        github: !data.contactInfo?.github,
+        linkedin: !data.personalInfo?.linkedin,
+        github: !data.personalInfo?.github,
         initiallyNonKenyan: initiallyNonKenyan
       });
     }
@@ -327,6 +326,11 @@ export default function CVGeneratorPage() {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const applicantIdParam = params.get('applicantId');
+    // When this is a client-portal link (?portal=true), applicantId is only
+    // needed to identify which record to load/save — it must NOT flip
+    // workflowStep into the internal 'review-edit' UI or strip the portal/
+    // draftId params, both of which would kick the client out of the portal.
+    const isPortalMode = params.get('portal') === 'true';
 
     // Also check legacy sessionStorage fallback
     const raw = sessionStorage.getItem('cv_builder_prefill');
@@ -612,18 +616,20 @@ export default function CVGeneratorPage() {
             }
           }
 
-          setWorkflowStep('review-edit');
-          setActiveSection('contact');
-          setShowSaveCvPrompt(true);
+          if (!isPortalMode) {
+            setWorkflowStep('review-edit');
+            setActiveSection('contact');
+            setShowSaveCvPrompt(true);
 
-          // Clean URL params
-          window.history.replaceState({}, '', window.location.pathname);
+            // Clean URL params
+            window.history.replaceState({}, '', window.location.pathname);
+          }
         } catch (e) {
           console.error('[CV Builder] Failed to load applicant data:', e);
           toast.error('Failed to load applicant data.');
         }
       })();
-    } else if (raw) {
+    } else if (raw && !isPortalMode) {
       // Legacy sessionStorage fallback (same-origin only)
       try {
         const prefill = JSON.parse(raw);
@@ -781,6 +787,86 @@ export default function CVGeneratorPage() {
     }
   };
 
+  // Full reset for "Start Building" — clears every piece of current-session
+  // state (including its localStorage cache), not just cvData. Previously
+  // this only reset cvData, so leftover state like hasClientSubmission /
+  // clientSubmission from a prior applicant would still show up under
+  // "Client Submission Received!" on the Collaboration tab of a brand-new
+  // CV. Saved Drafts (cvDrafts) and Resume Versions (cvVersions) are left
+  // alone since those are explicit saves, not session cache.
+  const handleStartFromScratch = () => {
+    setCvData(EMPTY_CV_DATA);
+    setApplicantId(null);
+    setLinkedIndividualId(null);
+    setSelectedIndividual(null);
+    setIndividualPhoto(null);
+    setPendingPhotoFile(null);
+    setPendingPhotoPreview(null);
+    setShowSavePhotoPrompt(false);
+    setShowSaveCvPrompt(false);
+    setSelectedLayout('corporate');
+    setCvSettings({
+      photoSize: 150,
+      photoFit: 'cover' as 'cover' | 'contain' | 'fill',
+      photoShape: 'square' as 'square' | 'circle' | 'rounded',
+      primaryColor: '#2c3e50',
+      accentColor: '#3498db',
+      fontScale: 1 as 0.85 | 1 | 1.15,
+      fontFamily: 'Inter, sans-serif',
+      showPhoto: true,
+      showCustomize: false,
+    });
+    setCollapsedGroups({});
+    setCollapsedItems({});
+    setCollabTargetCountry('kenya');
+    setCollabTargetRole('software-engineer');
+    setHasClientSubmission(false);
+    setClientSubmission(null);
+    setAcceptedFields({});
+    setCurrentPortalDraftId(null);
+    setPortalDraftId(null);
+    setHasSavedDraft(false);
+    setLastDraftName('');
+    setClientEdits(null);
+    setPortalStep(1);
+    setInitiallyMissingSections({
+      skills: false,
+      education: false,
+      summary: false,
+      languages: false,
+      references: false,
+      nationality: false,
+      dob: false,
+      maritalStatus: false,
+      companyDesc: false,
+      dates: false,
+      responsibilities: false,
+      linkedin: false,
+      github: false,
+      initiallyNonKenyan: false
+    });
+    setPortalConsentAccepted(false);
+    setPortalConsentTimestamp(null);
+    setPortalConsentChecked(false);
+
+    // Clear the cached copies immediately rather than waiting on the
+    // debounced autosave effect, so a refresh can't resurrect stale data.
+    ['cvData', 'cvSettings', 'selectedLayout', 'collapsedGroups', 'collabTargetCountry',
+     'collabTargetRole', 'hasClientSubmission', 'clientSubmission', 'currentPortalDraftId',
+     'hasSavedDraft', 'lastDraftName'].forEach(key => {
+      try { localStorage.removeItem(LS_PREFIX + key); } catch { /* ignore */ }
+    });
+
+    // Drop any applicantId/portal/draftId params so a refresh doesn't reload the old record.
+    if (typeof window !== 'undefined') {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
+    setWorkflowStep('review-edit');
+    setActiveSection('contact');
+    toast.success('Started a new CV from scratch.');
+  };
+
   const sectionGroups = [
     {
       label: 'Core',
@@ -819,13 +905,6 @@ export default function CVGeneratorPage() {
 
   const sectionMeta = sectionGroups.flatMap(g => g.sections);
 
-
-  const handleClientPersonalInfoChange = (field: string, value: any) => {
-    setClientEdits((prev: any) => ({
-      ...prev,
-      personalInfo: { ...prev.personalInfo, [field]: value }
-    }));
-  };
 
   const handleClientPersonalDetailsChange = (field: string, value: any) => {
     setClientEdits((prev: any) => ({
@@ -1002,12 +1081,12 @@ export default function CVGeneratorPage() {
         try {
           const { data: record, error } = await supabase
             .from('job_applicant_cvs')
-            .select('raw_cv_extracted_details')
+            .select('client_portal_submission')
             .eq('applicant_id', applicantId)
             .single();
-          
-          if (!error && record?.raw_cv_extracted_details?.clientEdits) {
-            setClientSubmission(record.raw_cv_extracted_details.clientEdits);
+
+          if (!error && record?.client_portal_submission?.clientEdits) {
+            setClientSubmission(record.client_portal_submission.clientEdits);
             setHasClientSubmission(true);
             toast.success('Client submission loaded from database!');
             return;
@@ -1040,12 +1119,12 @@ export default function CVGeneratorPage() {
       try {
         const { data: record, error } = await supabase
           .from('job_applicant_cvs')
-          .select('raw_cv_extracted_details')
+          .select('client_portal_submission')
           .eq('applicant_id', applicantId)
           .single();
-        
-        if (!error && record?.raw_cv_extracted_details?.clientEdits) {
-          setClientSubmission(record.raw_cv_extracted_details.clientEdits);
+
+        if (!error && record?.client_portal_submission?.clientEdits) {
+          setClientSubmission(record.client_portal_submission.clientEdits);
           setHasClientSubmission(true);
           toast.success('Client submission loaded from database!');
           return;
@@ -1581,15 +1660,17 @@ export default function CVGeneratorPage() {
         portalStep={portalStep}
         setPortalStep={setPortalStep}
         setWorkflowStep={setWorkflowStep}
-        handleClientPersonalInfoChange={handleClientPersonalInfoChange}
         handleClientPersonalDetailsChange={handleClientPersonalDetailsChange}
         handleClientGapNoteChange={handleClientGapNoteChange}
         collabTargetCountry={collabTargetCountry}
         portalDraftId={portalDraftId}
         applicantId={applicantId}
+        linkedIndividualId={linkedIndividualId}
         portalConsentTimestamp={portalConsentTimestamp}
         setClientSubmission={setClientSubmission}
         setHasClientSubmission={setHasClientSubmission}
+        companyOptions={companyOptions}
+        onCreateCompany={handleCreateCompany}
       />
     );
   }
@@ -1716,6 +1797,7 @@ export default function CVGeneratorPage() {
             setCvData={setCvData}
             setWorkflowStep={setWorkflowStep}
             setActiveSection={setActiveSection}
+            onStartFromScratch={handleStartFromScratch}
             showDraftsList={showDraftsList}
             setShowDraftsList={setShowDraftsList}
             cvDrafts={cvDrafts}

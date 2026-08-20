@@ -10,6 +10,7 @@ import { FileText, Plus, Minus, Loader2, AlertTriangle, ChevronLeft, ChevronRigh
 import { AutomationMappingDialog } from "../components/AutomationMappingDialog"
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
 import { cn } from "@/lib/utils"
+import { computeStageDeltaDays } from "../../reports/utils/reportStageLogic"
 
 // --- INTERFACE ---
 interface StandardTableProps {
@@ -54,10 +55,12 @@ interface StandardTableProps {
   expandedSections?: Set<string>
   toggleSectionExpansion?: (sectionId: string) => void
   areTabsVisible?: boolean
+  showDelta?: boolean
 }
 
 const DEFAULT_COL_WIDTH = 180;
 const ACTION_WIDTH = 150;
+const DELTA_COL_WIDTH = 72;
 
 export const StandardTable: React.FC<StandardTableProps> = ({
   tasks, tableType, ENHANCED_TABLE_HEADERS_IMMIGRATION, stages,
@@ -75,6 +78,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
   expandedSections = new Set(['report_docs']),
   toggleSectionExpansion,
   areTabsVisible = true,
+  showDelta = false,
 }) => {
   const isReportDocsExpanded = expandedSections.has('report_docs');
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
@@ -93,6 +97,23 @@ export const StandardTable: React.FC<StandardTableProps> = ({
   const visibleStages = useMemo(() => stages
     .filter(stage => visibleStageIds.has(stage.id.toString()))
     .sort((a, b) => (a.order_num || 0) - (b.order_num || 0)), [stages, visibleStageIds]);
+
+  // "Show Δ" — a synthetic delta entry spliced between each adjacent pair of visible stages,
+  // carrying every earlier visible stage as `priorStages` so the day-gap can bridge back to the
+  // nearest actually-dated stage if the immediate predecessor isn't dated yet (same algorithm as
+  // reports/StandardReportView.tsx's Δ column — see computeStageDeltaDays). One rowSpan=3 header
+  // cell each, same as an unexpanded stage column.
+  const stagesWithDeltas = useMemo(() => {
+    if (!showDelta) return visibleStages.map(stage => ({ type: 'stage' as const, stage }));
+    const result: ({ type: 'stage'; stage: any } | { type: 'delta'; id: string; priorStages: any[]; nextStage: any })[] = [];
+    visibleStages.forEach((stage, i) => {
+      if (i > 0) {
+        result.push({ type: 'delta', id: `delta-${visibleStages[i - 1].id}-${stage.id}`, priorStages: visibleStages.slice(0, i), nextStage: stage });
+      }
+      result.push({ type: 'stage', stage });
+    });
+    return result;
+  }, [visibleStages, showDelta]);
 
   useEffect(() => {
     let isMounted = true;
@@ -155,7 +176,12 @@ export const StandardTable: React.FC<StandardTableProps> = ({
     const cols = [];
     visibleCaseDetailHeaders.forEach((h, idx) => cols.push({ id: `case-${h.id}`, type: 'case', header: h, idx }));
 
-    visibleStages.forEach(stage => {
+    stagesWithDeltas.forEach(entry => {
+      if (entry.type === 'delta') {
+        cols.push({ id: entry.id, type: 'delta', priorStages: entry.priorStages, nextStage: entry.nextStage });
+        return;
+      }
+      const stage = entry.stage;
       if (!expandedStages.has(stage.id.toString()) || !stage.documents || stage.documents.length === 0) {
         cols.push({ id: `stage-${stage.id}`, type: 'stage', stage });
       } else {
@@ -182,7 +208,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
 
     cols.push({ id: 'actions', type: 'actions' });
     return cols;
-  }, [visibleCaseDetailHeaders, visibleStages, expandedStages, expandedDocuments, documentFields, reportDocDefaults, isReportDocsExpanded]);
+  }, [visibleCaseDetailHeaders, stagesWithDeltas, expandedStages, expandedDocuments, documentFields, reportDocDefaults, isReportDocsExpanded]);
 
   // Track the boundaries of the "Stages" section for distinctive borders
   const stageColsIndices = useMemo(() => {
@@ -196,7 +222,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
 
   // --- STATS CALCULATOR ---
   const getColStats = useCallback((col: any) => {
-    if (col.type === 'actions') return { total: '-', completed: '-', missing: '-' };
+    if (col.type === 'actions' || col.type === 'delta') return { total: '-', completed: '-', missing: '-' };
 
     let completed = 0;
     const total = sortedTasks.length;
@@ -307,36 +333,51 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                 );
               })}
 
-              {visibleStages.map((stage, i) => (
-                <TableHead
-                  key={stage.id}
-                  colSpan={getStageColSpan(stage)}
-                  rowSpan={getStageRowSpan(stage)}
-                  className={cn(
-                    "border-r border-b border-white/30 text-center px-2 py-2.5 bg-[#376bae]",
-                    i === 0 && "border-l-[3px] border-l-blue-400",
-                    i === visibleStages.length - 1 && "border-r-[3px] border-r-blue-400"
-                  )}
-                  style={!expandedStages.has(stage.id.toString()) ? { width: DEFAULT_COL_WIDTH, minWidth: DEFAULT_COL_WIDTH, maxWidth: DEFAULT_COL_WIDTH } : {}}
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    <span className="text-[11px] font-semibold text-white uppercase tracking-wider whitespace-normal break-words leading-snug" title={stage.name}>{stage.name}</span>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button onClick={() => requestSort(`stage_${stage.id}`)} className="text-white" title="Sort by Stage">
-                        {sortConfig?.key === `stage_${stage.id}`
-                          ? (sortConfig.direction === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)
-                          : <ArrowUpDown size={11} className="opacity-50 hover:opacity-100" />
-                        }
-                      </button>
-                      {stage.documents?.length > 0 && (
-                        <button onClick={() => toggleStageExpansion(stage.id.toString())} className="text-white">
-                          {expandedStages.has(stage.id.toString()) ? <Minus size={12} /> : <Plus size={12} />}
+              {stagesWithDeltas.map((entry, i) => {
+                if (entry.type === 'delta') {
+                  return (
+                    <TableHead
+                      key={entry.id}
+                      rowSpan={3}
+                      className="border-r border-b border-white/30 text-center px-1 py-2.5 bg-[#2a5486]"
+                      style={{ width: DELTA_COL_WIDTH, minWidth: DELTA_COL_WIDTH, maxWidth: DELTA_COL_WIDTH }}
+                    >
+                      <span className="text-[10px] font-black text-amber-300/90 uppercase tracking-wide bg-white/10 px-1.5 py-0.5 rounded" title="Days between stages">Δ</span>
+                    </TableHead>
+                  );
+                }
+                const stage = entry.stage;
+                return (
+                  <TableHead
+                    key={stage.id}
+                    colSpan={getStageColSpan(stage)}
+                    rowSpan={getStageRowSpan(stage)}
+                    className={cn(
+                      "border-r border-b border-white/30 text-center px-2 py-2.5 bg-[#376bae]",
+                      i === 0 && "border-l-[3px] border-l-blue-400",
+                      i === stagesWithDeltas.length - 1 && "border-r-[3px] border-r-blue-400"
+                    )}
+                    style={!expandedStages.has(stage.id.toString()) ? { width: DEFAULT_COL_WIDTH, minWidth: DEFAULT_COL_WIDTH, maxWidth: DEFAULT_COL_WIDTH } : {}}
+                  >
+                    <div className="flex items-center justify-center gap-2">
+                      <span className="text-[11px] font-semibold text-white uppercase tracking-wider whitespace-normal break-words leading-snug" title={stage.name}>{stage.name}</span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button onClick={() => requestSort(`stage_${stage.id}`)} className="text-white" title="Sort by Stage">
+                          {sortConfig?.key === `stage_${stage.id}`
+                            ? (sortConfig.direction === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)
+                            : <ArrowUpDown size={11} className="opacity-50 hover:opacity-100" />
+                          }
                         </button>
-                      )}
+                        {stage.documents?.length > 0 && (
+                          <button onClick={() => toggleStageExpansion(stage.id.toString())} className="text-white">
+                            {expandedStages.has(stage.id.toString()) ? <Minus size={12} /> : <Plus size={12} />}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </TableHead>
-              ))}
+                  </TableHead>
+                );
+              })}
 
               {/* Report Doc Default Columns - independent collapsible section */}
               {reportDocDefaults && reportDocDefaults.length > 0 && (
@@ -485,7 +526,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                 {flatColumns.map((col, idx) => {
                   const s = getColStats(col);
                   const val = stat.label === 'Total' ? s.total : stat.label === 'Completed' ? s.completed : s.missing;
-                  const colWidth = col.type === 'case' ? (col.header.width || DEFAULT_COL_WIDTH) : (col.type === 'actions' ? ACTION_WIDTH : DEFAULT_COL_WIDTH);
+                  const colWidth = col.type === 'case' ? (col.header.width || DEFAULT_COL_WIDTH) : col.type === 'actions' ? ACTION_WIDTH : col.type === 'delta' ? DELTA_COL_WIDTH : DEFAULT_COL_WIDTH;
 
                   const isStageStart = idx === firstStageColIdx;
                   const isStageEnd = idx === lastStageColIdx;
@@ -524,7 +565,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
               taskRows.map((row, rowIndex) => (
                 <TableRow key={row.key} className={cn("group border-0 transition-colors", row.type === 'dependant' ? "bg-orange-50/40" : (rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/50"), "hover:bg-blue-50/50")}>
                   {flatColumns.map((col, idx) => {
-                    const colWidth = col.type === 'case' ? (col.header.width || DEFAULT_COL_WIDTH) : (col.type === 'actions' ? ACTION_WIDTH : DEFAULT_COL_WIDTH);
+                    const colWidth = col.type === 'case' ? (col.header.width || DEFAULT_COL_WIDTH) : col.type === 'actions' ? ACTION_WIDTH : col.type === 'delta' ? DELTA_COL_WIDTH : DEFAULT_COL_WIDTH;
 
                     const isStageStart = idx === firstStageColIdx;
                     const isStageEnd = idx === lastStageColIdx;
@@ -593,6 +634,16 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                           style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}
                         >
                           -
+                        </TableCell>
+                      );
+                    }
+
+                    // --- DELTA ("Show Δ") ---
+                    if (col.type === 'delta') {
+                      const deltaRow = { type: 'delta', getValue: (t: any) => computeStageDeltaDays(t, col.priorStages, col.nextStage) };
+                      return (
+                        <TableCell key={`${row.key}-${col.id}`} className="text-center px-1 py-2 border-r border-b border-slate-200 bg-slate-50/40" style={{ width: colWidth, minWidth: colWidth, maxWidth: colWidth }}>
+                          {renderCellContent(deltaRow, row.task, 'date')}
                         </TableCell>
                       );
                     }

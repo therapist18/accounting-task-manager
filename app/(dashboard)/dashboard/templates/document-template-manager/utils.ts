@@ -56,6 +56,15 @@ export function detectPlaceholderTags(content: string, braces: 1 | 2 = 2): Detec
   return tags;
 }
 
+// "client_first_name" -> "Client First Name" - fallback label for Display
+// Value when no master field match supplies a better one.
+export const humanizeTagName = (tag: string): string => {
+  return tag
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim();
+};
+
 export const findMatchingMasterFields = (placeholderName: string, masterFields: JobField[]): { ids: number[], sourceType?: string } => {
   if (!placeholderName || !masterFields.length) return { ids: [] };
 
@@ -223,6 +232,7 @@ export const extractPlaceholders = async (
               id: `block_${tagName}_${uid()}`,
               name: tagName,
               type: 'conditional',
+              display_value: humanizeTagName(conditionName),
               required: true,
               entity_type: ['company', 'principal', 'director', 'shareholder', 'dependant', 'employee'],
               is_block_start: true,
@@ -249,6 +259,7 @@ export const extractPlaceholders = async (
               id: `block_${tagName}_${uid()}`,
               name: tagName,
               type: 'array',
+              display_value: humanizeTagName(tagName),
               required: true,
               entity_type: blockEntity,
               ...(blockRelationships.length > 0 && { dependant_relationship: blockRelationships }),
@@ -272,6 +283,9 @@ export const extractPlaceholders = async (
         console.log(`[FIELD DETECTED] {${tagName}${formatSuffix ? '/' + formatSuffix : ''}} ${currentParent ? `(Inside ${currentParent})` : '(Global)'}`);
 
         const { ids: matchingFieldIds, sourceType } = findMatchingMasterFields(tagName, masterFields);
+        const matchedField = matchingFieldIds.length > 0
+          ? masterFields.find(f => f.id === matchingFieldIds[0])
+          : undefined;
 
         let inferredEntity: EntityType = 'principal';
         let inferredRelationships: string[] = [];
@@ -299,6 +313,7 @@ export const extractPlaceholders = async (
           name: tagName,
           parent_name: currentParent,
           type: prefix === '%' ? 'image' : 'text',
+          display_value: matchedField?.label || humanizeTagName(tagName),
           required: true,
           entity_type: inferredEntity,
           master_field_ids: matchingFieldIds,
@@ -325,6 +340,7 @@ export const extractPlaceholders = async (
           id: `seq_${groupName}_${uid()}`,
           name: groupName,
           type: 'text',
+          display_value: humanizeTagName(groupName),
           is_digit_split: true,
           digit_count: data.max,
           required: true,
@@ -370,6 +386,7 @@ export const mergePlaceholders = (
           ? newPh.type
           : existing.type,
         description: existing.description || newPh.description,
+        display_value: existing.display_value || newPh.display_value,
       });
     } else {
       acc.push(newPh);

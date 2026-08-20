@@ -738,6 +738,12 @@ export const isJustYear = (dateStr: string): boolean => {
   return /^(19|20)\d{2}$/.test(trimmed);
 };
 
+// True when a date is either entirely empty or only a bare year (e.g. "2021"),
+// both of which need the client to add a proper month/year value.
+export const needsFullDate = (dateStr: string): boolean => {
+  return !dateStr || !dateStr.trim() || isJustYear(dateStr);
+};
+
 // Merges the AI's "enhance-full-cv" response back into the current CV data.
 // Only wording-level fields (summary, skills, responsibilities, descriptions) are
 // taken from the AI — factual/identity data (contact info, dates, company/institution

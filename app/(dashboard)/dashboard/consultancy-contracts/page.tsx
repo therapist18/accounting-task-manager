@@ -2,20 +2,19 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2, RefreshCw } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2, RefreshCw, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { CompaniesSidebar } from './components/CompaniesSidebar';
 import { DataValuesPanel } from './components/DataValuesPanel';
 import { ContractPreview } from './components/ContractPreview';
 import { fetchCompanies, Company } from '../companies/database';
-import { SearchableSelect } from '@/components/ui/searchable-select';
 import { fetchDefaultTemplate, updateTemplate, CcTemplate } from './utils/ccTemplate';
-import type { EcPlaceholder } from '../employment-contracts/utils/ecPlaceholders';
-import { resolveEcPlaceholderValues, resolveEcArrayPlaceholderValues } from '../employment-contracts/utils/masterFieldResolver';
-import { dtmPlaceholderToResolverInput, inferGroupLabel, resolveCompanyRole } from './utils/ccPlaceholderAdapter';
+import type { Placeholder } from '../templates/document-template-manager/types';
+import { resolveCompanyRole, fetchCcData, resolveCcPlaceholders, resolveCcBlockPlaceholders } from './utils/ccResolver';
 import { fetchLatestEngagement, createEngagement, updateEngagement, CcEngagement } from './utils/ccEngagements';
 import { ContractThemeSettings, DEFAULT_CONTRACT_THEME } from './utils/themeEngine';
+import type { ContractThemePanelTab } from './components/ContractThemePanel';
 import { useCompanyDirectors } from './hooks/useCompanyDirectors';
 import type { JobField } from '../master-fields/components/types/database';
 import type { ImageStyle, ImageStyleMap } from './utils/imageStyles';
@@ -47,6 +46,17 @@ export default function ConsultancyContractsPage() {
     () => directors.filter((d) => selectedDirectorIds.includes(d.id)),
     [directors, selectedDirectorIds]
   );
+
+  // Contract Settings panel (Theme/Color/Font/Header/Consultant) - owned
+  // here, not inside ContractPreview, so the toolbar's "Consultant" label
+  // can open it directly on the Consultant tab (see handleOpenThemePanel),
+  // not just the Palette button inside ContractPreview.
+  const [themePanelOpen, setThemePanelOpen] = useState(false);
+  const [themePanelTab, setThemePanelTab] = useState<ContractThemePanelTab>('theme');
+  const handleOpenThemePanel = useCallback((tab: ContractThemePanelTab) => {
+    setThemePanelTab(tab);
+    setThemePanelOpen(true);
+  }, []);
 
   const [loadingCompanyData, setLoadingCompanyData] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -97,24 +107,30 @@ export default function ConsultancyContractsPage() {
 
   // Placeholders live directly on the template row (cc_templates.placeholders,
   // a DTM Placeholder[] maintained by Settings' Re-scan/PlaceholderFormDialog -
-  // see settings/page.tsx), not in the ec_placeholders table Employment
-  // Contracts uses. Adapted into EcPlaceholder-shaped objects so the existing
-  // resolveEcPlaceholderValues engine and the DataValuesPanel/ContractPreview
-  // components (built against that shape) don't need their own rewrite.
-  const placeholders = useMemo(
-    () => (template?.placeholders || []).map((p) => dtmPlaceholderToResolverInput(p, inferGroupLabel({ key: p.name, company_role: p.company_role }))),
+  // see settings/page.tsx). Used directly by the ccResolver functions.
+  const placeholders: Placeholder[] = useMemo(
+    () => template?.placeholders || [],
     [template]
   );
 
+  // Components (DataValuesPanel, ContractPreview) expect a `key` field on
+  // each placeholder. DTM Placeholder uses `name` as the identifier, so
+  // we map once to add `key: p.name` for component props.
+  const ccPlaceholders = useMemo(
+    () => placeholders.map((p) => ({ ...p, key: p.name })),
+    [placeholders]
+  );
+
   const groupedPlaceholders = useMemo(() => {
-    const empty = { topLevel: [] as EcPlaceholder[], flatChildren: [] as EcPlaceholder[], blocks: {} as Record<string, { config: EcPlaceholder; children: EcPlaceholder[] }> };
-    if (!placeholders.length) return empty;
-    const topLevel: EcPlaceholder[] = [];
-    const flatChildren: EcPlaceholder[] = [];
-    const blocks: Record<string, { config: EcPlaceholder; children: EcPlaceholder[] }> = {};
-    for (const p of placeholders) {
+    type PWithKey = Placeholder & { key: string };
+    const empty = { topLevel: [] as PWithKey[], flatChildren: [] as PWithKey[], blocks: {} as Record<string, { config: PWithKey; children: PWithKey[] }> };
+    if (!ccPlaceholders.length) return empty;
+    const topLevel: PWithKey[] = [];
+    const flatChildren: PWithKey[] = [];
+    const blocks: Record<string, { config: PWithKey; children: PWithKey[] }> = {};
+    for (const p of ccPlaceholders) {
       if (p.is_block_start) {
-        blocks[p.key] = { config: p, children: [] };
+        blocks[p.name] = { config: p, children: [] };
       } else if (p.parent_name && blocks[p.parent_name]) {
         blocks[p.parent_name].children.push(p);
       } else if (p.parent_name) {
@@ -124,7 +140,7 @@ export default function ConsultancyContractsPage() {
       }
     }
     return { topLevel, flatChildren, blocks };
-  }, [placeholders]);
+  }, [ccPlaceholders]);
 
   // All placeholders except block parents — passed to DataValuesPanel for
   // scalar display.  Block children are rendered separately by array blocks.
@@ -183,72 +199,87 @@ export default function ConsultancyContractsPage() {
 
   // Scoped to scalarPlaceholders (excludes block parents/children, which are
   // resolved separately below via consultantBlockPlaceholders/
-  // clientBlockPlaceholders) - the full `placeholders` list would otherwise
-  // feed block-only keys into resolveEcPlaceholderValues too, which is
-  // harmless (they simply resolve to nothing there) but redundant.
+  // clientBlockPlaceholders) - split via resolveCompanyRole (explicit
+  // company_role first, else the consultant_ key-prefix heuristic).
   const [consultantPlaceholders, clientPlaceholders] = useMemo(() => {
-    const consultant: EcPlaceholder[] = [];
-    const client: EcPlaceholder[] = [];
-    for (const p of scalarPlaceholders) (resolveCompanyRole(p) === 'consultant' ? consultant : client).push(p);
+    const consultant: Placeholder[] = [];
+    const client: Placeholder[] = [];
+    for (const p of scalarPlaceholders) (resolveCompanyRole({ key: p.name, company_role: p.company_role }) === 'consultant' ? consultant : client).push(p);
     return [consultant, client];
   }, [scalarPlaceholders]);
 
   // Same Consultant/Client split as consultantPlaceholders/clientPlaceholders
   // above, but for BLOCK placeholders (director arrays etc.) - resolved by
-  // block, not individually, since a block's children (e.g. a plain
-  // "director_name" child key) rarely carry their own consultant_/client_
-  // prefix or explicit company_role themselves; only the block's own parent
-  // placeholder reliably does. Each block's parent+children travel together
-  // so resolveEcArrayPlaceholderValues can still find the pairing.
+  // block, not individually, since a block's children rarely carry their own
+  // consultant_/client_ prefix; only the block's own parent placeholder
+  // reliably does. Each block's parent+children travel together for
+  // resolveCcBlockPlaceholders.
   const [consultantBlockPlaceholders, clientBlockPlaceholders] = useMemo(() => {
-    const consultant: EcPlaceholder[] = [];
-    const client: EcPlaceholder[] = [];
+    const consultant: Placeholder[] = [];
+    const client: Placeholder[] = [];
     for (const block of Object.values(groupedPlaceholders.blocks)) {
-      const target = resolveCompanyRole(block.config) === 'consultant' ? consultant : client;
+      const target = resolveCompanyRole({ key: block.config.name, company_role: block.config.company_role }) === 'consultant' ? consultant : client;
       target.push(block.config, ...block.children);
     }
     return [consultant, client];
   }, [groupedPlaceholders]);
 
   // Resolves both sides' placeholders (Consultant against consultantCompany,
-  // Client against the given client id) and merges the results into one map,
-  // since the template/Data & Values panel don't care which side a value
-  // came from once resolved. Also resolves array/block placeholders (e.g.
-  // one row per director) via the separate array resolver - for BOTH sides,
-  // each against its own source array (the Client's directors vs the
-  // Consultant's own), not just the Client's.
+  // Client against the given client id) and merges the results into one map.
+  // Uses a single consolidated data fetch via fetchCcData for all entity IDs,
+  // then resolves synchronously via processPlaceholderValue for each side.
   const resolveContractValues = useCallback(async (clientCompanyId: string) => {
-    const clientSourceArrays: Record<string, Array<{ id: string; [key: string]: any }>> = {};
-    if (directors.length > 0) {
-      clientSourceArrays.director = directors.map((d) => ({ id: d.id, full_name: d.name, position: d.position }));
-    }
-    const consultantSourceArrays: Record<string, Array<{ id: string; [key: string]: any }>> = {};
-    if (consultantDirectors.length > 0) {
-      consultantSourceArrays.director = consultantDirectors.map((d) => ({ id: d.id, full_name: d.name, position: d.position }));
-    }
+    // Collect ALL entity IDs upfront for a single data fetch
+    const allIndividualIds = [
+      ...directors.map((d) => d.id),
+      ...consultantDirectors.map((d) => d.id),
+    ];
+    const allCompanyIds = [
+      clientCompanyId,
+      ...(consultantCompany ? [String(consultantCompany.id)] : []),
+    ];
 
-    const consultantSignatoryIndividualId = consultantSignatoryId != null ? Number(consultantSignatoryId) : null;
+    // Single data fetch for everything
+    const { combinedCache, masterFields: mf } = await fetchCcData(placeholders, [...allCompanyIds, ...allIndividualIds]);
 
-    const [clientResult, consultantResult, clientArrayResult, consultantArrayResult] = await Promise.all([
-      resolveEcPlaceholderValues(clientPlaceholders, null, clientCompanyId),
-      consultantCompany && consultantPlaceholders.length > 0
-        ? resolveEcPlaceholderValues(consultantPlaceholders, consultantSignatoryIndividualId, consultantCompany.id)
-        : Promise.resolve({ values: {}, masterFields: new Map<number, JobField>() }),
-      resolveEcArrayPlaceholderValues(clientBlockPlaceholders, clientCompanyId, clientSourceArrays),
-      consultantCompany && consultantBlockPlaceholders.length > 0
-        ? resolveEcArrayPlaceholderValues(consultantBlockPlaceholders, consultantCompany.id, consultantSourceArrays)
-        : Promise.resolve({ arrayValues: {} as Record<string, Record<string, string>[]>, masterFields: new Map<number, JobField>() }),
-    ]);
+    // Client resolution
+    const clientDirectorArray = directors.map((d) => ({ id: d.id, full_name: d.name, position: d.position }));
+    const clientRelationshipData = {
+      company: { id: clientCompanyId },
+      directors: clientDirectorArray,
+      principal: null, dependants: [], understudy: null, sponsor: null,
+    };
+    const clientValues = resolveCcPlaceholders(clientPlaceholders, clientRelationshipData, combinedCache, mf);
+    const clientArrays = resolveCcBlockPlaceholders(
+      clientBlockPlaceholders,
+      clientDirectorArray.length > 0 ? { director: clientDirectorArray } : {},
+      combinedCache, mf,
+    );
+
+    // Consultant resolution
+    let consultantValues: Record<string, string> = {};
+    let consultantArrays: Record<string, Record<string, string>[]> = {};
+    if (consultantCompany) {
+      const consultantDirectorArray = consultantDirectors.map((d) => ({ id: d.id, full_name: d.name, position: d.position }));
+      const consultantRelationshipData = {
+        company: { id: String(consultantCompany.id) },
+        directors: consultantDirectorArray,
+        principal: null, dependants: [], understudy: null, sponsor: null,
+      };
+      consultantValues = resolveCcPlaceholders(consultantPlaceholders, consultantRelationshipData, combinedCache, mf);
+      consultantArrays = resolveCcBlockPlaceholders(
+        consultantBlockPlaceholders,
+        consultantDirectorArray.length > 0 ? { director: consultantDirectorArray } : {},
+        combinedCache, mf,
+      );
+    }
 
     return {
-      values: { ...clientResult.values, ...consultantResult.values },
-      masterFields: new Map([
-        ...clientResult.masterFields, ...consultantResult.masterFields,
-        ...clientArrayResult.masterFields, ...consultantArrayResult.masterFields,
-      ]),
-      arrayValues: { ...clientArrayResult.arrayValues, ...consultantArrayResult.arrayValues },
+      values: { ...clientValues, ...consultantValues },
+      masterFields: mf,
+      arrayValues: { ...clientArrays, ...consultantArrays },
     };
-  }, [consultantPlaceholders, clientPlaceholders, consultantBlockPlaceholders, clientBlockPlaceholders, consultantCompany, consultantSignatoryId, directors, consultantDirectors]);
+  }, [placeholders, consultantCompany, directors, consultantDirectors, clientPlaceholders, clientBlockPlaceholders, consultantPlaceholders, consultantBlockPlaceholders]);
 
   // Per-company: resolve master-field-sourced values and load any saved
   // engagement (overrides + status) for the selected client.
@@ -446,30 +477,30 @@ export default function ConsultancyContractsPage() {
 
   return (
     <div className="h-screen w-full overflow-hidden bg-[#f3f4f6] dark:bg-[#0a0a0a] flex flex-col shadow-sm">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shrink-0 z-10 shadow-sm relative">
-        <div className="flex items-center gap-6">
-          <h1 className="text-xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
+      <div className="flex items-center justify-between gap-6 px-7 py-5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shrink-0 z-10 shadow-sm relative">
+        <div className="flex items-center gap-7">
+          <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
             Consultancy Contracts
           </h1>
-          <div className="hidden md:flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-full border border-slate-200 dark:border-slate-800/80">
+          <div className="hidden md:flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-full border border-slate-200 dark:border-slate-800/80">
             <button
               onClick={() => togglePanel('sidebar')}
               title={collapsed.sidebar ? 'Show clients panel' : 'Hide clients panel'}
-              className={cn("p-1.5 rounded-full transition-all", collapsed.sidebar ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm")}
+              className={cn("p-2 rounded-full transition-all", collapsed.sidebar ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm")}
             >
               {collapsed.sidebar ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
             </button>
             <button
               onClick={() => togglePanel('data')}
               title={collapsed.data ? 'Show data & values panel' : 'Hide data & values panel'}
-              className={cn("p-1.5 rounded-full transition-all", collapsed.data ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm")}
+              className={cn("p-2 rounded-full transition-all", collapsed.data ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm")}
             >
               <Columns2 className="w-4 h-4" />
             </button>
             <button
               onClick={() => togglePanel('preview')}
               title={collapsed.preview ? 'Show preview panel' : 'Hide preview panel'}
-              className={cn("p-1.5 rounded-full transition-all", collapsed.preview ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm")}
+              className={cn("p-2 rounded-full transition-all", collapsed.preview ? "text-slate-400 hover:text-slate-600" : "bg-custom-blue text-white shadow-sm")}
             >
               {collapsed.preview ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
             </button>
@@ -477,48 +508,56 @@ export default function ConsultancyContractsPage() {
               onClick={handleRefresh}
               disabled={loadingCompanyData}
               title="Refresh data"
-              className={cn("p-1.5 rounded-full transition-all", "text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800")}
+              className={cn("p-2 rounded-full transition-all", "text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800")}
             >
               {loadingCompanyData ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             </button>
           </div>
         </div>
 
-        {/* The Consultant (Booksmart Consultancy Limited) side of every
-            generated contract - a platform-wide choice persisted on the
-            template (see handleConsultantChange above), deliberately kept
-            visible in the header rather than tucked into Settings since it
-            silently determines every {{consultant_*}} value. */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Consultant</span>
-          <SearchableSelect
-            value={consultantCompanyId ? String(consultantCompanyId) : ''}
-            onValueChange={handleConsultantChange}
-            options={companies.map((c) => ({ value: String(c.id), label: c.company_name }))}
-            placeholder="Select consultant company..."
-            searchPlaceholder="Search companies..."
-            buttonClassName="h-9 rounded-full text-sm"
-            className="w-64"
-          />
-        </div>
+        {/* Read-only "Client" summary (picked from the sidebar list on the
+            left) next to a CLICKABLE "Consultant" summary - clicking it
+            opens the Contract Settings panel directly on the Consultant tab
+            (see handleOpenThemePanel/ContractThemePanel.tsx), so there's no
+            guessing where Consultant/Signatory configuration lives. Styled
+            as cards (icon + stacked label/value) rather than inline text so
+            they read clearly instead of getting lost in the toolbar. */}
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-2.5 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/50 min-w-0">
+            <Building2 className="w-5 h-5 text-slate-400 shrink-0" />
+            <div className="leading-tight min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Client</div>
+              <div className={cn(
+                "text-sm font-bold truncate max-w-[220px]",
+                selectedCompany ? "text-slate-800 dark:text-slate-100" : "text-slate-400 italic font-medium"
+              )}>
+                {selectedCompany?.company_name || 'None selected'}
+              </div>
+            </div>
+          </div>
 
-        {/* Which of the Consultant's own directors signs on its behalf -
-            resolves consultant_signatory_name/position/signature/stamp-style
-            placeholders (individual-scoped, so they need a real person to
-            resolve against - see handleSignatoryChange above). Only
-            meaningful once a Consultant company is picked. */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Signatory</span>
-          <SearchableSelect
-            value={consultantSignatoryId ? String(consultantSignatoryId) : ''}
-            onValueChange={handleSignatoryChange}
-            options={consultantDirectors.map((d) => ({ value: String(d.id), label: `${d.name} (${d.position})` }))}
-            placeholder={consultantCompany ? 'Select signatory...' : 'Pick a Consultant first'}
-            searchPlaceholder="Search directors..."
-            buttonClassName="h-9 rounded-full text-sm"
-            className="w-64"
-            disabled={!consultantCompany}
-          />
+          <button
+            type="button"
+            onClick={() => handleOpenThemePanel('consultant')}
+            title="Open Consultant settings"
+            className={cn(
+              "flex items-center gap-2.5 px-4 py-2 rounded-xl border transition-colors min-w-0 text-left",
+              consultantCompany
+                ? "border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800"
+                : "border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-900/10 hover:bg-amber-100/70 dark:hover:bg-amber-900/20"
+            )}
+          >
+            <Building2 className={cn("w-5 h-5 shrink-0", consultantCompany ? "text-slate-400" : "text-amber-500")} />
+            <div className="leading-tight min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Consultant</div>
+              <div className={cn(
+                "text-sm font-bold truncate max-w-[220px]",
+                consultantCompany ? "text-slate-800 dark:text-slate-100" : "text-amber-600 dark:text-amber-400"
+              )}>
+                {consultantCompany?.company_name || 'Not set - click to configure'}
+              </div>
+            </div>
+          </button>
         </div>
       </div>
 
@@ -565,7 +604,7 @@ export default function ConsultancyContractsPage() {
               companySelected={!!selectedCompanyId}
               loading={loadingCompanyData}
               placeholders={scalarPlaceholders}
-              allPlaceholders={placeholders}
+              allPlaceholders={ccPlaceholders}
               resolvedValues={resolvedValues}
               arrayData={arrayData}
               overrides={scalarOverrides}
@@ -610,8 +649,18 @@ export default function ConsultancyContractsPage() {
               saving={saving}
               onSave={handleSave}
               selectedDirectors={selectedDirectors}
-              placeholders={placeholders}
+              placeholders={ccPlaceholders}
               imageStyles={imageStyles}
+              themePanelOpen={themePanelOpen}
+              themePanelTab={themePanelTab}
+              onThemePanelOpen={handleOpenThemePanel}
+              onThemePanelClose={() => setThemePanelOpen(false)}
+              companies={companies}
+              consultantCompanyId={consultantCompanyId}
+              onConsultantChange={handleConsultantChange}
+              consultantDirectors={consultantDirectors}
+              consultantSignatoryId={consultantSignatoryId}
+              onSignatoryChange={handleSignatoryChange}
             />
           </Panel>
         </PanelGroup>

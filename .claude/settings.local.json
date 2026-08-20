@@ -141,7 +141,9 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/dashboard/cv-generator --max-time 15)",
       "Bash(npx --no-install playwright screenshot --viewport-size=1400,1600 --wait-for-timeout=6000 --full-page \"http://localhost:3000/dashboard/cv-generator\" \"C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\e--GitHub-accounting-task-manager\\\\c96c13df-9300-4844-8a7d-dbba0f09af21\\\\scratchpad\\\\corp_check.png\")",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3001/dashboard/matrimonial-biodata)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3001/dashboard/matrimonial-biodata/settings)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3001/dashboard/matrimonial-biodata/settings)",
+      "Bash(tail -40 /tmp/tscout.txt)",
+      "Bash(tail -30 /tmp/tscout2.txt)"
     ],
     "additionalDirectories": [
       "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals"

@@ -1,6 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Palette, X, Layout, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { SearchableSelect } from '@/components/ui/searchable-select';
+import type { Company } from '../../companies/database';
+import type { CompanyDirector } from '../hooks/useCompanyDirectors';
 import {
   ContractThemeSettings,
   DocumentTheme,
@@ -15,7 +18,10 @@ const TABS = [
   { key: 'color', label: 'Color' },
   { key: 'font', label: 'Font' },
   { key: 'header', label: 'Header' },
+  { key: 'consultant', label: 'Consultant' },
 ] as const;
+
+export type ContractThemePanelTab = typeof TABS[number]['key'];
 
 const BRANDING_OPTIONS: { id: BrandingStrategy; label: string; description: string }[] = [
   { id: 'none', label: 'None', description: 'No header, just the contract body' },
@@ -23,18 +29,41 @@ const BRANDING_OPTIONS: { id: BrandingStrategy; label: string; description: stri
   { id: 'embedded', label: 'Embedded', description: 'Type your own heading directly in the template body (e.g. an H1) - each theme styles it automatically' },
 ];
 
+interface ConsultantConfigProps {
+  companies: Company[];
+  consultantCompanyId: string | number | null;
+  onConsultantChange: (companyId: string) => void;
+  consultantDirectors: CompanyDirector[];
+  consultantSignatoryId: string | number | null;
+  onSignatoryChange: (individualId: string) => void;
+}
+
 // This module's own theme/color/font/header editor - deliberately a
 // separate component from employment-contracts/components/ContractThemePanel.tsx
 // (not a reused import), since it's wired to THIS module's own 3-theme
 // engine (utils/themeEngine.ts: consulting_standard/modern_agency/
 // classic_legal), not Employment Contracts' 8. Same shape/UX otherwise, so
-// nothing about the editing experience needs relearning.
-export function ContractThemeEditor({ settings, onChange, variant = 'panel' }: {
+// nothing about the editing experience needs relearning. Also carries the
+// Consultant tab (company + signatory) - not theme-related, but this is the
+// one settings panel this module has, and consolidating avoids a second
+// panel just for two dropdowns (see page.tsx's "Consultant" toolbar label,
+// which jumps straight to this tab via initialTab below).
+export function ContractThemeEditor({ settings, onChange, variant = 'panel', initialTab, consultant }: {
   settings: ContractThemeSettings;
   onChange: (settings: ContractThemeSettings) => void;
   variant?: 'panel' | 'inline';
+  initialTab?: ContractThemePanelTab;
+  consultant: ConsultantConfigProps;
 }) {
-  const [activeTab, setActiveTab] = useState<typeof TABS[number]['key']>('theme');
+  const [activeTab, setActiveTab] = useState<ContractThemePanelTab>(initialTab || 'theme');
+
+  // initialTab is a one-shot "open directly to this tab" instruction (see
+  // page.tsx's handleOpenConsultantSettings) - re-applied whenever the
+  // caller changes it, not just on mount, so jumping to Consultant works
+  // even if the panel was already open on a different tab.
+  useEffect(() => {
+    if (initialTab) setActiveTab(initialTab);
+  }, [initialTab]);
 
   const update = (patch: Partial<ContractThemeSettings>) => onChange({ ...settings, ...patch });
 
@@ -181,6 +210,36 @@ export function ContractThemeEditor({ settings, onChange, variant = 'panel' }: {
             </div>
           </div>
         )}
+
+        {activeTab === 'consultant' && (
+          <div className="space-y-4">
+            <div>
+              <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Consultant Company</span>
+              <p className="text-[11px] text-slate-400 mt-0.5 mb-2">Our own company - the other party on every generated contract.</p>
+              <SearchableSelect
+                value={consultant.consultantCompanyId ? String(consultant.consultantCompanyId) : ''}
+                onValueChange={consultant.onConsultantChange}
+                options={consultant.companies.map((c) => ({ value: String(c.id), label: c.company_name }))}
+                placeholder="Select consultant company..."
+                searchPlaceholder="Search companies..."
+                buttonClassName="h-9 text-sm"
+              />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Signatory</span>
+              <p className="text-[11px] text-slate-400 mt-0.5 mb-2">Which of the Consultant's directors signs on its behalf.</p>
+              <SearchableSelect
+                value={consultant.consultantSignatoryId ? String(consultant.consultantSignatoryId) : ''}
+                onValueChange={consultant.onSignatoryChange}
+                options={consultant.consultantDirectors.map((d) => ({ value: String(d.id), label: `${d.name} (${d.position})` }))}
+                placeholder={consultant.consultantCompanyId ? 'Select signatory...' : 'Pick a Consultant first'}
+                searchPlaceholder="Search directors..."
+                buttonClassName="h-9 text-sm"
+                disabled={!consultant.consultantCompanyId}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </>
   );
@@ -191,9 +250,11 @@ interface ContractThemePanelProps {
   onClose: () => void;
   settings: ContractThemeSettings;
   onChange: (settings: ContractThemeSettings) => void;
+  initialTab?: ContractThemePanelTab;
+  consultant: ConsultantConfigProps;
 }
 
-export function ContractThemePanel({ open, onClose, settings, onChange }: ContractThemePanelProps) {
+export function ContractThemePanel({ open, onClose, settings, onChange, initialTab, consultant }: ContractThemePanelProps) {
   if (!open) return null;
 
   return (
@@ -202,14 +263,14 @@ export function ContractThemePanel({ open, onClose, settings, onChange }: Contra
       <div className="fixed right-0 top-0 bottom-0 w-72 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl z-40 flex flex-col overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
           <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-            <Palette className="h-4 w-4 text-custom-blue" /> Contract Theme
+            <Palette className="h-4 w-4 text-custom-blue" /> Contract Settings
           </h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <ContractThemeEditor settings={settings} onChange={onChange} variant="panel" />
+        <ContractThemeEditor settings={settings} onChange={onChange} variant="panel" initialTab={initialTab} consultant={consultant} />
       </div>
     </>
   );

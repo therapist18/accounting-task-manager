@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CvPreviewPanel } from "../CvPreviewPanel";
 import { type DocumentViewerHandle } from "@/components/contracts/DocumentViewer";
-import { EMPTY_CV_DATA } from "../../utils/cvGeneratorData";
 
 interface ImportStepProps {
   isExtracting: boolean;
@@ -28,6 +27,7 @@ interface ImportStepProps {
   setCvData: (updater: any) => void;
   setWorkflowStep: (step: string) => void;
   setActiveSection: (id: string) => void;
+  onStartFromScratch: () => void;
   showDraftsList: boolean;
   setShowDraftsList: (updater: any) => void;
   cvDrafts: { id: string; name: string; data: any; createdAt: string; isPortalDraft: boolean }[];
@@ -59,6 +59,7 @@ export function ImportStep({
   setCvData,
   setWorkflowStep,
   setActiveSection,
+  onStartFromScratch,
   showDraftsList,
   setShowDraftsList,
   cvDrafts,
@@ -149,7 +150,7 @@ export function ImportStep({
               <h3 className="text-sm font-bold text-slate-800">Start From Scratch</h3>
               <p className="text-xs text-slate-400 mt-0.5">Build your CV manually</p>
             </div>
-            <Button onClick={() => { setCvData(EMPTY_CV_DATA); setWorkflowStep('review-edit'); setActiveSection('contact'); }} className="w-full h-8 text-xs bg-custom-blue hover:bg-[#2d5a94]">Start Building</Button>
+            <Button onClick={onStartFromScratch} className="w-full h-8 text-xs bg-custom-blue hover:bg-[#2d5a94]">Start Building</Button>
           </div>
         </div>
 

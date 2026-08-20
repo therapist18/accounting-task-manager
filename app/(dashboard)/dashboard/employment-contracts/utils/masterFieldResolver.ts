@@ -1,6 +1,6 @@
 import supabase from '@/lib/supabase/client';
 import { processTextField, processCurrentDateField, writeMasterFieldSourceValue, pickMasterFieldSource } from '../../master-fields/utils/masterFieldValueResolver';
-import { processConditionalField, processBooleanField } from '../../tasks-requirements/utils/placeholderProcessors';
+import { processConditionalField, processBooleanField, processOrdinalField, processDocumentChecklistField } from '../../tasks-requirements/utils/placeholderProcessors';
 import type { EcPlaceholder } from './ecPlaceholders';
 import type { JobField, JobFieldSource } from '../../master-fields/components/types/database';
 
@@ -310,6 +310,24 @@ export async function resolveEcPlaceholderValues(
       continue;
     }
 
+    // Ordinal placeholders generate "1st", "Second", etc. — used in
+    // Consultancy Contracts for repeating block row numbering.  No table
+    // lookup needed; the value is purely derived from the row index.
+    if (p.type === 'ordinal') {
+      const { value } = processOrdinalField(p, null);
+      if (value) result[p.key] = value;
+      continue;
+    }
+
+    // Document-checklist placeholders render a per-entity checklist of
+    // linked document submission statuses (✔ / ✗) — used by Consultancy
+    // Contracts for compliance views.
+    if (p.type === 'document_checklist') {
+      const { value } = processDocumentChecklistField(p, scopedTargetEntity, combinedCache);
+      if (value) result[p.key] = String(value);
+      continue;
+    }
+
     const links = p.master_field_links && p.master_field_links.length > 0
       ? [...p.master_field_links].sort((a, b) => a.display_priority - b.display_priority)
       : p.master_field_id
@@ -585,6 +603,21 @@ export async function resolveEcArrayPlaceholderValues(
         if (child.type === 'image') {
           const { value } = processImageField(child, targetEntity, combinedCache, masterFields);
           rowData[child.key] = value || '';
+          continue;
+        }
+
+        // Ordinal children generate row-number text (1st, Second, etc.)
+        if (child.type === 'ordinal') {
+          const arrayIdx = sourceArray.indexOf(entity);
+          const { value } = processOrdinalField(child, arrayIdx >= 0 ? arrayIdx : null);
+          rowData[child.key] = value || '';
+          continue;
+        }
+
+        // Document-checklist children render per-entity checklist
+        if (child.type === 'document_checklist') {
+          const { value } = processDocumentChecklistField(child, targetEntity, combinedCache);
+          rowData[child.key] = value ? String(value) : '';
           continue;
         }
 

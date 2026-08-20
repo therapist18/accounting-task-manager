@@ -93,6 +93,17 @@ export type BooleanCondition = {
   };
 };
 
+export type PlaceholderCalculation = {
+  op: 'add' | 'subtract' | 'multiply' | 'divide' | 'sum';
+  // add/subtract/multiply/divide: ordered sibling field names to combine -
+  // other children of the same parent_name block, or other top-level
+  // placeholders when this placeholder has no parent_name.
+  operands?: string[];
+  // sum only: the array block whose child field gets totalled across all its rows
+  source_block?: string;
+  source_field?: string;
+};
+
 export type IfStatement = {
   condition: {
     field: string;
@@ -152,7 +163,7 @@ export type Placeholder = {
   director_type?: DirectorType;
   dependant_relationship?: string[];
   conditions?: ConditionalCondition[];
-  ordinal_format?: 'number' | 'word' | 'custom';
+  ordinal_format?: 'number' | 'word' | 'plain' | 'custom';
   custom_ordinal_format?: string;
   source_logic?: 'all' | 'priority';
   linked_document_ids?: string[];
@@ -164,6 +175,11 @@ export type Placeholder = {
   linked_job_question_ids?: string[];
   linked_requirement_ids?: string[];
   default_value?: string;
+  // When set, this placeholder's value is auto-computed (same-row formula or
+  // cross-row sum of a block's child field) and renders read-only instead of
+  // an editable input - see PlaceholderInput.tsx and TemplateGenerationDialog's
+  // applyCalculations.
+  calculation?: PlaceholderCalculation;
   // Plain free-text description of where this value comes from - only
   // rendered by PlaceholderFormDialog when showSourceField is passed
   // (Employment Contracts' Clause Library opts in; other Placeholder

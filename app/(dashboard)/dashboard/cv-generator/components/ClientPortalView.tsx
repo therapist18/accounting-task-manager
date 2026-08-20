@@ -1,15 +1,27 @@
 "use client";
 
-import { AlertCircle, Award, Briefcase, Check, FileText, Globe, GraduationCap, BookOpen, ImagePlus, MessageSquare, Sparkles, User } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { AlertCircle, Award, Briefcase, Check, FileText, Globe, GraduationCap, BookOpen, MessageSquare, Sparkles, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase/client";
-import { analyzeCVCompleteness, CONSENT_VERSION, isJustYear, PRIVACY_NOTICE } from "../utils/cvGeneratorData";
+import { analyzeCVCompleteness, CONSENT_VERSION, PRIVACY_NOTICE } from "../utils/cvGeneratorData";
+import {
+  ContactEditor,
+  SummaryEditor,
+  ExperienceEditor,
+  EducationEditor,
+  SkillsEditor,
+  LanguagesEditor,
+  ReferencesEditor,
+  AchievementsEditor,
+} from "./editors/SectionEditors";
+import type { ComboOption } from "./CreatableCombobox";
 
 interface ClientPortalViewProps {
   clientEdits: any;
@@ -22,15 +34,17 @@ interface ClientPortalViewProps {
   portalStep: number;
   setPortalStep: (n: number) => void;
   setWorkflowStep: (step: string) => void;
-  handleClientPersonalInfoChange: (field: string, value: any) => void;
   handleClientPersonalDetailsChange: (field: string, value: any) => void;
   handleClientGapNoteChange: (gapKey: string, field: 'reason' | 'detail', value: string) => void;
   collabTargetCountry: 'kenya' | 'other';
   portalDraftId: string | null;
   applicantId: string | null;
+  linkedIndividualId: number | null;
   portalConsentTimestamp: string | null;
   setClientSubmission: (data: any) => void;
   setHasClientSubmission: (v: boolean) => void;
+  companyOptions: ComboOption[];
+  onCreateCompany: (label: string) => Promise<string>;
 }
 
 export function ClientPortalView({
@@ -44,16 +58,32 @@ export function ClientPortalView({
   portalStep,
   setPortalStep,
   setWorkflowStep,
-  handleClientPersonalInfoChange,
   handleClientPersonalDetailsChange,
   handleClientGapNoteChange,
   collabTargetCountry,
   portalDraftId,
   applicantId,
+  linkedIndividualId,
   portalConsentTimestamp,
   setClientSubmission,
   setHasClientSubmission,
+  companyOptions,
+  onCreateCompany,
 }: ClientPortalViewProps) {
+  // Declared unconditionally, before any early return, so hook call order
+  // stays consistent across renders (clientEdits/consent start out false/null
+  // and flip to their real values once the parent finishes initializing).
+  const [activeSectionId, setActiveSectionId] = useState<string>('');
+
+  // The rest of the app runs a "high-density enterprise" root font-size
+  // (11px on desktop, see globals.css) tuned for internal staff tables —
+  // wrong for this public-facing candidate portal. Opt the whole document
+  // out while this view is mounted, restore it on exit/unmount.
+  useEffect(() => {
+    document.documentElement.classList.add('cv-portal-view');
+    return () => { document.documentElement.classList.remove('cv-portal-view'); };
+  }, []);
+
   if (!clientEdits) return null;
 
   if (!portalConsentAccepted) {
@@ -100,12 +130,8 @@ export function ClientPortalView({
     );
   }
 
-  const { gaps, checklist } = analyzeCVCompleteness(clientEdits);
+  const { gaps } = analyzeCVCompleteness(clientEdits);
   const missingPhoto = !clientEdits.personalInfo?.photoUrl;
-  const isKenyan = (clientEdits.personalDetails?.nationality || '').toLowerCase().includes('kenyan') || (clientEdits.personalDetails?.nationality || '').toLowerCase().includes('kenya');
-  const jobsMissingDesc = (clientEdits.experience || []).filter((e: any) => !e.companyDesc || e.companyDesc.trim().length < 5);
-  const jobsMissingMonths = (clientEdits.experience || []).filter((e: any) => isJustYear(e.startDate) || isJustYear(e.endDate));
-  const jobsMissingResponsibilities = (clientEdits.experience || []).filter((e: any) => !e.responsibilities || e.responsibilities.length === 0);
 
   // Use initial missing state so sections don't disappear when filled
   const missingSkills = initiallyMissingSections.skills;
@@ -116,6 +142,8 @@ export function ClientPortalView({
   const missingNationality = initiallyMissingSections.nationality;
   const missingDOB = initiallyMissingSections.dob;
   const missingMaritalStatus = initiallyMissingSections.maritalStatus;
+  const missingLinkedin = initiallyMissingSections.linkedin;
+  const missingGithub = initiallyMissingSections.github;
 
   // For job-specific sections, keep showing if they were initially missing
   const showJobsMissingDesc = initiallyMissingSections.companyDesc;
@@ -123,6 +151,228 @@ export function ClientPortalView({
   const showJobsMissingResponsibilities = initiallyMissingSections.responsibilities;
 
   const isSubmitted = portalStep === 7;
+
+  // Sections sidebar — mirrors Review & Edit's section list. Each entry maps
+  // to the same editor component Review & Edit uses (ContactEditor,
+  // ExperienceEditor, etc.) for identical UI, so the granularity here matches
+  // those editors rather than each individual missing field. Employment Gaps
+  // and Kenya/East Africa Details have no Review & Edit equivalent — they're
+  // portal-only prompts — so they keep their own custom UI below.
+  const showContact = missingPhoto || missingLinkedin || missingGithub || missingNationality || missingDOB || missingMaritalStatus;
+  const showExperience = showJobsMissingDesc || showJobsMissingMonths || showJobsMissingResponsibilities;
+  const showGaps = gaps.length > 0;
+  const showKenyaDetails = collabTargetCountry === 'kenya' && initiallyMissingSections.initiallyNonKenyan;
+  const showAchievement = !clientEdits.achievements || clientEdits.achievements.length === 0;
+
+  const sections = [
+    showContact && { id: 'contact', label: 'Contact & Personal Details', icon: User },
+    showExperience && { id: 'experience', label: 'Work Experience', icon: Briefcase },
+    showGaps && { id: 'gaps', label: 'Employment Gaps', icon: AlertCircle },
+    missingSkills && { id: 'skills', label: 'Skills & Expertise', icon: Sparkles },
+    missingEducation && { id: 'education', label: 'Education', icon: GraduationCap },
+    missingSummary && { id: 'summary', label: 'Professional Summary', icon: BookOpen },
+    missingLanguages && { id: 'languages', label: 'Languages', icon: Globe },
+    missingReferences && { id: 'references', label: 'References', icon: MessageSquare },
+    showKenyaDetails && { id: 'kenyaDetails', label: 'Kenya / East Africa Details', icon: Globe },
+    showAchievement && { id: 'achievement', label: 'Key Achievement', icon: Award },
+  ].filter(Boolean) as { id: string; label: string; icon: any }[];
+
+  const currentSectionId = sections.some(s => s.id === activeSectionId) ? activeSectionId : (sections[0]?.id || 'submit');
+  const currentSectionLabel = currentSectionId === 'submit' ? 'Review & Submit' : (sections.find(s => s.id === currentSectionId)?.label || 'All Set');
+
+  // The recruiter-facing editors carry an "AI Auto-Write / AI Enhance" action
+  // — not something an anonymous portal link should be able to trigger, so
+  // it's a no-op here instead of the real /api/cv/ai-writer call.
+  const handleAiWriterUnavailable = () => {
+    toast.info("AI writing tools aren't available here — your recruiter can help polish this after you submit.");
+  };
+
+  const submitToRecruiter = async () => {
+    const submissionPayload = {
+      clientEdits,
+      submittedAt: new Date().toISOString(),
+      consent: { given: portalConsentAccepted, version: CONSENT_VERSION, timestamp: portalConsentTimestamp },
+    };
+
+    // Save to Supabase Storage (backup)
+    if (portalDraftId) {
+      try {
+        const payload = JSON.stringify(submissionPayload);
+        const blob = new Blob([payload], { type: 'application/json' });
+        await supabase.storage.from('kyc-documents').upload(`cv-drafts/${portalDraftId}/client-submission.json`, blob, { upsert: true, contentType: 'application/json' });
+      } catch (e) { console.warn('Storage save failed:', e); }
+    }
+
+    // Save to database as snapshot for recruiter verification
+    if (portalDraftId) {
+      try {
+        // The Secure Review URL carries applicantId as a query param (see
+        // getCollabPortalLink) which populates the `applicantId` state on
+        // mount. Only fall back to the draft.json lookup for older links
+        // that were generated before that param existed.
+        let targetApplicantId = applicantId;
+
+        if (!targetApplicantId) {
+          const { data: draftData } = await supabase.storage
+            .from('kyc-documents')
+            .download(`cv-drafts/${portalDraftId}/draft.json`);
+
+          if (draftData) {
+            const draftText = await draftData.text();
+            const draft = JSON.parse(draftText);
+            targetApplicantId = draft.applicantId || draft.data?.applicantId;
+          }
+        }
+
+        if (targetApplicantId) {
+          // Update the job_applicant_cvs record with client submission snapshot.
+          // Uses its own column (not raw_cv_extracted_details) because that
+          // column holds the original AI-extracted CV and is read as a
+          // fallback source elsewhere — overwriting it here would destroy it.
+          const { error: updateError } = await supabase
+            .from('job_applicant_cvs')
+            .update({
+              client_portal_submission: submissionPayload,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('applicant_id', targetApplicantId);
+
+          if (updateError) {
+            console.error('Failed to save submission to database:', updateError);
+          } else {
+            console.log('Client submission saved to database for applicant:', targetApplicantId);
+          }
+        }
+      } catch (e) {
+        console.error('Database save failed:', e);
+      }
+    }
+
+    setClientSubmission(clientEdits);
+    setHasClientSubmission(true);
+    setPortalStep(7);
+    toast.success('Details submitted! Recruiter will review shortly.');
+  };
+
+  // Shared between the desktop (resizable side-by-side panels) and mobile
+  // (stacked, tab-strip) layouts below so the section markup isn't duplicated.
+  const editorContent = (
+    <>
+      {currentSectionId === 'contact' && (
+        <ContactEditor cvData={clientEdits} setCvData={setClientEdits} applicantId={applicantId} linkedIndividualId={linkedIndividualId} />
+      )}
+
+      {currentSectionId === 'experience' && (
+        <ExperienceEditor cvData={clientEdits} setCvData={setClientEdits} onOpenAiWriter={handleAiWriterUnavailable} />
+      )}
+
+      {currentSectionId === 'gaps' && (
+        <div className="space-y-3">
+          {gaps.map((gap: any, idx: number) => {
+            const gapKey = `${gap.prevCompany || 'prev'}__${gap.currCompany || 'curr'}__${idx}`;
+            const gapNote = clientEdits.personalDetails?.employmentGapNotes?.[gapKey] || {};
+            return (
+              <div key={idx} className="space-y-2">
+                <p className="text-sm text-slate-600">There's a <strong>{gap.gapYears}-year gap</strong> between <strong>{gap.prevCompany}</strong> and <strong>{gap.currCompany}</strong>. What were you doing during this time?</p>
+                <div className="flex flex-wrap gap-2">
+                  {['Studying', 'Freelancing', 'Running Business', 'Career Break', 'Family reasons'].map(ans => (
+                    <button key={ans} type="button" onClick={() => handleClientGapNoteChange(gapKey, 'reason', ans)} className={`text-sm px-3 py-1.5 rounded-full border font-semibold transition-all ${gapNote.reason === ans ? 'bg-custom-blue text-white border-custom-blue' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{ans}</button>
+                  ))}
+                </div>
+                <Input placeholder="Add more detail..." className="h-9 text-sm" value={gapNote.detail || ''} onChange={(e) => handleClientGapNoteChange(gapKey, 'detail', e.target.value)} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {currentSectionId === 'skills' && (
+        <SkillsEditor cvData={clientEdits} setCvData={setClientEdits} />
+      )}
+
+      {currentSectionId === 'education' && (
+        <EducationEditor cvData={clientEdits} setCvData={setClientEdits} />
+      )}
+
+      {currentSectionId === 'summary' && (
+        <SummaryEditor cvData={clientEdits} setCvData={setClientEdits} onOpenAiWriter={handleAiWriterUnavailable} />
+      )}
+
+      {currentSectionId === 'languages' && (
+        <LanguagesEditor cvData={clientEdits} setCvData={setClientEdits} />
+      )}
+
+      {currentSectionId === 'references' && (
+        <ReferencesEditor cvData={clientEdits} setCvData={setClientEdits} companyOptions={companyOptions} onCreateCompany={onCreateCompany} />
+      )}
+
+      {currentSectionId === 'kenyaDetails' && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-sm font-bold text-slate-500 uppercase">Work Permit Status</Label>
+              <Select value={clientEdits.personalDetails?.kenyaStatus || ''} onValueChange={(val) => handleClientPersonalDetailsChange('kenyaStatus', val)}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select status" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Citizen">Kenyan Citizen / Permanent Resident</SelectItem>
+                  <SelectItem value="Needs Work Permit">Needs Work Permit Sponsorship</SelectItem>
+                  <SelectItem value="Willing to bear Special Work Permit expenses">Will bear own permit costs</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm font-bold text-slate-500 uppercase">Driving Licence</Label>
+              <Select value={clientEdits.personalDetails?.drivingExperience || ''} onValueChange={(val) => handleClientPersonalDetailsChange('drivingExperience', val)}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select licence" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="No Licence">No Licence</SelectItem>
+                  <SelectItem value="Class B (Light vehicles)">Class B — Light vehicles</SelectItem>
+                  <SelectItem value="Class C (Heavy trucks)">Class C — Heavy trucks</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm font-bold text-slate-500 uppercase">Nairobi Neighbourhood</Label>
+              <Input placeholder="e.g. Westlands, Kilimani" value={clientEdits.personalDetails?.nairobiRes || ''} onChange={(e) => handleClientPersonalDetailsChange('nairobiRes', e.target.value)} className="h-9 text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm font-bold text-slate-500 uppercase">Notice Period</Label>
+              <Select onValueChange={(val) => { const add = clientEdits.additionalInfo || []; const idx = add.findIndex((i: any) => i.label === 'Notice Period'); const updated = [...add]; if (idx > -1) updated[idx] = { label: 'Notice Period', value: val }; else updated.push({ label: 'Notice Period', value: val }); setClientEdits((prev: any) => ({ ...prev, additionalInfo: updated })); }}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select period" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Immediate">Immediate / No Notice</SelectItem>
+                  <SelectItem value="1 Month">1 Month</SelectItem>
+                  <SelectItem value="2 Months">2 Months</SelectItem>
+                  <SelectItem value="3 Months">3 Months</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {currentSectionId === 'achievement' && (
+        <AchievementsEditor cvData={clientEdits} setCvData={setClientEdits} />
+      )}
+
+      {currentSectionId === 'submit' && (
+        <div className="space-y-3">
+          <p className="text-sm text-slate-500 leading-relaxed">
+            {sections.length > 0
+              ? `You still have ${sections.length} section${sections.length === 1 ? '' : 's'} to complete. You can submit now or fill those in first.`
+              : "You've completed every section. Review your details, then submit to your recruiter."}
+          </p>
+          <Button
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-10 gap-2"
+            onClick={submitToRecruiter}
+          >
+            Submit to Recruiter <Check className="h-4 w-4" />
+          </Button>
+          <p className="text-sm text-slate-400 text-center">Your details will be reviewed and merged into your finalised CV.</p>
+        </div>
+      )}
+    </>
+  );
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-[#FAFAFC] text-slate-800 font-sans">
@@ -148,500 +398,123 @@ export function ClientPortalView({
 
       {/* Subtitle bar */}
       <div className="bg-slate-50 border-b border-slate-200 px-4 sm:px-6 py-2 shrink-0">
-        <p className="text-xs text-slate-500">Please review your details and fill in any missing information below. This helps us prepare the best possible CV for you.</p>
+        <p className="text-xs text-slate-500">Hello, {clientEdits.personalInfo?.fullName || 'there'}! Only sections that still need your input are listed on the left.</p>
       </div>
 
-      {/* Main Work Area — simplified single-page form */}
-      <div className="flex-1 overflow-auto p-4 sm:p-6 flex flex-col items-center custom-scrollbar">
-        <div className="w-full max-w-2xl space-y-4 pb-10">
-
-          {/* Success screen after submit */}
-          {isSubmitted ? (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-10 flex flex-col items-center text-center gap-5">
-              <div className="h-16 w-16 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600">
-                <Check className="h-8 w-8 stroke-[3]" />
-              </div>
-              <div>
-                <h3 className="text-xl font-extrabold text-slate-800">Details Submitted!</h3>
-                <p className="text-sm text-slate-500 max-w-sm mx-auto mt-2 leading-relaxed">
-                  Thank you! Your details have been saved. The recruiter will review and finalise your CV shortly.
-                </p>
+      {/* Success screen after submit */}
+      {isSubmitted ? (
+        <div className="flex-1 overflow-auto p-4 sm:p-6 flex flex-col items-center justify-center custom-scrollbar">
+          <div className="w-full max-w-xl bg-white rounded-2xl border border-slate-200 shadow-md p-10 flex flex-col items-center text-center gap-5">
+            <div className="h-16 w-16 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600">
+              <Check className="h-8 w-8 stroke-[3]" />
+            </div>
+            <div>
+              <h3 className="text-xl font-extrabold text-slate-800">Details Submitted!</h3>
+              <p className="text-sm text-slate-500 max-w-sm mx-auto mt-2 leading-relaxed">
+                Thank you! Your details have been saved. The recruiter will review and finalise your CV shortly.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Mobile / tablet — stacked layout: horizontal tab strip on top, editor below */}
+          <div className="flex lg:hidden flex-1 flex-col overflow-hidden">
+            <div className="border-b border-slate-200 bg-white px-3 py-2 overflow-x-auto shrink-0">
+              <div className="flex gap-1.5 w-max">
+                {sections.map((sec) => {
+                  const Icon = sec.icon;
+                  const isActive = currentSectionId === sec.id;
+                  return (
+                    <button
+                      key={sec.id}
+                      onClick={() => setActiveSectionId(sec.id)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold whitespace-nowrap transition-all ${
+                        isActive ? 'bg-custom-blue text-white' : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" /> {sec.label}
+                    </button>
+                  );
+                })}
+                <button
+                  onClick={() => setActiveSectionId('submit')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold whitespace-nowrap transition-all ${
+                    currentSectionId === 'submit' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700'
+                  }`}
+                >
+                  <Check className="h-3.5 w-3.5" /> Review &amp; Submit
+                </button>
               </div>
             </div>
-          ) : (
-            <>
-              {/* Welcome card */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex items-start gap-4">
-                <div className="h-10 w-10 bg-custom-blue rounded-xl flex items-center justify-center text-white shrink-0">
-                  <User className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-800">Hello, {clientEdits.personalInfo?.fullName || 'there'}!</h3>
-                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    Please fill in the details below. Only sections with missing or incomplete information are shown.
-                  </p>
-                </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <h2 className="text-base font-bold text-slate-700">{currentSectionLabel}</h2>
+              {editorContent}
+            </div>
+          </div>
+
+          {/* Desktop — resizable side-by-side sidebar + editor panels.
+              PanelGroup sets its own inline display style for layout math,
+              which beats Tailwind's `hidden` class on that same element —
+              so the responsive toggle has to live on this plain wrapper div
+              instead, whose display:none hides the whole subtree regardless
+              of PanelGroup's own inline styles. */}
+          <div className="hidden lg:flex flex-1 overflow-hidden">
+          <PanelGroup direction="horizontal" className="flex-1 overflow-hidden">
+            {/* Left — Sections Sidebar */}
+            <Panel defaultSize={22} minSize={18} maxSize={32} className="bg-white border-r border-slate-200 overflow-hidden flex flex-col">
+              <div className="px-3 py-2.5 border-b border-slate-200">
+                <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Sections To Complete</span>
               </div>
-
-              {/* ── Photo ── */}
-              {missingPhoto && (
-                <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><ImagePlus className="h-4 w-4 text-amber-500" /> Professional Photo Required</h4>
-                  <p className="text-xs text-slate-500 leading-relaxed">Please upload a passport-sized photo with a <strong>plain white background</strong>.</p>
-                  <div className="flex flex-wrap items-center gap-3">
-                    {clientEdits.personalInfo?.photoUrl && <img src={clientEdits.personalInfo.photoUrl} className="h-14 w-14 rounded-lg object-cover border border-slate-200 shrink-0" alt="Preview" />}
-                    <Input type="file" accept="image/*" className="text-xs h-9 bg-white flex-1 min-w-[180px]" onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) { const reader = new FileReader(); reader.onload = () => handleClientPersonalInfoChange('photoUrl', reader.result as string); reader.readAsDataURL(file); }
-                    }} />
-                  </div>
-                </div>
-              )}
-
-              {/* ── Online Presence (Optional) ── */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Globe className="h-4 w-4 text-custom-blue" /> Online Profiles <span className="text-xs font-normal text-slate-400">(Optional)</span></h4>
-                <p className="text-xs text-slate-500">If you have professional profiles, add them below. This section is optional.</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-bold text-slate-500 uppercase">LinkedIn URL</Label>
-                    <Input placeholder="linkedin.com/in/username" value={clientEdits.personalInfo?.linkedin || ''} onChange={(e) => handleClientPersonalInfoChange('linkedin', e.target.value)} className="h-9 text-xs" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-bold text-slate-500 uppercase">GitHub / Portfolio URL</Label>
-                    <Input placeholder="github.com/username" value={clientEdits.personalInfo?.github || ''} onChange={(e) => handleClientPersonalInfoChange('github', e.target.value)} className="h-9 text-xs" />
-                  </div>
-                </div>
+              <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+                {sections.map((sec) => {
+                  const Icon = sec.icon;
+                  const isActive = currentSectionId === sec.id;
+                  return (
+                    <button
+                      key={sec.id}
+                      onClick={() => setActiveSectionId(sec.id)}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all ${
+                        isActive ? 'bg-custom-blue text-white shadow-sm' : 'hover:bg-slate-50 text-slate-600'
+                      }`}
+                    >
+                      <Icon className={`h-3.5 w-3.5 shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                      <span className="text-sm font-semibold flex-1 truncate">{sec.label}</span>
+                    </button>
+                  );
+                })}
+                {sections.length === 0 && (
+                  <p className="text-sm text-slate-400 text-center py-6 px-2 leading-relaxed">Everything looks complete — you're ready to submit.</p>
+                )}
               </div>
-
-              {/* ── Company Descriptions ── */}
-              {showJobsMissingDesc && (
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Briefcase className="h-4 w-4 text-slate-500" /> Company Specializations</h4>
-                  <p className="text-xs text-slate-500">Briefly describe what each company does / specializes in.</p>
-                  {(clientEdits.experience || []).map((exp: any, idx: number) => {
-                    if (exp.companyDesc && exp.companyDesc.trim().length >= 5) return null;
-                    return (
-                      <div key={idx} className="space-y-1.5">
-                        <Label className="text-xs font-semibold text-slate-600">{exp.company || `Position #${idx + 1}`} — {exp.role}</Label>
-                        <Input placeholder="e.g. Professional accounting consultancy firm in Nairobi" value={exp.companyDesc || ''} onChange={(e) => { const updated = [...clientEdits.experience]; updated[idx] = { ...updated[idx], companyDesc: e.target.value }; setClientEdits((prev: any) => ({ ...prev, experience: updated })); }} className="h-9 text-xs" />
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* ── Dates needing months ── */}
-              {showJobsMissingMonths && (
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><AlertCircle className="h-4 w-4 text-amber-500" /> Employment Dates — Add Month</h4>
-                  <p className="text-xs text-slate-500">Some dates only have a year. Please provide the month too (e.g. Jan 2021).</p>
-                  {(clientEdits.experience || []).map((exp: any, idx: number) => {
-                    const sNeed = isJustYear(exp.startDate), eNeed = isJustYear(exp.endDate);
-                    if (!sNeed && !eNeed) return null;
-                    return (
-                      <div key={idx} className="space-y-2">
-                        <span className="text-xs font-semibold text-slate-700">{exp.company} — {exp.role}</span>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {sNeed && <div className="space-y-1"><Label className="text-xs text-slate-500">Start Date</Label><Input placeholder="e.g. Jan 2021" value={exp.startDate || ''} onChange={(e) => { const updated = [...clientEdits.experience]; updated[idx] = { ...updated[idx], startDate: e.target.value }; setClientEdits((prev: any) => ({ ...prev, experience: updated })); }} className="h-9 text-xs" /></div>}
-                          {eNeed && <div className="space-y-1"><Label className="text-xs text-slate-500">End Date</Label><Input placeholder="e.g. Dec 2023 or Present" value={exp.endDate || ''} onChange={(e) => { const updated = [...clientEdits.experience]; updated[idx] = { ...updated[idx], endDate: e.target.value }; setClientEdits((prev: any) => ({ ...prev, experience: updated })); }} className="h-9 text-xs" /></div>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* ── Employment Gaps ── */}
-              {gaps.length > 0 && (
-                <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><AlertCircle className="h-4 w-4 text-amber-500" /> Employment Gap</h4>
-                  {gaps.map((gap: any, idx: number) => {
-                    const gapKey = `${gap.prevCompany || 'prev'}__${gap.currCompany || 'curr'}__${idx}`;
-                    const gapNote = clientEdits.personalDetails?.employmentGapNotes?.[gapKey] || {};
-                    return (
-                      <div key={idx} className="space-y-2">
-                        <p className="text-xs text-slate-600">There's a <strong>{gap.gapYears}-year gap</strong> between <strong>{gap.prevCompany}</strong> and <strong>{gap.currCompany}</strong>. What were you doing during this time?</p>
-                        <div className="flex flex-wrap gap-2">
-                          {['Studying', 'Freelancing', 'Running Business', 'Career Break', 'Family reasons'].map(ans => (
-                            <button key={ans} type="button" onClick={() => handleClientGapNoteChange(gapKey, 'reason', ans)} className={`text-xs px-3 py-1.5 rounded-full border font-semibold transition-all ${gapNote.reason === ans ? 'bg-custom-blue text-white border-custom-blue' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{ans}</button>
-                          ))}
-                        </div>
-                        <Input placeholder="Add more detail..." className="h-9 text-xs" value={gapNote.detail || ''} onChange={(e) => handleClientGapNoteChange(gapKey, 'detail', e.target.value)} />
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* ── Missing Skills ── */}
-              {missingSkills && (
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Sparkles className="h-4 w-4 text-purple-500" /> Skills & Competencies</h4>
-                  <p className="text-xs text-slate-500">Please list your key skills grouped by category. This helps showcase your expertise.</p>
-                  <div className="space-y-3">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Technical Skills</Label>
-                      <Input placeholder="e.g. Python, JavaScript, SQL, Excel, QuickBooks" className="h-9 text-xs" onChange={(e) => {
-                        const existingTechnical = (clientEdits.skills || []).find((s: any) => s.category === 'Technical Skills');
-                        const otherSkills = (clientEdits.skills || []).filter((s: any) => s.category !== 'Technical Skills');
-                        if (existingTechnical) {
-                          // Update existing
-                          setClientEdits((prev: any) => ({
-                            ...prev,
-                            skills: prev.skills.map((s: any) => s.category === 'Technical Skills' ? { ...s, items: e.target.value } : s)
-                          }));
-                        } else {
-                          // Add new
-                          setClientEdits((prev: any) => ({
-                            ...prev,
-                            skills: [...otherSkills, { category: 'Technical Skills', items: e.target.value }]
-                          }));
-                        }
-                      }} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Soft Skills</Label>
-                      <Input placeholder="e.g. Communication, Team Leadership, Problem Solving" className="h-9 text-xs" onChange={(e) => {
-                        const existingSoft = (clientEdits.skills || []).find((s: any) => s.category === 'Soft Skills');
-                        const otherSkills = (clientEdits.skills || []).filter((s: any) => s.category !== 'Soft Skills');
-                        if (existingSoft) {
-                          // Update existing
-                          setClientEdits((prev: any) => ({
-                            ...prev,
-                            skills: prev.skills.map((s: any) => s.category === 'Soft Skills' ? { ...s, items: e.target.value } : s)
-                          }));
-                        } else {
-                          // Add new
-                          setClientEdits((prev: any) => ({
-                            ...prev,
-                            skills: [...otherSkills, { category: 'Soft Skills', items: e.target.value }]
-                          }));
-                        }
-                      }} />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Missing Education ── */}
-              {missingEducation && (
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><GraduationCap className="h-4 w-4 text-blue-500" /> Education Background</h4>
-                  <p className="text-xs text-slate-500">Please provide your highest qualification details.</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Degree / Certificate</Label>
-                      <Input placeholder="e.g. Bachelor of Commerce" className="h-9 text-xs" onChange={(e) => {
-                        const existingEdu = clientEdits.education?.[0] || {};
-                        setClientEdits((prev: any) => ({
-                          ...prev,
-                          education: [{ ...existingEdu, degree: e.target.value }]
-                        }));
-                      }} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Institution</Label>
-                      <Input placeholder="e.g. University of Nairobi" className="h-9 text-xs" onChange={(e) => {
-                        const existingEdu = clientEdits.education?.[0] || {};
-                        setClientEdits((prev: any) => ({
-                          ...prev,
-                          education: [{ ...existingEdu, institution: e.target.value }]
-                        }));
-                      }} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Year of Completion</Label>
-                      <Input placeholder="e.g. 2020" className="h-9 text-xs" onChange={(e) => {
-                        const existingEdu = clientEdits.education?.[0] || {};
-                        setClientEdits((prev: any) => ({
-                          ...prev,
-                          education: [{ ...existingEdu, year: e.target.value }]
-                        }));
-                      }} />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Missing Summary ── */}
-              {missingSummary && (
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><BookOpen className="h-4 w-4 text-green-500" /> Professional Summary</h4>
-                  <p className="text-xs text-slate-500">Write 2-3 sentences about your professional background and career goals.</p>
-                  <Textarea
-                    placeholder="e.g. Results-driven accountant with 5+ years of experience in financial reporting and audit. Seeking to leverage expertise in a challenging role..."
-                    rows={3}
-                    className="text-xs"
-                    onChange={(e) => setClientEdits((prev: any) => ({ ...prev, summary: e.target.value }))}
-                  />
-                </div>
-              )}
-
-              {/* ── Missing Languages ── */}
-              {missingLanguages && (
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Globe className="h-4 w-4 text-slate-500" /> Languages</h4>
-                  <p className="text-xs text-slate-500">Which languages do you speak? Select all that apply.</p>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {['English', 'Swahili', 'French', 'German', 'Hindi', 'Arabic', 'Spanish', 'Mandarin'].map(lang => {
-                      const isChecked = (clientEdits.languages || []).some((l: any) => l.language === lang);
-                      return (
-                        <label key={lang} className="flex items-center gap-2 text-xs font-semibold cursor-pointer text-slate-700">
-                          <Checkbox checked={isChecked} onCheckedChange={(checked) => {
-                            if (checked) {
-                              const langs = clientEdits.languages || [];
-                              if (!langs.some((l: any) => l.language === lang)) {
-                                setClientEdits((prev: any) => ({
-                                  ...prev,
-                                  languages: [...langs, { language: lang, proficiency: lang === 'English' ? 'Professional' : 'Basic' }]
-                                }));
-                              }
-                            } else {
-                              setClientEdits((prev: any) => ({
-                                ...prev,
-                                languages: (prev.languages || []).filter((l: any) => l.language !== lang)
-                              }));
-                            }
-                          }} />
-                          {lang}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* ── Missing References ── */}
-              {missingReferences && (
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><MessageSquare className="h-4 w-4 text-slate-500" /> Professional References</h4>
-                  <p className="text-xs text-slate-500">Please provide at least one professional reference (former manager, colleague, or client).</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Reference Name</Label>
-                      <Input placeholder="e.g. John Kamau" className="h-9 text-xs" onChange={(e) => {
-                        const existingRef = clientEdits.references?.[0] || {};
-                        setClientEdits((prev: any) => ({
-                          ...prev,
-                          references: [{ ...existingRef, name: e.target.value }]
-                        }));
-                      }} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Position / Title</Label>
-                      <Input placeholder="e.g. Finance Manager" className="h-9 text-xs" onChange={(e) => {
-                        const existingRef = clientEdits.references?.[0] || {};
-                        setClientEdits((prev: any) => ({
-                          ...prev,
-                          references: [{ ...existingRef, title: e.target.value }]
-                        }));
-                      }} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Company</Label>
-                      <Input placeholder="e.g. ABC Company Ltd" className="h-9 text-xs" onChange={(e) => {
-                        const existingRef = clientEdits.references?.[0] || {};
-                        setClientEdits((prev: any) => ({
-                          ...prev,
-                          references: [{ ...existingRef, company: e.target.value }]
-                        }));
-                      }} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Contact (Phone/Email)</Label>
-                      <Input placeholder="e.g. +254 700 123456" className="h-9 text-xs" onChange={(e) => {
-                        const existingRef = clientEdits.references?.[0] || {};
-                        setClientEdits((prev: any) => ({
-                          ...prev,
-                          references: [{ ...existingRef, contact: e.target.value }]
-                        }));
-                      }} />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Job Responsibilities ── */}
-              {showJobsMissingResponsibilities && (
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Briefcase className="h-4 w-4 text-slate-500" /> Key Responsibilities</h4>
-                  <p className="text-xs text-slate-500">Describe your main duties for each role. Use bullet points for clarity.</p>
-                  {jobsMissingResponsibilities.map((exp: any, idx: number) => (
-                    <div key={idx} className="space-y-2">
-                      <Label className="text-xs font-semibold text-slate-600">{exp.company || `Position #${idx + 1}`} — {exp.role}</Label>
-                      <Textarea
-                        placeholder="e.g. Managed monthly financial reporting, Prepared audit documentation, Supervised junior accountants"
-                        rows={2}
-                        className="text-xs"
-                        onChange={(e) => {
-                          const responsibilities = e.target.value.split('\n').filter((r: string) => r.trim());
-                          const updated = [...clientEdits.experience];
-                          const expIdx = clientEdits.experience.findIndex((e: any) => e.company === exp.company && e.role === exp.role);
-                          if (expIdx > -1) {
-                            updated[expIdx] = { ...updated[expIdx], responsibilities };
-                          }
-                          setClientEdits((prev: any) => ({ ...prev, experience: updated }));
-                        }}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* ── Personal Details ── */}
-              {(missingNationality || missingDOB || missingMaritalStatus) && (
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><User className="h-4 w-4 text-slate-500" /> Personal Details</h4>
-                  <p className="text-xs text-slate-500">Please provide your personal details.</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Nationality</Label>
-                      <Input placeholder="e.g. Kenyan" value={clientEdits.personalDetails?.nationality || ''} onChange={(e) => handleClientPersonalDetailsChange('nationality', e.target.value)} className="h-9 text-xs" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Date of Birth</Label>
-                      <Input placeholder="e.g. 15/03/1990" value={clientEdits.personalDetails?.dateOfBirth || ''} onChange={(e) => handleClientPersonalDetailsChange('dateOfBirth', e.target.value)} className="h-9 text-xs" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Marital Status</Label>
-                      <Input placeholder="e.g. Single, Married" value={clientEdits.personalDetails?.maritalStatus || ''} onChange={(e) => handleClientPersonalDetailsChange('maritalStatus', e.target.value)} className="h-9 text-xs" />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Kenya / Regional Details (Only for non-Kenyans) ── */}
-              {collabTargetCountry === 'kenya' && initiallyMissingSections.initiallyNonKenyan && (
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Globe className="h-4 w-4 text-custom-blue" /> Kenya / East Africa Details</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Work Permit Status</Label>
-                      <Select value={clientEdits.personalDetails?.kenyaStatus || ''} onValueChange={(val) => handleClientPersonalDetailsChange('kenyaStatus', val)}>
-                        <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select status" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Citizen">Kenyan Citizen / Permanent Resident</SelectItem>
-                          <SelectItem value="Needs Work Permit">Needs Work Permit Sponsorship</SelectItem>
-                          <SelectItem value="Willing to bear Special Work Permit expenses">Will bear own permit costs</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Driving Licence</Label>
-                      <Select value={clientEdits.personalDetails?.drivingExperience || ''} onValueChange={(val) => handleClientPersonalDetailsChange('drivingExperience', val)}>
-                        <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select licence" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="No Licence">No Licence</SelectItem>
-                          <SelectItem value="Class B (Light vehicles)">Class B — Light vehicles</SelectItem>
-                          <SelectItem value="Class C (Heavy trucks)">Class C — Heavy trucks</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Nairobi Neighbourhood</Label>
-                      <Input placeholder="e.g. Westlands, Kilimani" value={clientEdits.personalDetails?.nairobiRes || ''} onChange={(e) => handleClientPersonalDetailsChange('nairobiRes', e.target.value)} className="h-9 text-xs" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-slate-500 uppercase">Notice Period</Label>
-                      <Select onValueChange={(val) => { const add = clientEdits.additionalInfo || []; const idx = add.findIndex((i: any) => i.label === 'Notice Period'); const updated = [...add]; if (idx > -1) updated[idx] = { label: 'Notice Period', value: val }; else updated.push({ label: 'Notice Period', value: val }); setClientEdits((prev: any) => ({ ...prev, additionalInfo: updated })); }}>
-                        <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select period" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Immediate">Immediate / No Notice</SelectItem>
-                          <SelectItem value="1 Month">1 Month</SelectItem>
-                          <SelectItem value="2 Months">2 Months</SelectItem>
-                          <SelectItem value="3 Months">3 Months</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Achievement ── */}
-              {(!clientEdits.achievements || clientEdits.achievements.length === 0) && (
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Award className="h-4 w-4 text-slate-500" /> Key Achievement (Optional)</h4>
-                  <Textarea placeholder="Describe one major achievement, award, or project impact..." rows={3} className="text-xs" onChange={(e) => { const val = e.target.value; if (val.trim()) setClientEdits((prev: any) => ({ ...prev, achievements: [{ title: 'Key Achievement', description: val, date: 'Recent' }] })); }} />
-                </div>
-              )}
-
-              {/* ── Submit ── */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-                <Button
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-10 gap-2"
-                  onClick={async () => {
-                    const submissionPayload = {
-                      clientEdits,
-                      submittedAt: new Date().toISOString(),
-                      consent: { given: portalConsentAccepted, version: CONSENT_VERSION, timestamp: portalConsentTimestamp },
-                    };
-
-                    // Save to Supabase Storage (backup)
-                    if (portalDraftId) {
-                      try {
-                        const payload = JSON.stringify(submissionPayload);
-                        const blob = new Blob([payload], { type: 'application/json' });
-                        await supabase.storage.from('kyc-documents').upload(`cv-drafts/${portalDraftId}/client-submission.json`, blob, { upsert: true, contentType: 'application/json' });
-                      } catch (e) { console.warn('Storage save failed:', e); }
-                    }
-
-                    // Save to database as snapshot for recruiter verification
-                    if (portalDraftId) {
-                      try {
-                        // The Secure Review URL carries applicantId as a query param (see
-                        // getCollabPortalLink) which populates the `applicantId` state on
-                        // mount. Only fall back to the draft.json lookup for older links
-                        // that were generated before that param existed.
-                        let targetApplicantId = applicantId;
-
-                        if (!targetApplicantId) {
-                          const { data: draftData } = await supabase.storage
-                            .from('kyc-documents')
-                            .download(`cv-drafts/${portalDraftId}/draft.json`);
-
-                          if (draftData) {
-                            const draftText = await draftData.text();
-                            const draft = JSON.parse(draftText);
-                            targetApplicantId = draft.applicantId || draft.data?.applicantId;
-                          }
-                        }
-
-                        if (targetApplicantId) {
-                          // Update the job_applicant_cvs record with client submission snapshot
-                          const { error: updateError } = await supabase
-                            .from('job_applicant_cvs')
-                            .update({
-                              raw_cv_extracted_details: submissionPayload,
-                              updated_at: new Date().toISOString(),
-                            })
-                            .eq('applicant_id', targetApplicantId);
-
-                          if (updateError) {
-                            console.error('Failed to save submission to database:', updateError);
-                          } else {
-                            console.log('Client submission saved to database for applicant:', targetApplicantId);
-                          }
-                        }
-                      } catch (e) {
-                        console.error('Database save failed:', e);
-                      }
-                    }
-
-                    setClientSubmission(clientEdits);
-                    setHasClientSubmission(true);
-                    setPortalStep(7);
-                    toast.success('Details submitted! Recruiter will review shortly.');
-                  }}
+              <div className="border-t border-slate-200 p-2">
+                <button
+                  onClick={() => setActiveSectionId('submit')}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all ${
+                    currentSectionId === 'submit' ? 'bg-emerald-600 text-white shadow-sm' : 'text-emerald-700 hover:bg-emerald-50'
+                  }`}
                 >
-                  Submit to Recruiter <Check className="h-4 w-4" />
-                </Button>
-                <p className="text-xs text-slate-400 text-center mt-2">Your details will be reviewed and merged into your finalised CV.</p>
+                  <Check className="h-3.5 w-3.5 shrink-0" />
+                  <span className="text-sm font-bold flex-1">Review &amp; Submit</span>
+                </button>
               </div>
-            </>
-          )}
-        </div>
-      </div>
+            </Panel>
+
+            <PanelResizeHandle className="w-1.5 bg-slate-100 hover:bg-custom-blue/30 transition-colors cursor-col-resize flex-shrink-0" />
+
+            {/* Right — Editor Panel */}
+            <Panel minSize={40} className="bg-white overflow-hidden flex flex-col">
+              <div className="px-5 py-2.5 border-b border-slate-200 shrink-0">
+                <h2 className="text-lg font-bold text-slate-700 uppercase tracking-wider">{currentSectionLabel}</h2>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5 space-y-4 max-w-2xl">
+                {editorContent}
+              </div>
+            </Panel>
+          </PanelGroup>
+          </div>
+        </>
+      )}
     </div>
   );
 }

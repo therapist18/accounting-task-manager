@@ -62,90 +62,18 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
       return result
     }
 
-    // 2. Fetch departments to resolve the job level hierarchy
-    // tm_subdepartments must be explicitly embedded - a plain select('*') never
-    // returns related tables (PostgREST requires the explicit embed syntax below).
-    // subdepartment.classes is a plain jsonb column on tm_subdepartments, already
-    // included once the embed is present - no need to list it separately.
-    const { data: deptData } = await supabase
-      .from('tm_departments')
-      .select('*, tm_subdepartments(*)')
-
-    const departments: Department[] = (deptData || []).map((d: any) => ({
-      ...d,
-      id: Number(d.id),
-      stages: d.stages || [],
-      tm_subdepartments: d.tm_subdepartments || [],
-    }))
-
+    // Pure sync derivations from taskData - no I/O, so these can all be computed
+    // before firing off the parallel batch below.
     const jobLevel = taskData.job_level || {}
-    const department = departments.find(d => d.id === Number(jobLevel.department_id)) || null
-    const subdepartment = department?.tm_subdepartments?.find(
-      (s: any) => s.id === Number(jobLevel.subdepartment_id)
-    ) || null
-
-    // 3. Fetch stages for the department
-    const stages = await fetchStages(String(jobLevel.department_id), departments)
-
-    // 4. Fetch individual data
-    let individual = null
-    if (taskData.individual_id) {
-      const { data: indData } = await supabase
-        .from('registry_individuals')
-        .select('*')
-        .eq('id', taskData.individual_id)
-        .single()
-      individual = indData
-    }
-
-    // 5. Fetch companies
-    let companies = new Map()
-    try {
-      const { data: compData } = await supabase
-        .from('acc_portal_company_duplicate')
-        .select('id, company_name')
-      companies = new Map(
-        (compData || []).map((c: any) => [c.id, { name: c.company_name, prefix: '' }])
-      )
-    } catch {}
-
-    // 6. Fetch documents for this specific task's individual
     const individualIdNum = Number(taskData.individual_id)
-    let docsForIndividual: any[] = []
-    let documentsByIndividual: Record<string, any[]> = { [individualIdNum]: [] }
-    try {
-      const { data: docData } = await supabase
-        .from('acc_portal_directors_documents')
-        .select('*, acc_portal_kyc(id, name, display_name)')
-        .eq('director_id', individualIdNum)
-        .order('created_at', { ascending: false })
-      docsForIndividual = docData || []
-      documentsByIndividual = { [individualIdNum]: docsForIndividual }
-    } catch {}
-
-    // Also fetch participants (directors, dependants) documents
     const participantIds = (taskData.participants_details || [])
       .filter((p: any) => p.type === 'individual' && p.id)
       .map((p: any) => Number(p.id))
       .filter((id: number) => !isNaN(id) && id !== individualIdNum)
+    const allDirectorIds = taskData.individual_id
+      ? [individualIdNum, ...participantIds]
+      : participantIds
 
-    if (participantIds.length > 0) {
-      try {
-        const { data: participantDocs } = await supabase
-          .from('acc_portal_directors_documents')
-          .select('*, acc_portal_kyc(id, name, display_name)')
-          .in('director_id', participantIds)
-          .order('created_at', { ascending: false })
-        ;(participantDocs || []).forEach((doc: any) => {
-          if (!documentsByIndividual[doc.director_id]) documentsByIndividual[doc.director_id] = []
-          documentsByIndividual[doc.director_id].push(doc)
-        })
-      } catch {}
-    }
-
-    // 7. Fetch company KYC uploads - scoped to this task's company id(s) only, otherwise
-    // every company's uploads across the whole system get pulled in and requirement
-    // previews/statuses can end up showing a *different* company's document.
     const taskCompanyIds = new Set<number>()
     if (taskData.applicant_details?.type === 'company' && taskData.applicant_details?.id) {
       taskCompanyIds.add(Number(taskData.applicant_details.id))
@@ -155,19 +83,71 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
     })
     if (taskData.company_id) taskCompanyIds.add(Number(taskData.company_id))
 
-    let allCompanyDocuments: any[] = []
-    if (taskCompanyIds.size > 0) {
-      const { data: kycUploadData } = await supabase
-        .from('acc_portal_kyc_uploads')
-        .select('*')
-        .in('company_id', Array.from(taskCompanyIds))
-      allCompanyDocuments = kycUploadData || []
-    }
+    // 2. Everything below only depends on taskData (or nothing at all) - fire it
+    // all in one wave instead of one-round-trip-at-a-time. Each promise is
+    // individually .catch()-guarded so one failing query doesn't sink the batch,
+    // matching the try/catch-per-query resilience this file had before.
+    const noop = { data: null as any }
+    const [
+      { data: deptData },
+      { data: compData },
+      { data: kycData, error: kycError },
+      { data: requirementsData },
+      { data: indData },
+      { data: allDirectorDocsData },
+      { data: kycUploadData },
+    ] = await Promise.all([
+      // tm_subdepartments must be explicitly embedded - a plain select('*') never
+      // returns related tables (PostgREST requires the explicit embed syntax below).
+      // subdepartment.classes is a plain jsonb column on tm_subdepartments, already
+      // included once the embed is present - no need to list it separately.
+      supabase.from('tm_departments').select('*, tm_subdepartments(*)'),
+      Promise.resolve(supabase.from('acc_portal_company_duplicate').select('id, company_name')).catch(() => noop),
+      supabase.from('acc_portal_kyc').select('id, fields, name, display_name, has_template, main_category'),
+      supabase.from('tm_class_requirements').select('*'),
+      taskData.individual_id
+        ? supabase.from('registry_individuals').select('*').eq('id', taskData.individual_id).single()
+        : Promise.resolve(noop),
+      allDirectorIds.length > 0
+        ? Promise.resolve(supabase.from('acc_portal_directors_documents').select('*, acc_portal_kyc(id, name, display_name)').in('director_id', allDirectorIds).order('created_at', { ascending: false })).catch(() => noop)
+        : Promise.resolve(noop),
+      taskCompanyIds.size > 0
+        ? supabase.from('acc_portal_kyc_uploads').select('*').in('company_id', Array.from(taskCompanyIds))
+        : Promise.resolve(noop),
+    ])
 
-    // 8. Fetch KYC fields
-    const { data: kycData, error: kycError } = await supabase
-      .from('acc_portal_kyc')
-      .select('id, fields, name, display_name, has_template, main_category')
+    const departments: Department[] = (deptData || []).map((d: any) => ({
+      ...d,
+      id: Number(d.id),
+      stages: d.stages || [],
+      tm_subdepartments: d.tm_subdepartments || [],
+    }))
+
+    const department = departments.find(d => d.id === Number(jobLevel.department_id)) || null
+    const subdepartment = department?.tm_subdepartments?.find(
+      (s: any) => s.id === Number(jobLevel.subdepartment_id)
+    ) || null
+
+    // Fetch stages for the department (pure JS over `departments` - no network I/O)
+    const stages = await fetchStages(String(jobLevel.department_id), departments)
+
+    const individual = indData || null
+
+    const companies = new Map(
+      (compData || []).map((c: any) => [c.id, { name: c.company_name, prefix: '' }])
+    )
+
+    // Split the single merged directors_documents result by director_id, same
+    // bucketing this file always did across the (previously two) queries.
+    const documentsByIndividual: Record<string, any[]> = { [individualIdNum]: [] }
+    ;(allDirectorDocsData || []).forEach((doc: any) => {
+      if (!documentsByIndividual[doc.director_id]) documentsByIndividual[doc.director_id] = []
+      documentsByIndividual[doc.director_id].push(doc)
+    })
+    const docsForIndividual: any[] = documentsByIndividual[individualIdNum] || []
+
+    const allCompanyDocuments: any[] = kycUploadData || []
+
     if (kycError) console.error('[fetchJobWorkspaceData] acc_portal_kyc fetch error:', kycError)
     const kycDocsMap = new Map()
     ;(kycData || []).forEach((doc: any) => {
@@ -182,11 +162,7 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
     })
     console.log('[fetchJobWorkspaceData] kycDocsMap size:', kycDocsMap.size, 'docs with has_template set:', (kycData || []).filter((d: any) => d.has_template).length)
 
-    // 9. Process task - apply requirement matching
-    const { data: requirementsData } = await supabase
-      .from('tm_class_requirements')
-      .select('*')
-
+    // Process task - apply requirement matching
     const matchingRequirements = (requirementsData || []).filter((req: any) => {
       const rjl = req.job_level || {}
       if (String(rjl.department_id) === String(jobLevel.department_id) &&
@@ -239,19 +215,25 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
       ...requirementAutomationLinks.map(l => l.automationId),
       ...stageAutomationLinks.map(l => l.automationId),
     ])
-    let automations: any[] = []
-    if (autoIds.size > 0) {
-      try {
-        const { data: autoData } = await supabase
-          .from('tm_automations')
-          .select('*')
-          .in('id', Array.from(autoIds))
-          .order('created_at', { ascending: false })
-        automations = autoData || []
-      } catch {
-        automations = []
-      }
-    }
+
+    // 12. Fetch automations (referenced by matching requirements/stages above) and
+    // templates (for requirements that have hasTemplate) together - neither result
+    // feeds the other, they only share the same upstream (allReqs/stages), so there's
+    // no reason to await them one after another.
+    const reqDocIds = allReqs
+      .filter((r: any) => r.hasTemplate && (r.document_id || r.document_ids?.[0]))
+      .map((r: any) => r.document_id || r.document_ids[0])
+
+    const [autoResult, tplResult] = await Promise.all([
+      autoIds.size > 0
+        ? Promise.resolve(supabase.from('tm_automations').select('*').in('id', Array.from(autoIds)).order('created_at', { ascending: false })).catch(() => noop)
+        : Promise.resolve(noop),
+      reqDocIds.length > 0
+        ? supabase.from('acc_portal_templates').select('*').in('document_id', reqDocIds)
+        : Promise.resolve(noop),
+    ])
+    const automations: any[] = autoResult.data || []
+    const templates: any[] = tplResult.data || []
 
     const automationLinkSources: JobWorkspaceData['automationLinkSources'] = {}
     autoIds.forEach(id => { automationLinkSources[id] = { stages: [], requirements: [] } })
@@ -263,19 +245,6 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
       const bucket = automationLinkSources[l.automationId]
       if (bucket && !bucket.requirements.some(r => r.id === l.requirementId)) bucket.requirements.push({ id: l.requirementId, name: l.requirementName })
     })
-
-    // 12. Fetch templates for requirements that have hasTemplate
-    const reqDocIds = allReqs
-      .filter((r: any) => r.hasTemplate && (r.document_id || r.document_ids?.[0]))
-      .map((r: any) => r.document_id || r.document_ids[0])
-    let templates: any[] = []
-    if (reqDocIds.length > 0) {
-      const { data: tplData } = await supabase
-        .from('acc_portal_templates')
-        .select('*')
-        .in('document_id', reqDocIds)
-      templates = tplData || []
-    }
 
     const officer = taskData.participants_details?.find((p: any) => p.role?.includes('officer'))
     const taskManager = taskData.participants_details?.find((p: any) => p.role?.includes('task_manager'))
