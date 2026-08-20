@@ -2835,10 +2835,75 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
             const isHorizontal = blockConfig.array_direction === 'horizontal';
 
             const blockRegex = new RegExp(`\\{#${blockName}\\}([\\s\\S]*?)\\{/${blockName}\\}`, 'g');
+            // docx-style same-row table loop: {#block} opens inside one table cell and
+            // {/block} closes inside a LATER cell of the exact same <tr> (the convention
+            // docxtemplater itself supports natively for Word tables - it repeats the
+            // whole <w:tr> per row). The lookaheads keep `prefix`/`suffix` from crossing
+            // into a neighbouring row, so this only matches a genuine same-row block.
+            const sameRowBlockRegex = new RegExp(`(<tr[^>]*>)((?:(?!<\\/?tr\\b)[\\s\\S])*?)\\{#${blockName}\\}([\\s\\S]*?)\\{\\/${blockName}\\}((?:(?!<\\/?tr\\b)[\\s\\S])*?)(<\\/tr>)`, 'gi');
             const rows = Array.isArray(data[blockName]) ? data[blockName] : [];
+
+            // Substitutes this block's child placeholders into one copy of the
+            // captured inner template, once per data row - shared by both the
+            // same-row (<tr>-repeating) and legacy marker-to-marker paths below.
+            const buildRowHtmls = (innerTemplate) => rows.map((row, rowIndex) => {
+                let rowHtml = innerTemplate;
+                block.children.forEach(child => {
+                    const rawValue = row?.[child.name];
+
+                    if (child.type === 'image') {
+                        const childFormatSuffix = child.format || '';
+                        const childRegex = new RegExp(`\\{+\\s*%?\\s*${child.name}${childFormatSuffix ? '\\s*\\/\\s*' + childFormatSuffix : ''}\\s*\\}+`, 'g');
+                        const value = typeof rawValue === 'string' ? rawValue : extractDisplayValue(rawValue);
+                        if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
+                            const styleKey = `${blockName}_${rowIndex}_${child.name}`;
+                            const style = styles[styleKey] || styles[child.name] || {};
+
+                            // Use custom style if available, otherwise use default values from placeholder configuration
+                            let imgWidth = "120px"; // default fallback for blocks
+                            if (style.imageWidth) {
+                                imgWidth = `${style.imageWidth}px`;
+                            } else if (child.image_width) {
+                                imgWidth = child.image_width;
+                            }
+
+                            const textAlign = style.textAlign || 'center';
+
+                            const imageHtml = `<div style="text-align:${textAlign};">
+                            <img src="${value}" style="width:${imgWidth}; height:auto; display:block; margin:${textAlign === 'center' ? '0 auto' : '0'}; border-radius: 2px;"
+                                 onerror="console.error('[HTML IMAGE DEBUG] Failed to load image:', '${value}'); this.style.display='none'; this.nextElementSibling.style.display='block';" />
+                            <div style="display:none; color:red; font-size:10px; border:1px solid red; margin:5px 0;">
+                                ❌ Failed to load: ${value.substring(0, 50)}...
+                            </div>
+                        </div>`;
+                            rowHtml = rowHtml.replace(childRegex, imageHtml);
+                        } else {
+                            rowHtml = rowHtml.replace(childRegex, `<span style="color:#ccc; font-size: 8px;">[Empty Image: ${child.display_value || child.name}]</span>`);
+                        }
+                    } else {
+                        // Standard text inside block - captures an optional
+                        // inline /format suffix per occurrence, same as the
+                        // top-level placeholder handling below.
+                        const childRegex = new RegExp(`\\{+\\s*%?\\s*${child.name}(?:\\s*\\/\\s*([a-zA-Z]+))?\\s*\\}+`, 'g');
+                        const value = String(extractDisplayValue(rawValue) || '');
+                        rowHtml = rowHtml.replace(childRegex, (_match, inlineFormat) => {
+                            const format = inlineFormat || child.format;
+                            return format && formatFunctions.has(format) ? applyFormat(value, format) : value;
+                        });
+                    }
+                });
+                return rowHtml;
+            });
 
             // Handle the block replacement in content, header, and footer
             const processBlockInText = (text) => {
+                if (rows.length > 0 && !isHorizontal) {
+                    const sameRowResult = text.replace(sameRowBlockRegex, (_match, openTr, prefix, innerTemplate, suffix, closeTr) => {
+                        return buildRowHtmls(innerTemplate).map(rowHtml => `${openTr}${prefix}${rowHtml}${suffix}${closeTr}`).join('');
+                    });
+                    if (sameRowResult !== text) return sameRowResult;
+                }
+
                 return text.replace(blockRegex, (_, innerTemplate) => {
                     if (rows.length === 0) return '';
 
@@ -2852,55 +2917,10 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                         return `<div style="display:flex;align-items:center;">${cells}</div>`;
                     }
 
-                    // Handle Standard Vertical Rows
-                    return rows.map((row, rowIndex) => {
-                        let rowHtml = innerTemplate;
-                        block.children.forEach(child => {
-                            const rawValue = row?.[child.name];
-
-                            if (child.type === 'image') {
-                                const childFormatSuffix = child.format || '';
-                                const childRegex = new RegExp(`\\{+\\s*%?\\s*${child.name}${childFormatSuffix ? '\\s*\\/\\s*' + childFormatSuffix : ''}\\s*\\}+`, 'g');
-                                const value = typeof rawValue === 'string' ? rawValue : extractDisplayValue(rawValue);
-                                if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
-                                    const styleKey = `${blockName}_${rowIndex}_${child.name}`;
-                                    const style = styles[styleKey] || styles[child.name] || {};
-
-                                    // Use custom style if available, otherwise use default values from placeholder configuration
-                                    let imgWidth = "120px"; // default fallback for blocks
-                                    if (style.imageWidth) {
-                                        imgWidth = `${style.imageWidth}px`;
-                                    } else if (child.image_width) {
-                                        imgWidth = child.image_width;
-                                    }
-
-                                    const textAlign = style.textAlign || 'center';
-
-                                    const imageHtml = `<div style="text-align:${textAlign};">
-                                    <img src="${value}" style="width:${imgWidth}; height:auto; display:block; margin:${textAlign === 'center' ? '0 auto' : '0'}; border-radius: 2px;" 
-                                         onerror="console.error('[HTML IMAGE DEBUG] Failed to load image:', '${value}'); this.style.display='none'; this.nextElementSibling.style.display='block';" />
-                                    <div style="display:none; color:red; font-size:10px; border:1px solid red; margin:5px 0;">
-                                        ❌ Failed to load: ${value.substring(0, 50)}...
-                                    </div>
-                                </div>`;
-                                    rowHtml = rowHtml.replace(childRegex, imageHtml);
-                                } else {
-                                    rowHtml = rowHtml.replace(childRegex, `<span style="color:#ccc; font-size: 8px;">[Empty Image: ${child.display_value || child.name}]</span>`);
-                                }
-                            } else {
-                                // Standard text inside block - captures an optional
-                                // inline /format suffix per occurrence, same as the
-                                // top-level placeholder handling below.
-                                const childRegex = new RegExp(`\\{+\\s*%?\\s*${child.name}(?:\\s*\\/\\s*([a-zA-Z]+))?\\s*\\}+`, 'g');
-                                const value = String(extractDisplayValue(rawValue) || '');
-                                rowHtml = rowHtml.replace(childRegex, (_match, inlineFormat) => {
-                                    const format = inlineFormat || child.format;
-                                    return format && formatFunctions.has(format) ? applyFormat(value, format) : value;
-                                });
-                            }
-                        });
-                        return rowHtml;
-                    }).join('');
+                    // Handle Standard Vertical Rows (legacy 3-row convention: {#block}
+                    // alone in its own opening <tr>, {/block} alone in a later closing
+                    // <tr> - the text between them already spans a full </tr><tr> pair)
+                    return buildRowHtmls(innerTemplate).join('');
                 });
             };
 
