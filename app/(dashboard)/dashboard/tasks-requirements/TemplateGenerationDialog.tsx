@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, MousePointer2, Layout, Code, ChevronDown, Database, Layers, Edit3, Users, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2 } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, MousePointer2, Layout, Code, ChevronDown, Database, Layers, Edit3, Users, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2, Plus } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -2613,17 +2613,19 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         if (isHorizontal) {
             // Keep existing horizontal digit-split rendering
             return (
-                <div className="space-y-4 mt-2 border-l-2 border-blue-200 pl-4 py-2 bg-blue-50/20 rounded-r-lg">
-                    <Badge className="bg-orange-600 uppercase text-[9px] tracking-tighter">
-                        {blockName} (Horizontal)
-                    </Badge>
+                <div className="space-y-3 mt-2 rounded-xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-4">
+                    <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300">
+                            {blockName} (Horizontal)
+                        </span>
+                    </div>
                     {rows.length === 0 ? (
-                        <div className="p-3 bg-white border rounded shadow-sm italic text-xs text-muted-foreground">
+                        <div className="px-4 py-6 text-center text-xs text-slate-400 italic border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/50">
                             No items in {blockName}
                         </div>
                     ) : (
                         rows.map((row, idx) => (
-                            <div key={idx} className="p-3 bg-white border rounded shadow-sm space-y-3">
+                            <div key={idx} className="p-4 rounded-xl border border-slate-200/60 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/50 space-y-3">
                                 {children.map(child => {
                                     let resolvedOptions = [];
                                     if (child.master_field_ids?.length > 0) {
@@ -2664,44 +2666,28 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         return (
             <div className="mt-2 space-y-2">
                 <div className="flex items-center justify-between">
-                    <Badge className="bg-blue-600 uppercase text-[9px] tracking-tighter">
+                    <span className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300">
                         {blockName} — {rows.length} {String(entityLabel).toLowerCase()}(s)
-                    </Badge>
-                    <div className="flex gap-1">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-6 text-[10px] px-2 text-blue-600 border-blue-200"
-                            onClick={() => {
-                                const emptyRow = children.reduce((acc, child) => ({ ...acc, [child.name]: '' }), {});
-                                setFormData(prev => {
-                                    const { rows, aggregateUpdates } = applyCalculations(blockName, [...(prev[blockName] || []), emptyRow]);
-                                    return { ...prev, [blockName]: rows, ...aggregateUpdates };
-                                });
-                            }}
-                        >
-                            + Add Row
-                        </Button>
-                    </div>
+                    </span>
                 </div>
 
                 {rows.length === 0 ? (
-                    <div className="p-4 bg-white border-2 border-dashed rounded text-xs text-muted-foreground italic text-center">
+                    <div className="p-4 bg-white dark:bg-slate-900 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-400 italic text-center">
                         No {String(entityLabel).toLowerCase()}s found for {blockName}
                     </div>
                 ) : (
-                    <div className="overflow-x-auto rounded-lg border border-slate-200 shadow-sm">
+                    <div className="overflow-x-auto rounded-xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
                         <table className="w-full text-xs border-collapse">
                             <thead>
-                                <tr className="bg-slate-50 border-b border-slate-200">
+                                <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
                                     {/* Field column header */}
-                                    <th className="text-left px-3 py-2 font-bold text-slate-500 uppercase tracking-wider text-[10px] w-[140px] border-r border-slate-200 sticky left-0 bg-slate-50 z-10">
+                                    <th className="text-left px-3 py-2 font-bold text-slate-400 uppercase tracking-wider text-[10px] w-[140px] border-r border-slate-200 dark:border-slate-700 sticky left-0 bg-slate-50 dark:bg-slate-800/50 z-10 shadow-[2px_0_4px_rgba(0,0,0,0.03)]">
                                         Field
                                     </th>
                                     {rows.map((_, idx) => (
-                                        <th key={idx} className="px-3 py-2 text-center border-r border-slate-200 last:border-r-0 min-w-[180px]">
+                                        <th key={idx} className="px-3 py-2 text-center border-r border-slate-200 dark:border-slate-700 last:border-r-0 min-w-[180px]">
                                             <div className="flex items-center justify-between gap-1">
-                                                <span className="font-bold text-blue-700 text-[10px] uppercase tracking-tight">
+                                                <span className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300">
                                                     {String(entityLabel).charAt(0).toUpperCase() + String(entityLabel).slice(1)} {idx + 1}
                                                 </span>
                                                 <Button
@@ -2721,6 +2707,22 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                             </div>
                                         </th>
                                     ))}
+                                    {/* Add-row column - dashed indigo affordance in the header */}
+                                    <th className="w-10 px-2">
+                                        <button
+                                            title={`Add ${String(entityLabel).toLowerCase()}`}
+                                            className="mx-auto flex h-6 w-6 items-center justify-center rounded-md border border-dashed border-indigo-300 text-indigo-500 transition-colors hover:border-indigo-400 hover:bg-indigo-50 hover:text-indigo-600"
+                                            onClick={() => {
+                                                const emptyRow = children.reduce((acc, child) => ({ ...acc, [child.name]: '' }), {});
+                                                setFormData(prev => {
+                                                    const { rows, aggregateUpdates } = applyCalculations(blockName, [...(prev[blockName] || []), emptyRow]);
+                                                    return { ...prev, [blockName]: rows, ...aggregateUpdates };
+                                                });
+                                            }}
+                                        >
+                                            <Plus className="h-3.5 w-3.5" />
+                                        </button>
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -2730,12 +2732,12 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                         <tr
                                             key={child.id || child.name}
                                             className={cn(
-                                                "border-b border-slate-100 last:border-b-0 hover:bg-blue-50/30 transition-colors",
-                                                isEvenRow ? "bg-white" : "bg-slate-50/50"
+                                                "border-b border-slate-100 dark:border-slate-800 last:border-b-0 hover:bg-indigo-50/40 dark:hover:bg-indigo-500/5 transition-colors",
+                                                isEvenRow ? "bg-white dark:bg-slate-900" : "bg-slate-50/50 dark:bg-slate-950/50"
                                             )}
                                         >
                                             {/* Field label column */}
-                                            <td className="px-3 py-2 font-medium text-slate-700 text-[11px] border-r border-slate-200 sticky left-0 bg-inherit z-10">
+                                            <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-300 text-[11px] border-r border-slate-200 dark:border-slate-800 sticky left-0 bg-inherit z-10 shadow-[2px_0_4px_rgba(0,0,0,0.03)]">
                                                 {child.display_value || child.name.replace(/_/g, ' ')}
                                             </td>
 
@@ -2749,7 +2751,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                                 return (
                                                     <td
                                                         key={rowIdx}
-                                                        className="px-2 py-1.5 border-r border-slate-100 last:border-r-0 align-middle"
+                                                        className="px-2 py-1.5 border-r border-slate-100 dark:border-slate-800 last:border-r-0 align-middle"
                                                     >
                                                         <PlaceholderInput
                                                             placeholder={child}
@@ -4390,19 +4392,19 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                         </div>
                     </div>
 
-                    {/* Progress tracking */}
-                    <div className="hidden sm:flex items-center gap-3 min-w-0 max-w-[200px] flex-1">
-                        <div className="flex flex-col items-end shrink-0">
-                            <span className="text-[10px] font-bold text-slate-700 leading-none">
-                                {completionStats.filled} of {completionStats.total}
+                    {/* Progress tracking - CC summary card */}
+                    <div className="hidden sm:flex items-center gap-2.5 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/50 min-w-0 max-w-[240px] flex-1">
+                        <div className="flex flex-col shrink-0 min-w-0">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 leading-none">Progress</span>
+                            <span className="text-xs font-bold text-slate-700 dark:text-slate-200 mt-0.5 leading-none tabular-nums">
+                                {completionStats.filled}/{completionStats.total}
                             </span>
-                            <span className="text-[9px] font-medium text-slate-400 mt-0.5">Filled</span>
                         </div>
                         <Progress
                             value={completionStats.percentage}
-                            className={`h-1.5 flex-1 min-w-[80px] bg-slate-100 ${loadedDraft ? '[&>div]:bg-amber-500' : '[&>div]:bg-blue-600'}`}
+                            className={`h-1.5 flex-1 min-w-[60px] bg-slate-100 dark:bg-slate-800 ${loadedDraft ? '[&>div]:bg-amber-500' : '[&>div]:bg-custom-blue'}`}
                         />
-                        <span className="text-xs font-bold text-slate-700 shrink-0">{completionStats.percentage}%</span>
+                        <span className="text-xs font-bold text-custom-blue dark:text-blue-400 shrink-0 tabular-nums">{completionStats.percentage}%</span>
                     </div>
 
                     {/* Actions Panel */}
@@ -4412,14 +4414,14 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                             size="sm"
                             onClick={refineAllFieldsWithAI}
                             disabled={isGenerating}
-                            className="h-8 text-xs border-purple-200 text-purple-700 hover:bg-purple-50/50 hover:border-purple-300 rounded-full px-3.5 flex items-center gap-1.5 shadow-sm font-medium transition-all"
+                            className="h-8 text-xs border-purple-200 text-purple-700 hover:bg-purple-50/50 hover:border-purple-300 rounded-lg px-3 flex items-center gap-1.5 shadow-sm font-semibold transition-all"
                         >
                             <Sparkles className="h-3.5 w-3.5" />
                             AI Refine
                         </Button>
                         {availableTemplates.length > 1 && (
                             <Select value={selectedTemplate?.id} onValueChange={handleTemplateSelect}>
-                                <SelectTrigger className="w-48 h-8 text-xs rounded-full border-slate-200 hover:bg-slate-50 transition-colors">
+                                <SelectTrigger className="w-48 h-8 text-xs rounded-lg border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors shadow-sm">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent className="rounded-xl shadow-lg border-slate-100">
@@ -4433,14 +4435,14 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                             <button
                                 onClick={() => togglePanel('form')}
                                 title={collapsed.form ? 'Show fields panel' : 'Hide fields panel'}
-                                className={cn("p-2 rounded-full transition-all", collapsed.form ? "text-slate-400 hover:text-slate-600" : "bg-blue-600 text-white shadow-sm")}
+                                className={cn("p-2 rounded-full transition-all", collapsed.form ? "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" : "bg-custom-blue text-white shadow-sm")}
                             >
                                 {collapsed.form ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
                             </button>
                             <button
                                 onClick={() => togglePanel('preview')}
                                 title={collapsed.preview ? 'Show preview panel' : 'Hide preview panel'}
-                                className={cn("p-2 rounded-full transition-all", collapsed.preview ? "text-slate-400 hover:text-slate-600" : "bg-blue-600 text-white shadow-sm")}
+                                className={cn("p-2 rounded-full transition-all", collapsed.preview ? "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" : "bg-custom-blue text-white shadow-sm")}
                             >
                                 <Columns2 className="w-4 h-4" />
                             </button>
@@ -4448,13 +4450,13 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                 <button
                                     onClick={() => togglePanel('source')}
                                     title={collapsed.source ? 'Show source panel' : 'Hide source panel'}
-                                    className={cn("p-2 rounded-full transition-all", collapsed.source ? "text-slate-400 hover:text-slate-600" : "bg-blue-600 text-white shadow-sm")}
+                                    className={cn("p-2 rounded-full transition-all", collapsed.source ? "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" : "bg-custom-blue text-white shadow-sm")}
                                 >
                                     {collapsed.source ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
                                 </button>
                             )}
                         </div>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition-colors" onClick={onClose}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors" onClick={onClose}>
                             <X className="h-4 w-4" />
                         </Button>
                     </div>
@@ -4494,15 +4496,15 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 collapsedSize={0}
                 onCollapse={() => setCollapsed((prev) => ({ ...prev, form: true }))}
                 onExpand={() => setCollapsed((prev) => ({ ...prev, form: false }))}
-                className="bg-white flex flex-col z-10 overflow-hidden"
+                className="bg-slate-50 dark:bg-slate-950 flex flex-col z-10 overflow-hidden shadow-[0_0_15px_rgba(0,0,0,0.02)]"
             >
                 <ScrollArea className="h-full w-full">
                     
-                    <div className="p-6 space-y-8">
+                    <div className="p-5 space-y-6">
                         {/* Entity Override Selectors */}
                         {entitySelectionState?.hasMultiCandidateSelectors && entitySelectionState.selectors.length > 0 && (
                             <div className="space-y-4">
-                                <h4 className="flex items-center gap-2 font-black text-amber-600 text-[10px] tracking-widest uppercase border-b pb-2">
+                                <h4 className="flex items-center gap-2 font-bold text-amber-600 dark:text-amber-500 text-[10px] tracking-widest uppercase border-b border-slate-200/60 dark:border-slate-800 pb-2">
                                     <Users className="h-3 w-3" /> Auto-Selected Signatories &amp; Roles
                                 </h4>
                                 <p className="text-[11px] text-slate-500 -mt-2">
@@ -4516,9 +4518,9 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                         const isAutoSelected = !currentOverrideId;
 
                                         return (
-                                            <div key={selector.targetEntityType} className="flex flex-row items-center gap-6 p-3 rounded-lg border border-amber-200 bg-amber-50/40">
+                                            <div key={selector.targetEntityType} className="flex flex-row items-center gap-6 px-4 py-3 rounded-xl border border-amber-200/70 dark:border-amber-500/20 bg-amber-50/50 dark:bg-amber-500/5 shadow-sm">
                                                 <div className="w-1/3 flex flex-col">
-                                                    <Label className="font-bold text-slate-700 text-xs uppercase tracking-tight">
+                                                    <Label className="font-semibold text-slate-700 dark:text-slate-300 text-xs uppercase tracking-tight">
                                                         {selector.targetEntityType.replace(/_/g, ' ')}
                                                     </Label>
                                                     <span className="text-[10px] text-slate-400 mt-0.5">
@@ -4550,12 +4552,13 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                         )}
 
                         {/* Section Header */}
-                        <div className="space-y-4">
-                            <h4 className="flex items-center gap-2 font-black text-blue-600 text-[10px] tracking-widest uppercase border-b pb-2">
+                        <div className="space-y-3">
+                            <h4 className="flex items-center gap-2 font-bold text-slate-400 dark:text-slate-500 text-[10px] tracking-widest uppercase border-b border-slate-200/60 dark:border-slate-800 pb-2">
                                 <Layout className="h-3 w-3" /> General Document Fields
                             </h4>
 
-                            <div className="grid grid-cols-1 gap-y-1">
+                            <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200/60 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden">
+                            <div className="grid grid-cols-1">
                                 {groupedPlaceholders.topLevel.map((p, idx) => {
                                     let resolvedOptions = [];
                                     if (p.master_field_ids?.length > 0) {
@@ -4568,11 +4571,11 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                     return (
                                         <div
                                             key={`${p.id || p.name}-${p.name}`}
-                                            className="flex flex-row items-start gap-6 p-2 border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors"
+                                            className="flex flex-row items-start gap-6 px-4 py-3 hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors"
                                         >
                                             {/* COLUMN 1: ID Badge + Right Aligned Label */}
                                             <div className="w-1/3 flex items-start">
-                                                <Label className="font-bold text-slate-700 text-xs leading-relaxed uppercase tracking-tight">
+                                                <Label className="font-semibold text-slate-700 dark:text-slate-300 text-xs leading-relaxed uppercase tracking-tight">
                                                     {p.name.replace(/_/g, ' ')}
                                                 </Label>
                                             </div>
@@ -4606,12 +4609,13 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                     );
                                 })}
                             </div>
+                            </div>
                         </div>
 
                         {/* Repeating Sections Logic */}
                         {Object.keys(groupedPlaceholders.blocks).length > 0 && (
-                            <div className="space-y-4 pt-4 border-t">
-                                <h4 className="flex items-center gap-2 font-black text-blue-600 text-[10px] tracking-widest uppercase border-b pb-2">
+                            <div className="space-y-4 pt-4 border-t border-slate-200/60 dark:border-slate-800">
+                                <h4 className="flex items-center gap-2 font-bold text-slate-400 dark:text-slate-500 text-[10px] tracking-widest uppercase border-b border-slate-200/60 dark:border-slate-800 pb-2">
                                     <Layers className="h-3 w-3" /> Repeating Tables / Blocks
                                 </h4>
                                 {Object.keys(groupedPlaceholders.blocks).map(blockName => (
@@ -4627,7 +4631,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
             </Panel>
 
             <PanelResizeHandle className="relative flex w-2 items-center justify-center group outline-none cursor-col-resize z-20">
-                <div className="h-full w-[2px] bg-slate-200/50 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500 delay-75" />
+                <div className="h-full w-[2px] bg-slate-200/50 dark:bg-slate-800/50 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500 dark:group-hover:bg-blue-500 dark:group-active:bg-blue-600 delay-75" />
             </PanelResizeHandle>
 
             <Panel
@@ -4640,12 +4644,12 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 collapsedSize={0}
                 onCollapse={() => setCollapsed((prev) => ({ ...prev, preview: true }))}
                 onExpand={() => setCollapsed((prev) => ({ ...prev, preview: false }))}
-                className="bg-slate-50 flex flex-col z-10 overflow-hidden shadow-[0_0_15px_rgba(0,0,0,0.02)]"
+                className="bg-slate-100/80 dark:bg-slate-900/80 flex flex-col z-10 overflow-hidden"
             >
                 <PreviewPanel
                     previewContent={previewContent}
                     isPreviewLoading={isPreviewLoading}
-                    panelClasses="bg-slate-100/30 dark:bg-slate-900/30 backdrop-blur-sm"
+                    panelClasses="flex flex-col h-full"
                     EDITOR_PREVIEW_STYLES={EDITOR_PREVIEW_STYLES}
                     isWordTemplate={isWordTemplate}
                     docxBuffer={docxPreviewBuffer}
@@ -4655,7 +4659,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
             {isWordTemplate && (
                 <>
                     <PanelResizeHandle className="relative flex w-2 items-center justify-center group outline-none cursor-col-resize z-20">
-                        <div className="h-full w-[2px] bg-slate-200/50 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500 delay-75" />
+                        <div className="h-full w-[2px] bg-slate-200/50 dark:bg-slate-800/50 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500 dark:group-hover:bg-blue-500 dark:group-active:bg-blue-600 delay-75" />
                     </PanelResizeHandle>
 
                     <Panel
@@ -4668,32 +4672,34 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                         collapsedSize={0}
                         onCollapse={() => setCollapsed((prev) => ({ ...prev, source: true }))}
                         onExpand={() => setCollapsed((prev) => ({ ...prev, source: false }))}
-                        className="bg-slate-50 overflow-y-auto z-10  bg-slate-50 overflow-y-auto transition-all duration-300"
+                        className="bg-slate-50 dark:bg-slate-950 overflow-y-auto z-10 transition-all duration-300"
                     >
                         
-                        <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b flex justify-between">
-                            <span className="text-[10px] font-bold text-slate-500">ORIGINAL REFERENCE</span>
+                        <div className="sticky top-0 z-10 bg-white/80 dark:bg-slate-900/80 backdrop-blur px-4 py-2.5 border-b border-slate-200/70 dark:border-slate-800 flex justify-between items-center">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Original Reference</span>
                         </div>
                         <div className="p-4">
                             {isWordTemplate ? (
                                 docPreviewUrl ? (
-                                    <iframe
-                                        src={docPreviewUrl}
-                                        className="w-full h-[calc(100vh-250px)] border-0 rounded shadow bg-white"
-                                        title="Original"
-                                        onError={() => setDocPreviewUrl(null)}
-                                    />
+                                    <div className="rounded-xl overflow-hidden border border-slate-200/60 dark:border-slate-800 shadow-sm bg-white">
+                                        <iframe
+                                            src={docPreviewUrl}
+                                            className="w-full h-[calc(100vh-250px)] border-0 bg-white"
+                                            title="Original"
+                                            onError={() => setDocPreviewUrl(null)}
+                                        />
+                                    </div>
                                 ) : (
-                                    <div className="h-[300px] flex flex-col items-center justify-center text-slate-400 border-2 border-dashed rounded">
-                                        <FileText className="h-12 w-12 mb-2" />
+                                    <div className="h-[300px] flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl bg-white/50 dark:bg-slate-900/50">
+                                        <FileText className="h-12 w-12 mb-2 text-slate-300" />
                                         <p className="text-xs">Preview unavailable</p>
                                     </div>
                                 )
                             ) : (
-                                <div className="bg-white rounded border p-6">
-                                    <Code className="h-8 w-8 text-blue-500 mb-3" />
+                                <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/60 dark:border-slate-800 p-6 shadow-sm">
+                                    <Code className="h-8 w-8 text-custom-blue mb-3" />
                                     <h3 className="font-semibold text-sm mb-2">HTML Template Source</h3>
-                                    <p className="text-xs text-slate-600 italic">This template is HTML based. Use the Live Preview to see the output.</p>
+                                    <p className="text-xs text-slate-600 dark:text-slate-400 italic">This template is HTML based. Use the Live Preview to see the output.</p>
                                 </div>
                             )}
                         </div>
@@ -4702,8 +4708,8 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
             )}
         </PanelGroup>
     </div>
-    <div className="border-t border-slate-100 px-6 py-4 bg-slate-50/90 backdrop-blur-md flex justify-between items-center flex-shrink-0 z-10">
-                <div className="text-[11px] font-semibold text-slate-600 flex items-center gap-2 bg-slate-200/60 px-3 py-1 rounded-full border border-slate-300/30">
+    <div className="border-t border-slate-200 dark:border-slate-800 px-6 py-3 bg-white dark:bg-slate-950 flex justify-between items-center flex-shrink-0 z-10">
+                <div className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-2.5 px-4 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/50">
                     <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
                     <span>Format: {isWordTemplate ? 'Word (.docx)' : 'HTML'}</span>
                 </div>
@@ -4712,7 +4718,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                         variant="ghost" 
                         size="sm" 
                         onClick={onClose}
-                        className="h-9 px-4 rounded-full text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors text-xs font-semibold"
+                        className="h-9 px-4 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors text-xs font-semibold"
                     >
                         Cancel
                     </Button>
@@ -4721,7 +4727,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                         size="sm"
                         onClick={saveAsDraft}
                         disabled={isGenerating || isPreviewLoading}
-                        className="h-9 px-4.5 rounded-full border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-sm transition-all"
+                        className="h-9 px-4 rounded-lg border-slate-200 dark:border-slate-800 hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-sm transition-all"
                     >
                         {isGenerating || isPreviewLoading ? (
                             <Loader2 className="animate-spin mr-2 h-3.5 w-3.5 text-slate-500" />
@@ -4735,7 +4741,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                             <Button 
                                 size="sm" 
                                 disabled={isGenerating} 
-                                className="h-9 px-5 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-semibold shadow-md shadow-blue-500/10 border-0 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                                className="h-9 px-5 rounded-lg bg-custom-blue hover:bg-[#2d5a94] text-white text-xs font-semibold shadow-md shadow-custom-blue/20 border-0 hover:scale-[1.02] active:scale-[0.98] transition-all"
                             >
                                 {isGenerating ? (
                                     <Loader2 className="animate-spin mr-2 h-3.5 w-3.5" />

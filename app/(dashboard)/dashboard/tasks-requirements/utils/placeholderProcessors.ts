@@ -9,11 +9,16 @@ export const getCompanyRegistryCandidates = (normType: string, companyAssociates
   );
 };
 
-const resolveCompanyRegistryFallback = (normType: string, companyAssociates: any[] | null, entityOverrides: Record<string, string> | null) => {
+const resolveCompanyRegistryFallback = (normType: string, companyAssociates: any[] | null, entityOverrides: Record<string, string> | null, entityIdMap: Record<string, string> | null = null) => {
   const candidates = getCompanyRegistryCandidates(normType, companyAssociates);
   if (candidates.length === 0) return null;
-  const overrideId = entityOverrides?.[normType];
-  return (overrideId && candidates.find((c: any) => String(c.id) === String(overrideId))) || candidates[0];
+  // An explicit entityIdMap pick (e.g. CC's per-entity-type Consultant
+  // pickers) takes priority over entityOverrides, which in turn takes
+  // priority over just grabbing the first role match - otherwise a type
+  // with no dedicated relationshipData bucket above (hr, accountant,
+  // manager, etc.) would ignore the user's actual selection here.
+  const preferredId = entityIdMap?.[normType] || entityOverrides?.[normType];
+  return (preferredId && candidates.find((c: any) => String(c.id) === String(preferredId))) || candidates[0];
 };
 
 export const getTargetEntity = (
@@ -42,10 +47,19 @@ export const getTargetEntity = (
 
   const resolveFromTaskParticipants = () => {
     if (entityIdMap) {
+      // Each of these dedicated branches also falls back to companyAssociates
+      // (present for CC's per-entity-type pickers, see
+      // consultancy-contracts/hooks/useCompanyIndividualsByType.ts) - without
+      // it, an explicit pick that isn't ALSO present in relationshipData's own
+      // bucket (e.g. a shareholder/employee/understudy chosen via the picker
+      // before that bucket was populated, or a caller that never bothers
+      // building one) silently fell through to the unconditional "first
+      // match by role" fallback further down instead of honoring the pick.
       if (normType === 'director' && entityIdMap.director) {
         const dirId = entityIdMap.director;
         return relationshipData?.directors?.find((d: any) => String(d.id) === String(dirId)) ||
-          combinedCache?.['registry_individuals']?.[dirId];
+          combinedCache?.['registry_individuals']?.[dirId] ||
+          companyAssociates?.find((c: any) => String(c.id) === String(dirId));
       }
       if (normType === 'principal' && entityIdMap.principal) {
         return relationshipData?.principal || extractedData;
@@ -53,17 +67,20 @@ export const getTargetEntity = (
       if (normType === 'shareholder' && entityIdMap.shareholder) {
         const shareId = entityIdMap.shareholder;
         return relationshipData?.shareholders?.find((s: any) => String(s.id) === String(shareId)) ||
-          combinedCache?.['registry_individuals']?.[shareId];
+          combinedCache?.['registry_individuals']?.[shareId] ||
+          companyAssociates?.find((c: any) => String(c.id) === String(shareId));
       }
       if (normType === 'employee' && entityIdMap.employee) {
         const empId = entityIdMap.employee;
         return relationshipData?.employees?.find((e: any) => String(e.id) === String(empId)) ||
-          combinedCache?.['employment_data']?.[empId];
+          combinedCache?.['employment_data']?.[empId] ||
+          companyAssociates?.find((c: any) => String(c.id) === String(empId));
       }
       if (normType === 'understudy' && entityIdMap.understudy) {
         const underId = entityIdMap.understudy;
         return relationshipData?.understudies?.find((u: any) => String(u.id) === String(underId)) ||
-          combinedCache?.['registry_individuals']?.[underId];
+          combinedCache?.['registry_individuals']?.[underId] ||
+          companyAssociates?.find((c: any) => String(c.id) === String(underId));
       }
     }
 
@@ -115,7 +132,7 @@ export const getTargetEntity = (
   if (taskResult) return taskResult;
 
   if (normType && normType !== 'company') {
-    const fallback = resolveCompanyRegistryFallback(normType, companyAssociates, entityOverrides);
+    const fallback = resolveCompanyRegistryFallback(normType, companyAssociates, entityOverrides, entityIdMap);
     if (fallback) return fallback;
 
     const fallbackLower = String(normType).toLowerCase().trim();

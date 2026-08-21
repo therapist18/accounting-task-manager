@@ -127,7 +127,7 @@ export default function ConsultancyContractsPage() {
     () => placeholders.map((p) => ({
       ...p,
       key: p.name,
-      label: p.description || p.name.replace(/_/g, ' '),
+      label: p.display_value || p.description || p.name.replace(/_/g, ' '),
       group_label: inferGroupLabel({ key: p.name, company_role: p.company_role }),
     })),
     [placeholders]
@@ -333,6 +333,17 @@ export default function ConsultancyContractsPage() {
     };
   }, [placeholders, consultantCompany, directors, consultantDirectors, clientPlaceholders, clientBlockPlaceholders, consultantPlaceholders, consultantBlockPlaceholders, consultantEntityIds, consultantEntityOptions, consultantCompanyAssociates]);
 
+  // resolveContractValues legitimately gets a new identity whenever the
+  // Consultant entity-id selection changes (see its dependency array above) -
+  // kept in a ref so the FULL company-load effect below doesn't have to
+  // depend on it directly. Depending on it directly would re-run the entire
+  // load (loading spinner, re-fetching the engagement, resetting
+  // overrides/imageStyles/selectedDirectorIds) every time a Consultant
+  // picker changes, instead of just re-resolving values in place - see the
+  // dedicated soft-refresh effect further down.
+  const resolveContractValuesRef = useRef(resolveContractValues);
+  useEffect(() => { resolveContractValuesRef.current = resolveContractValues; }, [resolveContractValues]);
+
   // Per-company: resolve master-field-sourced values and load any saved
   // engagement (overrides + status) for the selected client.
   useEffect(() => {
@@ -351,7 +362,7 @@ export default function ConsultancyContractsPage() {
     setImageStyles({});
     (async () => {
       const [{ values, masterFields: fields, arrayValues }, existingEngagement] = await Promise.all([
-        resolveContractValues(selectedCompanyId),
+        resolveContractValuesRef.current(selectedCompanyId),
         fetchLatestEngagement(selectedCompanyId),
       ]);
       if (cancelled) return;
@@ -401,7 +412,9 @@ export default function ConsultancyContractsPage() {
       setLoadingCompanyData(false);
     })();
     return () => { cancelled = true; };
-  }, [selectedCompanyId, placeholders, resolveContractValues]);
+    // Deliberately NOT depending on resolveContractValues - see the ref above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompanyId, placeholders]);
 
   // Manual "refresh source data" trigger - re-resolves master-field values
   // for the current company without touching overrides/engagement/directors,
@@ -414,6 +427,28 @@ export default function ConsultancyContractsPage() {
     setArrayData(arrayValues);
     setMasterFields(fields);
   };
+
+  // Soft re-resolve when the Consultant entity-id selection changes (Contract
+  // Settings' per-entity-type pickers) - same handleRefreshMasterFieldValues
+  // pattern (values/arrayData only, no loading flag, no engagement/overrides
+  // reset), so picking a director/employee there updates Contract Fields in
+  // place instead of flashing the whole panel through its loading state.
+  // Skips the very first run (mount / initial company load already resolves
+  // this) via the ref below, firing only on a genuine subsequent change.
+  const hasResolvedOnceRef = useRef(false);
+  useEffect(() => {
+    if (!hasResolvedOnceRef.current) { hasResolvedOnceRef.current = true; return; }
+    if (!selectedCompanyId || placeholders.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const { values, masterFields: fields, arrayValues } = await resolveContractValuesRef.current(selectedCompanyId);
+      if (cancelled) return;
+      setResolvedValues(values);
+      setArrayData(arrayValues);
+      setMasterFields(fields);
+    })();
+    return () => { cancelled = true; };
+  }, [consultantEntityIds]);
 
   // New engagement (nothing saved yet) for this company: default the
   // Directors picker to everyone who qualifies, since a signed acknowledgement

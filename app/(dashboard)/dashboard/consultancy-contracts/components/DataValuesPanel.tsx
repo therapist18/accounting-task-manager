@@ -141,14 +141,14 @@ export function DataValuesPanel({
 
   return (
     <ScrollArea className="h-full">
-      <div className="p-5 space-y-6">
+      <div className="p-4 space-y-4">
         {/* Toolbar: title + All/With Data/Missing filter - same segmented
             control as employment-contracts/components/ContractEditor.tsx's
             own Contract Fields toolbar. */}
         <div>
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-3">
             <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-custom-blue" /> Contract Fields
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">Review and override placeholders resolved for this agreement.</p>
@@ -295,7 +295,7 @@ function PlaceholderRow({
 
   return (
     <div className={cn(
-      "grid grid-cols-1 md:grid-cols-[35%_20%_1fr] gap-4 p-4 items-center transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40 relative overflow-hidden",
+      "grid grid-cols-1 md:grid-cols-[35%_20%_1fr] gap-3.5 p-3.5 items-center transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40 relative overflow-hidden",
       isMissing && p.required ? "bg-rose-50/30 dark:bg-rose-900/10" : ""
     )}>
       <div className={cn(

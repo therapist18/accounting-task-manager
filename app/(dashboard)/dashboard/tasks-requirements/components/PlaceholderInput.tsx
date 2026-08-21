@@ -147,9 +147,9 @@ export const PlaceholderInput = ({
   // --- Inline Edit Mode (When overriding a source) ---
   if (editingSource) {
     return (
-      <div className="flex items-center gap-3 w-full py-1.5 border-y border-blue-100 dark:border-blue-900/30 bg-blue-50/20 dark:bg-blue-950/10 px-2 rounded-md">
+      <div className="flex items-center gap-3 w-full py-1.5 border-y border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 px-2 rounded-md">
         <div className="flex-1">
-          <div className="text-[9px] font-bold text-blue-600 uppercase mb-1 flex items-center gap-1">
+          <div className="text-[9px] font-bold text-custom-blue uppercase mb-1 flex items-center gap-1">
             <Edit3 className="h-2.5 w-2.5" /> Editing {editingSource.label}
           </div>
           <Input 
@@ -179,7 +179,7 @@ export const PlaceholderInput = ({
             ? "border-red-200 text-red-400 dark:border-red-900/50"
             : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300"
         )}>
-          <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 bg-blue-50 text-blue-600 border-blue-200 shrink-0">
+          <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 bg-custom-blue/5 text-custom-blue border-custom-blue/20 shrink-0">
             {placeholder.type === 'ordinal' ? '# Auto' : 'Σ Auto'}
           </Badge>
           <span className="truncate font-semibold tracking-tight">{isMissing ? '—' : value}</span>
@@ -220,7 +220,7 @@ export const PlaceholderInput = ({
                 return (
                   <div key={`m-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-md group/item">
                     <div className="min-w-0 pr-2">
-                      <div className="text-[8px] font-bold text-blue-600 uppercase">DB Field {idx + 1}</div>
+                      <div className="text-[8px] font-bold text-custom-blue uppercase">DB Field {idx + 1}</div>
                       <div className="text-[11px] font-bold text-slate-700 dark:text-slate-200 truncate">{mf?.label || `Field #${mid}`}</div>
                       <div className="text-[10px] text-slate-500 italic truncate">{isValidValue(sourceVal) ? sourceVal : 'Empty'}</div>
                     </div>
@@ -269,7 +269,7 @@ export const PlaceholderInput = ({
                 const newStr = str.substring(0, idx) + char + str.substring(idx + 1);
                 onChange(newStr.trimEnd());
               }} 
-              className="w-8 h-9 text-center border border-slate-200 dark:border-slate-800 rounded font-mono text-sm font-bold bg-white dark:bg-slate-950 focus:ring-1 focus:ring-blue-500 outline-none transition-all shadow-sm" 
+              className="w-8 h-9 text-center border border-slate-200 dark:border-slate-800 rounded font-mono text-sm font-bold bg-white dark:bg-slate-950 focus:ring-1 focus:ring-custom-blue outline-none transition-all shadow-sm" 
             />
           ))}
         </div>
@@ -303,7 +303,7 @@ export const PlaceholderInput = ({
             </div>
           ) : (
             <button 
-              className="w-full h-24 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-lg flex flex-col items-center justify-center gap-1.5 text-slate-400 hover:text-blue-500 hover:border-blue-300 dark:hover:border-blue-900 transition-all bg-slate-50/30 dark:bg-slate-950/30"
+              className="w-full h-24 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-lg flex flex-col items-center justify-center gap-1.5 text-slate-400 hover:text-custom-blue hover:border-custom-blue/40 dark:hover:border-custom-blue/50 transition-all bg-slate-50/30 dark:bg-slate-950/30"
               onClick={() => document.getElementById(`file-${fieldKey}`)?.click()}
             >
               <Expand className="h-5 w-5 opacity-50" />
@@ -386,7 +386,7 @@ export const PlaceholderInput = ({
             "h-10 text-xs font-bold border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-sm transition-all focus-visible:ring-1 pr-8",
             hasChanged && canSave 
               ? "border-amber-400 focus-visible:ring-amber-400/30" 
-              : "focus-visible:ring-blue-500/30"
+              : "focus-visible:ring-custom-blue/30"
           )}
         />
         {hasChanged && canSave && (

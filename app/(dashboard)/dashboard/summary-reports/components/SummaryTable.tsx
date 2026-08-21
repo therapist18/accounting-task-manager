@@ -753,12 +753,12 @@ export function SummaryTable({
                       <TableRow key={`empty-${item.name}`} className="border-0 hover:bg-transparent">
                         <TableCell
                           colSpan={1 + stickyColCount}
-                          className="sticky left-0 z-20 bg-slate-50/60 border-r border-b border-slate-200 py-3 px-4"
+                          className="sticky left-0 z-20 bg-slate-50 border-r border-b border-slate-200 py-3 px-4"
                         >
                           <span className="text-sm italic text-slate-400">No tasks associated</span>
                         </TableCell>
-                        <TableCell colSpan={spacerColSpan} className="bg-slate-50/60 border-b border-slate-200 py-3" />
-                        <TableCell className="sticky right-0 z-20 bg-slate-50/60 border-l border-b border-slate-200 py-3 px-2" />
+                        <TableCell colSpan={spacerColSpan} className="bg-slate-50 border-b border-slate-200 py-3" />
+                        <TableCell className="sticky right-0 z-20 bg-slate-50 border-l border-b border-slate-200 py-3 px-2" />
                       </TableRow>
                     );
                   }
@@ -769,10 +769,10 @@ export function SummaryTable({
                   return (
                     <TableRow
                       key={task.id}
-                      className={cn("group border-0 transition-colors cursor-pointer", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "hover:bg-blue-50/50")}
+                      className={cn("group border-0 transition-colors cursor-pointer", idx % 2 === 0 ? "bg-white" : "bg-slate-50", "hover:bg-blue-50/50")}
                       onClick={() => setPendingRedirectTask(task)}
                     >
-                      <TableCell className={cn("sticky left-0 z-20 border-r border-b border-slate-200 text-center py-2.5", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "group-hover:bg-blue-50/50")}>
+                      <TableCell className={cn("sticky left-0 z-20 border-r border-b border-slate-200 text-center py-2.5", idx % 2 === 0 ? "bg-white" : "bg-slate-50", "group-hover:bg-blue-50")}>
                         <span className="text-sm font-semibold text-slate-400 group-hover:text-slate-600 transition-colors">
                           {((currentPage - 1) * rowsPerPage) + idx + 1}
                         </span>
@@ -798,7 +798,7 @@ export function SummaryTable({
                               key={col.id}
                               className={cn(
                                 "px-1 py-2.5 border-r border-b border-slate-100 text-center border-l-[3px] border-l-amber-300/40",
-                                idx % 2 === 0 ? "bg-white" : "bg-slate-100/50",
+                                idx % 2 === 0 ? "bg-white" : "bg-slate-50",
                                 "group-hover:bg-blue-50/50"
                               )}
                             >
@@ -878,12 +878,18 @@ export function SummaryTable({
                             key={col.id}
                             className={cn(
                               "px-4 py-2.5 border-r border-b border-slate-200 text-sm max-w-0 overflow-hidden whitespace-nowrap text-ellipsis transition-colors",
-                              isSticky && "sticky z-20 shadow-[2px_0_4px_rgba(0,0,0,0.02)] bg-inherit",
+                              isSticky && "sticky z-20 shadow-[2px_0_4px_rgba(0,0,0,0.02)]",
                               col.highlight ? "bg-amber-50/40 group-hover:bg-amber-50/70 text-amber-800 font-medium"
                                 : col.type === 'computed_time' ? "bg-violet-50/40 group-hover:bg-violet-50/60"
                                 : "group-hover:bg-blue-50/50",
                               col.primary ? "text-slate-900 font-semibold" : (!col.highlight && col.type !== 'computed_time') && "text-slate-600",
-                              col.id === firstHighlightId && "border-l-[3px] border-l-amber-300"
+                              col.id === firstHighlightId && "border-l-[3px] border-l-amber-300",
+                              // isSticky background comes last so it always wins over the
+                              // highlight/computed_time/hover backgrounds above — a sticky
+                              // column must stay fully opaque to occlude content scrolling
+                              // underneath it, never a translucent overlay tint.
+                              isSticky && (idx % 2 === 0 ? "bg-white" : "bg-slate-50"),
+                              isSticky && "group-hover:bg-blue-50"
                             )}
                             style={isSticky ? { left: `${left}px` } : undefined}
                           >
@@ -897,7 +903,7 @@ export function SummaryTable({
                       })}
 
                       <TableCell
-                        className={cn("sticky right-0 z-20 border-l border-b border-slate-200 py-2.5 shadow-[-2px_0_4px_rgba(0,0,0,0.02)]", idx % 2 === 0 ? "bg-white" : "bg-slate-100/50", "group-hover:bg-blue-50/50")}
+                        className={cn("sticky right-0 z-20 border-l border-b border-slate-200 py-2.5 shadow-[-2px_0_4px_rgba(0,0,0,0.02)]", idx % 2 === 0 ? "bg-white" : "bg-slate-50", "group-hover:bg-blue-50")}
                       >
                         <RowActionsCell
                           task={task}
