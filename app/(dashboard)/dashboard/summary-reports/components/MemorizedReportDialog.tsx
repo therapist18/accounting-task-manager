@@ -60,7 +60,13 @@ interface MemorizedReportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   department: Department | null;
-  stages: any[];
+  // Per-department stage lists, not a pre-flattened array — the 4 milestone stage ids are
+  // deliberately shared across every department (see stageColumnConfig.ts's
+  // MILESTONE_STAGE_COLUMNS comment), so flattening ahead of time produced duplicate stage
+  // entries (and duplicate React keys) once a report spanned more than one department's stages.
+  // The dialog derives its own stage list scoped to whichever department/job level is
+  // currently selected, in that department's own DB fetch order (see `stages` memo below).
+  stagesByDept: Map<string, any[]>;
   kycDocuments: Map<string, KycDocument>;
   onApplyReport: (report: MemorizedReport) => void;
   tableHeaders: typeof ENHANCED_TABLE_HEADERS_IMMIGRATION;
@@ -593,7 +599,7 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
   );
 });
 
-export function MemorizedReportDialog({ open, onOpenChange, department, stages, kycDocuments, onApplyReport, tableHeaders, availableJobLevels = [], departments = [], subdepartments = [], classes = [], currentUserId = null }: MemorizedReportDialogProps) {
+export function MemorizedReportDialog({ open, onOpenChange, department, stagesByDept, kycDocuments, onApplyReport, tableHeaders, availableJobLevels = [], departments = [], subdepartments = [], classes = [], currentUserId = null }: MemorizedReportDialogProps) {
   const [reports, setReports] = useState<MemorizedReport[]>([])
   const [selectedReport, setSelectedReport] = useState<MemorizedReport | null>(null)
   const [isEditing, setIsEditing] = useState(false)
@@ -628,19 +634,34 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
     return cls?.subClasses || [];
   }, [selectedClass, availableClasses]);
 
+  // Scoped to the selected department (its own DB fetch order preserved — no client-side
+  // re-sort) once a specific job level is chosen; falls back to every department's stages
+  // deduped by id (first occurrence wins) while still on "All Departments", so the 4 shared
+  // milestone stage ids each render once instead of once per department.
+  const sortedStages = useMemo(() => {
+    if (selectedDepartment && selectedDepartment !== 'all') {
+      return stagesByDept.get(selectedDepartment) || [];
+    }
+    const seen = new Set<string>();
+    const result: any[] = [];
+    for (const deptStages of stagesByDept.values()) {
+      for (const s of deptStages) {
+        if (seen.has(s.id)) continue;
+        seen.add(s.id);
+        result.push(s);
+      }
+    }
+    return result;
+  }, [stagesByDept, selectedDepartment]);
+
   const nonApplicableStageIds = useMemo(() => {
-    if (!selectedDepartment || selectedDepartment === 'all' || !stages.length) return new Set<string>();
+    if (!selectedDepartment || selectedDepartment === 'all' || !sortedStages.length) return new Set<string>();
     return new Set(
-      stages
+      sortedStages
         .filter(stage => !isStageApplicable(stage, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubClass, memoizedDepartments))
         .map(s => s.id)
     );
-  }, [stages, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubClass, memoizedDepartments]);
-
-  const sortedStages = useMemo(() =>
-    [...stages].sort((a, b) => (a.order || a.order_num || 0) - (b.order || b.order_num || 0)),
-    [stages]
-  );
+  }, [sortedStages, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubClass, memoizedDepartments]);
 
   const calculatedJobLevel = useMemo(() => {
     if (!selectedDepartment || selectedDepartment === 'all') return null;
@@ -1164,7 +1185,7 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stages, 
               );
             })}
             {Object.entries(reportConfig.stages).map(([stageId, stageConfig]) => {
-              const stage = stages.find(s => s.id === stageId);
+              const stage = sortedStages.find(s => s.id === stageId);
               if (!stage) return null;
               const isNA = nonApplicableStageIds.has(stageId);
               return (

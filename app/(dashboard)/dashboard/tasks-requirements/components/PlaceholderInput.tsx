@@ -168,8 +168,8 @@ export const PlaceholderInput = ({
     );
   }
 
-  // --- 0. Computed View (read-only, auto-calculated) ---
-  if (placeholder.calculation) {
+  // --- 0. Computed View (read-only, auto-calculated/auto-numbered) ---
+  if (placeholder.calculation || placeholder.type === 'ordinal') {
     const isMissing = !isValidValue(value);
     return (
       <Layout>
@@ -180,7 +180,7 @@ export const PlaceholderInput = ({
             : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300"
         )}>
           <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 bg-blue-50 text-blue-600 border-blue-200 shrink-0">
-            Σ Auto
+            {placeholder.type === 'ordinal' ? '# Auto' : 'Σ Auto'}
           </Badge>
           <span className="truncate font-semibold tracking-tight">{isMissing ? '—' : value}</span>
         </div>

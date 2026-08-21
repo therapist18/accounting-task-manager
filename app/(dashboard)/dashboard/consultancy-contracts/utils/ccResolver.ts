@@ -38,6 +38,61 @@ export interface CcDataResult {
   masterFields: Map<number, JobField>;
 }
 
+// Collect every table + linking_variable + entity IDs that any placeholder
+// needs fetched, regardless of whether it's master-field-backed, image,
+// or document-checklist.
+function collectTableConfigs(
+  placeholders: Placeholder[],
+  entityIds: (string | number)[],
+  masterFields: Map<number, JobField>,
+): Map<string, Map<string, Set<string | number>>> {
+  const tableConfigs = new Map<string, Map<string, Set<string | number>>>();
+
+  const addConfig = (table: string, linkingVar: string, ids: (string | number)[]) => {
+    if (!tableConfigs.has(table)) tableConfigs.set(table, new Map());
+    const byLv = tableConfigs.get(table)!;
+    if (!byLv.has(linkingVar)) byLv.set(linkingVar, new Set());
+    const set = byLv.get(linkingVar)!;
+    for (const id of ids) set.add(id);
+  };
+
+  // 1) Master-field source tables
+  for (const mf of masterFields.values()) {
+    for (const source of (mf.sources || []) as any[]) {
+      if (!['individual', 'company', 'document'].includes(source.source_type)) continue;
+      if (!source.table) continue;
+      const linkingVar = (source.linking_variable as string) || 'id';
+      if (entityIds.length > 0) addConfig(source.table, linkingVar, entityIds);
+    }
+  }
+
+  // 2) Image placeholders — source_table + linking_variable live directly
+  //    on the placeholder (not via master field sources).
+  for (const p of placeholders) {
+    if (p.type === 'image' && p.source_table && p.linking_variable) {
+      if (entityIds.length > 0) addConfig(p.source_table, p.linking_variable, entityIds);
+    }
+
+    // 3) Document-checklist placeholders — each checklist_data_source
+    //    references its own table + linking_variable.
+    if (p.type === 'document_checklist' && p.checklist_data_sources?.length) {
+      for (const ds of p.checklist_data_sources) {
+        if (ds.table && ds.linking_variable) {
+          if (entityIds.length > 0) addConfig(ds.table, ds.linking_variable, entityIds);
+        }
+      }
+    }
+  }
+
+  console.log('[ccResolver] tableConfigs planned:', Array.from(tableConfigs.entries()).map(([t, byLv]) => ({
+    table: t,
+    linkingVars: Array.from(byLv.keys()),
+    idCount: Array.from(byLv.values()).reduce((sum, s) => sum + s.size, 0),
+  })));
+
+  return tableConfigs;
+}
+
 export async function fetchCcData(
   placeholders: Placeholder[],
   entityIds: (string | number)[],
@@ -46,32 +101,20 @@ export async function fetchCcData(
   for (const p of placeholders) {
     collectPlaceholderMasterFieldIds(p).forEach((id) => allFieldIds.add(id));
   }
-  if (allFieldIds.size === 0) return { combinedCache: {}, masterFields: new Map() };
 
-  const { data: fieldRows, error: fieldsError } = await supabase
-    .from('tm_job_fields')
-    .select('*')
-    .in('id', Array.from(allFieldIds));
-  if (fieldsError || !fieldRows) return { combinedCache: {}, masterFields: new Map() };
-
-  const masterFields = new Map<number, JobField>(fieldRows.map((f: any) => [f.id, f as JobField]));
-
-  const tableConfigs = new Map<string, Map<string, Set<string | number>>>();
-  for (const mf of masterFields.values()) {
-    for (const source of (mf.sources || []) as any[]) {
-      if (!['individual', 'company', 'document'].includes(source.source_type)) continue;
-      if (!source.table) continue;
-
-      const linkingVar = (source.linking_variable as string) || 'id';
-      if (entityIds.length === 0) continue;
-
-      if (!tableConfigs.has(source.table)) tableConfigs.set(source.table, new Map());
-      const byLv = tableConfigs.get(source.table)!;
-      if (!byLv.has(linkingVar)) byLv.set(linkingVar, new Set());
-      const set = byLv.get(linkingVar)!;
-      for (const id of entityIds) set.add(id);
+  let masterFields = new Map<number, JobField>();
+  if (allFieldIds.size > 0) {
+    const { data: fieldRows, error: fieldsError } = await supabase
+      .from('tm_job_fields')
+      .select('*')
+      .in('id', Array.from(allFieldIds));
+    if (!fieldsError && fieldRows) {
+      masterFields = new Map<number, JobField>(fieldRows.map((f: any) => [f.id, f as JobField]));
     }
   }
+
+  const tableConfigs = collectTableConfigs(placeholders, entityIds, masterFields);
+  if (tableConfigs.size === 0) return { combinedCache: {}, masterFields };
 
   const combinedCache: Record<string, Record<string, any>> = {};
   await Promise.all(
@@ -93,13 +136,21 @@ export async function fetchCcData(
       }
 
       const { data, error } = await query;
-      if (error || !data) return;
+      if (error) console.error(`[ccResolver] fetch error for table "${table}":`, error.message);
+      if (!data) {
+        console.warn(`[ccResolver] no data returned for table "${table}"`);
+        return;
+      }
+
+      console.log(`[ccResolver] fetched ${data.length} rows from "${table}"`);
 
       const rowsByKey: Record<string, any> = {};
       data.forEach((row: any, idx: number) => { rowsByKey[row.id ?? idx] = row; });
       combinedCache[table] = rowsByKey;
     }),
   );
+
+  console.log('[ccResolver] fetchCcData combinedCache tables:', Object.keys(combinedCache));
 
   return { combinedCache, masterFields };
 }
@@ -111,12 +162,27 @@ export function resolveCcPlaceholders(
   masterFields: Map<number, JobField>,
 ): Record<string, string> {
   const result: Record<string, string> = {};
+  const imagePlaceholders = placeholders.filter((p) => p.type === 'image');
+  if (imagePlaceholders.length > 0) {
+    console.log(`[ccResolver] resolving ${imagePlaceholders.length} image placeholders`);
+    for (const p of imagePlaceholders) {
+      const srcTable = p.source_table || p.image_config?.source_table;
+      const linkVar = p.linking_variable || p.image_config?.linking_variable;
+      console.log(`[ccResolver] image "${p.name}" source_table="${srcTable}" linking_variable="${linkVar}" cacheHasTable=${!!combinedCache[srcTable!]}`);
+    }
+  }
+
+  const companyLabel = relationshipData?.company?.id || 'unknown';
+  console.log(`[ccResolver] resolveCcPlaceholders: company=${companyLabel}, placeholders=${placeholders.length}`);
+
   for (const p of placeholders) {
     if (p.is_block_start) continue;
     const { value } = processPlaceholderValue(
       p, relationshipData, combinedCache, masterFields,
       null, null, relationshipData?.company, null, null, null, null,
     );
+    const resolved = value !== undefined && value !== null && String(value).trim() !== '';
+    console.log(`[ccResolver] "${p.name}" type=${p.type} entity=${p.entity_type?.[0]} resolved=${resolved} value="${String(value ?? '').substring(0, 80)}"`);
     if (value !== undefined && value !== null && String(value).trim() !== '') {
       result[p.name] = String(value);
     }

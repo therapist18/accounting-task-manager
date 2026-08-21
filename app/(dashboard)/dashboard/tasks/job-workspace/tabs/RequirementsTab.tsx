@@ -239,6 +239,16 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
 
   const resolveTemplateEntityForReq = useCallback((req: any) => {
     const entityTypes = req.entityTypes || (req.applicantType ? [req.applicantType] : [])
+
+    // Match against the same participant columns the Requirements table itself
+    // uses (director/shareholder/dependant/understudy/sponsor/etc.), not just
+    // company vs. principal - a requirement scoped to e.g. ["director"] has no
+    // "principal" participant to fall back to when the task only has a director.
+    if (entityTypes.length > 0) {
+      const matchingCol = buildParticipantColumns(task).find((c: ColDef) => entityTypes.includes(c.type))
+      if (matchingCol) return { colType: matchingCol.type, colId: matchingCol.id }
+    }
+
     if (entityTypes.includes('company')) {
       let companyId = task.company_id
       if (!companyId && task.participants_details) {

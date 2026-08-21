@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Loader2, Building2, Clock, GitCompare, FileDown, FileSpreadsheet, FileText, ChevronDown, ListFilter, TableIcon } from "lucide-react";
+import { Loader2, Building2, Clock, GitCompare, FileDown, FileSpreadsheet, FileText, ChevronDown, ListFilter, TableIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -706,15 +706,19 @@ export default function SummaryReportsPage() {
           <div className="min-w-0 flex items-center gap-4">
             <span className="h-9 w-1.5 rounded-full bg-custom-blue shrink-0" />
             <div className="min-w-0 flex flex-col gap-1.5">
-              <div className="flex items-center gap-2.5 min-w-0">
+              <div className="flex items-center gap-3 min-w-0">
                 <h1 className="text-[28px] font-black text-slate-900 uppercase tracking-tight truncate leading-none">
-                  Summary Reports Dashboard
+                  {activeReport ? activeReport.name : "Summary Reports Dashboard"}
                 </h1>
                 {activeReport && (
-                  <span className="inline-flex items-center gap-1.5 shrink-0 text-xs font-bold text-white px-2.5 py-1 rounded-full" style={{ backgroundColor: '#376bae' }}>
-                    <TableIcon className="h-3 w-3" />
-                    {activeReport.name}
-                  </span>
+                  <button
+                    onClick={() => { setActiveReport(null); setVisibleColumnIds(DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS); }}
+                    className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-800 border border-slate-200 hover:border-slate-300 rounded-full px-2.5 py-1 transition-colors"
+                    title="Unload report — return to default columns"
+                  >
+                    <X className="h-3 w-3" />
+                    Unload
+                  </button>
                 )}
               </div>
               <div className="flex items-center text-sm text-slate-500 font-semibold gap-1">
@@ -903,7 +907,7 @@ export default function SummaryReportsPage() {
       <MemorizedReportDialog
         open={isReportDialogOpen} onOpenChange={setIsReportDialogOpen}
         department={departments.find((d: any) => d.id.toString() === activeDeptId) || null}
-        stages={Array.from(stagesByDept.values()).flat()}
+        stagesByDept={stagesByDept}
         kycDocuments={kycDocuments}
         onApplyReport={(report) => {
           setActiveReport(report);

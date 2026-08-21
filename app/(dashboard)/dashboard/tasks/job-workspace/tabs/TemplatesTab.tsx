@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils"
 import { fetchMasterFields, buildTemplateGenerationInfo, isTemplateEligible } from "../../../tasks-requirements/utils/templateGenerationData"
 import type { JobWorkspaceData } from "../fetchJobWorkspaceData"
 import TemplateGenerationComponent, { resolveTemplatePlaceholders } from "../../../tasks-requirements/TemplateGenerationDialog"
+import { buildParticipantColumns } from "./RequirementsTab"
 
 interface TemplatesTabProps {
   data: JobWorkspaceData
@@ -39,6 +40,16 @@ export function TemplatesTab({ data, targetDocumentId, onSummaryChange }: Templa
 
   const resolveEntityForReq = useCallback((req: any) => {
     const entityTypes = req.entityTypes || (req.applicantType ? [req.applicantType] : [])
+
+    // Match against the same participant columns the Requirements table itself
+    // uses (director/shareholder/dependant/understudy/sponsor/etc.), not just
+    // company vs. principal - a requirement scoped to e.g. ["director"] has no
+    // "principal" participant to fall back to when the task only has a director.
+    if (entityTypes.length > 0) {
+      const matchingCol = buildParticipantColumns(task).find((c: any) => entityTypes.includes(c.type))
+      if (matchingCol) return { colType: matchingCol.type, colId: matchingCol.id }
+    }
+
     if (entityTypes.includes('company')) {
       let companyId = task.company_id
       if (!companyId && task.participants_details) {

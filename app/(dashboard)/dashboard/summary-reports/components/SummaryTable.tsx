@@ -336,16 +336,25 @@ export function SummaryTable({
   }, [columns, columnSizing]);
 
   // ── Δ columns between consecutive milestone columns ──
+  // A "dated stage column" is anything with its own resolved date in milestoneDates/
+  // milestoneDateObjs — every milestone and every report_stage_info column now qualify, since
+  // both always render their stage's actual completion date via EditableStageCell (a
+  // report_stage_info column selected for document fields only still shows that stage's real
+  // date if one exists — see renderReportStageInfoCell). dateKey is the key that date is
+  // stored under in those maps.
+  const isDatedStageCol = (col: any): boolean => col.type === 'milestone' || col.type === 'report_stage_info';
+  const dateKeyFor = (col: any): string => col.type === 'milestone' ? col.milestone.key : col.id;
+
   const interleavedColumns = useMemo(() => {
     if (!showDelta) return columns;
     const result: any[] = [];
-    const priorMilestoneCols: any[] = [];
+    const priorDatedCols: any[] = [];
     columns.forEach((col: any, i: number) => {
       result.push(col);
-      if (col.type === 'milestone') priorMilestoneCols.push(col);
+      if (isDatedStageCol(col)) priorDatedCols.push(col);
       const next = columns[i + 1];
-      if (col.type === 'milestone' && next?.type === 'milestone') {
-        result.push({ id: `__delta__${i}`, isDelta: true, prevCol: col, nextCol: next, priorCols: [...priorMilestoneCols], label: 'Δ' });
+      if (isDatedStageCol(col) && next && isDatedStageCol(next)) {
+        result.push({ id: `__delta__${i}`, isDelta: true, prevCol: col, nextCol: next, priorCols: [...priorDatedCols], label: 'Δ' });
       }
     });
     return result;
@@ -361,8 +370,8 @@ export function SummaryTable({
         const raw = resolveMilestoneDate(task, col.milestone.stageId);
         milestoneDates[col.milestone.key] = raw;
         milestoneDateObjs[col.milestone.key] = raw ? parseDateSafe(raw) : null;
-      } else if (col.type === 'report_stage') {
-        const raw = resolveMilestoneDate(task, col.reportStage.stageId);
+      } else if (col.type === 'report_stage_info') {
+        const raw = resolveMilestoneDate(task, col.reportStageInfo.stageId);
         milestoneDates[col.id] = raw;
         milestoneDateObjs[col.id] = raw ? parseDateSafe(raw) : null;
       }
@@ -464,16 +473,43 @@ export function SummaryTable({
     return result;
   }, [subDeptGroups, activeSubDeptId, paginatedRows]);
 
+  // Renders a 'report_stage_info' cell — always through EditableStageCell, same as every other
+  // stage cell in this table, regardless of whether the report selected this stage's own
+  // "Stage Completion Date" or only document fields under it. Previously this also rendered
+  // the report's selected document field values as bare extracted text underneath — dropped
+  // because it produced a confusing second, differently-styled "date" whenever the selected
+  // field happened to itself be a date (the field value and EditableStageCell's own resolved
+  // date showing side by side with no indication they were the same thing). Everything about
+  // a stage's document now goes through EditableStageCell's own resolution/preview instead.
+  const renderReportStageInfoCell = (col: any, task: any): React.ReactNode => {
+    const { stageId } = col.reportStageInfo;
+    const stageList = tasksStagesByDept.get(task.department_id?.toString()) || [];
+    const stage = stageList.find((s: any) => s.id === stageId) || { id: stageId };
+    const linkedDocs = getLinkedDocumentsForTaskStage(task, stage, allDocuments);
+    const stageData = task.stages?.[stage.id];
+    const cellValue = stageData?.date || stageData?.completedAt || stageData?.status || null;
+
+    return (
+      <EditableStageCell
+        stage={stage}
+        stages={stageList}
+        task={task}
+        value={cellValue}
+        allDocuments={allDocuments}
+        linkedDocuments={linkedDocs}
+        departments={departments}
+        getKycFields={getKycFields}
+        readOnly={true}
+        renderMode="combined"
+        showTime={showTime}
+        previewOnly={true}
+      />
+    );
+  };
+
   const resolveCellValue = (col: any, task: any): React.ReactNode => {
     if (col.id === 'current_stage') return getCurrentStageNameForTask?.(task) ?? null;
     if (col.type === 'field') return resolveFieldValue(col.id, task, companies, enhancedTasksData, departments);
-    if (col.type === 'report_field' && col.reportField) {
-      const { stageId, kycId, fieldName } = col.reportField;
-      const linkedDocs = getLinkedDocumentsForTaskStage(task, { id: stageId }, allDocuments);
-      const doc: any = linkedDocs.find((d: any) => d.document_id === kycId) || linkedDocs[0];
-      const value = doc?.extracted_details?.[fieldName] ?? doc?.edited_details?.[fieldName] ?? doc?.extracted_data?.[fieldName];
-      return value !== null && value !== undefined && value !== '' ? String(value) : null;
-    }
     if (col.type === 'computed_time') {
       if (col.id === 'promised_time') {
         const resolution = getPromisedTimeResolutionForTask?.(task);
@@ -694,13 +730,13 @@ export function SummaryTable({
                       {interleavedColumns.map((col: any) => {
                         // ── Δ cell ──
                         if (col.isDelta) {
-                          const nextDate = milestoneDateObjs[col.nextCol.milestone.key];
+                          const nextDate = milestoneDateObjs[dateKeyFor(col.nextCol)];
                           let prevDate: Date | null = null;
                           let bridgedFromCol: any = col.prevCol;
                           if (nextDate) {
                             for (let i = col.priorCols.length - 1; i >= 0; i--) {
                               const candidate = col.priorCols[i];
-                              const d = milestoneDateObjs[candidate.milestone.key];
+                              const d = milestoneDateObjs[dateKeyFor(candidate)];
                               if (d) { prevDate = d; bridgedFromCol = candidate; break; }
                             }
                           }
@@ -744,32 +780,38 @@ export function SummaryTable({
                         const isSticky = !!col.sticky;
                         const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
                         let value: React.ReactNode;
-                        if ((col.type === 'milestone' || col.type === 'report_stage') && (col.milestone || col.reportStage)) {
-                          const stageId = col.milestone?.stageId || col.reportStage?.stageId;
-                          const stage = tasksStagesByDept.get(task.department_id?.toString())?.find((s: any) => s.id === stageId);
-                          if (stage) {
-                            const stageData = task.stages?.[stage.id];
-                            const cellValue = stageData?.date || stageData?.completedAt || stageData?.status || null;
-                            const linkedDocs = getLinkedDocumentsForTaskStage(task, stage, allDocuments);
+                        if (col.type === 'milestone' && col.milestone) {
+                          // Always render through EditableStageCell — no plain-text fallback —
+                          // so a stage cell looks and behaves identically whether or not the
+                          // full stage definition was found for this task's department (a stub
+                          // {id} still gets EditableStageCell's icons/LATE badge/MISSING
+                          // styling; it just can't compute overdue/lock without stage.
+                          // estimated_time/dependencies). This is also the only path
+                          // DepartmentTasksManager uses, so both modules render identically.
+                          const stageList = tasksStagesByDept.get(task.department_id?.toString()) || [];
+                          const stage = stageList.find((s: any) => s.id === col.milestone.stageId) || { id: col.milestone.stageId };
+                          const stageData = task.stages?.[stage.id];
+                          const cellValue = stageData?.date || stageData?.completedAt || stageData?.status || null;
+                          const linkedDocs = getLinkedDocumentsForTaskStage(task, stage, allDocuments);
 
-                            value = (
-                              <EditableStageCell
-                                stage={stage}
-                                stages={tasksStagesByDept.get(task.department_id?.toString()) || []}
-                                task={task}
-                                value={cellValue}
-                                allDocuments={allDocuments}
-                                linkedDocuments={linkedDocs}
-                                departments={departments}
-                                getKycFields={getKycFields}
-                                readOnly={true}
-                                renderMode="combined"
-                                showTime={showTime}
-                              />
-                            );
-                          } else {
-                            value = formatDateCell(milestoneDates[col.milestone?.key ?? col.id], showTime);
-                          }
+                          value = (
+                            <EditableStageCell
+                              stage={stage}
+                              stages={stageList}
+                              task={task}
+                              value={cellValue}
+                              allDocuments={allDocuments}
+                              linkedDocuments={linkedDocs}
+                              departments={departments}
+                              getKycFields={getKycFields}
+                              readOnly={true}
+                              renderMode="combined"
+                              showTime={showTime}
+                              previewOnly={true}
+                            />
+                          );
+                        } else if (col.type === 'report_stage_info' && col.reportStageInfo) {
+                          value = renderReportStageInfoCell(col, task);
                         } else {
                           value = resolveCellValue(col, task);
                         }

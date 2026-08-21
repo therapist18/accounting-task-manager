@@ -11,7 +11,7 @@ import { ContractPreview } from './components/ContractPreview';
 import { fetchCompanies, Company } from '../companies/database';
 import { fetchDefaultTemplate, updateTemplate, CcTemplate } from './utils/ccTemplate';
 import type { Placeholder } from '../templates/document-template-manager/types';
-import { resolveCompanyRole, fetchCcData, resolveCcPlaceholders, resolveCcBlockPlaceholders } from './utils/ccResolver';
+import { resolveCompanyRole, inferGroupLabel, fetchCcData, resolveCcPlaceholders, resolveCcBlockPlaceholders } from './utils/ccResolver';
 import { fetchLatestEngagement, createEngagement, updateEngagement, CcEngagement } from './utils/ccEngagements';
 import { ContractThemeSettings, DEFAULT_CONTRACT_THEME } from './utils/themeEngine';
 import type { ContractThemePanelTab } from './components/ContractThemePanel';
@@ -113,11 +113,16 @@ export default function ConsultancyContractsPage() {
     [template]
   );
 
-  // Components (DataValuesPanel, ContractPreview) expect a `key` field on
-  // each placeholder. DTM Placeholder uses `name` as the identifier, so
-  // we map once to add `key: p.name` for component props.
+  // Components (DataValuesPanel, ContractPreview) expect `key`, `label`,
+  // and `group_label` fields on each placeholder — properties that DTM's
+  // raw Placeholder type does not carry.  Compute them once here.
   const ccPlaceholders = useMemo(
-    () => placeholders.map((p) => ({ ...p, key: p.name })),
+    () => placeholders.map((p) => ({
+      ...p,
+      key: p.name,
+      label: p.description || p.name.replace(/_/g, ' '),
+      group_label: inferGroupLabel({ key: p.name, company_role: p.company_role }),
+    })),
     [placeholders]
   );
 
@@ -242,6 +247,10 @@ export default function ConsultancyContractsPage() {
     // Single data fetch for everything
     const { combinedCache, masterFields: mf } = await fetchCcData(placeholders, [...allCompanyIds, ...allIndividualIds]);
 
+    console.log('[CC page] entityIds:', [...allCompanyIds, ...allIndividualIds]);
+    console.log('[CC page] placeholders count:', placeholders.length, 'image count:', placeholders.filter(p => p.type === 'image').length);
+    console.log('[CC page] clientPlaceholders:', clientPlaceholders.length, 'consultantPlaceholders:', consultantPlaceholders.length);
+
     // Client resolution
     const clientDirectorArray = directors.map((d) => ({ id: d.id, full_name: d.name, position: d.position }));
     const clientRelationshipData = {
@@ -261,6 +270,8 @@ export default function ConsultancyContractsPage() {
     let consultantArrays: Record<string, Record<string, string>[]> = {};
     if (consultantCompany) {
       const consultantDirectorArray = consultantDirectors.map((d) => ({ id: d.id, full_name: d.name, position: d.position }));
+      console.log('[CC page] consultantCompany:', consultantCompany.id, consultantCompany.company_name);
+      console.log('[CC page] consultantDirectors:', consultantDirectorArray.length, consultantDirectorArray.map(d => d.id));
       const consultantRelationshipData = {
         company: { id: String(consultantCompany.id) },
         directors: consultantDirectorArray,

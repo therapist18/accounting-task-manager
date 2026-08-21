@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { calculateStageDate } from "../utils/dateUtils"
 import { STAGE_TAB_LINKS } from "../utils/taskManagerData"
 import { cn } from "@/lib/utils"
+import { getCanonicalCurrentStage } from "../../reports/utils/reportStageLogic"
 
 interface EditableStageCellProps { 
   stage: any
@@ -43,6 +44,10 @@ interface EditableStageCellProps {
   readOnly?: boolean
   onOpenRequirements?: (task: any) => void
   showTime?: boolean
+  // readOnly-only: hides the deep-link action buttons (billing/requirements/automation
+  // shortcuts) so only the document-preview eye icon shows. For consumers like SummaryTable
+  // that only want a document preview affordance, not the full DepartmentTasksManager action set.
+  previewOnly?: boolean
 }
 
 const documentFieldsCache = new Map<string, { fields: any[], timestamp: number }>();
@@ -99,7 +104,7 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[] = [])
   }
 };
 
-export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, renderMode = 'date', taskName, clientName, getKycFields, onFetchData, officers = [], onOfficerChange, readOnly = false, onOpenRequirements, showTime = true }: EditableStageCellProps) {
+export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, renderMode = 'date', taskName, clientName, getKycFields, onFetchData, officers = [], onOfficerChange, readOnly = false, onOpenRequirements, showTime = true, previewOnly = false }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -280,9 +285,25 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     return durationMinutes > stage.estimated_time;
   }, [task?.stages, stage?.id, stage?.estimated_time, effectiveStartTime]);
 
+  // The task's actual current position (same "highest completed index, then next applicable
+  // stage" algorithm reports/page.tsx and DepartmentTasksManager's perspective tabs use).
+  // Stages strictly after this one haven't been reached yet — showing an "elapsed" timer for
+  // them is misleading (a task at stage 6 shouldn't show stage 9 as if it's already in
+  // progress). Stages at-or-before it (including earlier ones the task skipped past without
+  // ever getting data) still show elapsed/overdue normally.
+  const canonicalCurrentStage = useMemo(
+    () => getCanonicalCurrentStage(task, stages, departments),
+    [task, stages, departments]
+  );
+  const isStageReached = useMemo(() => {
+    if (!canonicalCurrentStage || stage?.order_num == null || canonicalCurrentStage.order_num == null) return true;
+    return stage.order_num <= canonicalCurrentStage.order_num;
+  }, [stage?.order_num, canonicalCurrentStage]);
+
   const timeStatus = useMemo(() => {
+    if (!isStageReached) return null;
     return getTimeStatus(effectiveStartTime, stage.estimated_time);
-  }, [effectiveStartTime, stage.estimated_time]);
+  }, [effectiveStartTime, stage.estimated_time, isStageReached]);
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -895,6 +916,57 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     }
   };
 
+  // Shared hover-detail body for a stage's date/status — used by every completed/in-progress
+  // tooltip (read-only and edit mode alike) so hovering any stage cell shows the same
+  // consistent picture: when it started, when it ended (or "In progress"), how long that took
+  // vs. how long it was expected to take, how far over/under that is, and — if this stage has
+  // dependencies — what it was waiting on to unlock.
+  const renderStageTimingDetails = (opts: { isCompleted: boolean }) => {
+    const startRaw = effectiveStartTime instanceof Date ? effectiveStartTime.toISOString() : effectiveStartTime;
+    const startLabel = startRaw ? formatDateDisplay(startRaw) : 'Unknown';
+    const estimatedMinutes = stage?.estimated_time || 0;
+    const deps = (stage?.dependencies || []).filter((d: any) => d.dependencyType !== 'always_visible');
+
+    let elapsedMinutes: number | null = null;
+    let endLabel = 'In progress';
+    if (opts.isCompleted && stageDate) {
+      const start = startRaw ? parseDate(startRaw) : null;
+      const end = parseDate(stageDate);
+      if (start && end) elapsedMinutes = Math.floor((end.getTime() - start.getTime()) / (1000 * 60));
+      endLabel = formatDateDisplay(stageDate);
+    } else if (!opts.isCompleted && timeStatus) {
+      elapsedMinutes = timeStatus.elapsed;
+    }
+
+    const overdueMinutes = estimatedMinutes > 0 && elapsedMinutes !== null && elapsedMinutes > estimatedMinutes ? elapsedMinutes - estimatedMinutes : 0;
+    const remainingMinutes = !opts.isCompleted && estimatedMinutes > 0 && elapsedMinutes !== null && elapsedMinutes <= estimatedMinutes ? estimatedMinutes - elapsedMinutes : 0;
+
+    return (
+      <div className="text-xs space-y-1">
+        <div className="flex justify-between gap-4"><span className="text-slate-500">Start:</span><span>{startLabel}</span></div>
+        <div className="flex justify-between gap-4"><span className="text-slate-500">{opts.isCompleted ? 'Completed:' : 'Status:'}</span><span>{endLabel}</span></div>
+        {elapsedMinutes !== null && (
+          <div className="flex justify-between gap-4"><span className="text-slate-500">{opts.isCompleted ? 'Duration:' : 'Elapsed:'}</span><span>{formatDuration(elapsedMinutes)}</span></div>
+        )}
+        {estimatedMinutes > 0 && (
+          <div className="flex justify-between gap-4"><span className="text-slate-500">Expected:</span><span>{formatDuration(estimatedMinutes)}</span></div>
+        )}
+        {overdueMinutes > 0 && <p className="text-amber-600 font-bold">Overdue by {formatDuration(overdueMinutes)}</p>}
+        {remainingMinutes > 0 && (
+          <div className="flex justify-between gap-4"><span className="text-slate-500">Remaining:</span><span className="text-green-600">{formatDuration(remainingMinutes)}</span></div>
+        )}
+        {deps.length > 0 && (
+          <div className="pt-1 mt-1 border-t border-black/10">
+            <p className="text-slate-500 font-semibold mb-0.5">Depends on:</p>
+            {deps.map((d: any, i: number) => (
+              <p key={i} className="text-[11px]">{d.stageName || 'Unknown'} — {d.dependencyType === 'visible_when_started' ? 'must be started' : 'must be completed'}</p>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderDateContent = (isCompact = false) => {
     if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
     const stageData = task.stages?.[stage.id];
@@ -961,7 +1033,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
                 )}
               >
                 <p className="font-bold mb-0.5">{isStageOverdue ? "Completed — Overdue" : "Completed On Time"}</p>
-                <p className="text-slate-600 text-sm">{formatDateDisplay(stageDate)}</p>
+                {renderStageTimingDetails({ isCompleted: true })}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -972,15 +1044,34 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         const textColorClass = timeStatus.isOverdue ? "text-red-600" : "text-blue-600";
         const icon = timeStatus.isOverdue ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> : <Timer className="h-3.5 w-3.5 shrink-0" />;
         return (
-          <div className="flex items-center gap-1">
-            <div className={`flex items-center gap-1 font-medium text-[11px] ${textColorClass} cursor-default truncate`}>
-              {icon}<span className="truncate">{timeStatus.formattedElapsed} elapsed</span>
-            </div>
-          </div>
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-1">
+                  <div className={`flex items-center gap-1 font-medium text-[11px] ${textColorClass} cursor-default truncate`}>
+                    {icon}<span className="truncate">{timeStatus.formattedElapsed} elapsed</span>
+                  </div>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent
+                side="top"
+                className={cn(
+                  "border shadow-lg text-xs rounded-lg px-3 py-2 z-[9999]",
+                  timeStatus.isOverdue ? "bg-red-50 border-red-200 text-red-900" : "bg-blue-50 border-blue-200 text-blue-900"
+                )}
+              >
+                <p className="font-bold mb-0.5">{timeStatus.isOverdue ? "In Progress — Overdue" : "In Progress — On Track"}</p>
+                {renderStageTimingDetails({ isCompleted: false })}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         );
       }
 
-      return <span className="text-sm text-gray-500 italic">...</span>;
+      // No date, no elapsed timer to show, and (if applicable) no linked document either —
+      // render nothing rather than a red "Missing" badge; a blank cell already reads as "no
+      // data" without turning the whole table red.
+      return null;
     }
 
     if (isSkipped) {
@@ -1090,16 +1181,17 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     }
 
     if ((isExplicitlyCompleted || isLegacyCompleted) && stageDate && stageDate !== 'NaN/NaN/NaN' && !isEditing) {
-      const completionDate = parseDate(stageDate);
-      let isCompletedOverdue = false;
+      // Shared with the readOnly branch's badge above — same isStageOverdue memo, so edit mode
+      // and read-only mode never disagree about whether a completed stage was late.
+      const isCompletedOverdue = isStageOverdue;
       let completionDuration = 'N/A';
 
-      if (completionDate && effectiveStartTime && stage.estimated_time) {
+      if (effectiveStartTime && stage.estimated_time) {
+        const completionDate = parseDate(stageDate);
         const start = parseDate(effectiveStartTime instanceof Date ? effectiveStartTime.toISOString() : effectiveStartTime);
-        if (start) {
+        if (completionDate && start) {
           const durationMs = completionDate.getTime() - start.getTime();
           const durationMinutes = Math.floor(durationMs / (1000 * 60));
-          isCompletedOverdue = durationMinutes > stage.estimated_time;
           completionDuration = formatDuration(durationMinutes);
         }
       }
@@ -1120,6 +1212,9 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
                 >
                   {icon}
                   <span className="truncate" title={formatDateDisplay(stageDate)}>{formatDateDisplay(stageDate)}</span>
+                  {isCompletedOverdue && (
+                    <span className="text-[8px] font-black text-amber-600 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded uppercase shrink-0">LATE</span>
+                  )}
                 </div>
               </TooltipTrigger>
               <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
@@ -1127,12 +1222,8 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
                   <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
                     <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
                   </div>
-                  <div className="text-xs space-y-1">
-                    <div className="flex justify-between gap-4"><span className="text-slate-500">Completed:</span><span>{formatDateDisplay(stageDate)}</span></div>
-                    <div className="flex justify-between gap-4"><span className="text-slate-500">Duration:</span><span>{completionDuration}</span></div>
-                    {isCompletedOverdue && <p className="text-amber-600 font-bold">Overdue</p>}
-                    <p className="text-[10px] text-slate-400 pt-1 italic border-t border-slate-200 mt-1">Double-click to edit date</p>
-                  </div>
+                  {renderStageTimingDetails({ isCompleted: true })}
+                  <p className="text-[10px] text-slate-400 pt-1 italic border-t border-slate-200 mt-1">Double-click to edit date</p>
                 </div>
               </TooltipContent>
             </Tooltip>
@@ -1261,7 +1352,9 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       );
     }
 
-    return <span className="text-sm text-gray-500 italic">...</span>;
+    // No date, no elapsed timer, no linked document — render nothing rather than a red
+    // "Missing" badge (same as the readOnly branch above).
+    return null;
   };
 
   const renderActionsContent = (isCompact = false) => {
@@ -1341,7 +1434,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       if (isCompact) {
         return (
           <div className="flex items-center gap-0.5 shrink-0 bg-slate-50/50 rounded p-0.5 border border-slate-100">
-            {stageLinkBtn}
+            {!previewOnly && stageLinkBtn}
             {viewBtn}
           </div>
         );
@@ -1349,7 +1442,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
 
       return (
         <div className="flex items-center gap-1 shrink-0">
-          {stageLinkBtn}
+          {!previewOnly && stageLinkBtn}
           {viewBtn}
         </div>
       );

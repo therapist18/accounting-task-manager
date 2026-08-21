@@ -2512,16 +2512,25 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
     // Recomputes any `calculation` placeholders tied to a block: same-row
     // formulas on its children (e.g. total = amount + interest), then
-    // top-level cross-row sums that read that block (e.g. grand_total).
+    // top-level cross-row sums that read that block (e.g. grand_total). Also
+    // re-numbers any `ordinal` children (1, 2, 3... per row) - manual blocks
+    // never go through resolveArrayData's entity-row resolution (that only
+    // sources rows from relationshipData.directors/dependants), so ordinal
+    // placeholders here would otherwise never get a value at all, and after a
+    // row is removed the remaining rows need their numbers shifted anyway.
     // Shared by handleArrayInputChange and the Add/Remove Row handlers so
-    // totals stay correct on every edit, not just field edits.
+    // totals/numbering stay correct on every edit, not just field edits.
     const applyCalculations = (blockName, rows) => {
         const block = groupedPlaceholders.blocks[blockName];
+        const ordinalFields = (block?.children || []).filter(c => c.type === 'ordinal');
         const rowCalcFields = (block?.children || []).filter(c => c.calculation && c.calculation.op !== 'sum');
 
-        const nextRows = rowCalcFields.length > 0
-            ? rows.map(row => {
+        const nextRows = (ordinalFields.length > 0 || rowCalcFields.length > 0)
+            ? rows.map((row, rowIndex) => {
                 const updated = { ...row };
+                ordinalFields.forEach(field => {
+                    updated[field.name] = processOrdinalField(field, rowIndex).value;
+                });
                 rowCalcFields.forEach(field => {
                     updated[field.name] = computeRowCalculation(field.calculation, updated);
                 });
@@ -2838,9 +2847,14 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
             // docx-style same-row table loop: {#block} opens inside one table cell and
             // {/block} closes inside a LATER cell of the exact same <tr> (the convention
             // docxtemplater itself supports natively for Word tables - it repeats the
-            // whole <w:tr> per row). The lookaheads keep `prefix`/`suffix` from crossing
-            // into a neighbouring row, so this only matches a genuine same-row block.
-            const sameRowBlockRegex = new RegExp(`(<tr[^>]*>)((?:(?!<\\/?tr\\b)[\\s\\S])*?)\\{#${blockName}\\}([\\s\\S]*?)\\{\\/${blockName}\\}((?:(?!<\\/?tr\\b)[\\s\\S])*?)(<\\/tr>)`, 'gi');
+            // whole <w:tr> per row). Every captured segment - prefix, the inner template,
+            // AND suffix - is guarded against crossing a <tr>/</tr> boundary, so this can
+            // only match a genuine single-row block. That last guard matters: without it,
+            // the legacy 3-row convention (marker alone in an opening row, marker alone in
+            // a later closing row) would ALSO satisfy a prefix/suffix-only check - the
+            // markers themselves each sit in single-row contexts even though the whole
+            // block spans three rows - and get misidentified as a same-row block here.
+            const sameRowBlockRegex = new RegExp(`(<tr[^>]*>)((?:(?!<\\/?tr\\b)[\\s\\S])*?)\\{#${blockName}\\}((?:(?!<\\/?tr\\b)[\\s\\S])*?)\\{\\/${blockName}\\}((?:(?!<\\/?tr\\b)[\\s\\S])*?)(<\\/tr>)`, 'gi');
             const rows = Array.isArray(data[blockName]) ? data[blockName] : [];
 
             // Substitutes this block's child placeholders into one copy of the
@@ -2897,8 +2911,9 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
 
             // Handle the block replacement in content, header, and footer
             const processBlockInText = (text) => {
-                if (rows.length > 0 && !isHorizontal) {
+                if (!isHorizontal) {
                     const sameRowResult = text.replace(sameRowBlockRegex, (_match, openTr, prefix, innerTemplate, suffix, closeTr) => {
+                        if (rows.length === 0) return '';
                         return buildRowHtmls(innerTemplate).map(rowHtml => `${openTr}${prefix}${rowHtml}${suffix}${closeTr}`).join('');
                     });
                     if (sameRowResult !== text) return sameRowResult;

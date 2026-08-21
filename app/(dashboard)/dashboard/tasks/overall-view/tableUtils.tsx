@@ -68,6 +68,16 @@ export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'cancellation_reason', label: 'Cancellation Reason', default: true, width: 192 }, // was 'w-48'
   { id: 'cancellation_date', label: 'Cancellation Date', default: false, width: 160 }, // was 'w-40'
   { id: 'cancelled_by', label: 'Cancelled By', default: false, width: 128 }, // was 'w-32'
+  // Same ids as SUMMARY_COLUMNS' computed_time columns (summary-reports/stageColumnConfig.ts)
+  // deliberately — lets a memorized report select/deselect them like any other field via
+  // TASK_FIELD_TO_SUMMARY_COLUMN_ID's identity mapping. Currently only resolved on the
+  // Summary Reports page (via executionMath.ts's Promised/Planned/Actual Execution helpers);
+  // selecting them in a report applied on the /reports page itself has no renderer yet there.
+  { id: 'promised_time', label: 'Promised Time', default: false, width: 128 },
+  { id: 'planned_execution', label: 'Planned Execution', default: false, width: 144 },
+  { id: 'actual_execution', label: 'Actual Execution', default: false, width: 128 },
+  { id: 'execution_delta', label: 'Actual Execution vs Promised', default: false, width: 176 },
+  { id: 'stages_time_expected', label: 'Stages Time Expected', default: false, width: 144 },
 ];
 
 export const ENHANCED_TABLE_HEADERS: TableHeader[] = [

@@ -90,7 +90,7 @@ export const getTargetEntity = (
 
     if (normType === 'director') {
       const dir = placeholder.director_type === 'primary'
-        ? relationshipData?.directors?.find((d: any) => d.is_primary)
+        ? (relationshipData?.directors?.find((d: any) => d.is_primary) || relationshipData?.directors?.[0])
         : relationshipData?.directors?.[0];
       return dir || null;
     }
@@ -555,11 +555,29 @@ export const processImageField = (
   combinedCache: Record<string, any>,
   masterFields: Map<number, any>
 ) => {
-  const sourceTable = placeholder.source_table;
-  const linkingVariable = placeholder.linking_variable;
-  const documentTypeIds = placeholder.document_type_ids || [];
+  let sourceTable = placeholder.source_table;
+  let linkingVariable = placeholder.linking_variable;
+  let documentTypeIds = placeholder.document_type_ids || [];
   const computedFunction = placeholder.computed_function || 'none';
   const executionMode = placeholder.execution_mode || 'latest';
+
+  // When the placeholder doesn't carry source_table directly (CC pattern),
+  // resolve it from the master field's sources.
+  if (!sourceTable || !linkingVariable) {
+    for (const mid of (placeholder.master_field_ids || [])) {
+      const mf = masterFields.get(Number(mid));
+      if (!mf?.sources?.length) continue;
+      const imgSource = mf.sources.find((s: any) => s.source_type === 'document' || s.source_type === 'individual');
+      if (imgSource) {
+        sourceTable = sourceTable || imgSource.table;
+        linkingVariable = linkingVariable || imgSource.linking_variable;
+        if (!documentTypeIds.length && imgSource.document_id) {
+          documentTypeIds = Array.isArray(imgSource.document_id) ? imgSource.document_id : [imgSource.document_id];
+        }
+        break;
+      }
+    }
+  }
 
   if (!sourceTable || !linkingVariable) {
     return { value: '', source: null };
@@ -790,6 +808,14 @@ export const processPlaceholderValue = (
   const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData, companyAssociates, entityOverrides);
   const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
 
+  // Ordinal fields are pure row-index math ("1st, 2nd, 3rd..." / "1, 2, 3...") -
+  // they don't need a linked master field or a resolved target entity, unlike
+  // every other placeholder type this function handles below, so resolve them
+  // unconditionally instead of gating on master_field_ids/targetEntity.
+  if (placeholder.type === 'ordinal') {
+    return processOrdinalField(placeholder, arrayIndex);
+  }
+
   // Check for current date fields first (don't require targetEntity)
   if (placeholder.master_field_ids?.length > 0) {
     for (const mid of placeholder.master_field_ids) {
@@ -811,9 +837,7 @@ export const processPlaceholderValue = (
         // Already handled above, skip
         continue;
       } else {
-        if (placeholder.type === 'ordinal') {
-          result = processOrdinalField(placeholder, arrayIndex);
-        } else if (placeholder.type === 'image') {
+        if (placeholder.type === 'image') {
           result = processImageField(placeholder, targetEntity, combinedCache, masterFields);
         } else if (placeholder.type === 'boolean') {
           result = processBooleanField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields, task);
