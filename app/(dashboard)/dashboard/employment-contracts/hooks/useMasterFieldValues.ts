@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EcPlaceholder, fetchPlaceholders } from '../utils/ecPlaceholders';
-import { resolveEcPlaceholderValues } from '../utils/masterFieldResolver';
+import { fetchEcData, resolveEcPlaceholders } from '../utils/ecResolver';
 import type { JobField } from '../../master-fields/components/types/database';
 
 // Shared by ContractEditor.tsx and ContractPreview.tsx so both resolve
@@ -51,8 +51,9 @@ export function useMasterFieldValues(
 
     setIsResolving(true);
     try {
-      const { values, masterFields: fields } = await resolveEcPlaceholderValues(placeholders, individualId, companyId);
+      const { combinedCache, masterFields: fields } = await fetchEcData(placeholders, individualId, companyId);
       if (requestId !== requestIdRef.current) return;
+      const values = resolveEcPlaceholders(placeholders, individualId, companyId, combinedCache, fields);
       setMasterFieldValues(values);
       setMasterFields(fields);
     } finally {

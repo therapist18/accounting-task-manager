@@ -8,7 +8,7 @@ import { Pencil, Loader2, Save, X } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { SearchableSelect, type SearchableSelectOption } from './SearchableSelect';
 import { ecPlaceholderToDtmPlaceholder } from '../utils/ecPlaceholderAdapter';
-import { saveEcMasterFieldValue, resolveEcPlaceholderValues, resolveEntityScope } from '../utils/masterFieldResolver';
+import { saveEcMasterFieldValue, resolveEcPlaceholderSingle, resolveEntityScope } from '../utils/ecResolver';
 import type { EcPlaceholder } from '../utils/ecPlaceholders';
 import type { JobField } from '../../master-fields/components/types/database';
 
@@ -92,7 +92,7 @@ export function MasterFieldEditControl({ placeholder, masterFields, individualId
         conditions: [],
         boolean_conditions: [],
       };
-      const { values } = await resolveEcPlaceholderValues([synthetic], individualId, companyId);
+      const values = await resolveEcPlaceholderSingle(synthetic, individualId, companyId);
       setEditValue(values['__value__'] ?? '');
     } finally {
       setLoadingValue(false);

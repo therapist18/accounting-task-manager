@@ -238,7 +238,7 @@ export function TrackerHeader({
             )}
           >
             <GitCompare className="h-3.5 w-3.5" />
-            {showDelta ? "Hide Δ" : "Show Δ"}
+            {showDelta ? "Hide Time Gaps" : "Show Time Gaps"}
           </Button>
 
           {/* BCL Users Toggle */}

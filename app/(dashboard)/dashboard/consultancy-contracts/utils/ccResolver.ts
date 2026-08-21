@@ -160,6 +160,14 @@ export function resolveCcPlaceholders(
   relationshipData: any,
   combinedCache: Record<string, any>,
   masterFields: Map<number, JobField>,
+  // One selected individual id per entity_type (e.g. { director: '12',
+  // employee: '47' }) - lets getTargetEntity resolve an EXPLICITLY chosen
+  // person instead of always falling back to "whoever's first"/role-matched.
+  entityIdMap: Record<string, string> | null = null,
+  // Candidates for entity_types with no dedicated relationshipData bucket
+  // (hr, accountant, manager, witness, etc.) - see getTargetEntity's generic
+  // id-lookup branch and its company-registry role-match fallback.
+  companyAssociates: any[] | null = null,
 ): Record<string, string> {
   const result: Record<string, string> = {};
   const imagePlaceholders = placeholders.filter((p) => p.type === 'image');
@@ -179,7 +187,8 @@ export function resolveCcPlaceholders(
     if (p.is_block_start) continue;
     const { value } = processPlaceholderValue(
       p, relationshipData, combinedCache, masterFields,
-      null, null, relationshipData?.company, null, null, null, null,
+      entityIdMap, null, relationshipData?.company, null, null, null, null,
+      companyAssociates, null,
     );
     const resolved = value !== undefined && value !== null && String(value).trim() !== '';
     console.log(`[ccResolver] "${p.name}" type=${p.type} entity=${p.entity_type?.[0]} resolved=${resolved} value="${String(value ?? '').substring(0, 80)}"`);

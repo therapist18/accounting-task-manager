@@ -776,7 +776,7 @@ export default function SummaryReportsPage() {
               )}
             >
               <GitCompare className="h-3.5 w-3.5" />
-              {showDelta ? "Hide Δ" : "Show Δ"}
+              {showDelta ? "Hide Time Gaps" : "Show Time Gaps"}
             </Button>
             <div className="h-6 w-px bg-slate-200 mx-1" />
             <DropdownMenu>

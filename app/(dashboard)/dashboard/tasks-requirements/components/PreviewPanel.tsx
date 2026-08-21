@@ -1,12 +1,17 @@
 /**
  * PreviewPanel - displays live preview for HTML templates, or native docx-preview for Word templates
+ *
+ * Chrome (toolbar, canvas, pagination footer, empty states) mirrors the
+ * contract modules' shared DocumentViewer (components/contracts/DocumentViewer.tsx)
+ * so the template generation workspace reads as the same product family:
+ * bordered zoom group, Fit/Fill segmented control, slate page canvas on a
+ * gray scroll area, and the docked rounded-full pagination pills.
  */
 
 'use client';
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Loader2, FileText, Eye, Sparkles, ZoomIn, ZoomOut, Maximize, StretchHorizontal, RotateCcw, ChevronDown } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { Loader2, Eye, Sparkles, ZoomIn, ZoomOut, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
@@ -25,6 +30,10 @@ interface PreviewPanelProps {
 type PreviewFitMode = 'zoom' | 'fit-width' | 'fit-page';
 
 const ZOOM_PRESETS = [25, 50, 75, 100, 125, 150, 200, 300];
+// Standard A4 at 96dpi - same page height the contract modules'
+// DocumentViewer paginates against, so "Page x / y" here agrees with what
+// the printed/exported sheet will look like.
+const PAGE_HEIGHT_PX = 1123;
 
 export const PreviewPanel = ({
   previewContent,
@@ -41,10 +50,16 @@ export const PreviewPanel = ({
   const contentWrapperRef = useRef<HTMLDivElement>(null);
   const hasHtmlContent = !isWordTemplate && previewContent && previewContent.trim().length > 0;
   const hasWordContent = isWordTemplate && !!docxBuffer;
+  const hasOutput = isWordTemplate ? hasWordContent : hasHtmlContent;
 
   const [fitMode, setFitMode] = useState<PreviewFitMode>('fit-width');
   const [zoomLevel, setZoomLevel] = useState(100);
   const [naturalSize, setNaturalSize] = useState({ width: 800, height: 0 });
+
+  // Scroll-based page tracking for the docked pagination footer - same
+  // math as DocumentViewer's onScroll handler.
+  const totalPages = Math.max(1, Math.ceil(naturalSize.height / PAGE_HEIGHT_PX));
+  const [currentPage, setCurrentPage] = useState(1);
 
   const applyFitMode = useCallback((mode: PreviewFitMode) => {
     setFitMode(mode);
@@ -111,6 +126,39 @@ export const PreviewPanel = ({
     return () => observer.disconnect();
   }, [isWordTemplate, docxBuffer, hasHtmlContent]);
 
+  // Reset the page tracker when the document itself changes.
+  useEffect(() => {
+    setCurrentPage(1);
+    scrollContainerRef.current?.scrollTo({ top: 0 });
+  }, [previewContent, docxBuffer]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || !hasOutput) return;
+
+    let rafId: number;
+    const onScroll = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const page = Math.floor(container.scrollTop / (PAGE_HEIGHT_PX * (zoomLevel / 100))) + 1;
+        setCurrentPage(Math.max(1, Math.min(page, totalPages)));
+      });
+    };
+
+    container.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => {
+      container.removeEventListener('scroll', onScroll);
+      cancelAnimationFrame(rafId);
+    };
+  }, [hasOutput, zoomLevel, totalPages]);
+
+  const scrollToPage = (page: number) => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    container.scrollTo({ top: (page - 1) * PAGE_HEIGHT_PX * (zoomLevel / 100), behavior: 'smooth' });
+  };
+
   useEffect(() => {
     if (!isWordTemplate || !docxBuffer || !docxContainerRef.current) return;
 
@@ -138,110 +186,115 @@ export const PreviewPanel = ({
     return () => { cancelled = true; };
   }, [docxBuffer, isWordTemplate]);
 
-  const hasNoContent = isWordTemplate ? !docxBuffer && !isPreviewLoading : !hasHtmlContent && !isPreviewLoading;
-  if (hasNoContent) return null;
+  const zoomRatio = useMemo(() => zoomLevel / 100, [zoomLevel]);
+
+  const emptyState = (
+    <div className="flex flex-col items-center justify-center py-24 px-6 text-center">
+      <div className="p-4 bg-white dark:bg-slate-900 rounded-full mb-4 shadow-sm border border-slate-200/60 dark:border-slate-800">
+        <Sparkles className="h-8 w-8 text-slate-300" />
+      </div>
+      <h4 className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-1">No Preview Available</h4>
+      <p className="text-xs text-slate-400 max-w-xs leading-relaxed">
+        Fill in the form fields to generate a live preview of the document.
+      </p>
+    </div>
+  );
 
   return (
-    <div className={`${panelClasses} border-r relative bg-gradient-to-br from-slate-50 to-slate-100 overflow-hidden flex flex-col`}>
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-slate-200 shadow-sm">
-        <div className="px-3 py-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg shadow-sm">
-                  <FileText className="h-4 w-4 text-white" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                    {isWordTemplate ? 'Document Preview' : 'Live Preview'}
-                    {isPreviewLoading && (
-                      <span className="flex items-center gap-1.5 text-xs text-blue-600">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        <span>Generating</span>
-                      </span>
-                    )}
-                  </h3>
-                  {templateName && (
-                    <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[200px]">
-                      {templateName}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5">
-              {documentType && (
-                <Badge variant="outline" className="text-[10px] font-medium bg-slate-50 border-slate-200 mr-1">
-                  {documentType}
-                </Badge>
-              )}
-
-              {/* Fit mode buttons */}
-              <div className="flex items-center bg-slate-100/80 p-0.5 rounded-full border border-slate-200/50">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn("h-6 w-6 p-0 rounded-full text-xs transition-all", fitMode === 'fit-width' && "bg-white text-blue-600 shadow-sm border border-slate-200/20")}
-                  onClick={() => applyFitMode('fit-width')}
-                  title="Fit to width"
+    <div className={cn(panelClasses, 'relative overflow-hidden flex flex-col')}>
+      {/* Toolbar - same chrome as the contract modules' DocumentViewer */}
+      <div className="shrink-0 flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200/70 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur z-20">
+        <div className="flex items-center gap-1.5 min-w-0">
+          {/* Zoom Controls */}
+          <div className="flex items-center h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden shadow-sm shrink-0">
+            <button
+              onClick={zoomOut}
+              title="Zoom out"
+              className="px-2 h-full text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  title="Zoom level"
+                  className="text-xs font-medium text-slate-600 dark:text-slate-300 w-11 h-full text-center tabular-nums select-none border-x border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
                 >
-                  <StretchHorizontal className="h-3 w-3" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn("h-6 w-6 p-0 rounded-full text-xs transition-all", fitMode === 'fit-page' && "bg-white text-blue-600 shadow-sm border border-slate-200/20")}
-                  onClick={() => applyFitMode('fit-page')}
-                  title="Fit to page"
-                >
-                  <Maximize className="h-3 w-3" />
-                </Button>
-              </div>
-
-              {/* Zoom controls */}
-              <div className="flex items-center gap-0.5">
-                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={zoomOut} title="Zoom out">
-                  <ZoomOut className="h-3 w-3" />
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="h-6 px-1.5 min-w-[48px] text-[10px] font-medium tabular-nums">
-                      {zoomLevel}%
-                      <ChevronDown className="h-2.5 w-2.5 ml-0.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="center" className="min-w-[100px]">
-                    {ZOOM_PRESETS.map(preset => (
-                      <DropdownMenuItem key={preset} onClick={() => setZoom(preset)} className="text-xs justify-center tabular-nums">
-                        {preset}%
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={zoomIn} title="Zoom in">
-                  <ZoomIn className="h-3 w-3" />
-                </Button>
-                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={resetZoom} title="Reset to fit width">
-                  <RotateCcw className="h-3 w-3" />
-                </Button>
-              </div>
-
-              <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 rounded-md border border-emerald-200 ml-1">
-                <Eye className="h-3 w-3 text-emerald-600" />
-                <span className="text-[10px] font-medium text-emerald-700">
-                  {isWordTemplate ? 'Doc' : 'Live'}
-                </span>
-              </div>
-            </div>
+                  {zoomLevel}%
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="center" className="min-w-[100px]">
+                {ZOOM_PRESETS.map(preset => (
+                  <DropdownMenuItem key={preset} onClick={() => setZoom(preset)} className="text-xs justify-center tabular-nums">
+                    {preset}%
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <button
+              onClick={zoomIn}
+              title="Zoom in"
+              className="px-2 h-full text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
           </div>
+
+          {/* Sizing Mode: Fit width / Fill height */}
+          <div className="flex items-center h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden shadow-sm shrink-0">
+            <button
+              onClick={() => applyFitMode('fit-width')}
+              title="Fit page to width"
+              className={cn(
+                "px-2.5 h-full text-[10px] font-bold uppercase tracking-wide transition-colors",
+                fitMode === 'fit-width' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" : "text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
+              )}
+            >
+              Fit
+            </button>
+            <button
+              onClick={() => applyFitMode('fit-page')}
+              title="Fill available height"
+              className={cn(
+                "px-2.5 h-full text-[10px] font-bold uppercase tracking-wide transition-colors border-l border-slate-200 dark:border-slate-700",
+                fitMode === 'fit-page' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" : "text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
+              )}
+            >
+              Fill
+            </button>
+          </div>
+
+          {/* Leading context */}
+          <div className="flex items-center gap-2 min-w-0 pl-1">
+            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">
+              {isWordTemplate ? 'Document Preview' : 'Live Preview'}
+            </h3>
+            {isPreviewLoading && (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-custom-blue shrink-0" />
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 min-w-0">
+          {templateName && (
+            <span className="hidden lg:block text-xs text-slate-400 truncate max-w-[200px]">{templateName}</span>
+          )}
+          {documentType && (
+            <Badge variant="outline" className="text-[10px] font-medium bg-slate-50 border-slate-200 hidden sm:inline-flex">
+              {documentType}
+            </Badge>
+          )}
+          <Badge variant="outline" className="text-[10px] font-medium bg-emerald-50 text-emerald-700 border-emerald-200 gap-1 shrink-0">
+            <Eye className="h-3 w-3" />
+            {isWordTemplate ? 'Doc' : 'Live'}
+          </Badge>
         </div>
       </div>
 
       {/* Content */}
       {isWordTemplate ? (
         /* Native DOCX rendering via docx-preview */
-        <div ref={scrollContainerRef} className="flex-1 overflow-auto bg-slate-100/80 dark:bg-slate-900/80 p-6 md:p-8 flex justify-center items-start">
+        <div ref={scrollContainerRef} className="flex-1 overflow-auto bg-slate-200/50 dark:bg-slate-950/60 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700 p-6 md:p-8 flex justify-center items-start">
           {docxBuffer ? (
             <div
               style={{
@@ -256,32 +309,24 @@ export const PreviewPanel = ({
               >
                 <div
                   ref={docxContainerRef}
-                  className="docx-preview-container shadow-2xl rounded-xl border border-slate-200/50 dark:border-slate-800 bg-white w-[800px]"
+                  className="docx-preview-container bg-white border border-slate-200/60 dark:border-slate-800/60 shadow-2xl shadow-slate-300/30 dark:shadow-black/40 w-[800px]"
                 />
               </div>
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-20 px-6 w-full">
               {isPreviewLoading ? (
-                <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                <Loader2 className="h-8 w-8 animate-spin text-custom-blue" />
               ) : (
-                <>
-                  <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-full mb-4 shadow-inner">
-                    <Sparkles className="h-8 w-8 text-slate-400" />
-                  </div>
-                  <h4 className="text-sm font-bold text-slate-700 dark:text-slate-350 mb-1">No Document Preview</h4>
-                  <p className="text-xs text-slate-500 text-center max-w-xs leading-relaxed">
-                    Fill in the form fields to compile and render the Word document preview
-                  </p>
-                </>
+                emptyState
               )}
             </div>
           )}
         </div>
       ) : (
         /* HTML live preview */
-        <div ref={scrollContainerRef} className="flex-1 overflow-auto bg-slate-100/80 dark:bg-slate-900/80">
-          <div className="max-w-4xl mx-auto p-6 md:p-8">
+        <div ref={scrollContainerRef} className="flex-1 overflow-auto bg-slate-200/50 dark:bg-slate-950/60 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
+          <div className="max-w-4xl mx-auto p-6 md:p-8 flex flex-col items-center min-h-full">
             {hasHtmlContent ? (
               <div
                 style={{
@@ -297,7 +342,7 @@ export const PreviewPanel = ({
                   <div className="relative">
                     <div
                       className={cn(
-                        "bg-white shadow-2xl rounded-xl overflow-hidden",
+                        "bg-white shadow-2xl shadow-slate-300/30 dark:shadow-black/40 overflow-hidden",
                         "border border-slate-200/60 dark:border-slate-800/60",
                         "min-h-[11in] px-8 md:px-12 pt-8 pb-8",
                         "w-[800px]",
@@ -319,16 +364,35 @@ export const PreviewPanel = ({
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-20 px-6 bg-white dark:bg-slate-900 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-800 shadow-sm">
-                <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-full mb-4 shadow-inner">
-                  <Sparkles className="h-8 w-8 text-slate-400" />
-                </div>
-                <h4 className="text-sm font-bold text-slate-700 dark:text-slate-350 mb-1">No Preview Available</h4>
-                <p className="text-xs text-slate-500 text-center max-w-xs leading-relaxed">
-                  Fill in the form fields to generate a live preview of your HTML template
-                </p>
+              <div className="flex flex-col items-center justify-center py-16 px-6 w-full bg-white dark:bg-slate-900 rounded-xl border border-slate-200/60 dark:border-slate-800 shadow-sm">
+                {isPreviewLoading ? (
+                  <Loader2 className="h-8 w-8 animate-spin text-custom-blue" />
+                ) : (
+                  emptyState
+                )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Docked Pagination Footer - same pill controls as DocumentViewer */}
+      {hasOutput && (
+        <div className="shrink-0 flex items-center justify-center gap-2.5 px-4 py-2 border-t border-slate-200/70 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur z-10">
+          <div className="flex items-center h-8 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+            <button onClick={() => scrollToPage(currentPage - 1)} disabled={currentPage <= 1} title="Previous page" className="w-8 h-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+          </div>
+
+          <span className="text-xs font-medium text-slate-600 dark:text-slate-300 tabular-nums">
+            Page <span className="text-slate-900 dark:text-white font-bold">{currentPage}</span> / {totalPages}
+          </span>
+
+          <div className="flex items-center h-8 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+            <button onClick={() => scrollToPage(currentPage + 1)} disabled={currentPage >= totalPages} title="Next page" className="w-8 h-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
         </div>
       )}

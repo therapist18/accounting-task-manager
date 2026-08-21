@@ -53,15 +53,17 @@ interface ContractPreviewProps {
   themePanelTab: ContractThemePanelTab;
   onThemePanelOpen: (tab: ContractThemePanelTab) => void;
   onThemePanelClose: () => void;
-  // Consultant company/signatory config, rendered inside the Contract
-  // Settings panel's "Consultant" tab (see ContractThemePanel.tsx) - owned
-  // by page.tsx like everything else Consultant-related.
+  // Consultant company/entity config, rendered inside the Contract Settings
+  // panel's "Consultant" tab (see ContractThemePanel.tsx) - owned by
+  // page.tsx like everything else Consultant-related. One picker per
+  // individual entity_type the template's Consultant placeholders actually
+  // need (not just a single director/shareholder "Signatory").
   companies: Company[];
   consultantCompanyId: string | number | null;
   onConsultantChange: (companyId: string) => void;
-  consultantDirectors: CompanyDirector[];
-  consultantSignatoryId: string | number | null;
-  onSignatoryChange: (individualId: string) => void;
+  consultantEntityOptions: Record<string, CompanyDirector[]>;
+  consultantEntityIds: Record<string, string>;
+  onEntityIdChange: (entityType: string, individualId: string) => void;
 }
 
 const LIST_MARKUP_KEYS = new Set(['applicable_benefits', 'key_responsibilities', 'statutory_deductions_table', 'services_table', 'fee_schedule_table']);
@@ -137,7 +139,7 @@ export function ContractPreview({
   company, templateContent, resolvedValues, arrayData, overrides, engagement,
   themeSettings, onThemeChange, saving, onSave, selectedDirectors, placeholders, imageStyles,
   themePanelOpen, themePanelTab, onThemePanelOpen, onThemePanelClose,
-  companies, consultantCompanyId, onConsultantChange, consultantDirectors, consultantSignatoryId, onSignatoryChange,
+  companies, consultantCompanyId, onConsultantChange, consultantEntityOptions, consultantEntityIds, onEntityIdChange,
 }: ContractPreviewProps) {
   const viewerRef = useRef<DocumentViewerHandle>(null);
   const [exporting, setExporting] = useState<'word' | 'pdf' | null>(null);
@@ -453,9 +455,9 @@ export function ContractPreview({
           companies,
           consultantCompanyId,
           onConsultantChange,
-          consultantDirectors,
-          consultantSignatoryId,
-          onSignatoryChange,
+          consultantEntityOptions,
+          consultantEntityIds,
+          onEntityIdChange,
         }}
       />
     </>

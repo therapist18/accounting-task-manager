@@ -10,11 +10,12 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, MousePointer2, Layout, Code, ChevronDown, Database, Layers, Edit3, Users } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, MousePointer2, Layout, Code, ChevronDown, Database, Layers, Edit3, Users, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2 } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { saveAs } from 'file-saver';
+import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
 import supabase from "@/lib/supabase/client";
 import Docxtemplater from "docxtemplater";
 import PizZip from "pizzip";
@@ -932,7 +933,17 @@ const PlaceholderInput = ({
 };
 
 export default function TemplateGenerationComponent({ task, isOpen, onClose, template, availableTemplates = [], documentName, masterFields, entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {}, relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null }, onDraftDiscarded, jobLevel, activeEntityType, activeEntityId, refreshDocuments }) {
-    const [panelsVisible, setPanelsVisible] = useState({ form: true, preview: true, source: true });
+        const formPanelRef = useRef<ImperativePanelHandle>(null);
+    const previewPanelRef = useRef<ImperativePanelHandle>(null);
+    const sourcePanelRef = useRef<ImperativePanelHandle>(null);
+    const [collapsed, setCollapsed] = useState({ form: false, preview: false, source: false });
+
+    const togglePanel = (key: 'form' | 'preview' | 'source') => {
+        const ref = key === 'form' ? formPanelRef : key === 'preview' ? previewPanelRef : sourcePanelRef;
+        const panel = ref.current;
+        if (!panel) return;
+        if (panel.isCollapsed()) panel.expand(); else panel.collapse();
+    };
     const { toast } = useToast();
     const [formData, setFormData] = useState(() => {
         const defaultValues = template?.placeholders?.reduce((acc, placeholder) => {
@@ -973,7 +984,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
     const [isLoadingDraft, setIsLoadingDraft] = useState(false);
     const [dataConflicts, setDataConflicts] = useState([]);
     const [showConflictBanner, setShowConflictBanner] = useState(false);
-    const togglePanel = (panel) => setPanelsVisible(prev => ({ ...prev, [panel]: !prev[panel] }));
+    
     const [requirementJobQuestions, setRequirementJobQuestions] = useState<any[]>([]);
     const [computedFieldCache, setComputedFieldCache] = useState<Record<string, any>>({});
     const [documentTablesReady, setDocumentTablesReady] = useState(false);
@@ -1268,24 +1279,7 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         return '';
     }, [isOpen, selectedTemplate, relationshipData, entityIdMap, sourceDataCache, additionalCache, extractedData, companyData, task, masterFields]);
 
-    const panelClasses = useMemo(() => {
-        const { form, preview, source } = panelsVisible;
-        const hasPreviewContent = isWordTemplate ? !!docxPreviewBuffer : (previewContent && previewContent.trim().length > 0);
-        const effectivePreview = preview && (hasPreviewContent || isPreviewLoading);
-        const effectiveSource = source && isWordTemplate;
-
-        const count = [form, effectivePreview, effectiveSource].filter(Boolean).length;
-        if (count === 3) return { form: 'col-span-3', preview: 'col-span-5', source: 'col-span-4' };
-        if (count === 2) {
-            if (!form) return { form: 'hidden', preview: 'col-span-7', source: 'col-span-5' };
-            if (!effectivePreview) return { form: 'col-span-5', preview: 'hidden', source: 'col-span-7' };
-            return { form: 'col-span-4', preview: 'col-span-8', source: 'hidden' };
-        }
-        if (count === 1) {
-            return { form: form ? 'col-span-12' : 'hidden', preview: effectivePreview ? 'col-span-12' : 'hidden', source: effectiveSource ? 'col-span-12' : 'hidden' };
-        }
-        return { form: form ? 'col-span-12' : 'hidden', preview: 'hidden', source: 'hidden' };
-    }, [panelsVisible, isWordTemplate, docxPreviewBuffer, previewContent, isPreviewLoading]);
+    
 
     const getTargetConfig = useCallback(() => {
         const isCompany = activeEntityType === 'company';
@@ -2453,11 +2447,6 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 });
             }
 
-            // TOP-LEVEL CALCULATIONS:
-            // Recompute any top-level `calculation` placeholder (row-scoped op, not
-            // 'sum') whose operands are other top-level fields - same idea as
-            // applyCalculations does for fields inside an array block, e.g.
-            // {sample_total} = {sample_one} + {two}, all outside any {#block}.
             groupedPlaceholders.topLevel.forEach(p => {
                 if (p.calculation && p.calculation.op !== 'sum') {
                     newState[p.name] = computeRowCalculation(p.calculation, newState);
@@ -2499,7 +2488,6 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
             if (docxTemplateBuffer.current) {
                 updateWordPreview(formData, newStyles);
             } else {
-                // Use async update for HTML templates to convert images to base64
                 (async () => {
                     const base64Data = await prepareRenderData(formData);
                     setPreviewContent(populateHtmlContent(base64Data, selectedTemplate?.placeholders || [], newStyles));
@@ -2510,16 +2498,6 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
         });
     };
 
-    // Recomputes any `calculation` placeholders tied to a block: same-row
-    // formulas on its children (e.g. total = amount + interest), then
-    // top-level cross-row sums that read that block (e.g. grand_total). Also
-    // re-numbers any `ordinal` children (1, 2, 3... per row) - manual blocks
-    // never go through resolveArrayData's entity-row resolution (that only
-    // sources rows from relationshipData.directors/dependants), so ordinal
-    // placeholders here would otherwise never get a value at all, and after a
-    // row is removed the remaining rows need their numbers shifted anyway.
-    // Shared by handleArrayInputChange and the Add/Remove Row handlers so
-    // totals/numbering stay correct on every edit, not just field edits.
     const applyCalculations = (blockName, rows) => {
         const block = groupedPlaceholders.blocks[blockName];
         const ordinalFields = (block?.children || []).filter(c => c.type === 'ordinal');
@@ -4370,21 +4348,21 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
     };
 
     return (
-        <div className="flex flex-col h-full w-full bg-white relative">
+        <div className="flex flex-col h-full w-full bg-[#f3f4f6] dark:bg-[#0a0a0a] relative">
             {/* Compact Header Bar */}
-            <div className="px-6 py-3.5 border-b border-slate-100 bg-white flex-shrink-0 shadow-sm relative z-10">
+            <div className="flex items-center justify-between gap-6 px-7 py-5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shrink-0 shadow-sm relative z-10">
                 <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3 min-w-0">
-                        <div className="p-2 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-xl shadow-md shadow-blue-500/10 shrink-0 flex items-center justify-center">
+                        <div className="p-2 bg-custom-blue rounded-xl shadow-md shadow-custom-blue/20 shrink-0 flex items-center justify-center">
                             <Wand2 className="h-4 w-4 text-white" />
                         </div>
                         <div className="flex flex-col min-w-0">
                             <div className="flex items-center gap-2">
-                                <h2 className="text-sm font-bold text-slate-800 truncate max-w-[240px] tracking-tight">{documentName}</h2>
+                                <h2 className="text-lg font-extrabold text-slate-900 dark:text-slate-50 truncate max-w-[320px] tracking-tight">{documentName}</h2>
                                 {loadedDraft && (
-                                    <Badge variant="outline" className="text-[9px] bg-amber-500/10 text-amber-700 border-amber-500/25 shrink-0 px-2 py-0 rounded-full font-semibold">
+                                    <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/25 shrink-0 px-2 py-0 rounded-full font-semibold uppercase tracking-wide">
                                         <FileText className="h-2.5 w-2.5 mr-1" />
-                                        DRAFT
+                                        Draft
                                     </Badge>
                                 )}
                                 {isLoadingDraft && (
@@ -4451,34 +4429,30 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                 </SelectContent>
                             </Select>
                         )}
-                        <div className="flex bg-slate-100/80 p-0.5 rounded-full border border-slate-200/50">
-                            <Button
-                                variant={panelsVisible.form ? 'secondary' : 'ghost'}
-                                size="sm"
-                                className={cn("h-7 px-3 text-xs rounded-full font-medium transition-all", panelsVisible.form ? "bg-white text-slate-800 shadow-sm border border-slate-200/20" : "text-slate-500 hover:text-slate-800")}
+                        <div className="hidden md:flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-full border border-slate-200 dark:border-slate-800/80">
+                            <button
                                 onClick={() => togglePanel('form')}
+                                title={collapsed.form ? 'Show fields panel' : 'Hide fields panel'}
+                                className={cn("p-2 rounded-full transition-all", collapsed.form ? "text-slate-400 hover:text-slate-600" : "bg-blue-600 text-white shadow-sm")}
                             >
-                                <MousePointer2 className="h-3 w-3 mr-1" />
-                                Fields
-                            </Button>
-                            <Button
-                                variant={panelsVisible.preview ? 'secondary' : 'ghost'}
-                                size="sm"
-                                className={cn("h-7 px-3 text-xs rounded-full font-medium transition-all", panelsVisible.preview ? "bg-white text-slate-800 shadow-sm border border-slate-200/20" : "text-slate-500 hover:text-slate-800")}
+                                {collapsed.form ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+                            </button>
+                            <button
                                 onClick={() => togglePanel('preview')}
+                                title={collapsed.preview ? 'Show preview panel' : 'Hide preview panel'}
+                                className={cn("p-2 rounded-full transition-all", collapsed.preview ? "text-slate-400 hover:text-slate-600" : "bg-blue-600 text-white shadow-sm")}
                             >
-                                <Layout className="h-3 w-3 mr-1" />
-                                Preview
-                            </Button>
-                            <Button
-                                variant={panelsVisible.source ? 'secondary' : 'ghost'}
-                                size="sm"
-                                className={cn("h-7 px-3 text-xs rounded-full font-medium transition-all", panelsVisible.source ? "bg-white text-slate-800 shadow-sm border border-slate-200/20" : "text-slate-500 hover:text-slate-800")}
-                                onClick={() => togglePanel('source')}
-                            >
-                                <FileText className="h-3 w-3 mr-1" />
-                                Source
-                            </Button>
+                                <Columns2 className="w-4 h-4" />
+                            </button>
+                            {isWordTemplate && (
+                                <button
+                                    onClick={() => togglePanel('source')}
+                                    title={collapsed.source ? 'Show source panel' : 'Hide source panel'}
+                                    className={cn("p-2 rounded-full transition-all", collapsed.source ? "text-slate-400 hover:text-slate-600" : "bg-blue-600 text-white shadow-sm")}
+                                >
+                                    {collapsed.source ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
+                                </button>
+                            )}
                         </div>
                         <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition-colors" onClick={onClose}>
                             <X className="h-4 w-4" />
@@ -4508,8 +4482,22 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                 </div>
             )}
 
-            <div className="flex-1 overflow-hidden grid grid-cols-12 gap-0">
-                <ScrollArea className={`${panelClasses.form} border-r bg-white`}>
+            <div className="flex-1 min-h-0 w-full relative">
+        <PanelGroup direction="horizontal" autoSaveId="template-generation-workspace-layout" className="h-full w-full">
+            <Panel
+                ref={formPanelRef}
+                id="form"
+                order={1}
+                defaultSize={30}
+                minSize={20}
+                collapsible
+                collapsedSize={0}
+                onCollapse={() => setCollapsed((prev) => ({ ...prev, form: true }))}
+                onExpand={() => setCollapsed((prev) => ({ ...prev, form: false }))}
+                className="bg-white flex flex-col z-10 overflow-hidden"
+            >
+                <ScrollArea className="h-full w-full">
+                    
                     <div className="p-6 space-y-8">
                         {/* Entity Override Selectors */}
                         {entitySelectionState?.hasMultiCandidateSelectors && entitySelectionState.selectors.length > 0 && (
@@ -4634,20 +4622,55 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                             </div>
                         )}
                     </div>
+                
                 </ScrollArea>
+            </Panel>
 
+            <PanelResizeHandle className="relative flex w-2 items-center justify-center group outline-none cursor-col-resize z-20">
+                <div className="h-full w-[2px] bg-slate-200/50 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500 delay-75" />
+            </PanelResizeHandle>
+
+            <Panel
+                ref={previewPanelRef}
+                id="preview"
+                order={2}
+                defaultSize={isWordTemplate ? 40 : 70}
+                minSize={25}
+                collapsible
+                collapsedSize={0}
+                onCollapse={() => setCollapsed((prev) => ({ ...prev, preview: true }))}
+                onExpand={() => setCollapsed((prev) => ({ ...prev, preview: false }))}
+                className="bg-slate-50 flex flex-col z-10 overflow-hidden shadow-[0_0_15px_rgba(0,0,0,0.02)]"
+            >
                 <PreviewPanel
                     previewContent={previewContent}
                     isPreviewLoading={isPreviewLoading}
-                    panelClasses={cn(panelClasses.preview, "bg-slate-100/30 dark:bg-slate-900/30 backdrop-blur-sm")}
+                    panelClasses="bg-slate-100/30 dark:bg-slate-900/30 backdrop-blur-sm"
                     EDITOR_PREVIEW_STYLES={EDITOR_PREVIEW_STYLES}
                     isWordTemplate={isWordTemplate}
                     docxBuffer={docxPreviewBuffer}
                 />
+            </Panel>
 
-                {/* RIGHT PANEL: Original Template Reference - only visible for Word templates */}
-                {isWordTemplate && (
-                    <div className={`${panelClasses.source} bg-slate-50 overflow-y-auto transition-all duration-300`}>
+            {isWordTemplate && (
+                <>
+                    <PanelResizeHandle className="relative flex w-2 items-center justify-center group outline-none cursor-col-resize z-20">
+                        <div className="h-full w-[2px] bg-slate-200/50 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500 delay-75" />
+                    </PanelResizeHandle>
+
+                    <Panel
+                        ref={sourcePanelRef}
+                        id="source"
+                        order={3}
+                        defaultSize={30}
+                        minSize={20}
+                        collapsible
+                        collapsedSize={0}
+                        onCollapse={() => setCollapsed((prev) => ({ ...prev, source: true }))}
+                        onExpand={() => setCollapsed((prev) => ({ ...prev, source: false }))}
+                        className="bg-slate-50 overflow-y-auto z-10  bg-slate-50 overflow-y-auto transition-all duration-300"
+                    >
+                        
                         <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b flex justify-between">
                             <span className="text-[10px] font-bold text-slate-500">ORIGINAL REFERENCE</span>
                         </div>
@@ -4674,10 +4697,12 @@ export default function TemplateGenerationComponent({ task, isOpen, onClose, tem
                                 </div>
                             )}
                         </div>
-                    </div>
-                )}
-            </div>
-            <div className="border-t border-slate-100 px-6 py-4 bg-slate-50/90 backdrop-blur-md flex justify-between items-center flex-shrink-0 z-10">
+                    </Panel>
+                </>
+            )}
+        </PanelGroup>
+    </div>
+    <div className="border-t border-slate-100 px-6 py-4 bg-slate-50/90 backdrop-blur-md flex justify-between items-center flex-shrink-0 z-10">
                 <div className="text-[11px] font-semibold text-slate-600 flex items-center gap-2 bg-slate-200/60 px-3 py-1 rounded-full border border-slate-300/30">
                     <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
                     <span>Format: {isWordTemplate ? 'Word (.docx)' : 'HTML'}</span>

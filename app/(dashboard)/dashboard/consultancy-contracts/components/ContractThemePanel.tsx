@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import type { Company } from '../../companies/database';
 import type { CompanyDirector } from '../hooks/useCompanyDirectors';
+import { getEntityTypeConfig, type EntityType } from '@/lib/constants/entity-types';
 import {
   ContractThemeSettings,
   DocumentTheme,
@@ -33,9 +34,12 @@ interface ConsultantConfigProps {
   companies: Company[];
   consultantCompanyId: string | number | null;
   onConsultantChange: (companyId: string) => void;
-  consultantDirectors: CompanyDirector[];
-  consultantSignatoryId: string | number | null;
-  onSignatoryChange: (individualId: string) => void;
+  // One entry per individual entity_type the current template's Consultant
+  // placeholders need a person for (e.g. 'director', 'employee') - not just
+  // directors/shareholders.
+  consultantEntityOptions: Record<string, CompanyDirector[]>;
+  consultantEntityIds: Record<string, string>;
+  onEntityIdChange: (entityType: string, individualId: string) => void;
 }
 
 // This module's own theme/color/font/header editor - deliberately a
@@ -225,19 +229,30 @@ export function ContractThemeEditor({ settings, onChange, variant = 'panel', ini
                 buttonClassName="h-9 text-sm"
               />
             </div>
-            <div>
-              <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Signatory</span>
-              <p className="text-[11px] text-slate-400 mt-0.5 mb-2">Which of the Consultant's directors signs on its behalf.</p>
-              <SearchableSelect
-                value={consultant.consultantSignatoryId ? String(consultant.consultantSignatoryId) : ''}
-                onValueChange={consultant.onSignatoryChange}
-                options={consultant.consultantDirectors.map((d) => ({ value: String(d.id), label: `${d.name} (${d.position})` }))}
-                placeholder={consultant.consultantCompanyId ? 'Select signatory...' : 'Pick a Consultant first'}
-                searchPlaceholder="Search directors..."
-                buttonClassName="h-9 text-sm"
-                disabled={!consultant.consultantCompanyId}
-              />
-            </div>
+            {/* One picker per individual entity_type this template's
+                Consultant placeholders actually need (director, employee,
+                etc.) - not a single fixed "Signatory" limited to
+                directors/shareholders. */}
+            {Object.keys(consultant.consultantEntityOptions).map((entityType) => {
+              const config = getEntityTypeConfig(entityType as EntityType);
+              const label = config?.label || (entityType.charAt(0).toUpperCase() + entityType.slice(1));
+              const options = consultant.consultantEntityOptions[entityType] || [];
+              return (
+                <div key={entityType}>
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">{label}</span>
+                  <p className="text-[11px] text-slate-400 mt-0.5 mb-2">Which {label.toLowerCase()} this resolves against on the Consultant's behalf.</p>
+                  <SearchableSelect
+                    value={consultant.consultantEntityIds[entityType] ? String(consultant.consultantEntityIds[entityType]) : ''}
+                    onValueChange={(id) => consultant.onEntityIdChange(entityType, id)}
+                    options={options.map((d) => ({ value: String(d.id), label: `${d.name} (${d.position})` }))}
+                    placeholder={consultant.consultantCompanyId ? `Select ${label.toLowerCase()}...` : 'Pick a Consultant first'}
+                    searchPlaceholder={`Search ${label.toLowerCase()}s...`}
+                    buttonClassName="h-9 text-sm"
+                    disabled={!consultant.consultantCompanyId}
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

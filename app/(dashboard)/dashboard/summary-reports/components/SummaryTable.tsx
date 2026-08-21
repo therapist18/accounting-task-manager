@@ -282,16 +282,33 @@ export function SummaryTable({
   // just being a divider line — measured (not hardcoded) so it stays correct if the header
   // row's height ever changes (column label wrapping, font tweaks, etc.).
   const headerRowRef = useRef<HTMLTableRowElement>(null);
+  const expectedTimeRowRef = useRef<HTMLTableRowElement>(null);
   const [groupHeaderTop, setGroupHeaderTop] = useState(40);
   useEffect(() => {
     const measure = () => {
-      const h = headerRowRef.current?.getBoundingClientRect().height;
+      const h = (headerRowRef.current?.getBoundingClientRect().height || 0)
+        + (expectedTimeRowRef.current?.getBoundingClientRect().height || 0);
       if (h) setGroupHeaderTop(h);
     };
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, []);
+  }, [columns.length]);
+
+  // Every stage's own configured "estimated_time" (Departments → Stages), looked up once
+  // across every department's stage list — resolved into a colId->minutes map so the
+  // Expected Time header row below can show it without a per-column lookup on every render.
+  const stageEstimatedTimeByColId = useMemo(() => {
+    const allStages = Array.from(tasksStagesByDept.values()).flat();
+    const map: Record<string, number> = {};
+    columns.forEach((col: any) => {
+      const stageId = col.type === 'milestone' ? col.milestone?.stageId : col.type === 'report_stage_info' ? col.reportStageInfo?.stageId : null;
+      if (!stageId) return;
+      const stage = allStages.find((s: any) => s.id === stageId);
+      if (stage?.estimated_time) map[col.id] = stage.estimated_time;
+    });
+    return map;
+  }, [columns, tasksStagesByDept]);
 
   // ── Column sizing (tanstack react-table, resizable columns) ──
   const columnDefs = useMemo<ColumnDef<any>[]>(() => [
@@ -568,7 +585,7 @@ export function SummaryTable({
                               <span className="text-[10px] font-black text-amber-300/90 uppercase tracking-wide cursor-default bg-white/10 px-1.5 py-0.5 rounded">Δ</span>
                             </TooltipTrigger>
                             <TooltipContent side="bottom" className="bg-slate-900 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[9999] max-w-[200px]">
-                              Days between milestones
+                              Days between stages
                             </TooltipContent>
                           </Tooltip>
                         </TooltipProvider>
@@ -648,6 +665,40 @@ export function SummaryTable({
                   <span className="text-[10px] font-semibold text-white uppercase tracking-wider">Actions</span>
                 </TableHead>
               </TableRow>
+
+              {/* Expected Time — each stage's own configured estimated_time (Departments →
+                  Stages), shown once per stage column instead of buried in a tooltip only
+                  visible on hover over a completed/in-progress cell. */}
+              {Object.keys(stageEstimatedTimeByColId).length > 0 && (
+                <TableRow ref={expectedTimeRowRef} className="hover:bg-transparent border-0">
+                  <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-1.5 px-2 bg-[#2a5486]" />
+                  {interleavedColumns.map((col: any) => {
+                    if (col.isDelta) {
+                      return <TableHead key={col.id} className="border-r border-b border-white/30 bg-[#2a5486]" style={{ width: DELTA_COL_WIDTH }} />;
+                    }
+                    const isSticky = !!col.sticky;
+                    const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
+                    const minutes = stageEstimatedTimeByColId[col.id];
+                    return (
+                      <TableHead
+                        key={col.id}
+                        className={cn(
+                          "border-r border-b border-white/30 text-center py-1.5 px-2 bg-[#2a5486]",
+                          isSticky && "z-40 sticky"
+                        )}
+                        style={isSticky ? { left: `${left}px` } : undefined}
+                      >
+                        {minutes ? (
+                          <span className="text-[10px] font-semibold text-sky-200 tabular-nums whitespace-nowrap">
+                            Expected: {formatEstimatedMins(minutes)}
+                          </span>
+                        ) : null}
+                      </TableHead>
+                    );
+                  })}
+                  <TableHead className="sticky right-0 z-50 border-l border-b border-white/30 bg-[#2a5486] shadow-[-2px_0_4px_rgba(0,0,0,0.15)]" />
+                </TableRow>
+              )}
             </TableHeader>
 
             <TableBody>

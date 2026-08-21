@@ -3668,7 +3668,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
             onClick={() => setShowDelta(!showDelta)}
           >
             <GitCompare className="h-3.5 w-3.5" />
-            {showDelta ? 'Hide Δ' : 'Show Δ'}
+            {showDelta ? 'Hide Time Gaps' : 'Show Time Gaps'}
           </Button>
 
           <Button

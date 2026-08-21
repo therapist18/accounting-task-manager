@@ -35,7 +35,7 @@ function ExportOptionsDialog({ pending, onClose, onConfirm }: any) {
           <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors">
             <Checkbox checked={includeDelta} onCheckedChange={(v: boolean) => setIncludeDelta(!!v)} />
             <div className="flex flex-col">
-              <span className="text-sm font-bold text-slate-800">Show Δ (time between stages)</span>
+              <span className="text-sm font-bold text-slate-800">Show Time Gaps (Δ) Between Stages</span>
               <span className="text-xs text-slate-500">Adds a day-difference column between each pair of stage columns</span>
             </div>
           </label>
@@ -364,7 +364,7 @@ export function ReportsHeader({ activeReport, setIsReportDialogOpen, view, setVi
               )}
             >
               <GitCompare className="h-3.5 w-3.5" />
-              {showDelta ? "Hide Δ" : "Show Δ"}
+              {showDelta ? "Hide Time Gaps" : "Show Time Gaps"}
             </Button>
           )}
 

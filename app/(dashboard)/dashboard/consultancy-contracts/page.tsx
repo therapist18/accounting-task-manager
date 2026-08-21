@@ -16,8 +16,15 @@ import { fetchLatestEngagement, createEngagement, updateEngagement, CcEngagement
 import { ContractThemeSettings, DEFAULT_CONTRACT_THEME } from './utils/themeEngine';
 import type { ContractThemePanelTab } from './components/ContractThemePanel';
 import { useCompanyDirectors } from './hooks/useCompanyDirectors';
+import { useCompanyIndividualsByType } from './hooks/useCompanyIndividualsByType';
 import type { JobField } from '../master-fields/components/types/database';
 import type { ImageStyle, ImageStyleMap } from './utils/imageStyles';
+
+// Stable fallback so `consultantEntityIds` doesn't get a fresh {} literal on
+// every render while `template` is still null (e.g. before the initial fetch
+// resolves) - a new object there would give resolveContractValues a new
+// identity every render, retriggering its effect in a loop.
+const EMPTY_ENTITY_IDS: Record<string, string> = {};
 
 export default function ConsultancyContractsPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -176,30 +183,17 @@ export default function ConsultancyContractsPage() {
   const { directors: consultantDirectors } = useCompanyDirectors(consultantCompany ? String(consultantCompany.id) : null);
   const handleConsultantChange = async (companyId: string) => {
     if (!template) return;
-    // Clearing the previous signatory too - it's a director id scoped to
-    // the OLD consultant company, meaningless (and potentially resolving to
-    // the wrong person entirely, if the id happens to collide) once the
-    // consultant company itself changes.
-    setTemplate({ ...template, consultant_company_id: companyId, consultant_signatory_id: null });
+    // Clearing the previous entity choices too - they're individual ids
+    // scoped to the OLD consultant company, meaningless (and potentially
+    // resolving to the wrong person entirely, if an id happens to collide)
+    // once the consultant company itself changes.
+    setTemplate({ ...template, consultant_company_id: companyId, consultant_entity_ids: {} });
     const updated = await updateTemplate(
       template.id,
-      { consultant_company_id: companyId, consultant_signatory_id: null },
+      { consultant_company_id: companyId, consultant_entity_ids: {} },
       template.classification
     );
     if (!updated) toast.error('Failed to save Consultant company');
-  };
-
-  // Which of the Consultant's own directors (consultantDirectors above)
-  // signs on its behalf - explicit choice, not auto-picked (see
-  // ccTemplate.ts's consultant_signatory_id comment for why this exists:
-  // individual-scoped Consultant placeholders like consultant_signatory_name
-  // have no other way to know which individual to resolve against).
-  const consultantSignatoryId = template?.consultant_signatory_id ?? null;
-  const handleSignatoryChange = async (individualId: string) => {
-    if (!template) return;
-    setTemplate({ ...template, consultant_signatory_id: individualId });
-    const updated = await updateTemplate(template.id, { consultant_signatory_id: individualId }, template.classification);
-    if (!updated) toast.error('Failed to save Consultant signatory');
   };
 
   // Scoped to scalarPlaceholders (excludes block parents/children, which are
@@ -212,6 +206,35 @@ export default function ConsultancyContractsPage() {
     for (const p of scalarPlaceholders) (resolveCompanyRole({ key: p.name, company_role: p.company_role }) === 'consultant' ? consultant : client).push(p);
     return [consultant, client];
   }, [scalarPlaceholders]);
+
+  // Which individual entity_types this template's Consultant placeholders
+  // actually need a person for (e.g. ['director', 'employee']) - drives one
+  // picker per type in Contract Settings' Consultant tab, instead of a single
+  // fixed "Signatory" (director/shareholder-only) field.
+  const requiredConsultantEntityTypes = useMemo(() => {
+    const types = new Set<string>();
+    consultantPlaceholders.forEach((p) => {
+      const t = (Array.isArray(p.entity_type) ? p.entity_type[0] : p.entity_type)?.toLowerCase()?.trim();
+      if (t && t !== 'company') types.add(t);
+    });
+    return Array.from(types);
+  }, [consultantPlaceholders]);
+
+  const { individualsByType: consultantEntityOptions, companyAssociates: consultantCompanyAssociates } =
+    useCompanyIndividualsByType(consultantCompany ? String(consultantCompany.id) : null, requiredConsultantEntityTypes);
+
+  // One selected individual id per entity_type (see ccTemplate.ts's
+  // consultant_entity_ids comment) - explicit choice, not auto-picked, since
+  // there's no reliable way to know which director/employee/etc. should sign
+  // on the Consultant's behalf otherwise.
+  const consultantEntityIds = template?.consultant_entity_ids ?? EMPTY_ENTITY_IDS;
+  const handleEntityIdChange = async (entityType: string, individualId: string) => {
+    if (!template) return;
+    const nextIds = { ...consultantEntityIds, [entityType]: individualId };
+    setTemplate({ ...template, consultant_entity_ids: nextIds });
+    const updated = await updateTemplate(template.id, { consultant_entity_ids: nextIds }, template.classification);
+    if (!updated) toast.error('Failed to save Consultant selection');
+  };
 
   // Same Consultant/Client split as consultantPlaceholders/clientPlaceholders
   // above, but for BLOCK placeholders (director arrays etc.) - resolved by
@@ -234,10 +257,15 @@ export default function ConsultancyContractsPage() {
   // Uses a single consolidated data fetch via fetchCcData for all entity IDs,
   // then resolves synchronously via processPlaceholderValue for each side.
   const resolveContractValues = useCallback(async (clientCompanyId: string) => {
-    // Collect ALL entity IDs upfront for a single data fetch
+    // Collect ALL entity IDs upfront for a single data fetch - including the
+    // explicitly chosen per-entity-type individuals (director, employee,
+    // etc.), not just the full director/shareholder list, so any master-
+    // field-linked placeholder scoped to one of them still gets its
+    // combinedCache row.
     const allIndividualIds = [
       ...directors.map((d) => d.id),
       ...consultantDirectors.map((d) => d.id),
+      ...Object.values(consultantEntityIds).filter(Boolean),
     ];
     const allCompanyIds = [
       clientCompanyId,
@@ -270,14 +298,27 @@ export default function ConsultancyContractsPage() {
     let consultantArrays: Record<string, Record<string, string>[]> = {};
     if (consultantCompany) {
       const consultantDirectorArray = consultantDirectors.map((d) => ({ id: d.id, full_name: d.name, position: d.position }));
+      // Same {id, full_name, position} shape as consultantDirectorArray above,
+      // for the entity types that have their own dedicated relationshipData
+      // bucket in getTargetEntity (shareholder/employee/understudy) - other
+      // types (hr, accountant, manager, etc.) resolve via consultantCompanyAssociates
+      // instead (passed to resolveCcPlaceholders below).
+      const toRelArray = (list: { id: string; name: string; position: string }[]) =>
+        list.map((d) => ({ id: d.id, full_name: d.name, position: d.position }));
       console.log('[CC page] consultantCompany:', consultantCompany.id, consultantCompany.company_name);
       console.log('[CC page] consultantDirectors:', consultantDirectorArray.length, consultantDirectorArray.map(d => d.id));
       const consultantRelationshipData = {
         company: { id: String(consultantCompany.id) },
         directors: consultantDirectorArray,
+        shareholders: toRelArray(consultantEntityOptions.shareholder || []),
+        employees: toRelArray(consultantEntityOptions.employee || []),
+        understudies: toRelArray(consultantEntityOptions.understudy || []),
         principal: null, dependants: [], understudy: null, sponsor: null,
       };
-      consultantValues = resolveCcPlaceholders(consultantPlaceholders, consultantRelationshipData, combinedCache, mf);
+      consultantValues = resolveCcPlaceholders(
+        consultantPlaceholders, consultantRelationshipData, combinedCache, mf,
+        consultantEntityIds, consultantCompanyAssociates,
+      );
       consultantArrays = resolveCcBlockPlaceholders(
         consultantBlockPlaceholders,
         consultantDirectorArray.length > 0 ? { director: consultantDirectorArray } : {},
@@ -290,7 +331,7 @@ export default function ConsultancyContractsPage() {
       masterFields: mf,
       arrayValues: { ...clientArrays, ...consultantArrays },
     };
-  }, [placeholders, consultantCompany, directors, consultantDirectors, clientPlaceholders, clientBlockPlaceholders, consultantPlaceholders, consultantBlockPlaceholders]);
+  }, [placeholders, consultantCompany, directors, consultantDirectors, clientPlaceholders, clientBlockPlaceholders, consultantPlaceholders, consultantBlockPlaceholders, consultantEntityIds, consultantEntityOptions, consultantCompanyAssociates]);
 
   // Per-company: resolve master-field-sourced values and load any saved
   // engagement (overrides + status) for the selected client.
@@ -669,9 +710,9 @@ export default function ConsultancyContractsPage() {
               companies={companies}
               consultantCompanyId={consultantCompanyId}
               onConsultantChange={handleConsultantChange}
-              consultantDirectors={consultantDirectors}
-              consultantSignatoryId={consultantSignatoryId}
-              onSignatoryChange={handleSignatoryChange}
+              consultantEntityOptions={consultantEntityOptions}
+              consultantEntityIds={consultantEntityIds}
+              onEntityIdChange={handleEntityIdChange}
             />
           </Panel>
         </PanelGroup>

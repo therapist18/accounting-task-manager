@@ -28,14 +28,19 @@ export interface CcTemplate {
   // than a dedicated column so no migration is needed to introduce it.
   consultant_company_id?: string | number | null;
 
-  // Which individual (one of the Consultant company's own directors, see
-  // useCompanyDirectors) signs on the Consultant's behalf - resolves
-  // individual-scoped Consultant placeholders like consultant_signatory_name/
-  // consultant_stamp, which otherwise have no individualId to resolve
-  // against (unlike Client-side individual data, which always goes through
-  // the array/block system with real per-row ids). Explicit, not
-  // auto-picked - see page.tsx's Signatory dropdown.
+  // Deprecated in favour of consultant_entity_ids (see below) - kept
+  // read-only for backward compat with templates saved before the
+  // per-entity-type pickers existed. No longer written by the UI.
   consultant_signatory_id?: string | number | null;
+
+  // Which individual resolves each individual-scoped Consultant entity_type
+  // (e.g. { director: '12', employee: '47' }) - a template's Consultant
+  // placeholders can span more than just directors/shareholders (an
+  // `entity_type: 'employee'` placeholder needs an employee, not a
+  // signatory), so this is one explicit choice per distinct type found among
+  // the template's Consultant placeholders, not a single fixed field.
+  // Explicit, not auto-picked - see page.tsx's per-entity-type dropdowns.
+  consultant_entity_ids?: Record<string, string>;
 
   // A contract-type document can now hold several template variants (see
   // fetchTemplatesForDocument) - exactly one per document_id is flagged
@@ -50,6 +55,13 @@ function withComputedFields(row: any): CcTemplate {
   template.theme_settings = template.classification?.theme_settings || {};
   template.consultant_company_id = template.classification?.consultant_company_id ?? null;
   template.consultant_signatory_id = template.classification?.consultant_signatory_id ?? null;
+  // Backward compat: a template saved before per-entity-type pickers existed
+  // only has the old single consultant_signatory_id - treat it as that
+  // signatory's `director` bucket rather than losing the saved choice.
+  template.consultant_entity_ids = template.classification?.consultant_entity_ids
+    || (template.classification?.consultant_signatory_id
+      ? { director: String(template.classification.consultant_signatory_id) }
+      : {});
   template.is_default = !!template.classification?.is_default;
   return template;
 }
@@ -204,23 +216,23 @@ export async function deleteTemplateVariant(id: string): Promise<boolean> {
 
 export async function updateTemplate(
   id: string,
-  patch: Partial<Pick<CcTemplate, 'file_name' | 'content' | 'file_path' | 'file_type' | 'file_size' | 'placeholders' | 'entity_types' | 'classification' | 'use_letterhead' | 'theme_settings' | 'consultant_company_id' | 'consultant_signatory_id' | 'is_default'>>,
+  patch: Partial<Pick<CcTemplate, 'file_name' | 'content' | 'file_path' | 'file_type' | 'file_size' | 'placeholders' | 'entity_types' | 'classification' | 'use_letterhead' | 'theme_settings' | 'consultant_company_id' | 'consultant_entity_ids' | 'is_default'>>,
   existingClassification?: Record<string, any>
 ): Promise<CcTemplate | null> {
-  const { theme_settings, consultant_company_id, consultant_signatory_id, is_default, ...restPatch } = patch;
+  const { theme_settings, consultant_company_id, consultant_entity_ids, is_default, ...restPatch } = patch;
 
-  // theme_settings/consultant_company_id/consultant_signatory_id/is_default
+  // theme_settings/consultant_company_id/consultant_entity_ids/is_default
   // all live inside classification - merge onto whatever the caller already
   // has loaded (existingClassification) so patching one doesn't clobber the
   // others when only one is passed.
   let finalPatch = { ...restPatch };
-  if (theme_settings !== undefined || consultant_company_id !== undefined || consultant_signatory_id !== undefined || is_default !== undefined) {
+  if (theme_settings !== undefined || consultant_company_id !== undefined || consultant_entity_ids !== undefined || is_default !== undefined) {
     finalPatch.classification = {
       ...existingClassification,
       ...restPatch.classification,
       ...(theme_settings !== undefined && { theme_settings }),
       ...(consultant_company_id !== undefined && { consultant_company_id }),
-      ...(consultant_signatory_id !== undefined && { consultant_signatory_id }),
+      ...(consultant_entity_ids !== undefined && { consultant_entity_ids }),
       ...(is_default !== undefined && { is_default }),
     };
   }
