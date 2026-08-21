@@ -1184,17 +1184,6 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       // Shared with the readOnly branch's badge above — same isStageOverdue memo, so edit mode
       // and read-only mode never disagree about whether a completed stage was late.
       const isCompletedOverdue = isStageOverdue;
-      let completionDuration = 'N/A';
-
-      if (effectiveStartTime && stage.estimated_time) {
-        const completionDate = parseDate(stageDate);
-        const start = parseDate(effectiveStartTime instanceof Date ? effectiveStartTime.toISOString() : effectiveStartTime);
-        if (completionDate && start) {
-          const durationMs = completionDate.getTime() - start.getTime();
-          const durationMinutes = Math.floor(durationMs / (1000 * 60));
-          completionDuration = formatDuration(durationMinutes);
-        }
-      }
 
       const textColorClass = isCompletedOverdue ? "text-amber-600" : "text-emerald-600";
       const icon = isCompletedOverdue ? <Clock className="h-3.5 w-3.5 shrink-0" /> : <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />;
@@ -1328,14 +1317,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
                   <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
                     <span className={`font-bold ${textColorClass}`}>{timeStatus.isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}</span>
                   </div>
-                  <div className="text-xs space-y-1">
-                    {stage.estimated_time > 0 && (
-                      <>
-                        <div className="flex justify-between gap-4"><span className="text-slate-500">Remaining:</span><span className={timeStatus.isOverdue ? 'font-bold text-red-600' : 'text-green-600'}>{timeStatus.isOverdue ? `Overdue by ${timeStatus.formattedOverdue}` : timeStatus.formattedRemaining}</span></div>
-                        <div className="flex justify-between gap-4"><span className="text-slate-500">Estimate:</span><span>{formatDuration(stage.estimated_time)}</span></div>
-                      </>
-                    )}
-                  </div>
+                  {renderStageTimingDetails({ isCompleted: false })}
                 </div>
               </TooltipContent>
             </Tooltip>
