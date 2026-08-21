@@ -60,6 +60,12 @@ interface MemorizedReportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   department: Department | null;
+  // Per-department stage lists, not a pre-flattened array — the 4 milestone stage ids are
+  // deliberately shared across every department (see stageColumnConfig.ts's
+  // MILESTONE_STAGE_COLUMNS comment), so flattening ahead of time produced duplicate stage
+  // entries (and duplicate React keys) once a report spanned more than one department's stages.
+  // The dialog derives its own stage list scoped to whichever department/job level is
+  // currently selected, in that department's own DB fetch order (see `stages` memo below).
   stagesByDept: Map<string, any[]>;
   kycDocuments: Map<string, KycDocument>;
   onApplyReport: (report: MemorizedReport) => void;
@@ -157,63 +163,47 @@ const TableHeaderRow = React.memo(({ handleSelectAllDefault, handleSelectAllRepo
   handleSelectAllReports: () => void;
 }) => (
   <div className="grid grid-cols-12 gap-0 border-b border-slate-200 text-[11px] font-semibold text-white sticky top-0 z-20 shadow-sm" style={{ backgroundColor: '#376bae' }}>
-    <div className="col-span-3 px-4 py-3 border-r border-slate-200 flex items-center">Stage</div>
-    <div className="col-span-3 px-4 py-3 border-r border-slate-200 flex items-center">Document</div>
-    <div className="col-span-4 px-4 py-3 border-r border-slate-200 flex items-center">Field / Category</div>
-    <div className="col-span-1 px-1 py-3 border-r border-slate-200 text-center bg-white/10 flex items-center justify-center gap-1">
-      <span className="truncate">Def</span>
-      <Button variant="ghost" size="sm" className="h-4 w-4 p-0 hover:bg-white/20 text-white" onClick={handleSelectAllDefault} title="Toggle All Default">
-        <CheckSquare className="h-2.5 w-2.5" />
+    <div className="col-span-8 px-4 py-3 border-r border-slate-200">Field / Category</div>
+    <div className="col-span-2 px-2 py-3 border-r border-slate-200 text-center bg-white/10 flex items-center justify-center gap-1">
+      <span>Default</span>
+      <Button variant="ghost" size="sm" className="h-5 w-5 p-0 hover:bg-white/20 text-white" onClick={handleSelectAllDefault} title="Toggle All Default">
+        <CheckSquare className="h-3 w-3" />
       </Button>
     </div>
-    <div className="col-span-1 px-1 py-3 text-center bg-white/10 flex items-center justify-center gap-1">
-      <span className="truncate">Rep</span>
-      <Button variant="ghost" size="sm" className="h-4 w-4 p-0 hover:bg-white/20 text-white" onClick={handleSelectAllReports} title="Toggle All Fields">
-        <CheckSquare className="h-2.5 w-2.5" />
+    <div className="col-span-2 px-2 py-3 text-center bg-white/10 flex items-center justify-center gap-1">
+      <span>Report</span>
+      <Button variant="ghost" size="sm" className="h-5 w-5 p-0 hover:bg-white/20 text-white" onClick={handleSelectAllReports} title="Toggle All Fields">
+        <CheckSquare className="h-3 w-3" />
       </Button>
     </div>
   </div>
 ));
 
-const TableRowItem = React.memo(({ stageLabel = "", documentLabel = "", fieldLabel, isIncluded, isDefault, onToggleInclude, onToggleDefault, depth = 0, className = "", icon = null, readOnly = false, onMoveUp, onMoveDown, showMoveControls = false, isSaved = false }: { stageLabel?: React.ReactNode; documentLabel?: React.ReactNode; fieldLabel: React.ReactNode; isIncluded?: boolean; isDefault?: boolean; onToggleInclude?: () => void; onToggleDefault?: () => void; depth?: number; className?: string; icon?: React.ReactNode; readOnly?: boolean; onMoveUp?: () => void; onMoveDown?: () => void; showMoveControls?: boolean; isSaved?: boolean; }) => (
+const TableRowItem = React.memo(({ label, isIncluded, isDefault, onToggleInclude, onToggleDefault, depth = 0, className = "", icon = null, readOnly = false, onMoveUp, onMoveDown, showMoveControls = false, isSaved = false }: { label: React.ReactNode; isIncluded?: boolean; isDefault?: boolean; onToggleInclude?: () => void; onToggleDefault?: () => void; depth?: number; className?: string; icon?: React.ReactNode; readOnly?: boolean; onMoveUp?: () => void; onMoveDown?: () => void; showMoveControls?: boolean; isSaved?: boolean; }) => (
   <div className={cn("grid grid-cols-12 gap-0 border-b border-slate-200 items-stretch text-sm transition-colors", isIncluded ? "bg-blue-50/20 hover:bg-blue-50/40" : "bg-white hover:bg-slate-50", className)}>
-    {/* Stage Column */}
-    <div className="col-span-3 flex items-center border-r border-slate-200 py-2 px-3 min-w-0">
-      <span className="text-xs font-semibold text-slate-700 truncate">
-        {stageLabel || "-"}
-      </span>
-    </div>
-
-    {/* Document Column */}
-    <div className="col-span-3 flex items-center border-r border-slate-200 py-2 px-3 min-w-0 bg-slate-50/10">
-      <span className="text-xs text-slate-600 truncate">
-        {documentLabel || "-"}
-      </span>
-    </div>
-
-    {/* Field Column */}
-    <div className="col-span-4 flex items-center border-r border-slate-200 py-2 px-3 min-w-0">
-      <div style={{ paddingLeft: `${depth * 8}px` }} className="flex items-center gap-2 w-full min-w-0">
+    <div className="col-span-8 flex items-center border-r border-slate-200 py-2">
+      <div style={{ width: `${depth * 24}px` }} className="shrink-0 h-full border-r border-dashed border-slate-200 mr-2 opacity-50" />
+      <div className="flex items-center gap-2 px-2 min-w-0 flex-1">
         {icon}
-        <span className={cn("text-xs truncate font-medium flex-1", isIncluded ? "text-slate-800" : "text-slate-500")}>
-          {fieldLabel}
+        <span className={cn("truncate font-medium", isIncluded ? "text-slate-800" : "text-slate-500")}>
+          {label}
         </span>
         {isSaved && isIncluded && (
-          <Badge variant="outline" className="shrink-0 text-[9px] py-0 px-1 bg-emerald-50 text-emerald-600 border-emerald-200 font-semibold">
+          <Badge variant="outline" className="ml-1 shrink-0 text-[10px] py-0 px-1.5 bg-emerald-50 text-emerald-600 border-emerald-200 font-semibold">
             Saved
           </Badge>
         )}
         {isSaved && !isIncluded && (
-          <Badge variant="outline" className="shrink-0 text-[9px] py-0 px-1 bg-slate-50 text-slate-400 border-slate-200 line-through">
+          <Badge variant="outline" className="ml-1 shrink-0 text-[10px] py-0 px-1.5 bg-slate-50 text-slate-400 border-slate-200 line-through">
             Saved
           </Badge>
         )}
         {showMoveControls && !readOnly && isIncluded && (
-          <div className="flex items-center gap-0.5 ml-auto shrink-0">
+          <div className="flex items-center gap-1 ml-auto shrink-0">
             <Button
               variant="ghost"
               size="sm"
-              className="h-4 w-4 p-0 hover:bg-slate-200"
+              className="h-5 w-5 p-0 hover:bg-slate-200"
               onClick={onMoveUp}
               disabled={!onMoveUp}
               title="Move up"
@@ -223,7 +213,7 @@ const TableRowItem = React.memo(({ stageLabel = "", documentLabel = "", fieldLab
             <Button
               variant="ghost"
               size="sm"
-              className="h-4 w-4 p-0 hover:bg-slate-200"
+              className="h-5 w-5 p-0 hover:bg-slate-200"
               onClick={onMoveDown}
               disabled={!onMoveDown}
               title="Move down"
@@ -234,27 +224,23 @@ const TableRowItem = React.memo(({ stageLabel = "", documentLabel = "", fieldLab
         )}
       </div>
     </div>
-
-    {/* Default Checkbox Column */}
-    <div className="col-span-1 flex items-center justify-center border-r border-slate-200 bg-slate-50/20 py-2">
+    <div className="col-span-2 flex items-center justify-center border-r border-slate-200 bg-slate-50/30 py-2">
       {(onToggleDefault || readOnly) && (
         <Checkbox
           checked={isDefault}
           onCheckedChange={onToggleDefault}
           disabled={readOnly || !isIncluded}
-          className="data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600 disabled:opacity-30 h-3.5 w-3.5"
+          className="data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600 disabled:opacity-30"
         />
       )}
     </div>
-
-    {/* Report Checkbox Column */}
-    <div className="col-span-1 flex items-center justify-center bg-slate-50/20 py-2">
+    <div className="col-span-2 flex items-center justify-center bg-slate-50/30 py-2">
       {(onToggleInclude || readOnly) && (
         <Checkbox
           checked={isIncluded}
           onCheckedChange={onToggleInclude}
           disabled={readOnly}
-          className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 disabled:opacity-30 h-3.5 w-3.5"
+          className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 disabled:opacity-30"
         />
       )}
     </div>
@@ -509,13 +495,12 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
                   return (
                     <TableRowItem
                       key={field.id}
-                      stageLabel="Task Details"
-                      documentLabel="-"
-                      fieldLabel={field.label}
+                      label={field.label}
                       isIncluded={isIncluded}
                       isDefault={!!config?.isDefault}
                       onToggleInclude={() => toggleTaskFieldInclude(field.id)}
                       onToggleDefault={() => toggleTaskFieldDefault(field.id)}
+                      depth={1}
                       isSaved={isEditMode && originalSavedFieldIds.has(field.id)}
                       onMoveUp={canMoveUp ? () => moveTaskField(field.id, 'up') : undefined}
                       onMoveDown={canMoveDown ? () => moveTaskField(field.id, 'down') : undefined}
@@ -538,14 +523,13 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
                 <ExpandableRow key={`stage-${stage.id}`} title={stage.name} stageId={stage.id} getSectionId={getSectionId} nonApplicableStageIds={nonApplicableStageIds}>
                   {(!showSelectedOnly || stageConfig?.isStageDateSelected) && (
                     <TableRowItem
-                      stageLabel={stage.name}
-                      documentLabel="-"
-                      fieldLabel="Stage Completion Date"
+                      label="Stage Completion Date"
                       isIncluded={!!stageConfig?.isStageDateSelected}
                       isDefault={!!stageConfig?.isStageDateDefault}
                       onToggleInclude={() => toggleStageDateInclude(stage.id)}
                       onToggleDefault={() => toggleStageDateDefault(stage.id)}
-                      className="italic font-medium"
+                      depth={1}
+                      className="italic"
                     />
                   )}
 
@@ -556,39 +540,33 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
 
                     return (
                       <div key={`doc-${stage.id}-${doc.kycId}`}>
-                        {/* Custom layout row for document selector */}
                         <div className={cn(
-                          "grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-xs transition-colors",
-                          isDocActive ? "bg-blue-50/20 hover:bg-blue-50/30" : "bg-white hover:bg-slate-50"
+                          "grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm",
+                          isDocActive ? "bg-blue-50/20 hover:bg-blue-50/40" : "bg-white hover:bg-slate-50"
                         )}>
-                          <div className="col-span-3 flex items-center border-r border-slate-100 py-2 px-3 min-w-0">
-                            <span className="text-xs font-semibold text-slate-500 truncate">{stage.name}</span>
-                          </div>
-                          <div className="col-span-3 flex items-center border-r border-slate-100 py-2 px-3 min-w-0 bg-blue-50/10">
-                            <div className="flex items-center gap-2 w-full min-w-0">
+                          <div className="col-span-8 flex items-center border-r border-slate-100 py-2">
+                            <div style={{ width: `24px` }} className="shrink-0 h-full border-r border-dashed border-slate-100 mr-2 opacity-50" />
+                            <div className="flex items-center gap-2 px-2 py-1 w-full">
                               <Checkbox
                                 id={`doc-${stage.id}-${doc.kycId}`}
                                 checked={isDocActive}
                                 onCheckedChange={() => toggleDocument(stage.id, doc.kycId)}
-                                className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 h-3.5 w-3.5"
+                                className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
                               />
                               <Label htmlFor={`doc-${stage.id}-${doc.kycId}`} className={cn(
-                                "cursor-pointer font-bold flex-1 truncate text-xs",
-                                isDocActive ? "text-blue-800" : "text-slate-500"
+                                "cursor-pointer font-semibold flex-1 truncate text-sm",
+                                isDocActive ? "text-slate-800" : "text-slate-500"
                               )}>
                                 {kycDoc.display_name || kycDoc.name}
                               </Label>
                             </div>
                           </div>
-                          <div className="col-span-4 flex items-center border-r border-slate-100 py-2 px-3 min-w-0 italic text-slate-400 text-[11px]">
-                            {isDocActive ? "Select document fields below:" : "Document inactive"}
-                          </div>
-                          <div className="col-span-1 border-r border-slate-100 bg-slate-50/10" />
-                          <div className="col-span-1 bg-slate-50/10" />
+                          <div className="col-span-2 border-r border-slate-100 bg-slate-50/30" />
+                          <div className="col-span-2 bg-slate-50/30" />
                         </div>
 
                         {isDocActive && (
-                          <div className="bg-slate-50/10 divide-y divide-slate-100/50">
+                          <div className="bg-slate-50/30">
                             {kycDoc.fields?.map((field: any) => {
                               const docConfig = stageConfig?.documents?.[doc.kycId];
                               const fieldConfig = docConfig?.fields.find((f: any) => f.id === field.id);
@@ -596,14 +574,12 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
                               return (
                                 <TableRowItem
                                   key={`field-${stage.id}-${doc.kycId}-${field.id}`}
-                                  stageLabel={stage.name}
-                                  documentLabel={kycDoc.display_name || kycDoc.name}
-                                  fieldLabel={field.fieldName}
+                                  label={field.fieldName}
                                   isIncluded={!!fieldConfig}
                                   isDefault={!!fieldConfig?.isDefault}
                                   onToggleInclude={() => toggleDocFieldInclude(stage.id, doc.kycId, field.id)}
                                   onToggleDefault={() => toggleDocFieldDefault(stage.id, doc.kycId, field.id)}
-                                  depth={1}
+                                  depth={2}
                                   className="bg-white"
                                 />
                               );
@@ -658,6 +634,10 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
     return cls?.subClasses || [];
   }, [selectedClass, availableClasses]);
 
+  // Scoped to the selected department (its own DB fetch order preserved — no client-side
+  // re-sort) once a specific job level is chosen; falls back to every department's stages
+  // deduped by id (first occurrence wins) while still on "All Departments", so the 4 shared
+  // milestone stage ids each render once instead of once per department.
   const sortedStages = useMemo(() => {
     if (selectedDepartment && selectedDepartment !== 'all') {
       return stagesByDept.get(selectedDepartment) || [];
@@ -707,6 +687,10 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
     return count;
   }, [reportConfig]);
 
+  // department is null while the page is scoped to "All Departments" (its default view) —
+  // that's not an error state, so fetch every report in that case rather than refusing to
+  // fetch at all. tm_memorized_reports rows always carry their own department_id regardless
+  // of which department is selected here, so the unscoped query is still meaningful data.
   const fetchReports = useCallback(async () => {
     const deptId = department?.id;
     setIsLoading(true);
@@ -774,8 +758,14 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
     setShowSelectedOnly(false);
   };
 
+  // Marks/unmarks a report as THIS user's default (auto-loaded on next visit to the
+  // Reports page). At most one report should carry this user's id in
+  // default_for_user_id at a time, so setting a new default always clears it off
+  // whichever report previously had it — both in the DB and in local state, so the
+  // list re-renders correctly without a refetch.
   const handleToggleDefault = async (e: React.MouseEvent, report: MemorizedReport) => {
     e.stopPropagation();
+    console.log('[MemorizedReportDialog] handleToggleDefault: currentUserId prop =', currentUserId, 'report =', report.id);
     if (!currentUserId) {
       toast({ title: "Error", description: "Could not identify current user.", variant: "destructive" });
       return;
@@ -802,6 +792,11 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
   };
 
   const handleSaveReport = async () => {
+    // department_id must come from the in-dialog hierarchy picker (selectedDepartment), not
+    // the outer `department` prop — that prop reflects whatever department the host page
+    // happens to be filtered to (and is null in an "All Departments" view), while
+    // selectedDepartment is what the user actually chose in this dialog for the report's
+    // scope, and is what calculatedJobLevel/job_level below is already built from.
     if (!reportName.trim() || !selectedDepartment || selectedDepartment === 'all') {
       if (reportName.trim()) toast({ title: "Select a department", description: "Choose a department above before saving this report.", variant: "destructive" });
       return;
@@ -881,8 +876,8 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
     setReportConfig(prev => {
       const exists = prev.taskFields.find(f => f.id === fieldId);
       const newFields = exists
-        ? prev.taskFields.filter(f => f.id !== fieldId)
-        : [...prev.taskFields, { id: fieldId, isDefault: false }];
+        ? prev.taskFields.filter(f => f.id !== fieldId)          // remove → deselect
+        : [...prev.taskFields, { id: fieldId, isDefault: false }]; // add → session-only
       return { ...prev, taskFields: newFields };
     });
   }, []);
@@ -892,7 +887,7 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
       const exists = prev.taskFields.find(f => f.id === fieldId);
       const newFields = exists
         ? prev.taskFields.map(f => f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f)
-        : [...prev.taskFields, { id: fieldId, isDefault: true }];
+        : [...prev.taskFields, { id: fieldId, isDefault: true }]; // include + mark default
       return { ...prev, taskFields: newFields };
     });
   }, []);
@@ -1100,7 +1095,7 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
                   size="icon"
                   className={cn("h-5 w-5 shrink-0", report.default_for_user_id === currentUserId ? 'text-amber-400 hover:text-amber-500' : 'text-slate-300 hover:text-amber-400')}
                   onClick={(e) => handleToggleDefault(e, report)}
-                  title={report.default_for_user_id === currentUserId ? "Your default report — click to unset" : "Set as your default report"}
+                  title={report.default_for_user_id === currentUserId ? "Your default report — click to unset" : "Set as your default report (auto-loads next time you open Reports)"}
                 >
                   <Star className={cn("h-3.5 w-3.5", report.default_for_user_id === currentUserId && "fill-current")} />
                 </Button>
@@ -1174,47 +1169,33 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
       <div className="border border-slate-200 rounded-lg shadow-sm flex-1 flex flex-col min-h-0 overflow-hidden bg-white">
         <TableHeaderRow handleSelectAllDefault={() => { }} handleSelectAllReports={() => { }} />
         <ScrollArea className="flex-1">
-          <Accordion
-            type="multiple"
-            className="w-full divide-y divide-slate-200"
-            value={expandedSections}
-            onValueChange={setExpandedSections}
-          >
-            {reportConfig.taskFields.length > 0 && (
-              <ExpandableRow title="Task Details" getSectionId={getSectionId} nonApplicableStageIds={nonApplicableStageIds}>
-                {reportConfig.taskFields.map(fieldConfig => {
-                  const header = tableHeaders.find(h => h.id === fieldConfig.id);
-                  return (
-                    <TableRowItem
-                      key={fieldConfig.id}
-                      stageLabel="Task Details"
-                      documentLabel="-"
-                      fieldLabel={header?.label || fieldConfig.id}
-                      isIncluded
-                      isDefault={fieldConfig.isDefault}
-                      readOnly
-                    />
-                  );
-                })}
-              </ExpandableRow>
-            )}
-
+          <div className="divide-y divide-slate-200">
+            <div className="bg-slate-50 px-4 py-2.5 font-bold text-[11px] uppercase text-slate-500 tracking-wider">Task Fields</div>
+            {reportConfig.taskFields.map(fieldConfig => {
+              const header = tableHeaders.find(h => h.id === fieldConfig.id);
+              return (
+                <TableRowItem
+                  key={fieldConfig.id}
+                  label={header?.label || fieldConfig.id}
+                  isIncluded
+                  isDefault={fieldConfig.isDefault}
+                  depth={0}
+                  readOnly
+                />
+              );
+            })}
             {Object.entries(reportConfig.stages).map(([stageId, stageConfig]) => {
               const stage = sortedStages.find(s => s.id === stageId);
               if (!stage) return null;
               const isNA = nonApplicableStageIds.has(stageId);
               return (
-                <ExpandableRow key={`stage-${stageId}`} title={stage.name} stageId={stageId} getSectionId={getSectionId} nonApplicableStageIds={nonApplicableStageIds}>
+                <div key={stageId}>
+                  <div className="bg-slate-50 px-4 py-2 font-bold text-xs uppercase text-slate-500 tracking-wider border-t border-slate-200 flex items-center gap-2">
+                    {stage.name}
+                    {isNA && <Badge variant="outline" className="text-[11px] text-amber-600 border-amber-300 bg-amber-50">N/A</Badge>}
+                  </div>
                   {stageConfig.isStageDateSelected && (
-                    <TableRowItem
-                      stageLabel={stage.name}
-                      documentLabel="-"
-                      fieldLabel="Stage Completion Date"
-                      isIncluded
-                      isDefault={stageConfig.isStageDateDefault}
-                      readOnly
-                      className="italic font-medium"
-                    />
+                    <TableRowItem label="Completion Date" isIncluded isDefault={stageConfig.isStageDateDefault} depth={0} readOnly />
                   )}
                   {Object.entries(stageConfig.documents).map(([kycId, docConfig]) => {
                     const kycDoc = kycDocuments.get(kycId);
@@ -1222,14 +1203,15 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
                     if (!kycDoc) return null;
                     return (
                       <React.Fragment key={kycId}>
+                        <div className="px-4 py-1.5 bg-slate-50/50 text-xs font-semibold text-slate-600 border-t border-slate-100 pl-8">
+                          {kycDoc.display_name || kycDoc.name}
+                        </div>
                         {docFields.map((field: any) => {
                           const fieldInfo = kycDoc.fields?.find((f: any) => f.id === field.id);
                           return (
                             <TableRowItem
                               key={field.id}
-                              stageLabel={stage.name}
-                              documentLabel={kycDoc.display_name || kycDoc.name}
-                              fieldLabel={fieldInfo?.fieldName || field.id}
+                              label={fieldInfo?.fieldName || field.id}
                               isIncluded
                               isDefault={field.isDefault}
                               depth={1}
@@ -1240,10 +1222,10 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
                       </React.Fragment>
                     );
                   })}
-                </ExpandableRow>
+                </div>
               );
             })}
-          </Accordion>
+          </div>
         </ScrollArea>
       </div>
     </div>
