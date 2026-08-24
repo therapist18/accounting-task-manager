@@ -236,6 +236,7 @@ export const FIELD_LABELS: Record<string, string> = {
   label: 'Label', value: 'Value',
   fullName: 'Full Name', email: 'Email', phone: 'Phone', location: 'Location',
   dateOfBirth: 'Date of Birth', nationality: 'Nationality', maritalStatus: 'Marital Status', residence: 'Residence',
+  linkedin: 'LinkedIn', github: 'GitHub',
 };
 
 export function getMissingFields(sectionId: string, item: any): string[] {

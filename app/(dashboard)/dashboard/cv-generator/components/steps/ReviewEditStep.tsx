@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { AlertCircle, ArrowRight, ChevronDown, ChevronRight, Copy, Crosshair, Download, PenLine, FileText as CoverLetterIcon } from "lucide-react";
+import Link from "next/link";
+import { AlertCircle, ArrowRight, ChevronDown, ChevronRight, Copy, Crosshair, Database, Download, PenLine, FileText as CoverLetterIcon } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
 import { CvPreviewPanel } from "../CvPreviewPanel";
@@ -186,6 +187,9 @@ export function ReviewEditStep({
           <button onClick={() => setShowResumeVersions(true)} className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left hover:bg-slate-50 text-slate-600 text-sm font-semibold"><Copy className="h-3 w-3 text-slate-500" /> Versions</button>
         </div>
         <div className="border-t border-slate-200 p-3 space-y-1.5">
+          <Button asChild size="sm" variant="outline" className="w-full text-xs h-7 border-slate-200">
+            <Link href="/dashboard/cv-generator/settings"><Database className="h-3 w-3 mr-1" /> Field Sources</Link>
+          </Button>
           <Button size="sm" onClick={() => setShowAdvancedExport(true)} variant="outline" className="w-full text-xs h-7 border-slate-200"><Download className="h-3 w-3 mr-1" /> Advanced Export</Button>
           <Button size="sm" onClick={() => setWorkflowStep('collaboration')} className="w-full text-xs bg-custom-blue hover:bg-[#2d5a94] h-7">
             Client Collaboration <ArrowRight className="h-3 w-3 ml-1" />

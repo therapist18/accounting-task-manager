@@ -50,6 +50,7 @@ import {
   sectionNeedsAttention,
   getMissingContactFields,
 } from "./utils/cvGeneratorData";
+import { resolveCvMasterFieldValues } from "./utils/cvResolver";
 
 export default function CVGeneratorPage() {
   const [cvData, setCvData] = useState<CvData>(initialCVData);
@@ -1285,7 +1286,7 @@ export default function CVGeneratorPage() {
     try {
       const { data, error } = await supabase
         .from('registry_individuals')
-        .select('id, full_name, gender, contact_details, residential_address_details')
+        .select('id, full_name, gender, nationality, date_of_birth, contact_details, residential_address_details')
         .ilike('full_name', `%${query}%`)
         .limit(10);
       if (!error && data) setSearchResults(data);
@@ -1351,29 +1352,64 @@ export default function CVGeneratorPage() {
       languages: [{ language: 'English', proficiency: 'Professional' }],
     });
 
+    // Persist the Registry link immediately (not just once "Apply to CV" is
+    // clicked) so the master-field write-back control has an individual_id
+    // to attach to as soon as someone is selected, and so re-opening this CV
+    // later still knows who it's linked to. Fire-and-forget: a failed
+    // background persist shouldn't block continuing to "Apply to CV".
+    setLinkedIndividualId(individual.id);
+    (async () => {
+      try {
+        const currentApplicantId = applicantId || crypto.randomUUID();
+        if (!applicantId) setApplicantId(currentApplicantId);
+        await supabase.from('job_applicant_cvs').upsert({
+          applicant_id: currentApplicantId,
+          individual_id: individual.id,
+          full_name: individual.full_name || '',
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'applicant_id' });
+      } catch (err) {
+        console.warn('[CV Builder] Failed to persist Registry link:', err);
+      }
+    })();
+
     const photoUrl = await fetchPhotoForIndividual(individual.id);
     setIndividualPhoto(photoUrl);
   };
 
-  const applyIndividualToCV = () => {
+  const applyIndividualToCV = async () => {
     if (!selectedIndividual) return;
     const photoUrl = pendingPhotoPreview || individualPhoto || '';
     const contact = Array.isArray(selectedIndividual.contact_details)
       ? selectedIndividual.contact_details[0] || {}
       : selectedIndividual.contact_details || {};
+
+    // Master-field-linked fields (configured via "Field Sources") win when
+    // present; every field still falls back to the pre-existing hardcoded
+    // registry mapping when unlinked, so nothing regresses for an admin who
+    // hasn't linked anything yet - same guarantee ec_placeholders shipped
+    // with ("resolution falls back to the existing hardcoded computation").
+    const { values: masterValues } = await resolveCvMasterFieldValues(selectedIndividual.id);
+
     setCvData({
       ...EMPTY_CV_DATA,
       personalInfo: {
         ...EMPTY_CV_DATA.personalInfo,
-        fullName: registryFormData.fullName || selectedIndividual.full_name || "",
-        phone: registryFormData.phone || contact.phone?.kenyan?.primary || contact.phone?.abroad?.primary || "",
-        email: registryFormData.email || contact.email?.primary || "",
-        location: registryFormData.location || "",
+        fullName: masterValues['personalInfo.fullName'] || registryFormData.fullName || selectedIndividual.full_name || "",
+        title: masterValues['personalInfo.title'] || "",
+        phone: masterValues['personalInfo.phone'] || registryFormData.phone || contact.phone?.kenyan?.primary || contact.phone?.abroad?.primary || "",
+        email: masterValues['personalInfo.email'] || registryFormData.email || contact.email?.primary || "",
+        location: masterValues['personalInfo.location'] || registryFormData.location || "",
+        linkedin: masterValues['personalInfo.linkedin'] || "",
+        github: masterValues['personalInfo.github'] || "",
         photoUrl,
       },
       personalDetails: {
         ...EMPTY_CV_DATA.personalDetails,
-        nationality: selectedIndividual.nationality || "",
+        dateOfBirth: masterValues['personalDetails.dateOfBirth'] || selectedIndividual.date_of_birth || "",
+        nationality: masterValues['personalDetails.nationality'] || selectedIndividual.nationality || "",
+        maritalStatus: masterValues['personalDetails.maritalStatus'] || "",
+        residence: masterValues['personalDetails.residence'] || "",
       },
       languages: registryFormData.languages.length > 0
         ? registryFormData.languages
@@ -1384,6 +1420,23 @@ export default function CVGeneratorPage() {
     setActiveSection('contact');
     if (pendingPhotoFile) setShowSavePhotoPrompt(true);
     setShowSaveCvPrompt(true);
+
+    // Re-fires the individual_id upsert (idempotent) since this is the
+    // actual "commit" action - covers reselecting a different individual
+    // before applying.
+    setLinkedIndividualId(selectedIndividual.id);
+    try {
+      const currentApplicantId = applicantId || crypto.randomUUID();
+      if (!applicantId) setApplicantId(currentApplicantId);
+      await supabase.from('job_applicant_cvs').upsert({
+        applicant_id: currentApplicantId,
+        individual_id: selectedIndividual.id,
+        full_name: selectedIndividual.full_name || '',
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'applicant_id' });
+    } catch (err) {
+      console.warn('[CV Builder] Failed to persist Registry link:', err);
+    }
   };
 
   const addRegistryLanguage = () =>

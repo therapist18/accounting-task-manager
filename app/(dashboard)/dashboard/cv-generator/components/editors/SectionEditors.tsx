@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { AlertCircle, Plus, Sparkles, Trash2, User } from "lucide-react";
+import { AlertCircle, Loader2, Pencil, Plus, Save, Sparkles, Trash2, User, X } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -11,6 +12,8 @@ import supabase from "@/lib/supabase/client";
 import { CLEAR_PHOTO_ID, getMissingFields, getMissingContactFields } from "../../utils/cvGeneratorData";
 import { CreatableCombobox, type ComboOption } from "../CreatableCombobox";
 import { getVerifiedDateLabel } from "@/lib/documentTheme";
+import { useCvMasterFieldValues } from "../../hooks/useCvMasterFieldValues";
+import { saveCvMasterFieldValue } from "../../utils/cvResolver";
 
 // ============================================================================
 // 1. CORE ARCHITECTURE (Hooks)
@@ -171,6 +174,56 @@ function ArrayItemBlock({ index, title, missing, onRemove, children }: any) {
   );
 }
 
+// A field only linked to a single master field is the common case for CV
+// variables (unlike Employment Contracts' merged-address-style fields), so
+// this always edits/saves the first (highest-priority) linked field rather
+// than offering a picker popover for "which of several sources" - simpler,
+// and matches what's actually visible in the input in the common case.
+function CvFieldSyncControl({ placeholder, masterFields, individualId, currentValue, onSaved }: any) {
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const linkedIds = (placeholder?.master_field_links || []).map((l: any) => Number(l.master_field_id));
+  if (!linkedIds.length || individualId == null) return null;
+
+  const startEdit = () => { setEditValue(currentValue ?? ""); setEditing(true); };
+  const cancelEdit = () => { setEditing(false); setEditValue(""); };
+
+  const handleSave = async () => {
+    setSaving(true);
+    const result = await saveCvMasterFieldValue(linkedIds[0], masterFields, editValue, individualId);
+    setSaving(false);
+    if (result.success) {
+      toast.success("Saved to source record");
+      cancelEdit();
+      onSaved();
+    } else {
+      toast.error(result.error || "Failed to save value");
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1">
+        <Input className="h-9 text-sm flex-1" value={editValue} onChange={(e) => setEditValue(e.target.value)} autoFocus />
+        <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-emerald-600 hover:bg-emerald-50" onClick={handleSave} disabled={saving} title="Save to source record">
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+        </Button>
+        <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:text-red-500" onClick={cancelEdit} disabled={saving} title="Cancel">
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <Button type="button" size="icon" variant="ghost" className="h-8 w-8 shrink-0 text-slate-400 hover:text-custom-blue" onClick={startEdit} title="Save a correction to the linked Registry record">
+      <Pencil className="h-3.5 w-3.5" />
+    </Button>
+  );
+}
+
 // ============================================================================
 // 3. THE EDITORS
 // ============================================================================
@@ -182,6 +235,22 @@ export function ContactEditor({ cvData, setCvData, applicantId, linkedIndividual
 
   const missing = getMissingContactFields(cvData.personalInfo, cvData.personalDetails);
   const reqCls = (label: string) => missingFieldCls(missing, label);
+
+  // Master-field write-back: only relevant once this CV is linked to a
+  // Registry individual AND an admin has actually linked the field via the
+  // "Field Sources" settings modal - otherwise renders nothing extra, so an
+  // unlinked field looks exactly as it always has.
+  const { ecPlaceholders, masterFields, refresh } = useCvMasterFieldValues(linkedIndividualId);
+  const placeholderFor = (key: string) => ecPlaceholders.find((p: any) => p.key === key);
+  const syncFor = (key: string, currentValue: any) => (
+    <CvFieldSyncControl
+      placeholder={placeholderFor(key)}
+      masterFields={masterFields}
+      individualId={linkedIndividualId}
+      currentValue={currentValue}
+      onSaved={refresh}
+    />
+  );
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 px-5">
@@ -207,31 +276,64 @@ export function ContactEditor({ cvData, setCvData, applicantId, linkedIndividual
       </FormRow>
 
       <FormRow label="Basic Information" description="Your core professional identity.">
-        <Input placeholder="Full Name" value={cvData.personalInfo?.fullName ?? ""} onChange={e => updateInfo("fullName", e.target.value)} className={reqCls("Full Name")} />
-        <Input placeholder="Professional Title (e.g. Software Engineer)" value={cvData.personalInfo?.title ?? ""} onChange={e => updateInfo("title", e.target.value)} className={reqCls("Title")} />
+        <div className="flex items-center gap-1">
+          <Input placeholder="Full Name" value={cvData.personalInfo?.fullName ?? ""} onChange={e => updateInfo("fullName", e.target.value)} className={`flex-1 min-w-0 ${reqCls("Full Name")}`} />
+          {syncFor("personalInfo.fullName", cvData.personalInfo?.fullName)}
+        </div>
+        <div className="flex items-center gap-1">
+          <Input placeholder="Professional Title (e.g. Software Engineer)" value={cvData.personalInfo?.title ?? ""} onChange={e => updateInfo("title", e.target.value)} className={`flex-1 min-w-0 ${reqCls("Title")}`} />
+          {syncFor("personalInfo.title", cvData.personalInfo?.title)}
+        </div>
       </FormRow>
 
       <FormRow label="Contact Details" description="How employers can reach you.">
         <div className="grid grid-cols-2 gap-3">
-          <Input placeholder="Email Address" type="email" value={cvData.personalInfo?.email ?? ""} onChange={e => updateInfo("email", e.target.value)} className={reqCls("Email")} />
-          <Input placeholder="Phone Number" value={cvData.personalInfo?.phone ?? ""} onChange={e => updateInfo("phone", e.target.value)} className={reqCls("Phone")} />
-          <Input placeholder="Location (City, Country)" className={`col-span-2 ${reqCls("Location")}`} value={cvData.personalInfo?.location ?? ""} onChange={e => updateInfo("location", e.target.value)} />
+          <div className="flex items-center gap-1">
+            <Input placeholder="Email Address" type="email" value={cvData.personalInfo?.email ?? ""} onChange={e => updateInfo("email", e.target.value)} className={`flex-1 min-w-0 ${reqCls("Email")}`} />
+            {syncFor("personalInfo.email", cvData.personalInfo?.email)}
+          </div>
+          <div className="flex items-center gap-1">
+            <Input placeholder="Phone Number" value={cvData.personalInfo?.phone ?? ""} onChange={e => updateInfo("phone", e.target.value)} className={`flex-1 min-w-0 ${reqCls("Phone")}`} />
+            {syncFor("personalInfo.phone", cvData.personalInfo?.phone)}
+          </div>
+          <div className="flex items-center gap-1 col-span-2">
+            <Input placeholder="Location (City, Country)" className={`flex-1 min-w-0 ${reqCls("Location")}`} value={cvData.personalInfo?.location ?? ""} onChange={e => updateInfo("location", e.target.value)} />
+            {syncFor("personalInfo.location", cvData.personalInfo?.location)}
+          </div>
         </div>
       </FormRow>
 
       <FormRow label="Web Links" description="Links to your professional portfolio or socials.">
         <div className="grid grid-cols-2 gap-3">
-          <Input placeholder="LinkedIn URL" value={cvData.personalInfo?.linkedin ?? ""} onChange={e => updateInfo("linkedin", e.target.value)} className={emptyFieldCls(cvData.personalInfo?.linkedin)} />
-          <Input placeholder="GitHub / Portfolio URL" value={cvData.personalInfo?.github ?? ""} onChange={e => updateInfo("github", e.target.value)} className={emptyFieldCls(cvData.personalInfo?.github)} />
+          <div className="flex items-center gap-1">
+            <Input placeholder="LinkedIn URL" value={cvData.personalInfo?.linkedin ?? ""} onChange={e => updateInfo("linkedin", e.target.value)} className={`flex-1 min-w-0 ${emptyFieldCls(cvData.personalInfo?.linkedin)}`} />
+            {syncFor("personalInfo.linkedin", cvData.personalInfo?.linkedin)}
+          </div>
+          <div className="flex items-center gap-1">
+            <Input placeholder="GitHub / Portfolio URL" value={cvData.personalInfo?.github ?? ""} onChange={e => updateInfo("github", e.target.value)} className={`flex-1 min-w-0 ${emptyFieldCls(cvData.personalInfo?.github)}`} />
+            {syncFor("personalInfo.github", cvData.personalInfo?.github)}
+          </div>
         </div>
       </FormRow>
 
       <FormRow label="Demographics" description="Personal details based on regional CV norms." isLast>
         <div className="grid grid-cols-2 gap-3">
-          <Input placeholder="Date of Birth" value={cvData.personalDetails?.dateOfBirth ?? ""} onChange={e => updateDetails("dateOfBirth", e.target.value)} className={reqCls("Date of Birth")} />
-          <Input placeholder="Nationality" value={cvData.personalDetails?.nationality ?? ""} onChange={e => updateDetails("nationality", e.target.value)} className={reqCls("Nationality")} />
-          <Input placeholder="Marital Status" value={cvData.personalDetails?.maritalStatus ?? ""} onChange={e => updateDetails("maritalStatus", e.target.value)} className={reqCls("Marital Status")} />
-          <Input placeholder="Residence" value={cvData.personalDetails?.residence ?? ""} onChange={e => updateDetails("residence", e.target.value)} className={reqCls("Residence")} />
+          <div className="flex items-center gap-1">
+            <Input placeholder="Date of Birth" value={cvData.personalDetails?.dateOfBirth ?? ""} onChange={e => updateDetails("dateOfBirth", e.target.value)} className={`flex-1 min-w-0 ${reqCls("Date of Birth")}`} />
+            {syncFor("personalDetails.dateOfBirth", cvData.personalDetails?.dateOfBirth)}
+          </div>
+          <div className="flex items-center gap-1">
+            <Input placeholder="Nationality" value={cvData.personalDetails?.nationality ?? ""} onChange={e => updateDetails("nationality", e.target.value)} className={`flex-1 min-w-0 ${reqCls("Nationality")}`} />
+            {syncFor("personalDetails.nationality", cvData.personalDetails?.nationality)}
+          </div>
+          <div className="flex items-center gap-1">
+            <Input placeholder="Marital Status" value={cvData.personalDetails?.maritalStatus ?? ""} onChange={e => updateDetails("maritalStatus", e.target.value)} className={`flex-1 min-w-0 ${reqCls("Marital Status")}`} />
+            {syncFor("personalDetails.maritalStatus", cvData.personalDetails?.maritalStatus)}
+          </div>
+          <div className="flex items-center gap-1">
+            <Input placeholder="Residence" value={cvData.personalDetails?.residence ?? ""} onChange={e => updateDetails("residence", e.target.value)} className={`flex-1 min-w-0 ${reqCls("Residence")}`} />
+            {syncFor("personalDetails.residence", cvData.personalDetails?.residence)}
+          </div>
         </div>
       </FormRow>
     </div>
