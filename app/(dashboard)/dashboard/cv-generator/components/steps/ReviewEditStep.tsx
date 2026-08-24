@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowRight, ChevronDown, ChevronRight, Copy, Crosshair, Download, PenLine, FileText as CoverLetterIcon } from "lucide-react";
+import { useState } from "react";
+import { AlertCircle, ArrowRight, ChevronDown, ChevronRight, Copy, Crosshair, Download, PenLine, FileText as CoverLetterIcon } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
 import { CvPreviewPanel } from "../CvPreviewPanel";
@@ -23,8 +24,8 @@ import {
 } from "../editors/SectionEditors";
 
 interface ReviewEditStepProps {
-  sectionGroups: { label: string; sections: { id: string; label: string; icon: any; count: number }[] }[];
-  sectionMeta: { id: string; label: string; icon: any; count: number }[];
+  sectionGroups: { label: string; sections: { id: string; label: string; icon: any; count: number; incomplete?: boolean }[] }[];
+  sectionMeta: { id: string; label: string; icon: any; count: number; incomplete?: boolean }[];
   collapsedGroups: Record<string, boolean>;
   setCollapsedGroups: (updater: any) => void;
   activeSection: string;
@@ -73,51 +74,108 @@ export function ReviewEditStep({
   cvSettings,
   previewRef,
 }: ReviewEditStepProps) {
+  const [showMissingOnly, setShowMissingOnly] = useState(false);
+
+  const isSectionComplete = (sec: { id: string; count: number; incomplete?: boolean }) =>
+    sec.incomplete !== undefined ? !sec.incomplete : sec.count > 0 || sec.id === 'contact';
+  const totalSections = sectionMeta.length;
+  const missingSections = sectionMeta.filter((sec) => !isSectionComplete(sec));
+  const completeCount = totalSections - missingSections.length;
+
+  const goToNextMissing = () => {
+    if (!missingSections.length) return;
+    const orderedIds = sectionMeta.map((s) => s.id);
+    const missingIds = missingSections.map((s) => s.id);
+    const curPos = orderedIds.indexOf(activeSection);
+    const next = missingIds.find((id) => orderedIds.indexOf(id) > curPos) || missingIds[0];
+    setActiveSection(next);
+  };
+
   return (
     <PanelGroup direction="horizontal" className="flex-1">
       {/* Left — Sections Sidebar (Collapsible Accordion) */}
       <Panel defaultSize={14} minSize={10} className="bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-        <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between">
-          <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Sections</span>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {sectionGroups.map((group) => (
-            <div key={group.label}>
+        <div className="px-3 py-2.5 border-b border-slate-200 space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Sections</span>
+            <span className={`text-sm font-bold ${missingSections.length ? 'text-amber-600' : 'text-emerald-600'}`}>
+              {completeCount}/{totalSections}
+            </span>
+          </div>
+          {missingSections.length > 0 && (
+            <div className="flex items-center gap-1">
               <button
-                onClick={() => setCollapsedGroups((prev: Record<string, boolean>) => ({ ...prev, [group.label]: !prev[group.label] }))}
-                className="w-full flex items-center gap-1.5 px-2 py-1 rounded text-sm font-bold text-slate-400 uppercase tracking-wider hover:text-slate-600"
+                onClick={() => setShowMissingOnly((v) => !v)}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1 rounded text-sm font-semibold border transition-colors ${
+                  showMissingOnly
+                    ? 'bg-amber-100 text-amber-800 border-amber-300'
+                    : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                }`}
+                title="Show only sections with no data"
               >
-                {collapsedGroups[group.label] ? <ChevronRight className="h-2.5 w-2.5" /> : <ChevronDown className="h-2.5 w-2.5" />}
-                {group.label}
+                <AlertCircle className="h-3 w-3" />
+                {missingSections.length} missing
               </button>
-              {!collapsedGroups[group.label] && (
-                <div className="space-y-0.5 mt-0.5">
-                  {group.sections.map((sec) => {
-                    const Icon = sec.icon
-                    const isActive = activeSection === sec.id
-                    const isComplete = sec.count > 0 || (sec.id === 'contact')
-                    return (
-                      <button
-                        key={sec.id}
-                        onClick={() => setActiveSection(sec.id)}
-                        className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-left transition-all ${
-                          isActive ? 'bg-custom-blue text-white shadow-sm' : 'hover:bg-slate-50 text-slate-600'
-                        }`}
-                      >
-                        <Icon className={`h-3 w-3 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                        <span className="text-sm font-semibold flex-1 truncate">{sec.label}</span>
-                        <span className={`text-sm font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center ${
-                          isActive ? 'bg-white/20 text-white' : isComplete ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'
-                        }`}>
-                          {sec.count}
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
+              {!showMissingOnly && (
+                <button
+                  onClick={goToNextMissing}
+                  className="px-2 py-1 rounded text-sm font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200"
+                  title="Jump to next missing section"
+                >
+                  Next
+                </button>
               )}
             </div>
-          ))}
+          )}
+        </div>
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {sectionGroups.map((group) => {
+            const visibleSections = showMissingOnly
+              ? group.sections.filter((sec) => !isSectionComplete(sec))
+              : group.sections;
+            if (!visibleSections.length) return null;
+            return (
+              <div key={group.label}>
+                <button
+                  onClick={() => setCollapsedGroups((prev: Record<string, boolean>) => ({ ...prev, [group.label]: !prev[group.label] }))}
+                  className="w-full flex items-center gap-1.5 px-2 py-1 rounded text-sm font-bold text-slate-400 uppercase tracking-wider hover:text-slate-600"
+                >
+                  {(!showMissingOnly && collapsedGroups[group.label]) ? <ChevronRight className="h-2.5 w-2.5" /> : <ChevronDown className="h-2.5 w-2.5" />}
+                  {group.label}
+                </button>
+                {(showMissingOnly || !collapsedGroups[group.label]) && (
+                  <div className="space-y-0.5 mt-0.5">
+                    {visibleSections.map((sec) => {
+                      const Icon = sec.icon
+                      const isActive = activeSection === sec.id
+                      const isComplete = isSectionComplete(sec)
+                      return (
+                        <button
+                          key={sec.id}
+                          onClick={() => setActiveSection(sec.id)}
+                          className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-left transition-all ${
+                            isActive
+                              ? 'bg-custom-blue text-white shadow-sm'
+                              : isComplete
+                                ? 'hover:bg-slate-50 text-slate-600'
+                                : 'bg-amber-50/60 hover:bg-amber-50 text-slate-700 ring-1 ring-amber-200'
+                          }`}
+                        >
+                          <Icon className={`h-3 w-3 ${isActive ? 'text-white' : isComplete ? 'text-slate-400' : 'text-amber-500'}`} />
+                          <span className="text-sm font-semibold flex-1 truncate">{sec.label}</span>
+                          <span className={`text-sm font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center ${
+                            isActive ? 'bg-white/20 text-white' : isComplete ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-100 text-amber-700'
+                          }`}>
+                            {sec.count}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
         {/* AI & Tools Panel */}
         <div className="border-t border-slate-200 p-2 space-y-1.5">

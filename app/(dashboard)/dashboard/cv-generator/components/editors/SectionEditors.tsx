@@ -1,14 +1,14 @@
 "use client";
 
 import React, { useState } from "react";
-import { Plus, Sparkles, Trash2, User } from "lucide-react";
+import { AlertCircle, Plus, Sparkles, Trash2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import supabase from "@/lib/supabase/client";
-import { CLEAR_PHOTO_ID } from "../../utils/cvGeneratorData";
+import { CLEAR_PHOTO_ID, getMissingFields, getMissingContactFields } from "../../utils/cvGeneratorData";
 import { CreatableCombobox, type ComboOption } from "../CreatableCombobox";
 import { getVerifiedDateLabel } from "@/lib/documentTheme";
 
@@ -79,6 +79,21 @@ function useAvatarUpload(applicantId: string | null, linkedIndividualId: number 
   return { handleUpload, isUploading };
 }
 
+// Visual flags for empty fields: a stronger amber ring for fields that are
+// required-and-missing, a lighter dashed border for fields that are simply
+// blank (optional or not-yet-tracked as required) so gaps are visible either way.
+function isBlank(value: any): boolean {
+  return !String(value ?? "").trim();
+}
+
+function emptyFieldCls(value: any): string {
+  return isBlank(value) ? "border-dashed border-slate-300 bg-slate-50/60" : "";
+}
+
+function missingFieldCls(missing: string[], label: string): string {
+  return missing.includes(label) ? "border-amber-300 ring-1 ring-amber-200 bg-amber-50/30" : "";
+}
+
 // ============================================================================
 // 2. TWO-COLUMN UI COMPONENTS
 // ============================================================================
@@ -130,16 +145,24 @@ function ArraySection({ title, count, onAdd, emptyMessage, children }: any) {
 }
 
 /** Wraps an individual item inside an ArraySection */
-function ArrayItemBlock({ index, title, onRemove, children }: any) {
+function ArrayItemBlock({ index, title, missing, onRemove, children }: any) {
+  const hasMissing = Array.isArray(missing) && missing.length > 0;
   return (
-    <div className="border border-slate-200 rounded-xl bg-white overflow-hidden shadow-sm">
-      <div className="bg-slate-50/80 border-b border-slate-200 px-5 py-2.5 flex justify-between items-center">
+    <div className={`border rounded-xl bg-white overflow-hidden shadow-sm ${hasMissing ? 'border-amber-300' : 'border-slate-200'}`}>
+      <div className={`border-b px-5 py-2.5 flex justify-between items-center ${hasMissing ? 'bg-amber-50/70 border-amber-200' : 'bg-slate-50/80 border-slate-200'}`}>
         <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
           {title ? title : `Entry #${index + 1}`}
         </span>
-        <Button variant="ghost" size="sm" onClick={onRemove} className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 px-2">
-          <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Remove
-        </Button>
+        <div className="flex items-center gap-3">
+          {hasMissing && (
+            <span className="flex items-center gap-1 text-xs font-semibold text-amber-700 normal-case tracking-normal">
+              <AlertCircle className="w-3 h-3" /> Missing: {missing.join(', ')}
+            </span>
+          )}
+          <Button variant="ghost" size="sm" onClick={onRemove} className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 px-2">
+            <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Remove
+          </Button>
+        </div>
       </div>
       <div className="px-5">
         {children}
@@ -157,8 +180,17 @@ export function ContactEditor({ cvData, setCvData, applicantId, linkedIndividual
   const updateDetails = (field: string, value: any) => setCvData((p: any) => ({ ...p, personalDetails: { ...p.personalDetails, [field]: value } }));
   const { handleUpload, isUploading } = useAvatarUpload(applicantId, linkedIndividualId, (url) => updateInfo("photoUrl", url));
 
+  const missing = getMissingContactFields(cvData.personalInfo, cvData.personalDetails);
+  const reqCls = (label: string) => missingFieldCls(missing, label);
+
   return (
     <div className="bg-white rounded-xl border border-slate-200 px-5">
+      {missing.length > 0 && (
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-4">
+          <AlertCircle className="w-3.5 h-3.5" /> Missing: {missing.join(', ')}
+        </div>
+      )}
+
       <FormRow label="Profile Photo" description="Upload a professional headshot.">
         <div className="flex items-center gap-4">
           <div className="relative h-16 w-16 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center">
@@ -175,31 +207,31 @@ export function ContactEditor({ cvData, setCvData, applicantId, linkedIndividual
       </FormRow>
 
       <FormRow label="Basic Information" description="Your core professional identity.">
-        <Input placeholder="Full Name" value={cvData.personalInfo?.fullName ?? ""} onChange={e => updateInfo("fullName", e.target.value)} />
-        <Input placeholder="Professional Title (e.g. Software Engineer)" value={cvData.personalInfo?.title ?? ""} onChange={e => updateInfo("title", e.target.value)} />
+        <Input placeholder="Full Name" value={cvData.personalInfo?.fullName ?? ""} onChange={e => updateInfo("fullName", e.target.value)} className={reqCls("Full Name")} />
+        <Input placeholder="Professional Title (e.g. Software Engineer)" value={cvData.personalInfo?.title ?? ""} onChange={e => updateInfo("title", e.target.value)} className={reqCls("Title")} />
       </FormRow>
 
       <FormRow label="Contact Details" description="How employers can reach you.">
         <div className="grid grid-cols-2 gap-3">
-          <Input placeholder="Email Address" type="email" value={cvData.personalInfo?.email ?? ""} onChange={e => updateInfo("email", e.target.value)} />
-          <Input placeholder="Phone Number" value={cvData.personalInfo?.phone ?? ""} onChange={e => updateInfo("phone", e.target.value)} />
-          <Input placeholder="Location (City, Country)" className="col-span-2" value={cvData.personalInfo?.location ?? ""} onChange={e => updateInfo("location", e.target.value)} />
+          <Input placeholder="Email Address" type="email" value={cvData.personalInfo?.email ?? ""} onChange={e => updateInfo("email", e.target.value)} className={reqCls("Email")} />
+          <Input placeholder="Phone Number" value={cvData.personalInfo?.phone ?? ""} onChange={e => updateInfo("phone", e.target.value)} className={reqCls("Phone")} />
+          <Input placeholder="Location (City, Country)" className={`col-span-2 ${reqCls("Location")}`} value={cvData.personalInfo?.location ?? ""} onChange={e => updateInfo("location", e.target.value)} />
         </div>
       </FormRow>
 
       <FormRow label="Web Links" description="Links to your professional portfolio or socials.">
         <div className="grid grid-cols-2 gap-3">
-          <Input placeholder="LinkedIn URL" value={cvData.personalInfo?.linkedin ?? ""} onChange={e => updateInfo("linkedin", e.target.value)} />
-          <Input placeholder="GitHub / Portfolio URL" value={cvData.personalInfo?.github ?? ""} onChange={e => updateInfo("github", e.target.value)} />
+          <Input placeholder="LinkedIn URL" value={cvData.personalInfo?.linkedin ?? ""} onChange={e => updateInfo("linkedin", e.target.value)} className={emptyFieldCls(cvData.personalInfo?.linkedin)} />
+          <Input placeholder="GitHub / Portfolio URL" value={cvData.personalInfo?.github ?? ""} onChange={e => updateInfo("github", e.target.value)} className={emptyFieldCls(cvData.personalInfo?.github)} />
         </div>
       </FormRow>
 
-      <FormRow label="Demographics" description="Optional personal details based on regional CV norms." isLast>
+      <FormRow label="Demographics" description="Personal details based on regional CV norms." isLast>
         <div className="grid grid-cols-2 gap-3">
-          <Input placeholder="Date of Birth" value={cvData.personalDetails?.dateOfBirth ?? ""} onChange={e => updateDetails("dateOfBirth", e.target.value)} />
-          <Input placeholder="Nationality" value={cvData.personalDetails?.nationality ?? ""} onChange={e => updateDetails("nationality", e.target.value)} />
-          <Input placeholder="Marital Status" value={cvData.personalDetails?.maritalStatus ?? ""} onChange={e => updateDetails("maritalStatus", e.target.value)} />
-          <Input placeholder="Residence" value={cvData.personalDetails?.residence ?? ""} onChange={e => updateDetails("residence", e.target.value)} />
+          <Input placeholder="Date of Birth" value={cvData.personalDetails?.dateOfBirth ?? ""} onChange={e => updateDetails("dateOfBirth", e.target.value)} className={reqCls("Date of Birth")} />
+          <Input placeholder="Nationality" value={cvData.personalDetails?.nationality ?? ""} onChange={e => updateDetails("nationality", e.target.value)} className={reqCls("Nationality")} />
+          <Input placeholder="Marital Status" value={cvData.personalDetails?.maritalStatus ?? ""} onChange={e => updateDetails("maritalStatus", e.target.value)} className={reqCls("Marital Status")} />
+          <Input placeholder="Residence" value={cvData.personalDetails?.residence ?? ""} onChange={e => updateDetails("residence", e.target.value)} className={reqCls("Residence")} />
         </div>
       </FormRow>
     </div>
@@ -240,29 +272,34 @@ export function ExperienceEditor({ cvData, setCvData, onOpenAiWriter }: any) {
       emptyMessage="No work experience added yet."
       onAdd={() => add({ company: "", location: "", role: "", startDate: "", endDate: "", companyDesc: "", responsibilities: [] })}
     >
-      {items.map((exp: any, idx: number) => (
-        <ArrayItemBlock key={idx} index={idx} title={exp.role || "New Position"} onRemove={() => remove(idx)}>
+      {items.map((exp: any, idx: number) => {
+        const missing = getMissingFields("experience", exp);
+        const respEmpty = !Array.isArray(exp.responsibilities)
+          ? isBlank(exp.responsibilities)
+          : exp.responsibilities.filter((r: string) => !isBlank(r)).length === 0;
+        return (
+        <ArrayItemBlock key={idx} index={idx} title={exp.role || "New Position"} missing={missing} onRemove={() => remove(idx)}>
           <FormRow label="Job Details">
-            <Input placeholder="Job Title (e.g. Senior Developer)" value={exp.role ?? ""} onChange={e => update(idx, "role", e.target.value)} />
+            <Input placeholder="Job Title (e.g. Senior Developer)" value={exp.role ?? ""} onChange={e => update(idx, "role", e.target.value)} className={missingFieldCls(missing, "Role")} />
             <div className="grid grid-cols-2 gap-3">
-              <Input placeholder="Company Name" value={exp.company ?? ""} onChange={e => update(idx, "company", e.target.value)} />
-              <Input placeholder="Location" value={exp.location ?? ""} onChange={e => update(idx, "location", e.target.value)} />
+              <Input placeholder="Company Name" value={exp.company ?? ""} onChange={e => update(idx, "company", e.target.value)} className={missingFieldCls(missing, "Company")} />
+              <Input placeholder="Location" value={exp.location ?? ""} onChange={e => update(idx, "location", e.target.value)} className={emptyFieldCls(exp.location)} />
             </div>
           </FormRow>
 
           <FormRow label="Duration">
             <div className="grid grid-cols-2 gap-3">
-              <Input placeholder="Start Date (e.g. Jan 2021)" value={exp.startDate ?? ""} onChange={e => update(idx, "startDate", e.target.value)} />
-              <Input placeholder="End Date (e.g. Present)" value={exp.endDate ?? ""} onChange={e => update(idx, "endDate", e.target.value)} />
+              <Input placeholder="Start Date (e.g. Jan 2021)" value={exp.startDate ?? ""} onChange={e => update(idx, "startDate", e.target.value)} className={missingFieldCls(missing, "Start Date")} />
+              <Input placeholder="End Date (e.g. Present)" value={exp.endDate ?? ""} onChange={e => update(idx, "endDate", e.target.value)} className={missingFieldCls(missing, "End Date")} />
             </div>
           </FormRow>
 
           <FormRow label="Company Info" description="Optional brief description of what the company does.">
-            <Input placeholder="E.g. A B2B SaaS startup..." value={exp.companyDesc ?? ""} onChange={e => update(idx, "companyDesc", e.target.value)} />
+            <Input placeholder="E.g. A B2B SaaS startup..." value={exp.companyDesc ?? ""} onChange={e => update(idx, "companyDesc", e.target.value)} className={emptyFieldCls(exp.companyDesc)} />
           </FormRow>
 
-          <FormRow 
-            label="Responsibilities" 
+          <FormRow
+            label="Responsibilities"
             description="List your key duties and achievements. Put each point on a new line."
             isLast
             action={
@@ -271,15 +308,17 @@ export function ExperienceEditor({ cvData, setCvData, onOpenAiWriter }: any) {
               </Button>
             }
           >
-            <Textarea 
-              rows={5} 
+            <Textarea
+              rows={5}
               placeholder="Led a team of 4 engineers...&#10;Increased revenue by 20%..."
-              value={Array.isArray(exp.responsibilities) ? exp.responsibilities.join('\n') : (exp.responsibilities ?? "")} 
-              onChange={e => update(idx, "responsibilities", e.target.value.split('\n'))} 
+              value={Array.isArray(exp.responsibilities) ? exp.responsibilities.join('\n') : (exp.responsibilities ?? "")}
+              onChange={e => update(idx, "responsibilities", e.target.value.split('\n'))}
+              className={respEmpty ? "border-dashed border-slate-300 bg-slate-50/60" : ""}
             />
           </FormRow>
         </ArrayItemBlock>
-      ))}
+        );
+      })}
     </ArraySection>
   );
 }
@@ -293,33 +332,40 @@ export function InternshipsEditor({ cvData, setCvData }: any) {
       emptyMessage="No internships added yet."
       onAdd={() => add({ company: "", location: "", role: "", startDate: "", endDate: "", companyDesc: "", responsibilities: [] })}
     >
-      {items.map((intern: any, idx: number) => (
-        <ArrayItemBlock key={idx} index={idx} title={intern.role || "New Internship"} onRemove={() => remove(idx)}>
+      {items.map((intern: any, idx: number) => {
+        const missing = getMissingFields("internships", intern);
+        const respEmpty = !Array.isArray(intern.responsibilities)
+          ? isBlank(intern.responsibilities)
+          : intern.responsibilities.filter((r: string) => !isBlank(r)).length === 0;
+        return (
+        <ArrayItemBlock key={idx} index={idx} title={intern.role || "New Internship"} missing={missing} onRemove={() => remove(idx)}>
           <FormRow label="Internship Details">
-            <Input placeholder="Role / Title" value={intern.role ?? ""} onChange={e => update(idx, "role", e.target.value)} />
+            <Input placeholder="Role / Title" value={intern.role ?? ""} onChange={e => update(idx, "role", e.target.value)} className={missingFieldCls(missing, "Role")} />
             <div className="grid grid-cols-2 gap-3">
-              <Input placeholder="Company" value={intern.company ?? ""} onChange={e => update(idx, "company", e.target.value)} />
-              <Input placeholder="Location" value={intern.location ?? ""} onChange={e => update(idx, "location", e.target.value)} />
+              <Input placeholder="Company" value={intern.company ?? ""} onChange={e => update(idx, "company", e.target.value)} className={missingFieldCls(missing, "Company")} />
+              <Input placeholder="Location" value={intern.location ?? ""} onChange={e => update(idx, "location", e.target.value)} className={emptyFieldCls(intern.location)} />
             </div>
           </FormRow>
-          
+
           <FormRow label="Duration">
             <div className="grid grid-cols-2 gap-3">
-              <Input placeholder="Start Date" value={intern.startDate ?? ""} onChange={e => update(idx, "startDate", e.target.value)} />
-              <Input placeholder="End Date" value={intern.endDate ?? ""} onChange={e => update(idx, "endDate", e.target.value)} />
+              <Input placeholder="Start Date" value={intern.startDate ?? ""} onChange={e => update(idx, "startDate", e.target.value)} className={missingFieldCls(missing, "Start Date")} />
+              <Input placeholder="End Date" value={intern.endDate ?? ""} onChange={e => update(idx, "endDate", e.target.value)} className={missingFieldCls(missing, "End Date")} />
             </div>
           </FormRow>
 
           <FormRow label="Responsibilities" description="One responsibility per line." isLast>
-            <Textarea 
-              rows={4} 
+            <Textarea
+              rows={4}
               placeholder="Assisted with campaigns...&#10;Conducted research..."
-              value={Array.isArray(intern.responsibilities) ? intern.responsibilities.join('\n') : (intern.responsibilities ?? "")} 
-              onChange={e => update(idx, "responsibilities", e.target.value.split('\n'))} 
+              value={Array.isArray(intern.responsibilities) ? intern.responsibilities.join('\n') : (intern.responsibilities ?? "")}
+              onChange={e => update(idx, "responsibilities", e.target.value.split('\n'))}
+              className={respEmpty ? "border-dashed border-slate-300 bg-slate-50/60" : ""}
             />
           </FormRow>
         </ArrayItemBlock>
-      ))}
+        );
+      })}
     </ArraySection>
   );
 }
@@ -333,18 +379,21 @@ export function EducationEditor({ cvData, setCvData }: any) {
       emptyMessage="No education entries added."
       onAdd={() => add({ degree: "", institution: "", year: "", details: "" })}
     >
-      {items.map((edu: any, idx: number) => (
-        <ArrayItemBlock key={idx} index={idx} title={edu.degree || "New Degree"} onRemove={() => remove(idx)}>
+      {items.map((edu: any, idx: number) => {
+        const missing = getMissingFields("education", edu);
+        return (
+        <ArrayItemBlock key={idx} index={idx} title={edu.degree || "New Degree"} missing={missing} onRemove={() => remove(idx)}>
           <FormRow label="Academic Details" isLast>
-            <Input placeholder="Degree / Certificate (e.g. BSc Computer Science)" value={edu.degree ?? ""} onChange={e => update(idx, "degree", e.target.value)} />
-            <Input placeholder="Institution Name" value={edu.institution ?? ""} onChange={e => update(idx, "institution", e.target.value)} />
+            <Input placeholder="Degree / Certificate (e.g. BSc Computer Science)" value={edu.degree ?? ""} onChange={e => update(idx, "degree", e.target.value)} className={missingFieldCls(missing, "Degree")} />
+            <Input placeholder="Institution Name" value={edu.institution ?? ""} onChange={e => update(idx, "institution", e.target.value)} className={missingFieldCls(missing, "Institution")} />
             <div className="grid grid-cols-2 gap-3">
-              <Input placeholder="Graduation Year" value={edu.year ?? ""} onChange={e => update(idx, "year", e.target.value)} />
-              <Input placeholder="Extra Details (GPA, Honors)" value={edu.details ?? ""} onChange={e => update(idx, "details", e.target.value)} />
+              <Input placeholder="Graduation Year" value={edu.year ?? ""} onChange={e => update(idx, "year", e.target.value)} className={missingFieldCls(missing, "Year")} />
+              <Input placeholder="Extra Details (GPA, Honors)" value={edu.details ?? ""} onChange={e => update(idx, "details", e.target.value)} className={emptyFieldCls(edu.details)} />
             </div>
           </FormRow>
         </ArrayItemBlock>
-      ))}
+        );
+      })}
     </ArraySection>
   );
 }
@@ -358,19 +407,23 @@ export function SkillsEditor({ cvData, setCvData }: any) {
       emptyMessage="No skill categories added."
       onAdd={() => add({ category: "", items: "" })}
     >
-      {items.map((skill: any, idx: number) => (
-        <ArrayItemBlock key={idx} index={idx} title={skill.category || "Skill Category"} onRemove={() => remove(idx)}>
+      {items.map((skill: any, idx: number) => {
+        const missing = getMissingFields("skills", skill);
+        return (
+        <ArrayItemBlock key={idx} index={idx} title={skill.category || "Skill Category"} missing={missing} onRemove={() => remove(idx)}>
           <FormRow label="Skill Group" description="Group your skills by category." isLast>
-            <Input placeholder="Category Name (e.g. Programming Languages)" value={skill.category ?? ""} onChange={e => update(idx, "category", e.target.value)} />
-            <Textarea 
-              rows={2} 
-              placeholder="Comma-separated items (e.g. JavaScript, Python, React)" 
-              value={skill.items ?? ""} 
-              onChange={e => update(idx, "items", e.target.value)} 
+            <Input placeholder="Category Name (e.g. Programming Languages)" value={skill.category ?? ""} onChange={e => update(idx, "category", e.target.value)} className={missingFieldCls(missing, "Category")} />
+            <Textarea
+              rows={2}
+              placeholder="Comma-separated items (e.g. JavaScript, Python, React)"
+              value={skill.items ?? ""}
+              onChange={e => update(idx, "items", e.target.value)}
+              className={missingFieldCls(missing, "Items")}
             />
           </FormRow>
         </ArrayItemBlock>
-      ))}
+        );
+      })}
     </ArraySection>
   );
 }
@@ -384,22 +437,26 @@ export function ProjectsEditor({ cvData, setCvData }: any) {
       emptyMessage="No projects added."
       onAdd={() => add({ title: "", description: "", year: "" })}
     >
-      {items.map((proj: any, idx: number) => (
-        <ArrayItemBlock key={idx} index={idx} title={proj.title || "New Project"} onRemove={() => remove(idx)}>
+      {items.map((proj: any, idx: number) => {
+        const missing = getMissingFields("projects", proj);
+        return (
+        <ArrayItemBlock key={idx} index={idx} title={proj.title || "New Project"} missing={missing} onRemove={() => remove(idx)}>
           <FormRow label="Project Details" isLast>
             <div className="grid grid-cols-[1fr_120px] gap-3">
-              <Input placeholder="Project Title" value={proj.title ?? ""} onChange={e => update(idx, "title", e.target.value)} />
-              <Input placeholder="Year" value={proj.year ?? ""} onChange={e => update(idx, "year", e.target.value)} />
+              <Input placeholder="Project Title" value={proj.title ?? ""} onChange={e => update(idx, "title", e.target.value)} className={missingFieldCls(missing, "Title")} />
+              <Input placeholder="Year" value={proj.year ?? ""} onChange={e => update(idx, "year", e.target.value)} className={emptyFieldCls(proj.year)} />
             </div>
-            <Textarea 
-              rows={3} 
-              placeholder="Description of the project and technologies used..." 
-              value={proj.description ?? ""} 
-              onChange={e => update(idx, "description", e.target.value)} 
+            <Textarea
+              rows={3}
+              placeholder="Description of the project and technologies used..."
+              value={proj.description ?? ""}
+              onChange={e => update(idx, "description", e.target.value)}
+              className={missingFieldCls(missing, "Description")}
             />
           </FormRow>
         </ArrayItemBlock>
-      ))}
+        );
+      })}
     </ArraySection>
   );
 }
@@ -414,15 +471,21 @@ export function LanguagesEditor({ cvData, setCvData }: any) {
       onAdd={() => add({ language: "", proficiency: "" })}
     >
       <div className="bg-white rounded-xl border border-slate-200 px-5">
-        {items.map((lang: any, idx: number) => (
-          <FormRow key={idx} label={`Language #${idx + 1}`} isLast={idx === items.length - 1}>
-            <div className="flex gap-3 items-center">
-              <Input placeholder="Language (e.g. French)" value={lang.language ?? ""} onChange={e => update(idx, "language", e.target.value)} className="flex-1" />
-              <Input placeholder="Proficiency (e.g. Fluent)" value={lang.proficiency ?? ""} onChange={e => update(idx, "proficiency", e.target.value)} className="flex-1" />
-              <Button variant="ghost" size="icon" onClick={() => remove(idx)} className="text-red-400 hover:text-red-600 hover:bg-red-50"><Trash2 className="w-4 h-4" /></Button>
-            </div>
-          </FormRow>
-        ))}
+        {items.map((lang: any, idx: number) => {
+          const missing = getMissingFields("languages", lang);
+          return (
+            <FormRow key={idx} label={`Language #${idx + 1}`} isLast={idx === items.length - 1}>
+              <div className="flex gap-3 items-center">
+                <Input placeholder="Language (e.g. French)" value={lang.language ?? ""} onChange={e => update(idx, "language", e.target.value)} className={`flex-1 ${missingFieldCls(missing, "Language")}`} />
+                <Input placeholder="Proficiency (e.g. Fluent)" value={lang.proficiency ?? ""} onChange={e => update(idx, "proficiency", e.target.value)} className={`flex-1 ${missingFieldCls(missing, "Proficiency")}`} />
+                <Button variant="ghost" size="icon" onClick={() => remove(idx)} className="text-red-400 hover:text-red-600 hover:bg-red-50"><Trash2 className="w-4 h-4" /></Button>
+              </div>
+              {missing.length > 0 && (
+                <span className="flex items-center gap-1 text-xs font-semibold text-amber-700 mt-1.5"><AlertCircle className="w-3 h-3" /> Missing: {missing.join(', ')}</span>
+              )}
+            </FormRow>
+          );
+        })}
       </div>
     </ArraySection>
   );
@@ -437,22 +500,26 @@ export function ReferencesEditor({ cvData, setCvData, companyOptions, onCreateCo
       emptyMessage="No references added."
       onAdd={() => add({ name: "", title: "", company: "", address: "", contact: "" })}
     >
-      {items.map((ref: any, idx: number) => (
-        <ArrayItemBlock key={idx} index={idx} title={ref.name || "New Reference"} onRemove={() => remove(idx)}>
+      {items.map((ref: any, idx: number) => {
+        const missing = getMissingFields("references", ref);
+        return (
+        <ArrayItemBlock key={idx} index={idx} title={ref.name || "New Reference"} missing={missing} onRemove={() => remove(idx)}>
           <FormRow label="Reference Details" isLast>
-            <Input placeholder="Full Name" value={ref.name ?? ""} onChange={e => update(idx, "name", e.target.value)} />
+            <Input placeholder="Full Name" value={ref.name ?? ""} onChange={e => update(idx, "name", e.target.value)} className={missingFieldCls(missing, "Name")} />
             <div className="grid grid-cols-2 gap-3">
-              <Input placeholder="Title / Role" value={ref.title ?? ""} onChange={e => update(idx, "title", e.target.value)} />
+              <Input placeholder="Title / Role" value={ref.title ?? ""} onChange={e => update(idx, "title", e.target.value)} className={missingFieldCls(missing, "Title")} />
               <CreatableCombobox
                 options={companyOptions} value={ref.company ?? ""} onChange={(v) => update(idx, "company", v)}
                 onCreateOption={onCreateCompany} placeholder="Select or create company..." createLabel="Use new company"
+                className={missingFieldCls(missing, "Company")}
               />
             </div>
-            <Input placeholder="Contact Info (Email or Phone)" value={ref.contact ?? ""} onChange={e => update(idx, "contact", e.target.value)} />
-            <Input placeholder="Address / Office" value={ref.address ?? ""} onChange={e => update(idx, "address", e.target.value)} />
+            <Input placeholder="Contact Info (Email or Phone)" value={ref.contact ?? ""} onChange={e => update(idx, "contact", e.target.value)} className={missingFieldCls(missing, "Contact")} />
+            <Input placeholder="Address / Office" value={ref.address ?? ""} onChange={e => update(idx, "address", e.target.value)} className={emptyFieldCls(ref.address)} />
           </FormRow>
         </ArrayItemBlock>
-      ))}
+        );
+      })}
     </ArraySection>
   );
 }
@@ -466,18 +533,21 @@ export function CertificationsEditor({ cvData, setCvData }: any) {
       emptyMessage="No certifications added."
       onAdd={() => add({ name: "", issuer: "", date: "", url: "" })}
     >
-      {items.map((cert: any, idx: number) => (
-        <ArrayItemBlock key={idx} index={idx} title={cert.name || "New Certification"} onRemove={() => remove(idx)}>
+      {items.map((cert: any, idx: number) => {
+        const missing = getMissingFields("certifications", cert);
+        return (
+        <ArrayItemBlock key={idx} index={idx} title={cert.name || "New Certification"} missing={missing} onRemove={() => remove(idx)}>
           <FormRow label="Certification Details" isLast>
-            <Input placeholder="Certification Name" value={cert.name ?? ""} onChange={e => update(idx, "name", e.target.value)} />
-            <Input placeholder="Issuing Organization" value={cert.issuer ?? ""} onChange={e => update(idx, "issuer", e.target.value)} />
+            <Input placeholder="Certification Name" value={cert.name ?? ""} onChange={e => update(idx, "name", e.target.value)} className={missingFieldCls(missing, "Name")} />
+            <Input placeholder="Issuing Organization" value={cert.issuer ?? ""} onChange={e => update(idx, "issuer", e.target.value)} className={missingFieldCls(missing, "Issuer")} />
             <div className="grid grid-cols-2 gap-3">
-              <Input placeholder="Date Achieved" value={cert.date ?? ""} onChange={e => update(idx, "date", e.target.value)} />
-              <Input placeholder="Credential URL (Optional)" value={cert.url ?? ""} onChange={e => update(idx, "url", e.target.value)} />
+              <Input placeholder="Date Achieved" value={cert.date ?? ""} onChange={e => update(idx, "date", e.target.value)} className={emptyFieldCls(cert.date)} />
+              <Input placeholder="Credential URL (Optional)" value={cert.url ?? ""} onChange={e => update(idx, "url", e.target.value)} className={emptyFieldCls(cert.url)} />
             </div>
           </FormRow>
         </ArrayItemBlock>
-      ))}
+        );
+      })}
     </ArraySection>
   );
 }
@@ -491,17 +561,20 @@ export function AchievementsEditor({ cvData, setCvData }: any) {
       emptyMessage="No achievements added."
       onAdd={() => add({ title: "", description: "", date: "" })}
     >
-      {items.map((ach: any, idx: number) => (
-        <ArrayItemBlock key={idx} index={idx} title={ach.title || "New Achievement"} onRemove={() => remove(idx)}>
+      {items.map((ach: any, idx: number) => {
+        const missing = getMissingFields("achievements", ach);
+        return (
+        <ArrayItemBlock key={idx} index={idx} title={ach.title || "New Achievement"} missing={missing} onRemove={() => remove(idx)}>
           <FormRow label="Achievement Details" isLast>
             <div className="grid grid-cols-[1fr_120px] gap-3">
-              <Input placeholder="Title or Award Name" value={ach.title ?? ""} onChange={e => update(idx, "title", e.target.value)} />
-              <Input placeholder="Date / Year" value={ach.date ?? ""} onChange={e => update(idx, "date", e.target.value)} />
+              <Input placeholder="Title or Award Name" value={ach.title ?? ""} onChange={e => update(idx, "title", e.target.value)} className={missingFieldCls(missing, "Title")} />
+              <Input placeholder="Date / Year" value={ach.date ?? ""} onChange={e => update(idx, "date", e.target.value)} className={emptyFieldCls(ach.date)} />
             </div>
-            <Textarea rows={2} placeholder="Description..." value={ach.description ?? ""} onChange={e => update(idx, "description", e.target.value)} />
+            <Textarea rows={2} placeholder="Description..." value={ach.description ?? ""} onChange={e => update(idx, "description", e.target.value)} className={missingFieldCls(missing, "Description")} />
           </FormRow>
         </ArrayItemBlock>
-      ))}
+        );
+      })}
     </ArraySection>
   );
 }
@@ -516,15 +589,21 @@ export function AdditionalInfoEditor({ cvData, setCvData }: any) {
       onAdd={() => add({ label: "", value: "" })}
     >
       <div className="bg-white rounded-xl border border-slate-200 px-5">
-        {items.map((info: any, idx: number) => (
-          <FormRow key={idx} label={`Entry #${idx + 1}`} isLast={idx === items.length - 1}>
-            <div className="flex gap-3 items-center">
-              <Input placeholder="Label (e.g. Availability)" value={info.label ?? ""} onChange={e => update(idx, "label", e.target.value)} className="flex-1" />
-              <Input placeholder="Value (e.g. Immediate)" value={info.value ?? ""} onChange={e => update(idx, "value", e.target.value)} className="flex-1" />
-              <Button variant="ghost" size="icon" onClick={() => remove(idx)} className="text-red-400 hover:text-red-600 hover:bg-red-50"><Trash2 className="w-4 h-4" /></Button>
-            </div>
-          </FormRow>
-        ))}
+        {items.map((info: any, idx: number) => {
+          const missing = getMissingFields("additionalInfo", info);
+          return (
+            <FormRow key={idx} label={`Entry #${idx + 1}`} isLast={idx === items.length - 1}>
+              <div className="flex gap-3 items-center">
+                <Input placeholder="Label (e.g. Availability)" value={info.label ?? ""} onChange={e => update(idx, "label", e.target.value)} className={`flex-1 ${missingFieldCls(missing, "Label")}`} />
+                <Input placeholder="Value (e.g. Immediate)" value={info.value ?? ""} onChange={e => update(idx, "value", e.target.value)} className={`flex-1 ${missingFieldCls(missing, "Value")}`} />
+                <Button variant="ghost" size="icon" onClick={() => remove(idx)} className="text-red-400 hover:text-red-600 hover:bg-red-50"><Trash2 className="w-4 h-4" /></Button>
+              </div>
+              {missing.length > 0 && (
+                <span className="flex items-center gap-1 text-xs font-semibold text-amber-700 mt-1.5"><AlertCircle className="w-3 h-3" /> Missing: {missing.join(', ')}</span>
+              )}
+            </FormRow>
+          );
+        })}
       </div>
     </ArraySection>
   );

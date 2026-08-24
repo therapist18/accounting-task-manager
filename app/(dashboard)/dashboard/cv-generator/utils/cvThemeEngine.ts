@@ -399,7 +399,7 @@ function additionalBlock(additionalInfo: any[]): string {
 }
 
 function skillsBlock(categories: any[], layout: CvLayout, pri: string, acc: string): string {
-  if (!categories.length) return "<p><em>No skills added yet.</em></p>";
+  if (!categories.length) return "";
   const { style, uppercase } = headingVisual(layout, "h4", pri, acc);
   const styleAttr = style ? ` style="${style}"` : "";
   
@@ -415,7 +415,7 @@ function skillsBlock(categories: any[], layout: CvLayout, pri: string, acc: stri
 }
 
 function languagesBlock(languages: any[]): string {
-  if (!languages.length) return "<p><em>No languages added yet.</em></p>";
+  if (!languages.length) return "";
   const lines = languages.map((l: any) => `${esc(l.language || "")}${l.proficiency ? ` — ${esc(l.proficiency)}` : ""}`);
   return `<p>${lines.join("<br/>")}</p>`;
 }
@@ -441,13 +441,13 @@ function expEntry(exp: any, layout: CvLayout): string {
   return `<table cellpadding="0" cellspacing="0" border="0" style="width:100%;"><tr><td><strong>${company}</strong> — ${role}${loc}</td><td align="right"><em>${dates}</em></td></tr></table>${companyDesc}${ul}`;
 }
 
-function expSection(entries: any[], emptyText: string, layout: CvLayout): string {
-  if (!entries.length) return `<p><em>${esc(emptyText)}</em></p>`;
+function expSection(entries: any[], layout: CvLayout): string {
+  if (!entries.length) return "";
   return entries.map((e: any) => expEntry(e, layout)).join("");
 }
 
 function eduEntries(entries: any[]): string {
-  if (!entries.length) return "<p><em>No education added yet.</em></p>";
+  if (!entries.length) return "";
   return entries
     .map((edu: any) => {
       const details = edu.details ? `<br/><em>${esc(edu.details)}</em>` : "";
@@ -457,7 +457,7 @@ function eduEntries(entries: any[]): string {
 }
 
 function projectsBlock(projects: any[], layout: CvLayout): string {
-  if (!projects.length) return "<p><em>No projects added yet.</em></p>";
+  if (!projects.length) return "";
 
   if (layout === "corporate" || layout === "bold") {
     const card = (p: any) => `<td class="cv-project-card" valign="top" width="50%" style="border:1px solid #eeeeee;padding:12px;">
@@ -482,7 +482,7 @@ function projectsBlock(projects: any[], layout: CvLayout): string {
 }
 
 function refsBlock(references: any[]): string {
-  if (!references.length) return "<p><em>No references added yet.</em></p>";
+  if (!references.length) return "";
   return references
     .map((r: any) => {
       const meta = `${esc(r.title || "")}${r.company ? ` | ${esc(r.company)}` : ""}`;
@@ -625,11 +625,11 @@ function buildBlock(block: BlockSpec, cvData: any, settings: any, layout: CvLayo
   const { personalInfo = {}, personalDetails = {}, skills = [], languages = [], additionalInfo = [], certifications = [], achievements = [], education = [], references = [] } = cvData;
   switch (block.kind) {
     case "summary":
-      return cvData.summary ? `<p>${esc(cvData.summary)}</p>` : "<p><em>No profile summary added yet.</em></p>";
+      return cvData.summary ? `<p>${esc(cvData.summary)}</p>` : "";
     case "experience":
-      return expSection(cvData.experience || [], "No work experience added yet.", layout);
+      return expSection(cvData.experience || [], layout);
     case "internships":
-      return expSection(cvData.internships || [], "No internships added yet.", layout);
+      return expSection(cvData.internships || [], layout);
     case "education":
       return eduEntries(education);
     case "projects":

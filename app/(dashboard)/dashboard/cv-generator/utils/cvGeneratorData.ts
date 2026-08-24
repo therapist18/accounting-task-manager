@@ -207,6 +207,64 @@ export function mapCertificationsFromExtractedDetails(ed: any, qualificationsTex
   return [];
 }
 
+// ---------------------------------------------------------------------------
+// Field-level completeness — flags entries/sections that have *some* data but
+// are still missing key fields, so the editor can point at specific gaps
+// instead of only knowing a section is non-empty.
+// ---------------------------------------------------------------------------
+
+export const SECTION_REQUIRED_FIELDS: Record<string, string[]> = {
+  experience: ['company', 'role', 'startDate', 'endDate'],
+  internships: ['company', 'role', 'startDate', 'endDate'],
+  education: ['degree', 'institution', 'year'],
+  skills: ['category', 'items'],
+  projects: ['title', 'description'],
+  languages: ['language', 'proficiency'],
+  references: ['name', 'title', 'company', 'contact'],
+  certifications: ['name', 'issuer'],
+  achievements: ['title', 'description'],
+  additionalInfo: ['label', 'value'],
+};
+
+export const FIELD_LABELS: Record<string, string> = {
+  company: 'Company', role: 'Role', startDate: 'Start Date', endDate: 'End Date',
+  degree: 'Degree', institution: 'Institution', year: 'Year',
+  category: 'Category', items: 'Items',
+  title: 'Title', description: 'Description',
+  language: 'Language', proficiency: 'Proficiency',
+  name: 'Name', issuer: 'Issuer', contact: 'Contact',
+  label: 'Label', value: 'Value',
+  fullName: 'Full Name', email: 'Email', phone: 'Phone', location: 'Location',
+  dateOfBirth: 'Date of Birth', nationality: 'Nationality', maritalStatus: 'Marital Status', residence: 'Residence',
+};
+
+export function getMissingFields(sectionId: string, item: any): string[] {
+  const required = SECTION_REQUIRED_FIELDS[sectionId];
+  if (!required) return [];
+  return required.filter((f) => !String(item?.[f] ?? '').trim()).map((f) => FIELD_LABELS[f] || f);
+}
+
+// True when the section is empty, or non-empty but at least one entry is
+// missing a required field — the two things "no data" and "some data missing"
+// both need to surface as "this section still needs attention".
+export function sectionNeedsAttention(sectionId: string, items: any[]): boolean {
+  if (!items || !items.length) return true;
+  const required = SECTION_REQUIRED_FIELDS[sectionId];
+  if (!required) return false;
+  return items.some((it) => getMissingFields(sectionId, it).length > 0);
+}
+
+export const CONTACT_REQUIRED_FIELDS: (keyof PersonalInfo)[] = ['fullName', 'title', 'email', 'phone', 'location'];
+export const CONTACT_DETAILS_REQUIRED_FIELDS: (keyof PersonalDetails)[] = ['dateOfBirth', 'nationality', 'maritalStatus', 'residence'];
+
+export function getMissingContactFields(personalInfo: PersonalInfo | undefined, personalDetails?: PersonalDetails): string[] {
+  const infoMissing = CONTACT_REQUIRED_FIELDS.filter((f) => !String(personalInfo?.[f] ?? '').trim())
+    .map((f) => FIELD_LABELS[f] || (f as string));
+  const detailsMissing = CONTACT_DETAILS_REQUIRED_FIELDS.filter((f) => !String(personalDetails?.[f] ?? '').trim())
+    .map((f) => FIELD_LABELS[f] || (f as string));
+  return [...infoMissing, ...detailsMissing];
+}
+
 export function isSkillsBlank(skills: any[]): boolean {
   return !Array.isArray(skills) || skills.length === 0 || skills.every((s) => !s?.category && !s?.items);
 }

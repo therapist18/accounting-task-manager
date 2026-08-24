@@ -47,6 +47,8 @@ import {
   getCVDiffs,
   needsFullDate,
   mergeAiEnhancedCv,
+  sectionNeedsAttention,
+  getMissingContactFields,
 } from "./utils/cvGeneratorData";
 
 export default function CVGeneratorPage() {
@@ -871,34 +873,34 @@ export default function CVGeneratorPage() {
     {
       label: 'Core',
       sections: [
-        { id: 'contact', label: 'Contact Information', icon: User, count: 1 },
-        { id: 'summary', label: 'Professional Summary', icon: BookOpen, count: cvData.summary ? 1 : 0 },
+        { id: 'contact', label: 'Contact Information', icon: User, count: 1, incomplete: getMissingContactFields(cvData.personalInfo, cvData.personalDetails).length > 0 },
+        { id: 'summary', label: 'Professional Summary', icon: BookOpen, count: cvData.summary ? 1 : 0, incomplete: !cvData.summary },
       ],
     },
     {
       label: 'Experience',
       sections: [
-        { id: 'experience', label: 'Experience', icon: Briefcase, count: cvData.experience.length },
-        { id: 'internships', label: 'Internships', icon: Briefcase, count: cvData.internships.length },
-        { id: 'education', label: 'Education', icon: GraduationCap, count: cvData.education.length },
-        { id: 'certifications', label: 'Certifications', icon: Award, count: cvData.certifications?.length || 0 },
+        { id: 'experience', label: 'Experience', icon: Briefcase, count: cvData.experience.length, incomplete: sectionNeedsAttention('experience', cvData.experience) },
+        { id: 'internships', label: 'Internships', icon: Briefcase, count: cvData.internships.length, incomplete: sectionNeedsAttention('internships', cvData.internships) },
+        { id: 'education', label: 'Education', icon: GraduationCap, count: cvData.education.length, incomplete: sectionNeedsAttention('education', cvData.education) },
+        { id: 'certifications', label: 'Certifications', icon: Award, count: cvData.certifications?.length || 0, incomplete: sectionNeedsAttention('certifications', cvData.certifications || []) },
       ],
     },
     {
       label: 'Skills & Projects',
       sections: [
-        { id: 'skills', label: 'Skills', icon: Sparkles, count: cvData.skills.length },
-        { id: 'projects', label: 'Projects', icon: FolderGit2, count: cvData.projects.length },
-        { id: 'achievements', label: 'Achievements', icon: Target, count: cvData.achievements?.length || 0 },
+        { id: 'skills', label: 'Skills', icon: Sparkles, count: cvData.skills.length, incomplete: sectionNeedsAttention('skills', cvData.skills) },
+        { id: 'projects', label: 'Projects', icon: FolderGit2, count: cvData.projects.length, incomplete: sectionNeedsAttention('projects', cvData.projects) },
+        { id: 'achievements', label: 'Achievements', icon: Target, count: cvData.achievements?.length || 0, incomplete: sectionNeedsAttention('achievements', cvData.achievements || []) },
       ],
     },
     {
       label: 'Additional',
       sections: [
-        { id: 'languages', label: 'Languages', icon: Globe, count: cvData.languages.length },
-        { id: 'references', label: 'References', icon: MessageSquare, count: cvData.references.length },
-        { id: 'additionalInfo', label: 'Additional Info', icon: FileSpreadsheet, count: cvData.additionalInfo?.length || 0 },
-        { id: 'declaration', label: 'Declaration', icon: Check, count: cvData.declaration ? 1 : 0 },
+        { id: 'languages', label: 'Languages', icon: Globe, count: cvData.languages.length, incomplete: sectionNeedsAttention('languages', cvData.languages) },
+        { id: 'references', label: 'References', icon: MessageSquare, count: cvData.references.length, incomplete: sectionNeedsAttention('references', cvData.references) },
+        { id: 'additionalInfo', label: 'Additional Info', icon: FileSpreadsheet, count: cvData.additionalInfo?.length || 0, incomplete: sectionNeedsAttention('additionalInfo', cvData.additionalInfo || []) },
+        { id: 'declaration', label: 'Declaration', icon: Check, count: cvData.declaration ? 1 : 0, incomplete: cvData.includeDeclaration !== false && !cvData.declaration },
       ],
     },
   ];
