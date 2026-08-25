@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import React, { useCallback, useMemo, useState, useRef, useEffect } from "react"
+import React, { useCallback, useMemo, useState, useRef, useEffect, forwardRef, useImperativeHandle } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -275,7 +275,7 @@ const MemoizedTableRow = React.memo(({
             </Button>
           </div>
         </TableCell>
-        <TableCell colSpan={paginatedHeaderStructure.length * 2 + 2}></TableCell>
+        <TableCell colSpan={paginatedHeaderStructure.length * 4 + 2}></TableCell>
       </TableRow>
     );
   }
@@ -321,14 +321,9 @@ const MemoizedTableRow = React.memo(({
 
           if (!isApplicable) {
             return (
-              <React.Fragment key={`${row.key}-${colIndex}`}>
-                <TableCell className={cn("text-center text-sm py-1 px-2 align-middle border-l-4 border-t border-b border-gray-100 w-[150px] bg-slate-50/50 text-gray-400 italic text-[11px]", item.type === 'dependant' ? 'bg-orange-50/20' : '')}>
-                  N/A
-                </TableCell>
-                <TableCell className={cn("text-center text-sm py-1 px-2 align-middle border-r-4 border-t border-b border-gray-100 w-[120px] bg-slate-50/50 text-gray-400 italic text-[11px]", item.type === 'dependant' ? 'bg-orange-50/20' : '')}>
-                  -
-                </TableCell>
-              </React.Fragment>
+              <TableCell key={`${row.key}-${colIndex}`} colSpan={4} className={cn("text-center text-sm py-1 px-2 align-middle border-l-2 border-l-gray-300 border-t border-b border-gray-100 bg-slate-50/50 text-gray-400 italic text-[11px]", item.type === 'dependant' ? 'bg-orange-50/20' : '')}>
+                N/A
+              </TableCell>
             );
           }
 
@@ -371,13 +366,27 @@ const MemoizedTableRow = React.memo(({
             colRecords
           };
 
+          const cellBg = cn("bg-emerald-50/10", item.type === 'dependant' ? 'bg-orange-50/30' : '');
+          // One light, uniform divider between Date/Status/Upload/Other — enough that an empty
+          // cell (a blank Date, no document to view/upload) still reads as its own column
+          // instead of blending into its neighbor, without the old per-side-colored borders
+          // that made every sub-column look like a separate boxed-off thing. A slightly darker
+          // left border on the first (Date) cell marks where one task's group ends and the next
+          // begins.
+          const cellBorder = "border-t border-b border-r border-gray-100";
           return (
             <React.Fragment key={`${row.key}-${colIndex}`}>
-              <TableCell className={cn("text-center text-sm py-1.5 px-2 align-middle border-l-4 border-t border-b border-gray-100 w-[150px] bg-emerald-50/10", item.type === 'dependant' ? 'bg-orange-50/30' : '')}>
-                {safeRender(renderCellContent(reportDocRow, item.task, 'date'))}
+              <TableCell className={cn("text-center text-sm py-1.5 px-2 align-middle border-l-2 border-l-gray-300 w-[140px] min-w-[140px] max-w-[140px]", cellBorder, cellBg)}>
+                {safeRender(renderCellContent(reportDocRow, item.task, 'plain-date'))}
               </TableCell>
-              <TableCell className={cn("text-center text-sm py-1 px-2 align-middle border-r-4 border-t border-b border-gray-100 w-[120px] bg-emerald-50/10", item.type === 'dependant' ? 'bg-orange-50/30' : '')}>
-                {safeRender(renderCellContent(reportDocRow, item.task, 'actions'))}
+              <TableCell className={cn("text-center text-sm py-1 px-2 align-middle w-[110px] min-w-[110px] max-w-[110px]", cellBorder, cellBg)}>
+                {safeRender(renderCellContent(reportDocRow, item.task, 'status'))}
+              </TableCell>
+              <TableCell className={cn("text-center text-sm py-1 px-2 align-middle w-[65px] min-w-[65px] max-w-[65px]", cellBorder, cellBg)}>
+                {safeRender(renderCellContent(reportDocRow, item.task, 'upload'))}
+              </TableCell>
+              <TableCell className={cn("text-center text-sm py-1 px-2 align-middle w-[50px] min-w-[50px] max-w-[50px]", cellBorder, cellBg)}>
+                {safeRender(renderCellContent(reportDocRow, item.task, 'other'))}
               </TableCell>
             </React.Fragment>
           );
@@ -387,7 +396,7 @@ const MemoizedTableRow = React.memo(({
   }
 
   return (
-    <TableRow className={`${rowBg} ${hoverBg} group border-b border-slate-200`}>
+    <TableRow className={`${rowBg} ${hoverBg} group border-b border-slate-200 ${row.type === 'actions' ? 'sticky bottom-0 z-10 bg-white shadow-[0_-2px_4px_-1px_rgba(0,0,0,0.05)] border-t border-slate-300' : ''}`}>
       {row.type !== 'actions' && (
         <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 text-center w-14 min-w-14 max-w-14`}>
           {safeRender(row.stageOrder) || (row.type !== 'stage' && row.type !== 'document' && row.type !== 'field' && row.type !== 'actions' ? (rowIndex + 1) : '')}
@@ -424,32 +433,56 @@ const MemoizedTableRow = React.memo(({
         </div>
       </TableCell>
 
-      {paginatedHeaderStructure.map((item, colIndex) => (
-        <React.Fragment key={`${row.key}-${colIndex}`}>
-          {row.type !== 'actions' && (
-            <TableCell
-              className={`text-center text-sm py-1 px-2 align-middle border-l-4 border-t border-b border-gray-100 w-[150px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}
-            >
-              {item.type === 'principal' ? (
-                safeRender(renderCellContent(row, item.task, 'date'))
-              ) : (
-                <span className="text-sm text-gray-400">-</span>
-              )}
-            </TableCell>
-          )}
+      {paginatedHeaderStructure.map((item, colIndex) => {
+        const depBg = item.type === 'dependant' ? 'bg-orange-50/50' : '';
 
+        // Stage rows get the full 4-way split: Date | Status | Upload/View | Other Actions —
+        // everything else (document/field/delta/actions-row/etc.) renders identically for
+        // every columnType, so one merged cell avoids redundant duplicate content. Dependant
+        // columns never carry stage data of their own, so they also collapse to one dash
+        // instead of repeating it across all 4 sub-columns.
+        // One light, uniform divider between Date/Status/Upload/Other — enough that an empty
+        // cell (a blank Date, no document to view/upload) still reads as its own column instead
+        // of blending into its neighbor, without the old per-side-colored borders that made
+        // every sub-column look like a separate boxed-off thing. A slightly darker left border
+        // on the first cell of each task's group (Date for stage rows, the merged cell
+        // otherwise) still marks where one task ends and the next begins.
+        const cellBorder = "border-t border-b border-r border-gray-100";
+        const groupStartBorder = "border-l-2 border-l-gray-300";
+
+        if (row.type === 'stage' && item.type === 'principal') {
+          return (
+            <React.Fragment key={`${row.key}-${colIndex}`}>
+              <TableCell className={`text-center text-sm py-1 px-2 align-middle ${cellBorder} ${groupStartBorder} w-[140px] min-w-[140px] max-w-[140px] ${depBg}`}>
+                {safeRender(renderCellContent(row, item.task, 'plain-date'))}
+              </TableCell>
+              <TableCell className={`text-center text-sm py-1 px-2 align-middle ${cellBorder} w-[110px] min-w-[110px] max-w-[110px] ${depBg}`}>
+                {safeRender(renderCellContent(row, item.task, 'status'))}
+              </TableCell>
+              <TableCell className={`text-center text-sm py-1 px-2 align-middle ${cellBorder} w-[65px] min-w-[65px] max-w-[65px] ${depBg}`}>
+                {safeRender(renderCellContent(row, item.task, 'upload'))}
+              </TableCell>
+              <TableCell className={`text-center text-sm py-1 px-2 align-middle ${cellBorder} w-[50px] min-w-[50px] max-w-[50px] ${depBg}`}>
+                {safeRender(renderCellContent(row, item.task, 'other'))}
+              </TableCell>
+            </React.Fragment>
+          );
+        }
+
+        return (
           <TableCell
-            colSpan={row.type === 'actions' ? 2 : 1}
-            className={`text-center text-sm py-1 px-2 align-middle border-r-4 border-t border-b border-gray-100 ${row.type === 'actions' ? 'w-[270px] min-w-[270px] max-w-[270px]' : 'w-[120px] min-w-[120px] max-w-[120px]'} ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}
+            key={`${row.key}-${colIndex}`}
+            colSpan={4}
+            className={`text-center text-sm py-1 px-2 align-middle ${cellBorder} ${groupStartBorder} ${depBg}`}
           >
             {item.type === 'principal' ? (
-              safeRender(renderCellContent(row, item.task, 'actions'))
+              safeRender(renderCellContent(row, item.task, 'date'))
             ) : (
               <span className="text-sm text-gray-400">-</span>
             )}
           </TableCell>
-        </React.Fragment>
-      ))}
+        );
+      })}
     </TableRow>
   );
 });
@@ -486,9 +519,13 @@ interface EnhancedTableProps {
   allIndividualDocuments?: Record<number, any[]>;
   allCompanyDocuments?: Record<number, any[]>;
   areTabsVisible?: boolean;
+  onPageChange?: (page: number) => void;
+  onColumnsPerPageChange?: (size: number) => void;
+  onTotalColumnsChange?: (total: number) => void;
+  hideInternalPagination?: boolean;
 }
 
-export const EnhancedTable: React.FC<EnhancedTableProps> = ({
+export const EnhancedTable = forwardRef<any, EnhancedTableProps>(({
   departments,
   tasks,
   tableType,
@@ -518,7 +555,11 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   allIndividualDocuments = {},
   allCompanyDocuments = {},
   areTabsVisible = true,
-}) => {
+  onPageChange,
+  onColumnsPerPageChange,
+  onTotalColumnsChange,
+  hideInternalPagination = false,
+}, ref) => {
   const didLogRef = useRef(false);
   const getCellContentWithCancel = useCallback((task: any, headerId: string) => {
     return getCellContent(task, headerId);
@@ -535,6 +576,13 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   const [editingTask, setEditingTask] = useState<any>(null);
   const [showNAStages, setShowNAStages] = useState(false);
   const processedDocuments = useMemo(() => processDocumentsForTasks(tasks, allDocuments), [tasks, allDocuments]);
+
+  useImperativeHandle(ref, () => ({
+    setCurrentPage: (page: number) => setCurrentPage(page),
+    setColumnsPerPage: (size: number) => setColumnsPerPage(size),
+    getCurrentPage: () => currentPage,
+    getColumnsPerPage: () => columnsPerPage,
+  }));
 
   useEffect(() => {
     setCurrentPage(1);
@@ -594,6 +642,18 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
 
   const totalColumns = headerStructure.length;
   const totalPages = Math.max(1, Math.ceil(totalColumns / columnsPerPage));
+
+  useEffect(() => {
+    onTotalColumnsChange?.(totalColumns);
+  }, [totalColumns, onTotalColumnsChange]);
+
+  useEffect(() => {
+    onPageChange?.(currentPage);
+  }, [currentPage, onPageChange]);
+
+  useEffect(() => {
+    onColumnsPerPageChange?.(columnsPerPage);
+  }, [columnsPerPage, onColumnsPerPageChange]);
 
   const paginatedHeaderStructure = useMemo(() => {
     const startIndex = (currentPage - 1) * columnsPerPage;
@@ -662,6 +722,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
         loading={loading}
       />
 
+      {!hideInternalPagination && totalColumns > 0 && (
       <div className="flex items-center justify-between p-4 bg-white border rounded-xl shadow-sm">
         {totalColumns > 0 && (
           <>
@@ -735,6 +796,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
           </>
         )}
       </div>
+      )}
 
       <div className="bg-white overflow-auto shadow-sm border-b border-slate-200" style={{ maxHeight: `calc(100vh - ${areTabsVisible ? 260 : 145}px)` }}>
         <Table className="min-w-full border-separate border-spacing-0">
@@ -750,7 +812,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
 
                 {paginatedHeaderStructure.map((item, colIndex) => (
                   <React.Fragment key={`header-${header.id}-${item.key}`}>
-                    <TableCell colSpan={2} className={`text-center text-sm py-1 px-2 align-middle bg-blue-500 text-white border border-gray-100 w-[150px] ${item.type === 'dependant' ? 'bg-orange-500' : ''}`}>
+                    <TableCell colSpan={4} className={`text-center text-sm py-1 px-2 align-middle bg-blue-500 text-white border border-gray-100 w-[365px] ${item.type === 'dependant' ? 'bg-orange-500' : ''}`}>
                       <div className="flex flex-col items-center gap-1">
                         <TableHeaderCell item={item} header={header} getCellContent={getCellContentWithCancel} />
                       </div>
@@ -763,18 +825,19 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
           <TableBody className="divide-y divide-slate-200">
             {error ? (
               <TableRow>
-                <TableCell colSpan={paginatedHeaderStructure.length * 2 + 2} className="h-32 text-center text-red-600">
+                <TableCell colSpan={paginatedHeaderStructure.length * 4 + 2} className="h-32 text-center text-red-600">
                   <div className="flex justify-center items-center gap-2"><AlertTriangle className="h-5 w-5" />{error}</div>
                 </TableCell>
               </TableRow>
             ) : loading && filteredTableRows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={paginatedHeaderStructure.length * 2 + 2} className="h-32 text-center">
+                <TableCell colSpan={paginatedHeaderStructure.length * 4 + 2} className="h-32 text-center">
                   <div className="flex justify-center items-center gap-2 text-slate-600"><Loader2 className="h-5 w-5 animate-spin" />Loading...</div>
                 </TableCell>
               </TableRow>
             ) : (
-              filteredTableRows.map((row, index) => (
+              <>
+                {filteredTableRows.filter(row => row.type !== 'actions').map((row, index) => (
                 <MemoizedTableRow
                   key={row.key}
                   row={row}
@@ -796,7 +859,31 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
                   allIndividualDocuments={allIndividualDocuments}
                   allCompanyDocuments={allCompanyDocuments}
                 />
-              ))
+                ))}
+                {filteredTableRows.filter(row => row.type === 'actions').map((row, index) => (
+                <MemoizedTableRow
+                  key={row.key}
+                  row={row}
+                  rowIndex={index}
+                  paginatedHeaderStructure={paginatedHeaderStructure}
+                  expandedSections={expandedSections}
+                  toggleSectionExpansion={toggleSectionExpansion}
+                  toggleStageExpansion={toggleStageExpansion}
+                  toggleDocumentExpansion={toggleDocumentExpansion}
+                  onDeleteTask={onDeleteTask}
+                  setTaskToDelete={setTaskToDelete}
+                  processedDocuments={processedDocuments}
+                  kycDocuments={kycDocuments}
+                  renderCellContent={renderCellContent}
+                  onEditTask={onEditTask}
+                  setEditingTask={setEditingTask}
+                  setEditDialogOpen={setEditDialogOpen}
+                  readOnly={readOnly}
+                  allIndividualDocuments={allIndividualDocuments}
+                  allCompanyDocuments={allCompanyDocuments}
+                />
+                ))}
+              </>
             )}
           </TableBody>
         </Table>
@@ -825,4 +912,4 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
       />
     </div>
   )
-}
+});

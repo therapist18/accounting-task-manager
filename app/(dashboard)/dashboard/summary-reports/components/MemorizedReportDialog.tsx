@@ -163,7 +163,10 @@ const TableHeaderRow = React.memo(({ handleSelectAllDefault, handleSelectAllRepo
   handleSelectAllReports: () => void;
 }) => (
   <div className="grid grid-cols-12 gap-0 border-b border-slate-200 text-[11px] font-semibold text-white sticky top-0 z-20 shadow-sm" style={{ backgroundColor: '#376bae' }}>
-    <div className="col-span-8 px-4 py-3 border-r border-slate-200">Field / Category</div>
+    <div className="col-span-1 px-2 py-3 border-r border-slate-200">ID</div>
+    <div className="col-span-3 px-4 py-3 border-r border-slate-200">Stage / Field Name</div>
+    <div className="col-span-2 px-2 py-3 border-r border-slate-200">Document</div>
+    <div className="col-span-2 px-2 py-3 border-r border-slate-200">Doc Field</div>
     <div className="col-span-2 px-2 py-3 border-r border-slate-200 text-center bg-white/10 flex items-center justify-center gap-1">
       <span>Default</span>
       <Button variant="ghost" size="sm" className="h-5 w-5 p-0 hover:bg-white/20 text-white" onClick={handleSelectAllDefault} title="Toggle All Default">
@@ -179,15 +182,22 @@ const TableHeaderRow = React.memo(({ handleSelectAllDefault, handleSelectAllRepo
   </div>
 ));
 
-const TableRowItem = React.memo(({ label, isIncluded, isDefault, onToggleInclude, onToggleDefault, depth = 0, className = "", icon = null, readOnly = false, onMoveUp, onMoveDown, showMoveControls = false, isSaved = false }: { label: React.ReactNode; isIncluded?: boolean; isDefault?: boolean; onToggleInclude?: () => void; onToggleDefault?: () => void; depth?: number; className?: string; icon?: React.ReactNode; readOnly?: boolean; onMoveUp?: () => void; onMoveDown?: () => void; showMoveControls?: boolean; isSaved?: boolean; }) => (
+const TableRowItem = React.memo(({ id, label, documentName, docFieldName, isIncluded, isDefault, onToggleInclude, onToggleDefault, depth = 0, className = "", icon = null, readOnly = false, onMoveUp, onMoveDown, showMoveControls = false, isSaved = false }: { id?: string; label?: React.ReactNode; documentName?: React.ReactNode; docFieldName?: React.ReactNode; isIncluded?: boolean; isDefault?: boolean; onToggleInclude?: () => void; onToggleDefault?: () => void; depth?: number; className?: string; icon?: React.ReactNode; readOnly?: boolean; onMoveUp?: () => void; onMoveDown?: () => void; showMoveControls?: boolean; isSaved?: boolean; }) => (
   <div className={cn("grid grid-cols-12 gap-0 border-b border-slate-200 items-stretch text-sm transition-colors", isIncluded ? "bg-blue-50/20 hover:bg-blue-50/40" : "bg-white hover:bg-slate-50", className)}>
-    <div className="col-span-8 flex items-center border-r border-slate-200 py-2">
-      <div style={{ width: `${depth * 24}px` }} className="shrink-0 h-full border-r border-dashed border-slate-200 mr-2 opacity-50" />
+    <div className="col-span-1 flex items-center border-r border-slate-200 py-2 px-2 min-w-0">
+      {id != null && (
+        <span className="truncate text-[10px] font-mono text-slate-400" title={String(id)}>{id}</span>
+      )}
+    </div>
+    <div className="col-span-3 flex items-center border-r border-slate-200 py-2">
+      <div style={{ width: `${depth * 16}px` }} className="shrink-0" />
       <div className="flex items-center gap-2 px-2 min-w-0 flex-1">
         {icon}
-        <span className={cn("truncate font-medium", isIncluded ? "text-slate-800" : "text-slate-500")}>
-          {label}
-        </span>
+        {label != null && (
+          <span className={cn("truncate font-medium", isIncluded ? "text-slate-800" : "text-slate-500")}>
+            {label}
+          </span>
+        )}
         {isSaved && isIncluded && (
           <Badge variant="outline" className="ml-1 shrink-0 text-[10px] py-0 px-1.5 bg-emerald-50 text-emerald-600 border-emerald-200 font-semibold">
             Saved
@@ -223,6 +233,16 @@ const TableRowItem = React.memo(({ label, isIncluded, isDefault, onToggleInclude
           </div>
         )}
       </div>
+    </div>
+    <div className="col-span-2 flex items-center border-r border-slate-200 py-2 px-3 min-w-0">
+      {documentName != null && (
+        <span className="truncate text-slate-600" title={typeof documentName === 'string' ? documentName : undefined}>{documentName}</span>
+      )}
+    </div>
+    <div className="col-span-2 flex items-center border-r border-slate-200 py-2 px-3 min-w-0">
+      {docFieldName != null && (
+        <span className="truncate text-slate-600" title={typeof docFieldName === 'string' ? docFieldName : undefined}>{docFieldName}</span>
+      )}
     </div>
     <div className="col-span-2 flex items-center justify-center border-r border-slate-200 bg-slate-50/30 py-2">
       {(onToggleDefault || readOnly) && (
@@ -353,6 +373,20 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
     if (stageConfig.isStageDateSelected) return true;
     return Object.keys(stageConfig.documents).length > 0;
   });
+
+  // "2.m" reference numbers — a stage's position (order_num order) among only the stages THIS
+  // report actually selected something under, matching the numbering SummaryTable's own column
+  // headers show for the same stage (see applyReportToSummaryColumns' fieldNumbers). sortedStages
+  // is already order_num-sorted, so filtering it (rather than re-deriving order separately) keeps
+  // this in lockstep with that numbering without duplicating the sort.
+  const selectedStageOrder = useMemo(
+    () => sortedStages.filter(s => !!reportConfig.stages?.[s.id]),
+    [sortedStages, reportConfig.stages]
+  );
+  const stageReportNumber = (stageId: string): string | undefined => {
+    const idx = selectedStageOrder.findIndex(s => s.id === stageId);
+    return idx === -1 ? undefined : `2.${idx + 1}`;
+  };
 
   const isEditMode = !!selectedReport;
 
@@ -485,7 +519,7 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
             onValueChange={setExpandedSections}
           >
             {filteredTaskFields.length > 0 && (
-              <ExpandableRow title="Task Details" getSectionId={getSectionId} nonApplicableStageIds={nonApplicableStageIds}>
+              <ExpandableRow title="1. Task Details" getSectionId={getSectionId} nonApplicableStageIds={nonApplicableStageIds}>
                 {filteredTaskFields.map((field) => {
                   const isIncluded = isTaskFieldIncluded(field.id);
                   const config = reportConfig.taskFields?.find(f => f.id === field.id);
@@ -495,6 +529,7 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
                   return (
                     <TableRowItem
                       key={field.id}
+                      id={isIncluded && fieldIndex !== -1 ? `1.${fieldIndex + 1}` : undefined}
                       label={field.label}
                       isIncluded={isIncluded}
                       isDefault={!!config?.isDefault}
@@ -511,87 +546,107 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
               </ExpandableRow>
             )}
 
-            {filteredStages.map(stage => {
-              const stageConfig = reportConfig.stages?.[stage.id];
-              const filteredDocs = (stage.documents || []).filter((doc: any) =>
-                showSelectedOnly ? !!stageConfig?.documents?.[doc.kycId] : true
-              );
+            {filteredStages.length > 0 && (
+              <ExpandableRow title="2. Stages" getSectionId={getSectionId} nonApplicableStageIds={nonApplicableStageIds}>
+                {filteredStages.map(stage => {
+                  const stageConfig = reportConfig.stages?.[stage.id];
+                  const filteredDocs = (stage.documents || []).filter((doc: any) =>
+                    showSelectedOnly ? !!stageConfig?.documents?.[doc.kycId] : true
+                  );
 
-              if (showSelectedOnly && !stageConfig?.isStageDateSelected && filteredDocs.length === 0) return null;
+                  if (showSelectedOnly && !stageConfig?.isStageDateSelected && filteredDocs.length === 0) return null;
 
-              return (
-                <ExpandableRow key={`stage-${stage.id}`} title={stage.name} stageId={stage.id} getSectionId={getSectionId} nonApplicableStageIds={nonApplicableStageIds}>
-                  {(!showSelectedOnly || stageConfig?.isStageDateSelected) && (
-                    <TableRowItem
-                      label="Stage Completion Date"
-                      isIncluded={!!stageConfig?.isStageDateSelected}
-                      isDefault={!!stageConfig?.isStageDateDefault}
-                      onToggleInclude={() => toggleStageDateInclude(stage.id)}
-                      onToggleDefault={() => toggleStageDateDefault(stage.id)}
-                      depth={1}
-                      className="italic"
-                    />
-                  )}
+                  const stageNumber = stageReportNumber(stage.id);
+                  const isNA = nonApplicableStageIds.has(stage.id);
 
-                  {filteredDocs.map((doc: any) => {
-                    const kycDoc = kycDocuments.get(doc.kycId);
-                    if (!kycDoc) return null;
-                    const isDocActive = !!stageConfig?.documents?.[doc.kycId];
-
-                    return (
-                      <div key={`doc-${stage.id}-${doc.kycId}`}>
-                        <div className={cn(
-                          "grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm",
-                          isDocActive ? "bg-blue-50/20 hover:bg-blue-50/40" : "bg-white hover:bg-slate-50"
-                        )}>
-                          <div className="col-span-8 flex items-center border-r border-slate-100 py-2">
-                            <div style={{ width: `24px` }} className="shrink-0 h-full border-r border-dashed border-slate-100 mr-2 opacity-50" />
-                            <div className="flex items-center gap-2 px-2 py-1 w-full">
-                              <Checkbox
-                                id={`doc-${stage.id}-${doc.kycId}`}
-                                checked={isDocActive}
-                                onCheckedChange={() => toggleDocument(stage.id, doc.kycId)}
-                                className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
-                              />
-                              <Label htmlFor={`doc-${stage.id}-${doc.kycId}`} className={cn(
-                                "cursor-pointer font-semibold flex-1 truncate text-sm",
-                                isDocActive ? "text-slate-800" : "text-slate-500"
-                              )}>
-                                {kycDoc.display_name || kycDoc.name}
-                              </Label>
-                            </div>
-                          </div>
-                          <div className="col-span-2 border-r border-slate-100 bg-slate-50/30" />
-                          <div className="col-span-2 bg-slate-50/30" />
-                        </div>
-
-                        {isDocActive && (
-                          <div className="bg-slate-50/30">
-                            {kycDoc.fields?.map((field: any) => {
-                              const docConfig = stageConfig?.documents?.[doc.kycId];
-                              const fieldConfig = docConfig?.fields.find((f: any) => f.id === field.id);
-                              if (showSelectedOnly && !fieldConfig) return null;
-                              return (
-                                <TableRowItem
-                                  key={`field-${stage.id}-${doc.kycId}-${field.id}`}
-                                  label={field.fieldName}
-                                  isIncluded={!!fieldConfig}
-                                  isDefault={!!fieldConfig?.isDefault}
-                                  onToggleInclude={() => toggleDocFieldInclude(stage.id, doc.kycId, field.id)}
-                                  onToggleDefault={() => toggleDocFieldDefault(stage.id, doc.kycId, field.id)}
-                                  depth={2}
-                                  className="bg-white"
-                                />
-                              );
-                            })}
-                          </div>
-                        )}
+                  return (
+                    <div key={`stage-${stage.id}`} className={cn(isNA && "opacity-60")}>
+                      <div className="bg-slate-50/80 px-4 py-2 border-y border-slate-200 flex items-center gap-2">
+                        <span className="font-semibold text-xs uppercase tracking-wide text-slate-600">
+                          {stage.order_num}. {stage.name}
+                        </span>
+                        {isNA && <Badge variant="outline" className="text-[10px] bg-white text-amber-600 border-amber-200">N/A</Badge>}
                       </div>
-                    );
-                  })}
-                </ExpandableRow>
-              );
-            })}
+
+                      {(!showSelectedOnly || stageConfig?.isStageDateSelected) && (
+                        <TableRowItem
+                          id={stageNumber}
+                          label="Stage Completion Date"
+                          isIncluded={!!stageConfig?.isStageDateSelected}
+                          isDefault={!!stageConfig?.isStageDateDefault}
+                          onToggleInclude={() => toggleStageDateInclude(stage.id)}
+                          onToggleDefault={() => toggleStageDateDefault(stage.id)}
+                          depth={1}
+                          className="italic"
+                        />
+                      )}
+
+                      {filteredDocs.map((doc: any) => {
+                        const kycDoc = kycDocuments.get(doc.kycId);
+                        if (!kycDoc) return null;
+                        const isDocActive = !!stageConfig?.documents?.[doc.kycId];
+
+                        return (
+                          <div key={`doc-${stage.id}-${doc.kycId}`}>
+                            <div className={cn(
+                              "grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm",
+                              isDocActive ? "bg-blue-50/20 hover:bg-blue-50/40" : "bg-white hover:bg-slate-50"
+                            )}>
+                              <div className="col-span-1 flex items-center border-r border-slate-100 py-2 px-2 min-w-0">
+                                {stageNumber && <span className="truncate text-[10px] font-semibold text-slate-400 tabular-nums">{stageNumber}</span>}
+                              </div>
+                              <div className="col-span-3 border-r border-slate-100" />
+                              <div className="col-span-2 flex items-center border-r border-slate-100 py-2 px-3 min-w-0">
+                                <span className={cn(
+                                  "truncate font-semibold",
+                                  isDocActive ? "text-slate-800" : "text-slate-500"
+                                )}>
+                                  {kycDoc.display_name || kycDoc.name}
+                                </span>
+                              </div>
+                              <div className="col-span-2 border-r border-slate-100 bg-slate-50/30" />
+                              <div className="col-span-2 border-r border-slate-100 bg-slate-50/30" />
+                              <div className="col-span-2 flex items-center justify-center bg-slate-50/30 py-2">
+                                <Checkbox
+                                  id={`doc-${stage.id}-${doc.kycId}`}
+                                  checked={isDocActive}
+                                  onCheckedChange={() => toggleDocument(stage.id, doc.kycId)}
+                                  className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                                />
+                              </div>
+                            </div>
+
+                            {isDocActive && (
+                              <div className="bg-slate-50/30">
+                                {kycDoc.fields?.map((field: any) => {
+                                  const docConfig = stageConfig?.documents?.[doc.kycId];
+                                  const fieldConfig = docConfig?.fields.find((f: any) => f.id === field.id);
+                                  if (showSelectedOnly && !fieldConfig) return null;
+                                  return (
+                                    <TableRowItem
+                                      key={`field-${stage.id}-${doc.kycId}-${field.id}`}
+                                      id={stageNumber}
+                                      documentName={kycDoc.display_name || kycDoc.name}
+                                      docFieldName={field.fieldName}
+                                      isIncluded={!!fieldConfig}
+                                      isDefault={!!fieldConfig?.isDefault}
+                                      onToggleInclude={() => toggleDocFieldInclude(stage.id, doc.kycId, field.id)}
+                                      onToggleDefault={() => toggleDocFieldDefault(stage.id, doc.kycId, field.id)}
+                                      depth={0}
+                                      className="bg-white"
+                                    />
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </ExpandableRow>
+            )}
           </Accordion>
         </ScrollArea>
       </div>
@@ -674,7 +729,10 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
     };
   }, [selectedDepartment, selectedSubdepartment, selectedClass, selectedSubClass]);
 
-  const getSectionId = useCallback((title: string) => title.toLowerCase().replace(/\s+/g, '-'), []);
+  // Strips a leading "1. "/"2. " section-number prefix before slugifying, so the accordion's
+  // identity (and the 'task-details' default in expandedSections below) stays stable regardless
+  // of that prefix — the number is a display label, not part of the section's identity.
+  const getSectionId = useCallback((title: string) => title.replace(/^\d+\.\s*/, '').toLowerCase().replace(/\s+/g, '-'), []);
 
   const countSelectedFields = useCallback(() => {
     let count = reportConfig.taskFields.length;
@@ -1171,11 +1229,12 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
         <ScrollArea className="flex-1">
           <div className="divide-y divide-slate-200">
             <div className="bg-slate-50 px-4 py-2.5 font-bold text-[11px] uppercase text-slate-500 tracking-wider">Task Fields</div>
-            {reportConfig.taskFields.map(fieldConfig => {
+            {reportConfig.taskFields.map((fieldConfig, fieldIdx) => {
               const header = tableHeaders.find(h => h.id === fieldConfig.id);
               return (
                 <TableRowItem
                   key={fieldConfig.id}
+                  id={`1.${fieldIdx + 1}`}
                   label={header?.label || fieldConfig.id}
                   isIncluded
                   isDefault={fieldConfig.isDefault}
@@ -1184,37 +1243,50 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
                 />
               );
             })}
-            {Object.entries(reportConfig.stages).map(([stageId, stageConfig]) => {
-              const stage = sortedStages.find(s => s.id === stageId);
-              if (!stage) return null;
+            {sortedStages.filter(stage => !!reportConfig.stages[stage.id]).map((stage, stageIdx) => {
+              const stageId = stage.id;
+              const stageConfig = reportConfig.stages[stageId];
               const isNA = nonApplicableStageIds.has(stageId);
+              const stageNumber = `2.${stageIdx + 1}`;
               return (
                 <div key={stageId}>
                   <div className="bg-slate-50 px-4 py-2 font-bold text-xs uppercase text-slate-500 tracking-wider border-t border-slate-200 flex items-center gap-2">
-                    {stage.name}
+                    {stage.order_num}. {stage.name}
                     {isNA && <Badge variant="outline" className="text-[11px] text-amber-600 border-amber-300 bg-amber-50">N/A</Badge>}
                   </div>
                   {stageConfig.isStageDateSelected && (
-                    <TableRowItem label="Completion Date" isIncluded isDefault={stageConfig.isStageDateDefault} depth={0} readOnly />
+                    <TableRowItem id={stageNumber} label="Completion Date" isIncluded isDefault={stageConfig.isStageDateDefault} depth={0} readOnly />
                   )}
                   {Object.entries(stageConfig.documents).map(([kycId, docConfig]) => {
                     const kycDoc = kycDocuments.get(kycId);
                     const docFields = (docConfig as any).fields || [];
                     if (!kycDoc) return null;
+                    const docDisplayName = kycDoc.display_name || kycDoc.name;
                     return (
                       <React.Fragment key={kycId}>
-                        <div className="px-4 py-1.5 bg-slate-50/50 text-xs font-semibold text-slate-600 border-t border-slate-100 pl-8">
-                          {kycDoc.display_name || kycDoc.name}
+                        <div className="grid grid-cols-12 gap-0 border-t border-slate-100 bg-slate-50/50 text-xs">
+                          <div className="col-span-1 flex items-center border-r border-slate-100 py-1.5 px-2 min-w-0">
+                            <span className="truncate text-[10px] font-semibold text-slate-400 tabular-nums">{stageNumber}</span>
+                          </div>
+                          <div className="col-span-3 border-r border-slate-100" />
+                          <div className="col-span-2 flex items-center border-r border-slate-100 py-1.5 px-3 min-w-0">
+                            <span className="truncate font-semibold text-slate-600">{docDisplayName}</span>
+                          </div>
+                          <div className="col-span-2 border-r border-slate-100" />
+                          <div className="col-span-2 border-r border-slate-100" />
+                          <div className="col-span-2" />
                         </div>
                         {docFields.map((field: any) => {
                           const fieldInfo = kycDoc.fields?.find((f: any) => f.id === field.id);
                           return (
                             <TableRowItem
                               key={field.id}
-                              label={fieldInfo?.fieldName || field.id}
+                              id={stageNumber}
+                              documentName={docDisplayName}
+                              docFieldName={fieldInfo?.fieldName || field.id}
                               isIncluded
                               isDefault={field.isDefault}
-                              depth={1}
+                              depth={0}
                               readOnly
                             />
                           );

@@ -99,6 +99,26 @@ export const SUMMARY_COLUMNS: SummaryColumnDef[] = [
   { id: 'actual_execution', label: 'ACTUAL EXECUTION', type: 'computed_time' },
   { id: 'execution_delta', label: 'ACTUAL EXECUTION VS PROMISED', type: 'computed_time' },
   { id: 'stages_time_expected', label: 'STAGES TIME EXPECTED', type: 'computed_time' },
+  // Everything below has a matching ENHANCED_TABLE_HEADERS_IMMIGRATION field id (the vocabulary
+  // memorized reports are built against) but previously had no SUMMARY_COLUMNS equivalent, so
+  // applyReportToSummaryColumns silently dropped any report that selected one of them. Hidden by
+  // default (see DEFAULT_HIDDEN_SUMMARY_COLUMN_IDS below) — they exist so a report CAN show them,
+  // not to add 14 more always-on columns to the default view.
+  { id: 'id', label: 'ID', type: 'field' },
+  { id: 'nationality', label: 'Nationality', type: 'field' },
+  { id: 'full_name', label: 'Full Name', type: 'field' },
+  { id: 'age', label: 'Age', type: 'field' },
+  { id: 'r_number', label: 'R Number', type: 'field' },
+  { id: 'passport_number', label: 'Passport Number', type: 'field' },
+  { id: 'task_manager', label: 'Task Manager', type: 'field' },
+  { id: 'task_assistant', label: 'Task Assistant', type: 'field' },
+  { id: 'current_stage_follow_up', label: 'Current Stage Follow-up', type: 'field' },
+  { id: 'cancellation_reason', label: 'Cancellation Reason', type: 'field' },
+  { id: 'cancellation_date', label: 'Cancellation Date', type: 'field' },
+  { id: 'cancelled_by', label: 'Cancelled By', type: 'field' },
+  { id: 'immigration_document_type', label: 'Current Immigration Document Type', type: 'field' },
+  { id: 'immigration_expiry_date', label: 'Current Immigration Expiry Date', type: 'field' },
+  { id: 'immigration_days_to_go', label: 'Immigration Days Remaining', type: 'field' },
 ];
 
 const DEFAULT_HIDDEN_SUMMARY_COLUMN_IDS = new Set([
@@ -108,6 +128,21 @@ const DEFAULT_HIDDEN_SUMMARY_COLUMN_IDS = new Set([
   'duration',
   'subclass_name',
   'stages_time_expected',
+  'id',
+  'nationality',
+  'full_name',
+  'age',
+  'r_number',
+  'passport_number',
+  'task_manager',
+  'task_assistant',
+  'current_stage_follow_up',
+  'cancellation_reason',
+  'cancellation_date',
+  'cancelled_by',
+  'immigration_document_type',
+  'immigration_expiry_date',
+  'immigration_days_to_go',
 ]);
 
 export const DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS = SUMMARY_COLUMNS
@@ -131,6 +166,10 @@ const TASK_FIELD_TO_SUMMARY_COLUMN_ID: Record<string, string> = {
   job_description: 'job_description',
   current_stage_name: 'current_stage',
   current_stage_status_value: 'current_stage',
+  // 'application_type' has no matching ENHANCED_TABLE_HEADERS_IMMIGRATION id of its own — reports
+  // select this data under the field id 'renewal_status' (resolveFieldValue's 'application_type'
+  // case already reads task.renewal_status, so this just points reports at the same column).
+  renewal_status: 'application_type',
   // Identity mapping — ENHANCED_TABLE_HEADERS_IMMIGRATION uses the same ids as these
   // SUMMARY_COLUMNS computed_time entries on purpose (see that header list's own comment).
   promised_time: 'promised_time',
@@ -138,6 +177,26 @@ const TASK_FIELD_TO_SUMMARY_COLUMN_ID: Record<string, string> = {
   actual_execution: 'actual_execution',
   execution_delta: 'execution_delta',
   stages_time_expected: 'stages_time_expected',
+  // Identity mappings for the previously-dropped fields (see SUMMARY_COLUMNS' own comment).
+  id: 'id',
+  nationality: 'nationality',
+  full_name: 'full_name',
+  age: 'age',
+  r_number: 'r_number',
+  passport_number: 'passport_number',
+  task_manager: 'task_manager',
+  task_assistant: 'task_assistant',
+  current_stage_follow_up: 'current_stage_follow_up',
+  cancellation_reason: 'cancellation_reason',
+  cancellation_date: 'cancellation_date',
+  cancelled_by: 'cancelled_by',
+  immigration_document_type: 'immigration_document_type',
+  immigration_expiry_date: 'immigration_expiry_date',
+  immigration_days_to_go: 'immigration_days_to_go',
+  // subclass_name already had a SUMMARY_COLUMNS entry but no ENHANCED_TABLE_HEADERS_IMMIGRATION
+  // field maps to it by that exact id — there's no dedicated "Sub-Class" header id, so this is
+  // included for completeness/future-proofing rather than a field that was actually dropping.
+  subclass_name: 'subclass_name',
 };
 
 // Always kept visible regardless of what the applied report selected — without these two,
@@ -148,6 +207,15 @@ export interface ApplyReportToSummaryColumnsResult {
   visibleColumnIds: string[];
   matchedCount: number;
   droppedCount: number;
+  // columnId -> "1.n" (task field, n = its position among the report's own task fields) or
+  // "2.m" (stage, m = its position among the report's own selected stages in order_num order)
+  // — a stable, human-readable reference in place of the field/stage's own raw id (a positional
+  // ENHANCED_TABLE_HEADERS_IMMIGRATION int for task fields, a UUID for stages), shown both in
+  // MemorizedReportDialog's ID column and next to the matching column header in SummaryTable so
+  // the two views can be cross-referenced. A milestone stage that produced both a date column
+  // (its `milestone.key`) and a report_stage_info fields column shares one "2.m" across both —
+  // the number identifies the STAGE, not the column.
+  fieldNumbers: Record<string, string>;
 }
 
 type ReportStageConfig = {
@@ -163,38 +231,90 @@ type ReportStageConfig = {
 // reports/page.tsx's one-`stage_info`-column-per-stage model. Only task fields with no
 // SUMMARY_COLUMNS equivalent at all count as dropped; every stage selection now has a home via
 // buildDynamicReportStageColumns.
-export const applyReportToSummaryColumns = (configuration: {
-  taskFields?: { id: string }[];
-  stages?: Record<string, ReportStageConfig>;
-}): ApplyReportToSummaryColumnsResult => {
+export const applyReportToSummaryColumns = (
+  configuration: {
+    taskFields?: { id: string }[];
+    stages?: Record<string, ReportStageConfig>;
+  },
+  // Same stagesByDept SummaryTable's own buildDynamicReportStageColumns already sorts by — needed
+  // here too so stageInfoIds (below) lands in workflow order rather than configuration.stages'
+  // object-key order (whatever order the report builder happened to toggle stages on in), which
+  // otherwise disagreed with buildDynamicReportStageColumns' own order_num sort and made the
+  // rendered column order diverge from the "front matches config order" contract callers expect.
+  stagesByDept: Map<string, any[]> = new Map()
+): ApplyReportToSummaryColumnsResult => {
   const mapped = new Set<string>(ALWAYS_VISIBLE_SUMMARY_COLUMN_IDS);
   let matchedCount = 0;
   let droppedCount = 0;
 
+  const allStages = Array.from(stagesByDept.values()).flat();
+  const stageOrderNum = (stageId: string): number => {
+    const stage = allStages.find((s: any) => s.id === stageId);
+    return stage?.order_num ?? Number.MAX_SAFE_INTEGER;
+  };
+
+  const fieldNumbers: Record<string, string> = {};
+
+  // Preserves configuration.taskFields' own array order — the order the report's builder
+  // stored them in, which SummaryTable now displays columns in (see its `columns` useMemo) —
+  // rather than SUMMARY_COLUMNS' fixed declaration order the old implementation always fell
+  // back to regardless of how the report itself ordered its fields.
+  const orderedTaskFieldIds: string[] = [];
   (configuration.taskFields || []).forEach(field => {
     const summaryId = TASK_FIELD_TO_SUMMARY_COLUMN_ID[field.id];
-    if (summaryId) { mapped.add(summaryId); matchedCount++; }
-    else droppedCount++;
+    if (summaryId) {
+      if (!mapped.has(summaryId)) orderedTaskFieldIds.push(summaryId);
+      mapped.add(summaryId);
+      matchedCount++;
+    } else droppedCount++;
   });
+  orderedTaskFieldIds.forEach((id, i) => { fieldNumbers[id] = `1.${i + 1}`; });
 
+  const milestoneIds: string[] = [];
+  const stageInfoEntries: { id: string; orderNum: number }[] = [];
+  // One entry per STAGE (not per resulting column) — a milestone stage with both a date and
+  // extra fields selected produces two SUMMARY_COLUMNS ids, but is still one "2.m".
+  const stageNumberEntries: { stageId: string; orderNum: number; columnIds: string[] }[] = [];
   Object.entries(configuration.stages || {}).forEach(([stageId, stageConfig]) => {
     const hasDate = !!stageConfig?.isStageDateSelected;
     const hasFields = Object.values(stageConfig?.documents || {}).some(d => (d?.fields || []).length > 0);
     if (!hasDate && !hasFields) return;
 
     const milestone = MILESTONE_STAGE_COLUMNS.find(m => m.stageId === stageId);
-    if (hasDate && milestone) mapped.add(milestone.key);
-    if (hasFields || (hasDate && !milestone)) mapped.add(reportStageInfoColumnId(stageId));
+    const columnIds: string[] = [];
+    if (hasDate && milestone && !mapped.has(milestone.key)) { mapped.add(milestone.key); milestoneIds.push(milestone.key); columnIds.push(milestone.key); }
+    if (hasFields || (hasDate && !milestone)) {
+      const id = reportStageInfoColumnId(stageId);
+      if (!mapped.has(id)) { mapped.add(id); stageInfoEntries.push({ id, orderNum: stageOrderNum(stageId) }); columnIds.push(id); }
+    }
+    if (columnIds.length > 0) stageNumberEntries.push({ stageId, orderNum: stageOrderNum(stageId), columnIds });
     matchedCount++;
   });
+  // Workflow order (order_num), not configuration.stages' object-key order — same sort
+  // buildDynamicReportStageColumns applies to the actual column defs, so the visible order
+  // this produces always agrees with what SummaryTable ends up rendering.
+  const stageInfoIds = stageInfoEntries.sort((a, b) => a.orderNum - b.orderNum).map(e => e.id);
+
+  stageNumberEntries
+    .sort((a, b) => a.orderNum - b.orderNum)
+    .forEach((entry, i) => {
+      const number = `2.${i + 1}`;
+      entry.columnIds.forEach(id => { fieldNumbers[id] = number; });
+    });
 
   return {
     visibleColumnIds: [
-      ...SUMMARY_COLUMNS.map(c => c.id).filter(id => mapped.has(id)),
-      ...Array.from(mapped).filter(id => id.startsWith('report_stage_info_')),
+      ...ALWAYS_VISIBLE_SUMMARY_COLUMN_IDS,
+      ...orderedTaskFieldIds,
+      // Milestones keep their fixed workflow sequence (Enquiry -> Bill Raised -> Req Received
+      // -> Confirmed — see MILESTONE_STAGE_COLUMNS' own comment), not configuration.stages'
+      // object-key order, which carries no meaningful sequence of its own.
+      ...MILESTONE_STAGE_COLUMNS.map(m => m.key).filter(key => milestoneIds.includes(key)),
+      ...stageInfoIds,
     ],
     matchedCount,
     droppedCount,
+    fieldNumbers,
   };
 };
 

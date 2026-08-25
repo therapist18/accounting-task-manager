@@ -36,7 +36,7 @@ const parseDateSafeReport = (s: string | null | undefined): Date | null => {
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function StandardReportView({
-  allTasks, filteredColumns, sortConfig, expandedStageColumns,
+  allTasks, filteredColumns: incomingFilteredColumns, sortConfig, expandedStageColumns,
   renderCellValue, safeRender, handleSort, toggleStageColumns,
   initialRowsPerPage = 25, showDelta = false, showOfficers = false,
   showTime = false, activeDeptId = '', onSaveStageDate, stages,
@@ -47,6 +47,18 @@ export function StandardReportView({
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
 
   const stickyColumnIds = new Set(['task_id', 'task_passport_number', 'task_applicant_name']);
+
+  // A memorized report's own field order can put a non-sticky column between two sticky
+  // ones (e.g. Job Description reordered ahead of Applicant Name) — the offset math below
+  // only accounts for sticky columns' own accumulated widths, so a sticky column with a
+  // non-sticky one interleaved before it would compute the wrong `left` px and detach from
+  // its real position while scrolling. Sticky columns must always render contiguously at
+  // the front, regardless of the report's stored order, for that math to stay correct.
+  const filteredColumns = useMemo(() => {
+    const sticky = incomingFilteredColumns.filter((c: any) => stickyColumnIds.has(c.id));
+    const rest = incomingFilteredColumns.filter((c: any) => !stickyColumnIds.has(c.id));
+    return [...sticky, ...rest];
+  }, [incomingFilteredColumns]);
 
   // Resolve the same date value the stage cell actually renders (calculateStageDate +
   // immigration-date fallback, via renderCellValue), then run it through the same

@@ -416,7 +416,7 @@ export function PerspectiveTabs({
           <Tabs value={currentActive} onValueChange={setTab} className="w-full lg:w-auto">
             <TabsList className={cn(TAB_LIST_CLASS, "flex-wrap lg:flex-nowrap overflow-x-auto custom-scrollbar")}>
               <TabsTrigger value="all" className={cn(TAB_TRIGGER_CLASS, "h-9")}>
-                <User className="h-4 w-4 text-slate-400 group-data-[state=active]:text-white" /> Personnel
+                <User className="h-4 w-4 text-slate-400 group-data-[state=active]:text-white" /> All {isOfficer ? "Officers" : "Managers"}
                 <span className={COUNT_BADGE_CLASS}>
                   {counts.all ?? 0}
                 </span>

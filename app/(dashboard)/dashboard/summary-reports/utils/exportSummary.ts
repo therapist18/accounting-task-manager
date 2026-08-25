@@ -26,6 +26,9 @@ export interface SummaryExportParams {
   getPromisedMinutesForTask: (task: any) => number | null;
   getPlannedExecutionDateForTask: (task: any) => Date | null;
   getCurrentStageNameForTask?: (task: any) => string | null;
+  getCurrentStageFollowUpForTask?: (task: any) => string | null;
+  getStaffName?: (userId: any) => string;
+  getEnhancedStatusForTask?: (task: any) => { date: Date | null; documentType: string | null; daysRemaining: number | null };
   showTime: boolean;
   scopeName?: string;
   statusLabel?: string;
@@ -43,7 +46,11 @@ const resolveExportCell = (col: SummaryColumnDef, task: any, p: SummaryExportPar
   if (col.id === 'current_stage') {
     text = p.getCurrentStageNameForTask?.(task) ?? '';
   } else if (col.type === 'field') {
-    text = resolveFieldValue(col.id, task, p.companies, p.enhancedTasksData, p.departments) ?? '';
+    text = resolveFieldValue(col.id, task, p.companies, p.enhancedTasksData, p.departments, {
+      getStaffName: p.getStaffName,
+      getCurrentStageFollowUpForTask: p.getCurrentStageFollowUpForTask,
+      getEnhancedStatusForTask: p.getEnhancedStatusForTask,
+    }) ?? '';
   } else if (col.type === 'milestone') {
     const raw = formatDateCell(resolveMilestoneDate(task, col.milestone!.stageId), p.showTime);
     text = raw === '—' ? '' : raw;

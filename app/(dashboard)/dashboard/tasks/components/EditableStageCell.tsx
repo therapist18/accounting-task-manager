@@ -5,8 +5,8 @@ import { useState, useRef, useEffect, useCallback, useMemo, memo } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, Loader2, SkipForward, Clock3, MoreHorizontal, CheckCircle2, Timer, AlertCircle, User, UserPlus, List, Link2, Type, Hash, Globe, Mail, Phone, AlignLeft, FileText as FileTextIcon, RotateCcw, ArrowUpRight, CreditCard, ClipboardList, Lock } from "lucide-react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
+import { Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, Loader2, SkipForward, Clock3, MoreHorizontal, MoreVertical, CheckCircle2, Timer, AlertCircle, User, UserPlus, List, Link2, Type, Hash, Globe, Mail, Phone, AlignLeft, FileText as FileTextIcon, RotateCcw, ArrowUpRight, CreditCard, ClipboardList, Lock } from "lucide-react"
 import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
@@ -35,7 +35,11 @@ interface EditableStageCellProps {
   documentData?: any
   onAutomationClick?: (e: React.MouseEvent, documentData?: any) => void
   departments?: any[]
-  renderMode?: 'date' | 'actions' | 'combined'
+  // 'status' / 'upload' / 'other' split 'actions' into dedicated columns (status badge;
+  // view+upload; officer/billing-link/skip-menu) for the transposed table's 4-column layout —
+  // 'actions' itself is untouched so other consumers (StandardTable, TransposedStagesTable,
+  // StagesTable, EnquiryTable, SummaryTable) keep their existing combined behavior.
+  renderMode?: 'date' | 'actions' | 'combined' | 'plain-date' | 'status' | 'upload' | 'other'
   taskName?: string
   clientName?: string
   onFetchData?: () => Promise<void>;
@@ -967,8 +971,78 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     );
   };
 
+  // Shared composite date+time editor — used by both renderDateContent (legacy 'date' mode)
+  // and renderPlainDateContent (the transposed table's dedicated Date column) so the two never
+  // drift apart.
+  const renderCompositeDateEditor = () => {
+    const getCurrentDate = () => {
+      if (!editValue) return '';
+      try {
+        if (editValue.includes('T')) return editValue.split('T')[0];
+        const parsed = parseDate(editValue);
+        return parsed ? format(parsed, 'yyyy-MM-dd') : '';
+      } catch (e) { return ''; }
+    };
+
+    const getCurrentTime = () => {
+      if (!editValue) return '00:00';
+      try {
+        if (editValue.includes('T')) {
+          const t = editValue.split('T')[1];
+          return t ? t.substring(0, 5) : '00:00';
+        }
+        const parsed = parseDate(editValue);
+        return parsed ? format(parsed, 'HH:mm') : '00:00';
+      } catch (e) { return '00:00'; }
+    };
+
+    const datePart = getCurrentDate();
+    const timePart = getCurrentTime();
+
+    const handleCompositeSave = () => {
+      const dateInput = document.getElementById(`date-part-${stage.id}`) as HTMLInputElement;
+      const timeInput = document.getElementById(`time-part-${stage.id}`) as HTMLInputElement;
+      const rawDate = dateInput?.value || '';
+      const d = displayToIsoDate(rawDate) || datePart;
+      const t = timeInput?.value || '00:00';
+      if (!d) { toast({ title: "Error", description: "Please select a date", variant: "destructive" }); return; }
+      handleSave(false, '', `${d}T${t}`);
+    };
+
+    const handleKeyDownComposite = (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') handleCompositeSave();
+      if (e.key === 'Escape') handleCancel();
+    };
+
+    return (
+      <div className="flex items-center gap-1 w-full relative z-10">
+        <div className="flex items-center h-7 rounded-md border border-input bg-background px-1 text-sm shadow-sm flex-1 max-w-[130px]">
+          <input
+            id={`date-part-${stage.id}`} type="text" defaultValue={datePart ? isoToDisplayDate(datePart) : ''} autoFocus
+            placeholder="dd/mm/yyyy"
+            maxLength={10}
+            className="bg-transparent border-none p-0 h-full focus:outline-none focus:ring-0 text-[11px] font-medium text-slate-900 w-[85px]"
+            onKeyDown={handleKeyDownComposite}
+            onChange={(e) => { const raw = e.target.value.replace(/[^\d/]/g, ''); const isoDate = displayToIsoDate(raw); const t = (document.getElementById(`time-part-${stage.id}`) as HTMLInputElement)?.value || '00:00'; setEditValue(`${isoDate}T${t}`); }}
+          />
+          <span className="text-slate-200 mx-0.5">|</span>
+          <input
+            id={`time-part-${stage.id}`} type="time" defaultValue={timePart}
+            className="bg-transparent border-none p-0 h-full focus:outline-none focus:ring-0 text-[11px] text-slate-600 w-[45px]"
+            onKeyDown={handleKeyDownComposite}
+            onChange={(e) => { const rawDate = (document.getElementById(`date-part-${stage.id}`) as HTMLInputElement)?.value || ''; const isoDate = displayToIsoDate(rawDate); setEditValue(`${isoDate}T${e.target.value}`); }}
+          />
+        </div>
+        <div className="flex items-center shrink-0">
+          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" onClick={handleCompositeSave} disabled={isLoading} title="Save"><Check className="h-3.5 w-3.5" /></Button>
+          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-500 hover:text-red-700 hover:bg-red-50" onClick={handleCancel} disabled={isLoading} title="Cancel"><X className="h-3.5 w-3.5" /></Button>
+        </div>
+      </div>
+    );
+  };
+
   const renderDateContent = (isCompact = false) => {
-    if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
+    if (!isStageApplicable) return <span className="text-xs text-gray-400 italic">N/A</span>;
     const stageData = task.stages?.[stage.id];
     const stageStatus = stageData?.status;
     const isSkipped = stageStatus === 'skipped';
@@ -1013,7 +1087,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
             {isStageOverdue
               ? <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
               : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />}
-            <span className={cn("text-sm font-semibold whitespace-nowrap tracking-tight truncate", isStageOverdue ? "text-amber-700" : "text-slate-800")} title={formatDateDisplay(stageDate)}>
+            <span className={cn("text-xs font-semibold whitespace-nowrap tracking-tight truncate", isStageOverdue ? "text-amber-700" : "text-slate-800")} title={formatDateDisplay(stageDate)}>
               {formatDateDisplay(stageDate)}
             </span>
             {isStageOverdue && (
@@ -1048,7 +1122,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-1">
-                  <div className={`flex items-center gap-1 font-medium text-[11px] ${textColorClass} cursor-default truncate`}>
+                  <div className={`flex items-center gap-1 font-medium text-xs ${textColorClass} cursor-default truncate`}>
                     {icon}<span className="truncate">{timeStatus.formattedElapsed} elapsed</span>
                   </div>
                 </div>
@@ -1227,70 +1301,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     }
 
     if (isEditing) {
-      const getCurrentDate = () => {
-        if (!editValue) return '';
-        try {
-          if (editValue.includes('T')) return editValue.split('T')[0];
-          const parsed = parseDate(editValue);
-          return parsed ? format(parsed, 'yyyy-MM-dd') : '';
-        } catch (e) { return ''; }
-      };
-
-      const getCurrentTime = () => {
-        if (!editValue) return '00:00';
-        try {
-          if (editValue.includes('T')) {
-            const t = editValue.split('T')[1];
-            return t ? t.substring(0, 5) : '00:00';
-          }
-          const parsed = parseDate(editValue);
-          return parsed ? format(parsed, 'HH:mm') : '00:00';
-        } catch (e) { return '00:00'; }
-      };
-
-      const datePart = getCurrentDate();
-      const timePart = getCurrentTime();
-
-      const handleCompositeSave = () => {
-        const dateInput = document.getElementById(`date-part-${stage.id}`) as HTMLInputElement;
-        const timeInput = document.getElementById(`time-part-${stage.id}`) as HTMLInputElement;
-        const rawDate = dateInput?.value || '';
-        const d = displayToIsoDate(rawDate) || datePart;
-        const t = timeInput?.value || '00:00';
-        if (!d) { toast({ title: "Error", description: "Please select a date", variant: "destructive" }); return; }
-        handleSave(false, '', `${d}T${t}`);
-      };
-
-      const handleKeyDownComposite = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') handleCompositeSave();
-        if (e.key === 'Escape') handleCancel();
-      };
-
-      return (
-        <div className="flex items-center gap-1 w-full relative z-10">
-          <div className="flex items-center h-7 rounded-md border border-input bg-background px-1 text-sm shadow-sm flex-1 max-w-[130px]">
-            <input
-              id={`date-part-${stage.id}`} type="text" defaultValue={datePart ? isoToDisplayDate(datePart) : ''} autoFocus
-              placeholder="dd/mm/yyyy"
-              maxLength={10}
-              className="bg-transparent border-none p-0 h-full focus:outline-none focus:ring-0 text-[11px] font-medium text-slate-900 w-[85px]"
-              onKeyDown={handleKeyDownComposite}
-              onChange={(e) => { const raw = e.target.value.replace(/[^\d/]/g, ''); const isoDate = displayToIsoDate(raw); const t = (document.getElementById(`time-part-${stage.id}`) as HTMLInputElement)?.value || '00:00'; setEditValue(`${isoDate}T${t}`); }}
-            />
-            <span className="text-slate-200 mx-0.5">|</span>
-            <input
-              id={`time-part-${stage.id}`} type="time" defaultValue={timePart}
-              className="bg-transparent border-none p-0 h-full focus:outline-none focus:ring-0 text-[11px] text-slate-600 w-[45px]"
-              onKeyDown={handleKeyDownComposite}
-              onChange={(e) => { const rawDate = (document.getElementById(`date-part-${stage.id}`) as HTMLInputElement)?.value || ''; const isoDate = displayToIsoDate(rawDate); setEditValue(`${isoDate}T${e.target.value}`); }}
-            />
-          </div>
-          <div className="flex items-center shrink-0">
-            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" onClick={handleCompositeSave} disabled={isLoading} title="Save"><Check className="h-3.5 w-3.5" /></Button>
-            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-500 hover:text-red-700 hover:bg-red-50" onClick={handleCancel} disabled={isLoading} title="Cancel"><X className="h-3.5 w-3.5" /></Button>
-          </div>
-        </div>
-      );
+      return renderCompositeDateEditor();
     }
 
     if (timeStatus && !requiresUpload && !hasLinkedDocument) {
@@ -1304,7 +1315,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-1">
-                  <div className={`flex items-center gap-1 font-medium text-[11px] ${textColorClass} cursor-default truncate`}>
+                  <div className={`flex items-center gap-1 font-medium text-xs ${textColorClass} cursor-default truncate`}>
                     {icon}<span className="truncate">{timeStatus.formattedElapsed} elapsed</span>
                   </div>
                   <Button variant="ghost" size="sm" className="h-5 w-5 p-0 border border-dashed border-gray-300 hover:border-gray-400 shrink-0 ml-1" onClick={() => setIsEditing(true)}>
@@ -1343,7 +1354,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     if (!isStageApplicable) return null;
 
     const btnSizeClass = isCompact ? "h-6 w-6" : "h-7 w-7";
-    const iconSizeClass = isCompact ? "h-16 w-16" : "h-16 w-16";
+    const iconSizeClass = "h-3.5 w-3.5";
 
     const stageLinkBtn = (() => {
       if (!stageLink) return null;
@@ -1554,6 +1565,381 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     );
   };
 
+  // Neutral, uncolored date-only view for the transposed table's dedicated Date column — no
+  // status icon, no overdue color/badge, no elapsed timer, all of which now live exclusively
+  // in the Status column so the two never disagree about what "late" looks like.
+  const renderPlainDateContent = (isCompact = false) => {
+    if (!isStageApplicable) return <span className="text-xs text-gray-400 italic">N/A</span>;
+
+    const stageData = task.stages?.[stage.id];
+    const stageStatus = stageData?.status;
+    const isSkipped = stageStatus === 'skipped';
+
+    if (isSkipped) return <span className="text-xs text-gray-300">—</span>;
+
+    const isExplicitlyCompleted = stageStatus === 'completed';
+    const isLegacyCompleted = !stageStatus && (!!value || stageData?.documentsUploaded === true);
+    const inputType = stage.stageInputType;
+    const isCustomInputType = inputType && inputType !== 'document' && inputType !== 'file' && !requiresUpload;
+    const currentValue = value || stageData?.value || '';
+
+    if (isCustomInputType) {
+      if (isEditing) return renderCustomInputEditor(inputType, isCompact, currentValue);
+
+      if ((isExplicitlyCompleted || isLegacyCompleted) || currentValue) {
+        return (
+          <div className="flex items-center gap-1 min-w-0 justify-center">
+            <span className="text-xs text-slate-600 truncate" title={currentValue || undefined}>{currentValue || '—'}</span>
+            {!readOnly && (
+              <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-slate-400 hover:text-blue-600 shrink-0" onClick={(e) => { e.stopPropagation(); setIsEditing(true); setCustomInputValue(currentValue); if (inputType === 'multiselect') setCustomMultiSelectValues(currentValue ? currentValue.split(', ') : []); }} title="Edit">
+                {getInputTypeIcon(inputType)}
+              </Button>
+            )}
+          </div>
+        );
+      }
+
+      if (readOnly) return <span className="text-xs text-gray-300">—</span>;
+      return (
+        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-slate-500 border border-dashed border-gray-300 hover:border-gray-400 shrink-0" onClick={() => { setIsEditing(true); setCustomInputValue(currentValue); if (inputType === 'multiselect') setCustomMultiSelectValues(currentValue ? currentValue.split(', ') : []); }}>
+          {getInputTypeLabel(inputType)}
+        </Button>
+      );
+    }
+
+    if (isEditing) return renderCompositeDateEditor();
+
+    if ((isExplicitlyCompleted || isLegacyCompleted) && (!stageDate || stageDate === 'NaN/NaN/NaN') && !requiresUpload) {
+      if (readOnly) return <span className="text-xs text-gray-300">—</span>;
+      return (
+        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-slate-500 border border-dashed border-gray-300 hover:border-gray-400" onClick={() => setIsEditing(true)}>
+          Set Date
+        </Button>
+      );
+    }
+
+    if ((isExplicitlyCompleted || isLegacyCompleted) && stageDate && stageDate !== 'NaN/NaN/NaN') {
+      const editable = !readOnly && !requiresUpload;
+      return (
+        <span
+          className={cn("text-xs text-slate-600 truncate", editable && "cursor-pointer hover:underline")}
+          title={formatDateDisplay(stageDate)}
+          onClick={(e) => { if (!editable) return; e.stopPropagation(); setIsEditing(true); }}
+        >
+          {formatDateDisplay(stageDate)}
+        </span>
+      );
+    }
+
+    if (readOnly) return <span className="text-xs text-gray-300">—</span>;
+
+    if (!requiresUpload) {
+      return (
+        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-slate-500 border border-dashed border-gray-300 hover:border-gray-400" onClick={() => setIsEditing(true)}>
+          <Calendar className="h-3 w-3 mr-1" /> Add Date
+        </Button>
+      );
+    }
+
+    return null;
+  };
+
+  // Status-only view for the transposed table's dedicated Status column: same badge/tooltip
+  // logic as renderDateContent's completed/in-progress branches, minus the date text itself
+  // (which stays in the Date column). Purely a read display now — Undo Skip/Clear Stage moved
+  // into the Other Actions menu (renderOtherActionsContent) so this column never has to carry
+  // both a badge AND an icon-button crammed next to it.
+  const renderStatusContent = (isCompact = false) => {
+    if (!isStageApplicable) return <span className="text-xs text-gray-400 italic">N/A</span>;
+
+    const stageData = task.stages?.[stage.id];
+    const stageStatus = stageData?.status;
+    const isSkipped = stageStatus === 'skipped';
+
+    if (isSkipped) {
+      const skippedAt = stageData?.skippedAt;
+      const reason = stageData?.reason || 'No reason provided';
+      let formattedSkippedDate = 'N/A';
+      if (skippedAt) {
+        const d = parseDate(skippedAt);
+        if (d) formattedSkippedDate = format(d, 'dd/MM/yyyy');
+      }
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-1 text-xs text-amber-600 font-semibold cursor-help truncate">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">Skipped</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent className="bg-amber-50 text-amber-900 border-amber-200">
+              <div className="text-xs text-left space-y-1">
+                <p><span className="font-semibold">Reason:</span> {reason}</p>
+                <p><span className="font-semibold">Date:</span> {formattedSkippedDate}</p>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      );
+    }
+
+    const isExplicitlyCompleted = stageStatus === 'completed';
+    const isLegacyCompleted = !stageStatus && (!!value || stageData?.documentsUploaded === true);
+
+    if (isExplicitlyCompleted || isLegacyCompleted) {
+      const isCompletedOverdue = isStageOverdue;
+      const textColorClass = isCompletedOverdue ? "text-amber-600" : "text-emerald-600";
+      const icon = isCompletedOverdue ? <Clock className="h-3.5 w-3.5 shrink-0" /> : <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />;
+      const borderColorClass = isCompletedOverdue ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-100";
+
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className={`flex items-center gap-1 font-semibold text-xs ${textColorClass} cursor-default select-none truncate`}>
+                {icon}
+                <span className="truncate">{isCompletedOverdue ? "Overdue" : "Completed"}</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
+              <div className="space-y-2 p-1">
+                <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
+                  <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
+                </div>
+                {renderStageTimingDetails({ isCompleted: true })}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      );
+    }
+
+    if (timeStatus && !requiresUpload && !hasLinkedDocument) {
+      const textColorClass = timeStatus.isOverdue ? "text-red-600" : "text-blue-600";
+      const icon = timeStatus.isOverdue ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> : <Timer className="h-3.5 w-3.5 shrink-0" />;
+      const borderColorClass = timeStatus.isOverdue ? "border-red-200 bg-red-50" : "border-blue-200 bg-blue-50";
+
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className={`flex items-center gap-1 font-semibold text-xs ${textColorClass} cursor-default truncate`}>
+                {icon}<span className="truncate">{timeStatus.isOverdue ? 'Overdue' : 'In Progress'}</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md max-w-[250px]`}>
+              <div className="space-y-2 p-1">
+                <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
+                  <span className={`font-bold ${textColorClass}`}>{timeStatus.isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}</span>
+                </div>
+                {renderStageTimingDetails({ isCompleted: false })}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      );
+    }
+
+    return <span className="text-xs text-gray-400 italic">Not started</span>;
+  };
+
+  // Document-only view for the transposed table's dedicated Upload/View column.
+  const renderUploadViewContent = (isCompact = false) => {
+    if (!isStageApplicable) return null;
+
+    const btnSizeClass = isCompact ? "h-6 w-6" : "h-7 w-7";
+    const iconSizeClass = "h-3.5 w-3.5";
+
+    const viewBtn = linkedDocument && (
+      <Dialog>
+        <DialogTrigger asChild>
+          <Button variant="ghost" size="icon" className={cn("text-green-600 hover:bg-green-50", btnSizeClass)} title="View document details" onClick={handleViewDocument}>
+            <Eye className={iconSizeClass} />
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
+          <DialogHeader className="p-4 border-b">
+            <DialogTitle className="text-lg">
+              <div className="flex items-center justify-between">
+                <div>{stage?.name && <span>{stage.name}: </span>}{task?.name}{task?.client_name && ` - ${task.client_name}`}</div>
+                <div className="text-sm font-normal text-muted-foreground">{previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''}</div>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto p-4">
+            {previewDocuments.length > 0 ? (
+              previewDocuments.map((doc) => (
+                <div key={doc.documentId} className="border rounded-lg overflow-hidden mb-4">
+                  <div className="p-4 bg-gray-50 border-b">
+                    <h3 className="font-medium">{doc.documentName || 'Document'} <span className="text-muted-foreground text-sm font-normal ml-2">(Uploaded: {doc.created_at ? formatDateDisplay(doc.created_at) : 'N/A'})</span></h3>
+                  </div>
+                  <div className="p-4">
+                    <ExtractionPreview documentId={doc.documentId} documentName={doc.documentName} extractedData={doc.extractedData || {}} fields={doc.fields || []} fileUrl={doc.fileUrl} fileName={doc.fileName} onSave={handlePreviewSave} onDelete={handleDeleteDocument} expanded={true} showSaveButton={!readOnly && !!onSave} readOnly={readOnly} type={doc.type} file={doc.file} onDataChange={(fieldName, value) => handlePreviewDataChange(doc.documentId, fieldName, value)} />
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="h-full flex items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /><p className="ml-4 text-muted-foreground">Loading documents...</p>
+              </div>
+            )}
+          </div>
+          <div className="p-4 border-t flex justify-end">
+            <Button variant="default" onClick={() => setIsPreviewOpen(false)}>Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+
+    const uploadBtn = !readOnly && requiresUpload && (
+      <Button variant="ghost" size="icon" className={cn(hasLinkedDocument ? 'text-blue-400 hover:bg-blue-50' : 'text-blue-600 hover:bg-blue-50', btnSizeClass)} onClick={handleDocumentUpload} title={hasLinkedDocument ? 'Upload new document' : 'Upload document'}>
+        <Upload className={iconSizeClass} />
+      </Button>
+    );
+
+    if (!viewBtn && !uploadBtn) return null;
+
+    return (
+      <div className={cn("flex items-center gap-1 shrink-0", isCompact && "bg-slate-50/50 rounded p-0.5 border border-slate-100")}>
+        {viewBtn}
+        {uploadBtn}
+      </div>
+    );
+  };
+
+  // Officer assignment / billing-requirements-automation deep-link / skip+run-automation menu —
+  // everything from renderActionsContent except the document view/upload buttons, which get
+  // their own dedicated Upload/View column instead.
+  // Everything that isn't date/status/document (officer assignment, the billing/requirements/
+  // automation deep-link, Run Automation, Skip Stage) folds into ONE "more actions" menu instead
+  // of a row of separate icon buttons — the transposed table's 4-column layout only has room for
+  // a single compact trigger here, and a wall of icons per stage per task was the whole reason
+  // this column existed as a distinct, decluttered space in the first place.
+  const renderOtherActionsContent = (isCompact = false) => {
+    if (!isStageApplicable) return null;
+
+    const btnSizeClass = isCompact ? "h-6 w-6" : "h-7 w-7";
+
+    const stageLinkItem = (() => {
+      if (!stageLink) return null;
+      if (stageLink.tab === 'billing') {
+        return { icon: <CreditCard className="mr-2 h-3.5 w-3.5 text-blue-600 shrink-0" />, label: 'Preview Bill', onClick: (e: React.MouseEvent) => { e.stopPropagation(); setBillPreviewOpen(true); } };
+      }
+      if (stageLink.tab === 'requirements') {
+        return { icon: <ClipboardList className="mr-2 h-3.5 w-3.5 text-indigo-600 shrink-0" />, label: 'Requirements Checklist', onClick: (e: React.MouseEvent) => { e.stopPropagation(); onOpenRequirements?.(task); } };
+      }
+      if (stageLink.tab === 'automation' && currentAutomationConfig) {
+        return { icon: <Zap className="mr-2 h-3.5 w-3.5 text-purple-600 shrink-0" />, label: 'Open Automation', onClick: (e: React.MouseEvent) => { e.stopPropagation(); window.open(`/dashboard/tasks/${task.id}?tab=automation&automationId=${currentAutomationConfig.automationId}`, '_blank', 'noopener,noreferrer'); } };
+      }
+      return null;
+    })();
+
+    const menuTrigger = (
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className={cn("text-slate-400 hover:text-slate-700 hover:bg-slate-100 shrink-0", btnSizeClass)} onClick={(e) => e.stopPropagation()}>
+          <MoreVertical className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+    );
+
+    if (readOnly) {
+      if (previewOnly || !stageLinkItem) return null;
+      return (
+        <DropdownMenu>
+          {menuTrigger}
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={stageLinkItem.onClick}>{stageLinkItem.icon}{stageLinkItem.label}</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      );
+    }
+
+    const showAutomation = !!currentAutomationConfig && !hasLinkedDocument;
+    const showSkip = !isStageCompleted;
+
+    // Status-changing actions that used to sit as icon-buttons directly next to the Status
+    // column's badge (cramped, and duplicated per-row clutter) — now just menu items here.
+    const stageData = task.stages?.[stage.id];
+    const isSkipped = stageData?.status === 'skipped';
+    const isCompleted = stageData?.status === 'completed' || (!stageData?.status && (!!value || stageData?.documentsUploaded === true));
+    const showUndoSkip = isSkipped;
+    const showClear = isCompleted && !requiresUpload;
+
+    let officerSubmenu: React.ReactNode = null;
+    if (onOfficerChange && officers.length > 0 && stage.follow_up?.toLowerCase() === 'officer') {
+      const stageOfficerIds = new Set<string>();
+      if (Array.isArray(stage.officer_ids)) stage.officer_ids.forEach((id: any) => stageOfficerIds.add(id.toString()));
+      else if (stage.officer_id) stageOfficerIds.add(stage.officer_id.toString());
+
+      const stageOfficers = officers.filter(o => stageOfficerIds.has(o.id.toString()));
+      if (stageOfficers.length > 0) {
+        const taskStageData = task.stages?.[stage.id];
+        const assignedOfficerId = taskStageData?.officer_ids?.[0] || taskStageData?.officer_id;
+        const assignedOfficer = assignedOfficerId ? officers.find(o => o.id === assignedOfficerId || o.id?.toString() === assignedOfficerId?.toString()) : null;
+
+        officerSubmenu = (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <User className={cn("mr-2 h-3.5 w-3.5 shrink-0", assignedOfficer ? 'text-green-600' : 'text-slate-500')} />
+              <span className="flex-1">Assign Officer</span>
+              {assignedOfficer && <span className="text-[10px] text-muted-foreground ml-2 truncate max-w-[90px]">{assignedOfficer.displayName || assignedOfficer.name}</span>}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuItem onClick={() => handleOfficerChange(null)}>
+                <Check className={cn("mr-2 h-3.5 w-3.5 shrink-0", assignedOfficerId ? "invisible" : "")} />
+                Unassigned
+              </DropdownMenuItem>
+              {stageOfficers.map(officer => (
+                <DropdownMenuItem key={officer.id} onClick={() => handleOfficerChange(officer.id)}>
+                  <Check className={cn("mr-2 h-3.5 w-3.5 shrink-0", (assignedOfficerId === officer.id || assignedOfficerId?.toString() === officer.id?.toString()) ? "" : "invisible")} />
+                  {officer.displayName || officer.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        );
+      }
+    }
+
+    const hasAnyItem = !!stageLinkItem || !!officerSubmenu || showAutomation || showSkip || showUndoSkip || showClear;
+    if (!hasAnyItem) return null;
+
+    return (
+      <DropdownMenu>
+        {menuTrigger}
+        <DropdownMenuContent align="end">
+          {stageLinkItem && <DropdownMenuItem onClick={stageLinkItem.onClick}>{stageLinkItem.icon}{stageLinkItem.label}</DropdownMenuItem>}
+          {officerSubmenu}
+          {(stageLinkItem || officerSubmenu) && (showAutomation || showSkip || showUndoSkip || showClear) && <DropdownMenuSeparator />}
+          {showAutomation && (
+            <DropdownMenuItem onClick={handleTriggerAutomation} disabled={isAutomationRunning}>
+              <Zap className="mr-2 h-3.5 w-3.5 text-blue-600 fill-blue-600 shrink-0" />
+              <div className="flex flex-col">
+                <span>Run Automation</span><span className="text-[10px] text-muted-foreground leading-tight">via {currentAutomationConfig.docName}</span>
+              </div>
+            </DropdownMenuItem>
+          )}
+          {showSkip && (
+            <DropdownMenuItem onClick={handleSkipClick}>
+              <SkipForward className="mr-2 h-3.5 w-3.5 shrink-0" />Skip Stage
+            </DropdownMenuItem>
+          )}
+          {showUndoSkip && (
+            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleUnskip(); }} disabled={isLoading}>
+              <RotateCcw className="mr-2 h-3.5 w-3.5 shrink-0 text-blue-600" />Undo Skip
+            </DropdownMenuItem>
+          )}
+          {showClear && (
+            <DropdownMenuItem onClick={handleClearStage} disabled={isLoading} className="text-red-600 focus:text-red-600">
+              <RotateCcw className="mr-2 h-3.5 w-3.5 shrink-0" />Clear Stage
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
+
   const isDependencyMet = useMemo(() => {
     const deps = stage?.dependencies || [];
     if (deps.length === 0) return true;
@@ -1582,7 +1968,17 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   }, [stage?.dependencies, task?.stages]);
 
   const renderCellContent = () => {
-    if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
+    // The transposed table's 4-column layout ('plain-date'/'status'/'upload'/'other') calls
+    // this once per sub-column for the same stage — show N/A/Locked once (in Status, since
+    // that's the column that carries stage state) rather than once per sub-column. The legacy
+    // modes ('date'/'actions'/'combined') keep showing it themselves since each is the only
+    // call for its consumer (StandardTable, TransposedStagesTable, StagesTable, etc.).
+    const isLegacyMode = renderMode === 'date' || renderMode === 'actions' || renderMode === 'combined';
+
+    if (!isStageApplicable) {
+      if (isLegacyMode || renderMode === 'status') return <span className="text-xs text-gray-400 italic">N/A</span>;
+      return null;
+    }
 
     if (!isDependencyMet) {
       const waitingOn = (stage?.dependencies || [])
@@ -1596,6 +1992,8 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         })
         .map((dep: any) => dep.stageName || 'Unknown')
         .join(', ');
+
+      if (!isLegacyMode && renderMode !== 'status') return null;
 
       return (
         <TooltipProvider>
@@ -1616,7 +2014,11 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
 
     if (renderMode === 'date') return renderDateContent(false);
     if (renderMode === 'actions') return renderActionsContent(false);
-    
+    if (renderMode === 'plain-date') return renderPlainDateContent(false);
+    if (renderMode === 'status') return renderStatusContent(false);
+    if (renderMode === 'upload') return renderUploadViewContent(false);
+    if (renderMode === 'other') return renderOtherActionsContent(false);
+
     if (renderMode === 'combined') {
       return (
         <div className="flex flex-row items-center justify-between w-full h-full px-0.5 gap-1 min-h-[30px]">
@@ -1630,11 +2032,11 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       );
     }
     
-    return <span className="text-sm text-gray-500 italic">-</span>;
+    return <span className="text-xs text-gray-500 italic">-</span>;
   };
 
   return (
-    <>
+    <div className="flex items-center min-h-[28px] py-0.5">
       <SkipStageDialog />
       {renderCellContent()}
       {stageLink?.tab === 'billing' && (
@@ -1660,7 +2062,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
           </DialogContent>
         </Dialog>
       )}
-    </>
+    </div>
   );
 }
 

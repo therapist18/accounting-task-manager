@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client";
 
-import React, { useMemo, useState, useEffect, useRef } from "react";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useReactTable, getCoreRowModel, type ColumnDef, type ColumnSizingState } from "@tanstack/react-table";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,7 +13,7 @@ import { differenceInDays } from "date-fns";
 import { cn } from "@/lib/utils";
 import { formatDateCell, formatEstimatedMins } from "./reportCellRenderers";
 import { parseDateSafe } from "../utils/reportStageLogic";
-import { getSubDepartmentDisplay, getClassDisplay, getSubClassDisplay, getCompanyPrefixFromParticipants, getSponsorName } from "../../tasks/overall-view/tableUtils";
+import { getSubDepartmentDisplay, getClassDisplay, getSubClassDisplay, getCompanyPrefixFromParticipants, getSponsorName, getStaffFromParticipants, getEnhancedImmigrationStatus, formatImmigrationDocumentType, formatImmigrationExpiryDate, getRawImmigrationDaysToGo } from "../../tasks/overall-view/tableUtils";
 import { getLinkedDocumentsForTaskStage } from "../../tasks/utils/taskManagerData";
 import { SUMMARY_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS } from "../stageColumnConfig";
 import EditableStageCell from "../../tasks/components/EditableStageCell";
@@ -58,9 +58,21 @@ export const resolveCompanyName = (task: any, companies: Map<number, any>): stri
   return null;
 };
 
-export const resolveFieldValue = (colId: string, task: any, companies: Map<number, any>, enhancedTasksData: Map<string, any>, departments: any[] = []): any => {
+// `ctx` carries the handful of fields that need more than (task, companies, enhancedTasksData,
+// departments) to resolve — staff-name lookups, the canonical current stage, and the
+// document-derived immigration status. All optional so existing callers (export, sort) that
+// don't pass it still resolve every other field exactly as before; a ctx-dependent field simply
+// reads as empty until its caller starts passing the relevant callback.
+export interface ResolveFieldValueContext {
+  getStaffName?: (userId: any) => string;
+  getCurrentStageFollowUpForTask?: (task: any) => string | null;
+  getEnhancedStatusForTask?: (task: any) => { date: Date | null; documentType: string | null; daysRemaining: number | null };
+}
+
+export const resolveFieldValue = (colId: string, task: any, companies: Map<number, any>, enhancedTasksData: Map<string, any>, departments: any[] = [], ctx: ResolveFieldValueContext = {}): any => {
   const enhancedTask = enhancedTasksData?.get(task.id?.toString()) || task;
   switch (colId) {
+    case 'id': return task.id != null ? String(task.id) : null;
     case 'company': return resolveCompanyName(task, companies);
     case 'applicant': return task.applicant_name || null;
     case 'job_description': return task.job_description || null;
@@ -82,6 +94,34 @@ export const resolveFieldValue = (colId: string, task: any, companies: Map<numbe
     case 'subclass_name': {
       const v = getSubClassDisplay(task, departments);
       return v && v !== 'N/A' ? v : null;
+    }
+    case 'nationality': return enhancedTask.nationality || null;
+    case 'full_name': return enhancedTask.full_name || null;
+    case 'age': return enhancedTask.age != null ? String(enhancedTask.age) : null;
+    case 'r_number': return enhancedTask.r_number != null ? String(enhancedTask.r_number) : null;
+    case 'passport_number': return enhancedTask.passport_number || task.passport_number || null;
+    case 'cancellation_reason': return task.cancellation_details?.reason || null;
+    case 'cancellation_date': return task.cancellation_details?.cancelled_at
+      ? new Date(task.cancellation_details.cancelled_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+      : null;
+    case 'cancelled_by': return task.participants_details?.cancelled_by || null;
+    case 'task_manager': return ctx.getStaffName ? (getStaffFromParticipants(task, 'task_manager', ctx.getStaffName, departments) || null) : null;
+    case 'task_assistant': return ctx.getStaffName ? (getStaffFromParticipants(task, 'task_assistant', ctx.getStaffName, departments) || null) : null;
+    case 'current_stage_follow_up': return ctx.getCurrentStageFollowUpForTask ? ctx.getCurrentStageFollowUpForTask(task) : null;
+    case 'immigration_document_type': {
+      if (!ctx.getEnhancedStatusForTask) return null;
+      const v = formatImmigrationDocumentType(task, ctx.getEnhancedStatusForTask);
+      return v && v !== '-' ? v : null;
+    }
+    case 'immigration_expiry_date': {
+      if (!ctx.getEnhancedStatusForTask) return null;
+      const v = formatImmigrationExpiryDate(task, ctx.getEnhancedStatusForTask);
+      return v && v !== '-' ? v : null;
+    }
+    case 'immigration_days_to_go': {
+      if (!ctx.getEnhancedStatusForTask) return null;
+      const raw = getRawImmigrationDaysToGo(task, ctx.getEnhancedStatusForTask);
+      return raw === '-9999' ? null : raw;
     }
     default: return null;
   }
@@ -229,7 +269,11 @@ export function SummaryTable({
   getExpectedMinutesForTask, getActualTimeInfoForTask,
   getPromisedMinutesForTask, getPromisedTimeResolutionForTask, getPlannedExecutionDateForTask,
   getCurrentStageNameForTask,
+  getCurrentStageFollowUpForTask,
+  getStaffName,
   visibleColumnIds = DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS,
+  reportColumnOrder = null,
+  reportFieldNumbers = null,
   onEditTask, onRequestCancel, onRequestUncancel, onRequestDelete,
   allDocuments = [],
   kycDocuments = new Map(),
@@ -254,7 +298,17 @@ export function SummaryTable({
   getPromisedTimeResolutionForTask?: (task: any) => { minutes: number | null; source: 'condition' | 'default' | 'none'; applicationType: string | null; matchedValue?: string };
   getPlannedExecutionDateForTask?: (task: any) => Date | null;
   getCurrentStageNameForTask?: (task: any) => string | null;
+  getCurrentStageFollowUpForTask?: (task: any) => string | null;
+  getStaffName?: (userId: any) => string;
   visibleColumnIds?: string[];
+  // The order applyReportToSummaryColumns derived from the applied report's own stored field
+  // order (stageColumnConfig.ts) — null when no report is active, in which case columns fall
+  // back to SUMMARY_COLUMNS' fixed declaration order as before.
+  reportColumnOrder?: string[] | null;
+  // columnId -> "1.n"/"2.m" (applyReportToSummaryColumns) — shown next to a column's header
+  // label so it can be cross-referenced against MemorizedReportDialog's own ID column for that
+  // same field/stage. Null with no report active (or a column not selected by one, e.g. Actions).
+  reportFieldNumbers?: Record<string, string> | null;
   onEditTask?: (task: any) => void;
   onRequestCancel?: (task: any) => void;
   onRequestUncancel?: (task: any) => void;
@@ -266,10 +320,35 @@ export function SummaryTable({
   // selections, see stageColumnConfig.ts's 'report_stage' column type) are appended after the
   // static SUMMARY_COLUMNS so a report's arbitrary stage picks get their own columns instead of
   // being silently dropped.
-  const columns = useMemo(
-    () => [...SUMMARY_COLUMNS, ...dynamicStageColumns].filter(c => visibleColumnIds.includes(c.id)),
-    [visibleColumnIds, dynamicStageColumns]
-  );
+  const columns = useMemo(() => {
+    const all = [...SUMMARY_COLUMNS, ...dynamicStageColumns];
+    let result: any[];
+
+    if (!reportColumnOrder) {
+      result = all.filter(c => visibleColumnIds.includes(c.id));
+    } else {
+      // A report is active — display its columns in the order applyReportToSummaryColumns
+      // derived from the report's own stored field order, not SUMMARY_COLUMNS' fixed
+      // declaration order. Anything visible but outside that order (a column toggled on by
+      // hand after applying the report) still renders, just appended at the end in its natural
+      // position — same as the no-report case.
+      const byId = new Map(all.map(c => [c.id, c]));
+      const ordered = reportColumnOrder.filter(id => visibleColumnIds.includes(id)).map(id => byId.get(id)).filter(Boolean) as any[];
+      const orderedIds = new Set(ordered.map(c => c.id));
+      const extras = all.filter(c => visibleColumnIds.includes(c.id) && !orderedIds.has(c.id));
+      result = [...ordered, ...extras];
+    }
+
+    // stickyColumnOffsets below assumes every `sticky` column sits contiguously at the front —
+    // it only accumulates cursor width across sticky columns, so a non-sticky column landing
+    // between two sticky ones (a report field order that puts something ahead of Company/
+    // Applicant) would make a later sticky column's computed `left` px wrong and detach it
+    // from its real on-screen position while scrolling. Partition instead of trusting incoming
+    // order: sticky columns first (their relative order preserved), everything else after.
+    const sticky = result.filter(c => c.sticky);
+    const rest = result.filter(c => !c.sticky);
+    return [...sticky, ...rest];
+  }, [visibleColumnIds, dynamicStageColumns, reportColumnOrder]);
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
@@ -278,22 +357,35 @@ export function SummaryTable({
   // Stages lookup for EditableStageCell in milestone columns
   const tasksStagesByDept = stagesByDept;
 
+  // Backs the immigration_document_type/immigration_expiry_date/immigration_days_to_go
+  // columns — same getEnhancedImmigrationStatus DepartmentTasksManager's own
+  // getEnhancedImmigrationStatusWrapper calls, built here instead of threaded down as a prop
+  // since allDocuments/kycDocuments/stagesByDept are already available on this component.
+  const getEnhancedStatusForTask = useCallback((task: any) => {
+    const stageList = tasksStagesByDept.get(task.department_id?.toString()) || [];
+    return getEnhancedImmigrationStatus(task, stageList, allDocuments, kycDocuments);
+  }, [tasksStagesByDept, allDocuments, kycDocuments]);
+
+  const fieldValueCtx: ResolveFieldValueContext = { getStaffName, getCurrentStageFollowUpForTask, getEnhancedStatusForTask };
+
   // Group (sub-department) headers pin directly beneath the sticky column header instead of
   // just being a divider line — measured (not hardcoded) so it stays correct if the header
   // row's height ever changes (column label wrapping, font tweaks, etc.).
   const headerRowRef = useRef<HTMLTableRowElement>(null);
+  const refNumberRowRef = useRef<HTMLTableRowElement>(null);
   const expectedTimeRowRef = useRef<HTMLTableRowElement>(null);
   const [groupHeaderTop, setGroupHeaderTop] = useState(40);
   useEffect(() => {
     const measure = () => {
       const h = (headerRowRef.current?.getBoundingClientRect().height || 0)
+        + (refNumberRowRef.current?.getBoundingClientRect().height || 0)
         + (expectedTimeRowRef.current?.getBoundingClientRect().height || 0);
       if (h) setGroupHeaderTop(h);
     };
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [columns.length]);
+  }, [columns.length, reportFieldNumbers]);
 
   // Every stage's own configured "estimated_time" (Departments → Stages), looked up once
   // across every department's stage list — resolved into a colId->minutes map so the
@@ -526,7 +618,16 @@ export function SummaryTable({
 
   const resolveCellValue = (col: any, task: any): React.ReactNode => {
     if (col.id === 'current_stage') return getCurrentStageNameForTask?.(task) ?? null;
-    if (col.type === 'field') return resolveFieldValue(col.id, task, companies, enhancedTasksData, departments);
+    // Same red/amber/green urgency coloring as DepartmentTasksManager's own days-remaining
+    // column (formatImmigrationDaysToGo) — resolveFieldValue itself stays plain-text since
+    // sort/export also read through it and shouldn't get a ReactNode back.
+    if (col.id === 'immigration_days_to_go') {
+      const raw = resolveFieldValue(col.id, task, companies, enhancedTasksData, departments, fieldValueCtx);
+      if (raw == null) return null;
+      const days = Number(raw);
+      return <span className={cn("font-medium", days < 0 ? 'text-red-600' : days <= 30 ? 'text-amber-600' : 'text-green-600')}>{days} days</span>;
+    }
+    if (col.type === 'field') return resolveFieldValue(col.id, task, companies, enhancedTasksData, departments, fieldValueCtx);
     if (col.type === 'computed_time') {
       if (col.id === 'promised_time') {
         const resolution = getPromisedTimeResolutionForTask?.(task);
@@ -570,6 +671,42 @@ export function SummaryTable({
             </colgroup>
 
             <TableHeader className="sticky top-0 z-40">
+              {/* Reference # — the "1.n"/"2.m" number applyReportToSummaryColumns assigned this
+                  column (see reportFieldNumbers), on its own row above the label so it's visible
+                  without crowding the label below. Cross-references the same number Report
+                  Manager's own ID column shows for that field/stage. Only rendered while a
+                  report that actually produced numbers is applied. */}
+              {reportFieldNumbers && Object.keys(reportFieldNumbers).length > 0 && (
+                <TableRow ref={refNumberRowRef} className="hover:bg-transparent border-0" style={{ backgroundColor: '#2a5486' }}>
+                  <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-1 px-2" style={{ backgroundColor: '#2a5486' }} />
+                  {interleavedColumns.map((col: any) => {
+                    if (col.isDelta) {
+                      return <TableHead key={col.id} className="border-r border-b border-white/30" style={{ width: DELTA_COL_WIDTH, backgroundColor: '#2a5486' }} />;
+                    }
+                    const isSticky = !!col.sticky;
+                    const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
+                    const number = reportFieldNumbers[col.id];
+                    return (
+                      <TableHead
+                        key={col.id}
+                        className={cn(
+                          "border-r border-b border-white/30 text-center py-1 px-2",
+                          isSticky && "z-40 sticky"
+                        )}
+                        style={{ backgroundColor: '#2a5486', ...(isSticky ? { left: `${left}px` } : {}) }}
+                      >
+                        {number ? (
+                          <span className="text-[10px] font-black text-sky-200 tabular-nums" title="Reference number — matches the ID column in Report Manager">
+                            {number}
+                          </span>
+                        ) : null}
+                      </TableHead>
+                    );
+                  })}
+                  <TableHead className="sticky right-0 z-50 border-l border-b border-white/30 shadow-[-2px_0_4px_rgba(0,0,0,0.15)]" style={{ backgroundColor: '#2a5486' }} />
+                </TableRow>
+              )}
+
               <TableRow ref={headerRowRef} className="hover:bg-transparent border-0">
                 <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-2.5 px-2 bg-custom-blue">
                   <span className="text-[10px] font-semibold text-white uppercase tracking-wider">#</span>
@@ -670,11 +807,11 @@ export function SummaryTable({
                   Stages), shown once per stage column instead of buried in a tooltip only
                   visible on hover over a completed/in-progress cell. */}
               {Object.keys(stageEstimatedTimeByColId).length > 0 && (
-                <TableRow ref={expectedTimeRowRef} className="hover:bg-transparent border-0">
-                  <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-1.5 px-2 bg-[#2a5486]" />
+                <TableRow ref={expectedTimeRowRef} className="hover:bg-transparent border-0" style={{ backgroundColor: '#2a5486' }}>
+                  <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-1.5 px-2" style={{ backgroundColor: '#2a5486' }} />
                   {interleavedColumns.map((col: any) => {
                     if (col.isDelta) {
-                      return <TableHead key={col.id} className="border-r border-b border-white/30 bg-[#2a5486]" style={{ width: DELTA_COL_WIDTH }} />;
+                      return <TableHead key={col.id} className="border-r border-b border-white/30" style={{ width: DELTA_COL_WIDTH, backgroundColor: '#2a5486' }} />;
                     }
                     const isSticky = !!col.sticky;
                     const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
@@ -683,10 +820,10 @@ export function SummaryTable({
                       <TableHead
                         key={col.id}
                         className={cn(
-                          "border-r border-b border-white/30 text-center py-1.5 px-2 bg-[#2a5486]",
+                          "border-r border-b border-white/30 text-center py-1.5 px-2",
                           isSticky && "z-40 sticky"
                         )}
-                        style={isSticky ? { left: `${left}px` } : undefined}
+                        style={{ backgroundColor: '#2a5486', ...(isSticky ? { left: `${left}px` } : {}) }}
                       >
                         {minutes ? (
                           <span className="text-[10px] font-semibold text-sky-200 tabular-nums whitespace-nowrap">
@@ -696,7 +833,7 @@ export function SummaryTable({
                       </TableHead>
                     );
                   })}
-                  <TableHead className="sticky right-0 z-50 border-l border-b border-white/30 bg-[#2a5486] shadow-[-2px_0_4px_rgba(0,0,0,0.15)]" />
+                  <TableHead className="sticky right-0 z-50 border-l border-b border-white/30 shadow-[-2px_0_4px_rgba(0,0,0,0.15)]" style={{ backgroundColor: '#2a5486' }} />
                 </TableRow>
               )}
             </TableHeader>

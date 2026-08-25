@@ -10,7 +10,7 @@ import { toast } from "@/lib/hooks/use-toast";
 import { supabase } from "@/lib/supabase/client";
 import { fetchDepartments } from "../departments/departments/database";
 import { fetchTasks, fetchStages, fetchCompanies, fetchClassRequirements } from "../tasks/utils/taskManagerData";
-import { enhanceTasksWithIndividualData } from "../tasks/overall-view/tableUtils";
+import { enhanceTasksWithIndividualData, getEnhancedImmigrationStatus } from "../tasks/overall-view/tableUtils";
 import { userService } from "@/lib/shared-user-assignment-service";
 import { EnquiryDialog } from "../tasks/components/EnquiryDialog";
 import { CancelConfirmationDialog } from "../tasks/components/CancelConfirmationDialog";
@@ -28,7 +28,7 @@ import { MemorizedReportDialog, type MemorizedReport } from "./components/Memori
 import { ENHANCED_TABLE_HEADERS_IMMIGRATION } from "../tasks/overall-view/tableUtils";
 import { fetchAllDocuments, fetchAllKycFields, fetchUploadedDocumentsForTasks, type Document } from "../tasks/utils/taskManagerData";
 import { StatusTabs, PerspectiveTabs, HierarchyTabs, ColumnVisibilityDialog, } from "./components/PageHeader";
-import { SummaryTable, resolveCompanyName } from "./components/SummaryTable";
+import { SummaryTable, resolveCompanyName, resolveFieldValue } from "./components/SummaryTable";
 import { MILESTONE_STAGE_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS, SUMMARY_COLUMNS, applyReportToSummaryColumns, buildDynamicReportStageColumns } from "./stageColumnConfig";
 import { exportSummaryReportToExcel, exportSummaryReportToPDF } from "./utils/exportSummary";
 import {
@@ -96,6 +96,13 @@ export default function SummaryReportsPage() {
   // Memorized Reports
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
   const [activeReport, setActiveReport] = useState<MemorizedReport | null>(null);
+  // The applied report's own column order (from applyReportToSummaryColumns) — null when no
+  // report is active, so SummaryTable falls back to SUMMARY_COLUMNS' fixed order.
+  const [reportColumnOrder, setReportColumnOrder] = useState<string[] | null>(null);
+  // columnId -> "1.n"/"2.m" reference (see applyReportToSummaryColumns' own comment) — shown next
+  // to each column's header label so it can be cross-referenced against the same numbers
+  // MemorizedReportDialog shows in its ID column for that field/stage. Null with no report active.
+  const [reportFieldNumbers, setReportFieldNumbers] = useState<Record<string, string> | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // ── Row actions (Edit / Cancel / Reactivate / Delete) — same dialogs and tm_tasks writes
@@ -372,6 +379,33 @@ export default function SummaryReportsPage() {
   // never exposed the stage's own name as a column until now.
   const getCurrentStageNameForTask = useCallback((task: any) => getCanonicalCurrentStageForTask(task)?.name || null, [getCanonicalCurrentStageForTask]);
 
+  // Backs the Current Stage Follow-up column — same canonical current stage as
+  // getCurrentStageNameForTask, just its follow_up instead of its name, so the two columns can
+  // never disagree about which stage they're describing.
+  const getCurrentStageFollowUpForTask = useCallback((task: any) => getCanonicalCurrentStageForTask(task)?.follow_up || null, [getCanonicalCurrentStageForTask]);
+
+  // userId -> display name across every unified staff list this page already loads — same
+  // fallback order as DepartmentTasksManager's own getStaffName, minus the subdepartment-scoped
+  // lists that component has and this company-wide page doesn't need (unifiedOfficers/
+  // unifiedManagers/unifiedAssistants are already every department's staff, not one department's).
+  const getStaffName = useCallback((userId: any) => {
+    if (!userId) return '';
+    const userIdStr = userId.toString();
+    const officer = unifiedOfficers.find((o: any) => o.id === userIdStr);
+    if (officer) return officer.full_name || officer.name || officer.displayName || `Officer ${userId}`;
+    const manager = unifiedManagers.find((m: any) => m.id === userIdStr);
+    if (manager) return manager.full_name || manager.name || manager.displayName || `Manager ${userId}`;
+    const assistant = unifiedAssistants.find((a: any) => a.id === userIdStr);
+    if (assistant) return assistant.full_name || assistant.name || assistant.displayName || `Assistant ${userId}`;
+    return `User ${userId}`;
+  }, [unifiedOfficers, unifiedManagers, unifiedAssistants]);
+
+  // Backs the immigration_document_type/immigration_expiry_date/immigration_days_to_go columns
+  // for sorting/export — same getEnhancedImmigrationStatus SummaryTable's own
+  // getEnhancedStatusForTask calls for on-screen rendering (built independently there since it
+  // already has allDocuments/kycDocuments/stagesByDept as props).
+  const getEnhancedStatusForTask = useCallback((task: any) => getEnhancedImmigrationStatus(task, getTaskStages(task), allDocuments, kycDocuments), [getTaskStages, allDocuments, kycDocuments]);
+
   // Fed into SummaryTable's <EditableStageCell> calls so document-backed stage dates resolve
   // the same "isImmigrationDate"-prioritized field as DepartmentTasksManager's own getKycFields
   // (DepartmentTasksManager.tsx:658-661) instead of falling back to the weaker heuristics
@@ -614,7 +648,6 @@ export default function SummaryReportsPage() {
     if (columnId === 'company') return (resolveCompanyName(task, companies) || '').toLowerCase();
     if (columnId === 'applicant') return (task.applicant_name || '').toLowerCase();
     if (columnId === 'job_description') return (task.job_description || '').toLowerCase();
-    if (columnId === 'company_prefix' || columnId === 'sponsor_name' || columnId === 'application_type' || columnId === 'duration') return '';
     if (columnId === 'current_stage') return (getCurrentStageNameForTask(task) || '').toLowerCase();
     if (columnId === 'promised_time') return getPromisedMinutesForTask(task) ?? 0;
     if (columnId === 'planned_execution') return getPlannedExecutionDateForTask(task)?.getTime() ?? 0;
@@ -628,8 +661,18 @@ export default function SummaryReportsPage() {
       const parsed = raw ? parseDateSafe(raw) : null;
       return parsed ? parsed.getTime() : 0;
     }
-    return '';
-  }, [companies, getExpectedMinutesForTask, getActualTimeInfoForTask, getPromisedMinutesForTask, getPlannedExecutionDateForTask, getCurrentStageNameForTask]);
+    // Numeric/date-typed, so sort on the underlying value rather than the formatted display
+    // string resolveFieldValue returns (sorting "N days" text alphabetically, or a formatted
+    // "dd MMM yyyy" date string lexicographically, would both be wrong).
+    if (columnId === 'immigration_days_to_go') return getEnhancedStatusForTask(task)?.daysRemaining ?? Number.NEGATIVE_INFINITY;
+    if (columnId === 'immigration_expiry_date') return getEnhancedStatusForTask(task)?.date?.getTime() ?? 0;
+    // Every other 'field'-type column (company_prefix, sponsor_name, application_type,
+    // duration, subdepartment, class_name, subclass_name, and the fields SUMMARY_COLUMNS
+    // gained to stop memorized reports from dropping them) resolves through the same
+    // resolveFieldValue SummaryTable itself renders cells with, so what you see is what you
+    // sort by — previously these fell through to a hardcoded '' and sorting them was a no-op.
+    return (resolveFieldValue(columnId, task, companies, enhancedTasksData, departments, { getStaffName, getCurrentStageFollowUpForTask, getEnhancedStatusForTask }) || '').toString().toLowerCase();
+  }, [companies, departments, enhancedTasksData, getExpectedMinutesForTask, getActualTimeInfoForTask, getPromisedMinutesForTask, getPlannedExecutionDateForTask, getCurrentStageNameForTask, getStaffName, getCurrentStageFollowUpForTask, getEnhancedStatusForTask]);
 
   const handleSort = useCallback((columnId: string) => {
     setSortConfig(cur => cur?.key === columnId ? { key: columnId, direction: cur.direction === 'asc' ? 'desc' : 'asc' } : { key: columnId, direction: 'asc' });
@@ -665,6 +708,9 @@ export default function SummaryReportsPage() {
       getPromisedMinutesForTask,
       getPlannedExecutionDateForTask,
       getCurrentStageNameForTask,
+      getCurrentStageFollowUpForTask,
+      getStaffName,
+      getEnhancedStatusForTask,
       showTime,
       scopeName: departments.find((d: any) => d.id.toString() === activeDeptId)?.name,
       statusLabel: STATUS_LABELS[activeTaskStatus] || 'All Tasks',
@@ -680,7 +726,7 @@ export default function SummaryReportsPage() {
     } finally {
       setIsExporting(null);
     }
-  }, [sortedTasks, visibleColumnIds, companies, departments, enhancedTasksData, getExpectedMinutesForTask, getActualTimeInfoForTask, getPromisedMinutesForTask, getPlannedExecutionDateForTask, getCurrentStageNameForTask, showTime, activeDeptId, activeTaskStatus]);
+  }, [sortedTasks, visibleColumnIds, companies, departments, enhancedTasksData, getExpectedMinutesForTask, getActualTimeInfoForTask, getPromisedMinutesForTask, getPlannedExecutionDateForTask, getCurrentStageNameForTask, getCurrentStageFollowUpForTask, getStaffName, getEnhancedStatusForTask, showTime, activeDeptId, activeTaskStatus]);
 
   if (loading) {
     return (
@@ -712,7 +758,7 @@ export default function SummaryReportsPage() {
                 </h1>
                 {activeReport && (
                   <button
-                    onClick={() => { setActiveReport(null); setVisibleColumnIds(DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS); }}
+                    onClick={() => { setActiveReport(null); setReportColumnOrder(null); setReportFieldNumbers(null); setVisibleColumnIds(DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS); }}
                     className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-800 border border-slate-200 hover:border-slate-300 rounded-full px-2.5 py-1 transition-colors"
                     title="Unload report — return to default columns"
                   >
@@ -845,7 +891,11 @@ export default function SummaryReportsPage() {
         getPromisedTimeResolutionForTask={getPromisedTimeResolutionForTask}
         getPlannedExecutionDateForTask={getPlannedExecutionDateForTask}
         getCurrentStageNameForTask={getCurrentStageNameForTask}
+        getCurrentStageFollowUpForTask={getCurrentStageFollowUpForTask}
+        getStaffName={getStaffName}
         visibleColumnIds={visibleColumnIds}
+        reportColumnOrder={reportColumnOrder}
+        reportFieldNumbers={reportFieldNumbers}
         onEditTask={handleEditTask}
         onRequestCancel={handleRequestCancel}
         onRequestUncancel={handleRequestUncancel}
@@ -911,8 +961,10 @@ export default function SummaryReportsPage() {
         kycDocuments={kycDocuments}
         onApplyReport={(report) => {
           setActiveReport(report);
-          const { visibleColumnIds: mappedIds, matchedCount, droppedCount } = applyReportToSummaryColumns(report.configuration);
+          const { visibleColumnIds: mappedIds, matchedCount, droppedCount, fieldNumbers } = applyReportToSummaryColumns(report.configuration, stagesByDept);
           setVisibleColumnIds(mappedIds);
+          setReportColumnOrder(mappedIds);
+          setReportFieldNumbers(fieldNumbers);
           setIsReportDialogOpen(false);
           toast({
             title: "Report applied",

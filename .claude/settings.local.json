@@ -144,10 +144,14 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3001/dashboard/matrimonial-biodata/settings)",
       "Bash(tail -40 /tmp/tscout.txt)",
       "Bash(tail -30 /tmp/tscout2.txt)",
-      "Bash(git diff *)"
+      "Bash(git diff *)",
+      "Bash(npx supabase *)",
+      "Bash(node -e \"console.log\\(require.resolve\\('nodemailer'\\)\\)\")",
+      "Bash(mkdir -p \"/e/GitHub/kra-tools/app/api/send-rm-request-email\")"
     ],
     "additionalDirectories": [
-      "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals"
+      "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals",
+      "E:\\GitHub\\kra-tools\\app\\api"
     ]
   }
 }
