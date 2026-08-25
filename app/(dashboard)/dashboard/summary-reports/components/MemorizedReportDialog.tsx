@@ -183,13 +183,13 @@ const TableHeaderRow = React.memo(({ handleSelectAllDefault, handleSelectAllRepo
 ));
 
 const TableRowItem = React.memo(({ id, label, documentName, docFieldName, isIncluded, isDefault, onToggleInclude, onToggleDefault, depth = 0, className = "", icon = null, readOnly = false, onMoveUp, onMoveDown, showMoveControls = false, isSaved = false }: { id?: string; label?: React.ReactNode; documentName?: React.ReactNode; docFieldName?: React.ReactNode; isIncluded?: boolean; isDefault?: boolean; onToggleInclude?: () => void; onToggleDefault?: () => void; depth?: number; className?: string; icon?: React.ReactNode; readOnly?: boolean; onMoveUp?: () => void; onMoveDown?: () => void; showMoveControls?: boolean; isSaved?: boolean; }) => (
-  <div className={cn("grid grid-cols-12 gap-0 border-b border-slate-200 items-stretch text-sm transition-colors", isIncluded ? "bg-blue-50/20 hover:bg-blue-50/40" : "bg-white hover:bg-slate-50", className)}>
-    <div className="col-span-1 flex items-center border-r border-slate-200 py-2 px-2 min-w-0">
+  <div className={cn("grid grid-cols-12 gap-0 border-b border-slate-200 items-stretch text-xs transition-colors", isIncluded ? "bg-blue-50/20 hover:bg-blue-50/40" : "bg-white hover:bg-slate-50", className)}>
+    <div className="col-span-1 flex items-center border-r border-slate-200 py-1 px-2 min-w-0">
       {id != null && (
-        <span className="truncate text-[10px] font-mono text-slate-400" title={String(id)}>{id}</span>
+        <span className="truncate text-[9px] font-mono text-slate-400" title={String(id)}>{id}</span>
       )}
     </div>
-    <div className="col-span-3 flex items-center border-r border-slate-200 py-2">
+    <div className="col-span-3 flex items-center border-r border-slate-200 py-1">
       <div style={{ width: `${depth * 16}px` }} className="shrink-0" />
       <div className="flex items-center gap-2 px-2 min-w-0 flex-1">
         {icon}
@@ -199,12 +199,12 @@ const TableRowItem = React.memo(({ id, label, documentName, docFieldName, isIncl
           </span>
         )}
         {isSaved && isIncluded && (
-          <Badge variant="outline" className="ml-1 shrink-0 text-[10px] py-0 px-1.5 bg-emerald-50 text-emerald-600 border-emerald-200 font-semibold">
+          <Badge variant="outline" className="ml-1 shrink-0 text-[9px] py-0 px-1 leading-tight bg-emerald-50 text-emerald-600 border-emerald-200 font-semibold">
             Saved
           </Badge>
         )}
         {isSaved && !isIncluded && (
-          <Badge variant="outline" className="ml-1 shrink-0 text-[10px] py-0 px-1.5 bg-slate-50 text-slate-400 border-slate-200 line-through">
+          <Badge variant="outline" className="ml-1 shrink-0 text-[9px] py-0 px-1 leading-tight bg-slate-50 text-slate-400 border-slate-200 line-through">
             Saved
           </Badge>
         )}
@@ -213,54 +213,54 @@ const TableRowItem = React.memo(({ id, label, documentName, docFieldName, isIncl
             <Button
               variant="ghost"
               size="sm"
-              className="h-5 w-5 p-0 hover:bg-slate-200"
+              className="h-4 w-4 p-0 hover:bg-slate-200"
               onClick={onMoveUp}
               disabled={!onMoveUp}
               title="Move up"
             >
-              <ChevronUp className="h-3 w-3" />
+              <ChevronUp className="h-2.5 w-2.5" />
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              className="h-5 w-5 p-0 hover:bg-slate-200"
+              className="h-4 w-4 p-0 hover:bg-slate-200"
               onClick={onMoveDown}
               disabled={!onMoveDown}
               title="Move down"
             >
-              <ChevronDown className="h-3 w-3" />
+              <ChevronDown className="h-2.5 w-2.5" />
             </Button>
           </div>
         )}
       </div>
     </div>
-    <div className="col-span-2 flex items-center border-r border-slate-200 py-2 px-3 min-w-0">
+    <div className="col-span-2 flex items-center border-r border-slate-200 py-1 px-3 min-w-0">
       {documentName != null && (
         <span className="truncate text-slate-600" title={typeof documentName === 'string' ? documentName : undefined}>{documentName}</span>
       )}
     </div>
-    <div className="col-span-2 flex items-center border-r border-slate-200 py-2 px-3 min-w-0">
+    <div className="col-span-2 flex items-center border-r border-slate-200 py-1 px-3 min-w-0">
       {docFieldName != null && (
         <span className="truncate text-slate-600" title={typeof docFieldName === 'string' ? docFieldName : undefined}>{docFieldName}</span>
       )}
     </div>
-    <div className="col-span-2 flex items-center justify-center border-r border-slate-200 bg-slate-50/30 py-2">
+    <div className="col-span-2 flex items-center justify-center border-r border-slate-200 bg-slate-50/30 py-1">
       {(onToggleDefault || readOnly) && (
         <Checkbox
           checked={isDefault}
           onCheckedChange={onToggleDefault}
           disabled={readOnly || !isIncluded}
-          className="data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600 disabled:opacity-30"
+          className="h-3.5 w-3.5 data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600 disabled:opacity-30"
         />
       )}
     </div>
-    <div className="col-span-2 flex items-center justify-center bg-slate-50/30 py-2">
+    <div className="col-span-2 flex items-center justify-center bg-slate-50/30 py-1">
       {(onToggleInclude || readOnly) && (
         <Checkbox
           checked={isIncluded}
           onCheckedChange={onToggleInclude}
           disabled={readOnly}
-          className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 disabled:opacity-30"
+          className="h-3.5 w-3.5 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 disabled:opacity-30"
         />
       )}
     </div>
@@ -561,11 +561,11 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
 
                   return (
                     <div key={`stage-${stage.id}`} className={cn(isNA && "opacity-60")}>
-                      <div className="bg-slate-50/80 px-4 py-2 border-y border-slate-200 flex items-center gap-2">
-                        <span className="font-semibold text-xs uppercase tracking-wide text-slate-600">
+                      <div className="bg-slate-50/80 px-4 py-1 border-y border-slate-200 flex items-center gap-2">
+                        <span className="font-semibold text-[11px] uppercase tracking-wide text-slate-600">
                           {stage.order_num}. {stage.name}
                         </span>
-                        {isNA && <Badge variant="outline" className="text-[10px] bg-white text-amber-600 border-amber-200">N/A</Badge>}
+                        {isNA && <Badge variant="outline" className="text-[9px] py-0 px-1 leading-tight bg-white text-amber-600 border-amber-200">N/A</Badge>}
                       </div>
 
                       {(!showSelectedOnly || stageConfig?.isStageDateSelected) && (
@@ -589,14 +589,14 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
                         return (
                           <div key={`doc-${stage.id}-${doc.kycId}`}>
                             <div className={cn(
-                              "grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm",
+                              "grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-xs",
                               isDocActive ? "bg-blue-50/20 hover:bg-blue-50/40" : "bg-white hover:bg-slate-50"
                             )}>
-                              <div className="col-span-1 flex items-center border-r border-slate-100 py-2 px-2 min-w-0">
-                                {stageNumber && <span className="truncate text-[10px] font-semibold text-slate-400 tabular-nums">{stageNumber}</span>}
+                              <div className="col-span-1 flex items-center border-r border-slate-100 py-1 px-2 min-w-0">
+                                {stageNumber && <span className="truncate text-[9px] font-semibold text-slate-400 tabular-nums">{stageNumber}</span>}
                               </div>
                               <div className="col-span-3 border-r border-slate-100" />
-                              <div className="col-span-2 flex items-center border-r border-slate-100 py-2 px-3 min-w-0">
+                              <div className="col-span-2 flex items-center border-r border-slate-100 py-1 px-3 min-w-0">
                                 <span className={cn(
                                   "truncate font-semibold",
                                   isDocActive ? "text-slate-800" : "text-slate-500"
@@ -606,12 +606,12 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
                               </div>
                               <div className="col-span-2 border-r border-slate-100 bg-slate-50/30" />
                               <div className="col-span-2 border-r border-slate-100 bg-slate-50/30" />
-                              <div className="col-span-2 flex items-center justify-center bg-slate-50/30 py-2">
+                              <div className="col-span-2 flex items-center justify-center bg-slate-50/30 py-1">
                                 <Checkbox
                                   id={`doc-${stage.id}-${doc.kycId}`}
                                   checked={isDocActive}
                                   onCheckedChange={() => toggleDocument(stage.id, doc.kycId)}
-                                  className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                                  className="h-3.5 w-3.5 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
                                 />
                               </div>
                             </div>
@@ -1228,7 +1228,7 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
         <TableHeaderRow handleSelectAllDefault={() => { }} handleSelectAllReports={() => { }} />
         <ScrollArea className="flex-1">
           <div className="divide-y divide-slate-200">
-            <div className="bg-slate-50 px-4 py-2.5 font-bold text-[11px] uppercase text-slate-500 tracking-wider">Task Fields</div>
+            <div className="bg-slate-50 px-4 py-1 font-bold text-[11px] uppercase text-slate-500 tracking-wider">Task Fields</div>
             {reportConfig.taskFields.map((fieldConfig, fieldIdx) => {
               const header = tableHeaders.find(h => h.id === fieldConfig.id);
               return (
@@ -1250,9 +1250,9 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
               const stageNumber = `2.${stageIdx + 1}`;
               return (
                 <div key={stageId}>
-                  <div className="bg-slate-50 px-4 py-2 font-bold text-xs uppercase text-slate-500 tracking-wider border-t border-slate-200 flex items-center gap-2">
+                  <div className="bg-slate-50 px-4 py-1 font-bold text-[11px] uppercase text-slate-500 tracking-wider border-t border-slate-200 flex items-center gap-2">
                     {stage.order_num}. {stage.name}
-                    {isNA && <Badge variant="outline" className="text-[11px] text-amber-600 border-amber-300 bg-amber-50">N/A</Badge>}
+                    {isNA && <Badge variant="outline" className="text-[9px] py-0 px-1 leading-tight text-amber-600 border-amber-300 bg-amber-50">N/A</Badge>}
                   </div>
                   {stageConfig.isStageDateSelected && (
                     <TableRowItem id={stageNumber} label="Completion Date" isIncluded isDefault={stageConfig.isStageDateDefault} depth={0} readOnly />
@@ -1265,11 +1265,11 @@ export function MemorizedReportDialog({ open, onOpenChange, department, stagesBy
                     return (
                       <React.Fragment key={kycId}>
                         <div className="grid grid-cols-12 gap-0 border-t border-slate-100 bg-slate-50/50 text-xs">
-                          <div className="col-span-1 flex items-center border-r border-slate-100 py-1.5 px-2 min-w-0">
-                            <span className="truncate text-[10px] font-semibold text-slate-400 tabular-nums">{stageNumber}</span>
+                          <div className="col-span-1 flex items-center border-r border-slate-100 py-1 px-2 min-w-0">
+                            <span className="truncate text-[9px] font-semibold text-slate-400 tabular-nums">{stageNumber}</span>
                           </div>
                           <div className="col-span-3 border-r border-slate-100" />
-                          <div className="col-span-2 flex items-center border-r border-slate-100 py-1.5 px-3 min-w-0">
+                          <div className="col-span-2 flex items-center border-r border-slate-100 py-1 px-3 min-w-0">
                             <span className="truncate font-semibold text-slate-600">{docDisplayName}</span>
                           </div>
                           <div className="col-span-2 border-r border-slate-100" />

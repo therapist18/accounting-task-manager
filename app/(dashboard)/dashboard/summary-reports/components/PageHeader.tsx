@@ -16,9 +16,9 @@ import { SUMMARY_COLUMNS } from "../stageColumnConfig";
 
 // ── Shared UI: Standard Tabs (replaces the old pill-style toggles) ──
 // Matches the bordered, squared-off tab look used across the app (e.g. bcl-task-diary).
-const TAB_LIST_CLASS = "bg-white border border-slate-200 p-1 h-auto rounded-md";
-const TAB_TRIGGER_CLASS = "group gap-2 rounded-md px-4 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors data-[state=active]:bg-custom-blue data-[state=active]:text-white data-[state=active]:shadow-sm";
-const COUNT_BADGE_CLASS = "font-bold tabular-nums px-2 py-1 rounded-md text-sm min-w-[2rem] text-center bg-custom-blue/10 text-custom-blue group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white";
+const TAB_LIST_CLASS = "bg-slate-100 p-1 rounded-full border border-slate-200";
+const TAB_TRIGGER_CLASS = "group gap-2 rounded-2xl px-4 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-white transition-colors data-[state=active]:bg-custom-blue data-[state=active]:text-white data-[state=active]:shadow-sm";
+const COUNT_BADGE_CLASS = "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm bg-custom-blue text-white group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white";
 
 export interface PillTrackItem {
   id: string;
@@ -58,7 +58,7 @@ export function PillTrack({
                 <span className={cn("h-2 w-2 rounded-full shrink-0", item.dot)} />
               ) : null}
               {item.label}
-              {typeof item.count === 'number' && (
+              {typeof item.count === 'number' && item.count > 0 && (
                 <span className={COUNT_BADGE_CLASS}>
                   {item.count}
                 </span>
@@ -102,8 +102,8 @@ function MultiSelectSearchableDropdown({
           {label}
           {selectedIds.length > 0 && (
             <span className={cn(
-              "ml-2 h-5 min-w-5 flex items-center justify-center rounded-full text-xs font-black tabular-nums px-1.5",
-              accentActive ? "bg-white/20 text-white" : "bg-blue-100 text-blue-700"
+              "ml-2 inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm",
+              accentActive ? "bg-white/25 text-white" : "bg-custom-blue text-white"
             )}>
               {selectedIds.length}
             </span>
@@ -128,7 +128,7 @@ function MultiSelectSearchableDropdown({
                     <Check className={cn("mr-3 h-4 w-4 shrink-0 transition-opacity", isSelected ? "opacity-100 text-blue-600" : "opacity-0")} />
                     <span className={cn("flex-1 text-sm font-semibold truncate", isSelected ? "text-slate-900" : "text-slate-600")}>{it.name}</span>
                     {typeof counts[id] === 'number' && counts[id] > 0 && (
-                      <span className="ml-2 shrink-0 text-xs font-black tabular-nums h-5 min-w-5 flex items-center justify-center px-1.5 rounded-full bg-blue-100 text-blue-600">
+                      <span className="ml-2 shrink-0 inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm bg-custom-blue text-white">
                         {counts[id]}
                       </span>
                     )}
@@ -282,12 +282,12 @@ export function StatusTabs({
   // tab looking identical except for label — active tab gets a solid fill in that color,
   // idle tab gets a tinted badge in the same hue so the count stays legible either way.
   const STATUS_ITEMS = [
-    { id: 'all', label: 'All Tasks', active: 'data-[state=active]:bg-custom-blue data-[state=active]:text-white', badgeIdle: 'bg-custom-blue/10 text-custom-blue' },
-    { id: 'active', label: 'All Enquiry + WIP', active: 'data-[state=active]:bg-indigo-600 data-[state=active]:text-white', badgeIdle: 'bg-indigo-100 text-indigo-700' },
-    { id: 'enquiry', label: 'Enquiry', active: 'data-[state=active]:bg-sky-600 data-[state=active]:text-white', badgeIdle: 'bg-sky-100 text-sky-700' },
-    { id: 'wip', label: 'WIP', active: 'data-[state=active]:bg-amber-500 data-[state=active]:text-white', badgeIdle: 'bg-amber-100 text-amber-700' },
-    { id: 'completed', label: 'Completed', active: 'data-[state=active]:bg-emerald-600 data-[state=active]:text-white', badgeIdle: 'bg-emerald-100 text-emerald-700' },
-    { id: 'overdue', label: 'Overdue Tasks Based on Promised Time', active: 'data-[state=active]:bg-red-600 data-[state=active]:text-white', badgeIdle: 'bg-red-100 text-red-700' },
+    { id: 'all', label: 'All Tasks', active: 'data-[state=active]:bg-custom-blue data-[state=active]:text-white', badgeIdle: 'bg-custom-blue text-white' },
+    { id: 'active', label: 'All Enquiry + WIP', active: 'data-[state=active]:bg-teal-600 data-[state=active]:text-white', badgeIdle: 'bg-teal-500 text-white' },
+    { id: 'enquiry', label: 'Enquiry', active: 'data-[state=active]:bg-sky-600 data-[state=active]:text-white', badgeIdle: 'bg-sky-500 text-white' },
+    { id: 'wip', label: 'WIP', active: 'data-[state=active]:bg-amber-500 data-[state=active]:text-white', badgeIdle: 'bg-amber-500 text-white' },
+    { id: 'completed', label: 'Completed', active: 'data-[state=active]:bg-emerald-600 data-[state=active]:text-white', badgeIdle: 'bg-emerald-500 text-white' },
+    { id: 'overdue', label: 'Overdue Tasks Based on Promised Time', active: 'data-[state=active]:bg-red-600 data-[state=active]:text-white', badgeIdle: 'bg-red-500 text-white' },
   ];
 
   const perspectiveCounts = { all: allCount || 0, officers: officersCount || 0, managers: managersCount || 0, clients: clientsCount || 0 };
@@ -309,17 +309,19 @@ export function StatusTabs({
                 key={tab.id}
                 value={tab.id}
                 className={cn(
-                  "group gap-2 rounded-md px-4 h-9 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors data-[state=active]:shadow-sm",
+                  "group gap-2 rounded-2xl px-4 h-9 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-white transition-colors data-[state=active]:shadow-sm",
                   tab.active
                 )}
               >
                 {tab.label}
-                <span className={cn(
-                  "font-bold tabular-nums px-2 py-1 rounded-md text-sm min-w-[2rem] text-center group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white",
-                  tab.badgeIdle
-                )}>
-                  {counts[tab.id] || 0}
-                </span>
+                {(counts[tab.id] || 0) > 0 && (
+                  <span className={cn(
+                    "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white",
+                    tab.badgeIdle
+                  )}>
+                    {counts[tab.id] || 0}
+                  </span>
+                )}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -333,9 +335,14 @@ export function StatusTabs({
               {PERSPECTIVES.map(p => (
                 <TabsTrigger key={p.id} value={p.id} className={cn(TAB_TRIGGER_CLASS, "h-9")}>
                   {p.label}
-                  <span className={COUNT_BADGE_CLASS}>
-                    {perspectiveCounts[p.id]}
-                  </span>
+                  {perspectiveCounts[p.id] > 0 && (
+                    <span className={cn(
+                      "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm",
+                      "group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white bg-slate-800 text-white"
+                    )}>
+                      {perspectiveCounts[p.id]}
+                    </span>
+                  )}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -415,9 +422,16 @@ export function PerspectiveTabs({
         {isPersonView && (
           <Tabs value={currentActive} onValueChange={setTab} className="w-full lg:w-auto">
             <TabsList className={cn(TAB_LIST_CLASS, "flex-wrap lg:flex-nowrap overflow-x-auto custom-scrollbar")}>
-              <TabsTrigger value="all" className={cn(TAB_TRIGGER_CLASS, "h-9")}>
+              <TabsTrigger value="all" className={cn(
+                "group gap-2 rounded-2xl px-4 h-9 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-white transition-colors data-[state=active]:text-white data-[state=active]:shadow-sm",
+                isOfficer ? "data-[state=active]:bg-violet-600" : "data-[state=active]:bg-indigo-600"
+              )}>
                 <User className="h-4 w-4 text-slate-400 group-data-[state=active]:text-white" /> All {isOfficer ? "Officers" : "Managers"}
-                <span className={COUNT_BADGE_CLASS}>
+                <span className={cn(
+                  "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm",
+                  "group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white",
+                  isOfficer ? "bg-violet-500 text-white" : "bg-indigo-500 text-white"
+                )}>
                   {counts.all ?? 0}
                 </span>
               </TabsTrigger>
@@ -426,9 +440,16 @@ export function PerspectiveTabs({
                 const displayName = p.displayName || p.full_name || p.name || `User ${p.id}`;
                 const count = counts[p.id.toString()] || 0;
                 return (
-                  <TabsTrigger key={p.id} value={p.id.toString()} className={cn(TAB_TRIGGER_CLASS, "h-9")}>
+                  <TabsTrigger key={p.id} value={p.id.toString()} className={cn(
+                    "group gap-2 rounded-2xl px-4 h-9 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-white transition-colors data-[state=active]:text-white data-[state=active]:shadow-sm",
+                    isOfficer ? "data-[state=active]:bg-violet-600" : "data-[state=active]:bg-indigo-600"
+                  )}>
                     {displayName}
-                    <span className={COUNT_BADGE_CLASS}>
+                    <span className={cn(
+                      "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm",
+                      "group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white",
+                      isOfficer ? "bg-violet-500 text-white" : "bg-indigo-500 text-white"
+                    )}>
                       {count}
                     </span>
                   </TabsTrigger>

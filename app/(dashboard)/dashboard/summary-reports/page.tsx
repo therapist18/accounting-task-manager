@@ -745,36 +745,27 @@ export default function SummaryReportsPage() {
 
   return (
     <div className="flex flex-col flex-1 overflow-auto bg-slate-50">
-      {/* Title Bar — the title is the first thing on the page and is sized/weighted to read
-          as such; an accent bar gives it an anchor instead of relying on size alone. */}
-      <div className="border-b border-slate-200 bg-white px-8 py-6 antialiased flex flex-col justify-center">
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0 flex items-center gap-4">
-            <span className="h-9 w-1.5 rounded-full bg-custom-blue shrink-0" />
-            <div className="min-w-0 flex flex-col gap-1.5">
-              <div className="flex items-center gap-3 min-w-0">
-                <h1 className="text-[28px] font-black text-slate-900 uppercase tracking-tight truncate leading-none">
-                  {activeReport ? activeReport.name : "Summary Reports Dashboard"}
-                </h1>
-                {activeReport && (
-                  <button
-                    onClick={() => { setActiveReport(null); setReportColumnOrder(null); setReportFieldNumbers(null); setVisibleColumnIds(DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS); }}
-                    className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-800 border border-slate-200 hover:border-slate-300 rounded-full px-2.5 py-1 transition-colors"
-                    title="Unload report — return to default columns"
-                  >
-                    <X className="h-3 w-3" />
-                    Unload
-                  </button>
-                )}
-              </div>
-              <div className="flex items-center text-sm text-slate-500 font-semibold gap-1">
-                <Building2 className="h-3.5 w-3.5 shrink-0" style={{ color: '#376bae' }} />
-                <span className="font-bold" style={{ color: '#376bae' }}>{activeDepartment?.name || "All Departments"}</span>
-                <span className="text-slate-300 mx-0.5">/</span>
-                <span className="truncate text-slate-500">{breadcrumbSubtext}</span>
-              </div>
-            </div>
+      {/* Title Bar */}
+      <div className="border-b border-slate-200 bg-white px-8 py-4 flex items-center justify-between antialiased">
+        <div className="flex items-center gap-8">
+          <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight leading-none text-center">
+            {activeReport ? activeReport.name : "Summary Reports Dashboard"}
+          </h1>
+          <div className="flex items-center text-base font-bold gap-2">
+            <span className="text-slate-900">{activeDepartment?.name || "All Departments"}</span>
+            <ChevronRight className="h-4 w-4 text-slate-400" />
+            <span className="text-slate-600">{breadcrumbSubtext}</span>
           </div>
+          {activeReport && (
+            <button
+              onClick={() => { setActiveReport(null); setReportColumnOrder(null); setReportFieldNumbers(null); setVisibleColumnIds(DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS); }}
+              className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-800 border border-slate-200 hover:border-slate-300 rounded-full px-2.5 py-1 transition-colors"
+              title="Unload report — return to default columns"
+            >
+              <X className="h-3 w-3" />
+              Unload
+            </button>
+          )}
 
           {/* Secondary controls — normal squared buttons matching the tab design above. */}
           <div className="flex items-center gap-2.5 shrink-0">

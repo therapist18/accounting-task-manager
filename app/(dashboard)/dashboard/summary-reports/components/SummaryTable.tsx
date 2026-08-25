@@ -678,10 +678,10 @@ export function SummaryTable({
                   report that actually produced numbers is applied. */}
               {reportFieldNumbers && Object.keys(reportFieldNumbers).length > 0 && (
                 <TableRow ref={refNumberRowRef} className="hover:bg-transparent border-0" style={{ backgroundColor: '#2a5486' }}>
-                  <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-1 px-2" style={{ backgroundColor: '#2a5486' }} />
+                  <TableHead className="sticky left-0 z-50 h-5 border-r border-b border-white/30 text-center py-0 px-2" style={{ backgroundColor: '#2a5486' }} />
                   {interleavedColumns.map((col: any) => {
                     if (col.isDelta) {
-                      return <TableHead key={col.id} className="border-r border-b border-white/30" style={{ width: DELTA_COL_WIDTH, backgroundColor: '#2a5486' }} />;
+                      return <TableHead key={col.id} className="h-5 border-r border-b border-white/30 py-0" style={{ width: DELTA_COL_WIDTH, backgroundColor: '#2a5486' }} />;
                     }
                     const isSticky = !!col.sticky;
                     const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
@@ -690,20 +690,20 @@ export function SummaryTable({
                       <TableHead
                         key={col.id}
                         className={cn(
-                          "border-r border-b border-white/30 text-center py-1 px-2",
+                          "h-5 border-r border-b border-white/30 text-center py-0 px-2",
                           isSticky && "z-40 sticky"
                         )}
                         style={{ backgroundColor: '#2a5486', ...(isSticky ? { left: `${left}px` } : {}) }}
                       >
                         {number ? (
-                          <span className="text-[10px] font-black text-sky-200 tabular-nums" title="Reference number — matches the ID column in Report Manager">
+                          <span className="text-[10px] font-black text-sky-200 tabular-nums leading-none" title="Reference number — matches the ID column in Report Manager">
                             {number}
                           </span>
                         ) : null}
                       </TableHead>
                     );
                   })}
-                  <TableHead className="sticky right-0 z-50 border-l border-b border-white/30 shadow-[-2px_0_4px_rgba(0,0,0,0.15)]" style={{ backgroundColor: '#2a5486' }} />
+                  <TableHead className="sticky right-0 z-50 h-5 border-l border-b border-white/30 py-0 shadow-[-2px_0_4px_rgba(0,0,0,0.15)]" style={{ backgroundColor: '#2a5486' }} />
                 </TableRow>
               )}
 
@@ -808,10 +808,10 @@ export function SummaryTable({
                   visible on hover over a completed/in-progress cell. */}
               {Object.keys(stageEstimatedTimeByColId).length > 0 && (
                 <TableRow ref={expectedTimeRowRef} className="hover:bg-transparent border-0" style={{ backgroundColor: '#2a5486' }}>
-                  <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-1.5 px-2" style={{ backgroundColor: '#2a5486' }} />
+                  <TableHead className="sticky left-0 z-50 h-5 border-r border-b border-white/30 text-center py-0 px-2" style={{ backgroundColor: '#2a5486' }} />
                   {interleavedColumns.map((col: any) => {
                     if (col.isDelta) {
-                      return <TableHead key={col.id} className="border-r border-b border-white/30" style={{ width: DELTA_COL_WIDTH, backgroundColor: '#2a5486' }} />;
+                      return <TableHead key={col.id} className="h-5 border-r border-b border-white/30 py-0" style={{ width: DELTA_COL_WIDTH, backgroundColor: '#2a5486' }} />;
                     }
                     const isSticky = !!col.sticky;
                     const left = isSticky ? stickyColumnOffsets[col.id] : undefined;
@@ -820,20 +820,20 @@ export function SummaryTable({
                       <TableHead
                         key={col.id}
                         className={cn(
-                          "border-r border-b border-white/30 text-center py-1.5 px-2",
+                          "h-5 border-r border-b border-white/30 text-center py-0 px-2",
                           isSticky && "z-40 sticky"
                         )}
                         style={{ backgroundColor: '#2a5486', ...(isSticky ? { left: `${left}px` } : {}) }}
                       >
                         {minutes ? (
-                          <span className="text-[10px] font-semibold text-sky-200 tabular-nums whitespace-nowrap">
+                          <span className="text-[10px] font-semibold text-sky-200 tabular-nums whitespace-nowrap leading-none">
                             Expected: {formatEstimatedMins(minutes)}
                           </span>
                         ) : null}
                       </TableHead>
                     );
                   })}
-                  <TableHead className="sticky right-0 z-50 border-l border-b border-white/30 shadow-[-2px_0_4px_rgba(0,0,0,0.15)]" style={{ backgroundColor: '#2a5486' }} />
+                  <TableHead className="sticky right-0 z-50 h-5 border-l border-b border-white/30 py-0 shadow-[-2px_0_4px_rgba(0,0,0,0.15)]" style={{ backgroundColor: '#2a5486' }} />
                 </TableRow>
               )}
             </TableHeader>
