@@ -147,7 +147,8 @@
       "Bash(git diff *)",
       "Bash(npx supabase *)",
       "Bash(node -e \"console.log\\(require.resolve\\('nodemailer'\\)\\)\")",
-      "Bash(mkdir -p \"/e/GitHub/kra-tools/app/api/send-rm-request-email\")"
+      "Bash(mkdir -p \"/e/GitHub/kra-tools/app/api/send-rm-request-email\")",
+      "Bash(tail -40 /tmp/tscout2.txt)"
     ],
     "additionalDirectories": [
       "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals",
