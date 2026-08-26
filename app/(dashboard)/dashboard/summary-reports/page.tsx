@@ -46,27 +46,45 @@ const STATUS_LABELS: Record<string, string> = {
 };
 const COMPLETED_STATUSES = ['write_up_completed', 'endorsed', 'completed'];
 
+// Module-level (not React state) so it survives this component unmounting — navigating away from
+// Summary Reports and back (e.g. via the sidebar) previously threw away all loaded data and reran
+// the full ~8-request loadAllData() from a blank slate every single time, showing the full-page
+// "Loading Summary Reports..." spinner on every visit even when nothing had changed since the
+// last one. Every field here is what loadAllData() itself computes locally before setting state,
+// captured once at the end of a successful load. The mount effect below seeds every useState
+// straight from this cache when present, so a remount paints real data on the very first render —
+// no spinner — while a silent background refresh (loadAllData(true)) still runs to catch changes
+// made elsewhere since the cache was written. Only this tab's first-ever load in the session (or
+// after a full page reload) still shows the blocking spinner, since there's nothing to seed from.
+let summaryReportsCache: {
+  departments: any[]; companies: Map<number, { name: string; prefix: string }>; allTasks: any[];
+  stagesByDept: Map<string, any[]>; unifiedOfficers: any[]; unifiedManagers: any[]; unifiedAssistants: any[];
+  unifiedUserData: any; enhancedTasksData: Map<string, any>; expectedTimeByJobLevel: Map<string, number>;
+  promisedTimeByJobLevel: Map<string, { defaultMinutes: number | null; conditions: { value: string; minutes: number }[] }>;
+  allDocuments: Document[]; kycDocuments: Map<string, any>; currentUserId: string | null;
+} | null = null;
+
 export default function SummaryReportsPage() {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!summaryReportsCache);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [departments, setDepartments] = useState<any[]>([]);
-  const [companies, setCompanies] = useState<Map<number, { name: string; prefix: string }>>(new Map());
-  const [allTasks, setAllTasks] = useState<any[]>([]);
-  const [stagesByDept, setStagesByDept] = useState<Map<string, any[]>>(new Map());
-  const [unifiedOfficers, setUnifiedOfficers] = useState<any[]>([]);
-  const [unifiedManagers, setUnifiedManagers] = useState<any[]>([]);
-  const [unifiedAssistants, setUnifiedAssistants] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<any[]>(summaryReportsCache?.departments || []);
+  const [companies, setCompanies] = useState<Map<number, { name: string; prefix: string }>>(summaryReportsCache?.companies || new Map());
+  const [allTasks, setAllTasks] = useState<any[]>(summaryReportsCache?.allTasks || []);
+  const [stagesByDept, setStagesByDept] = useState<Map<string, any[]>>(summaryReportsCache?.stagesByDept || new Map());
+  const [unifiedOfficers, setUnifiedOfficers] = useState<any[]>(summaryReportsCache?.unifiedOfficers || []);
+  const [unifiedManagers, setUnifiedManagers] = useState<any[]>(summaryReportsCache?.unifiedManagers || []);
+  const [unifiedAssistants, setUnifiedAssistants] = useState<any[]>(summaryReportsCache?.unifiedAssistants || []);
   // Full { officers, managers, assistants, allUsers } payload, kept as-is (not just the split-out
   // lists above) so it can be handed straight to EnquiryDialog's `userData` prop — same shape
   // DepartmentTasksManager passes it, letting the dialog skip its own staff refetch.
-  const [unifiedUserData, setUnifiedUserData] = useState<any>(null);
-  const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
-  const [expectedTimeByJobLevel, setExpectedTimeByJobLevel] = useState<Map<string, number>>(new Map());
+  const [unifiedUserData, setUnifiedUserData] = useState<any>(summaryReportsCache?.unifiedUserData || null);
+  const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(summaryReportsCache?.enhancedTasksData || new Map());
+  const [expectedTimeByJobLevel, setExpectedTimeByJobLevel] = useState<Map<string, number>>(summaryReportsCache?.expectedTimeByJobLevel || new Map());
   // Promised Time (Stages module) per job level — defaultMinutes is the fallback, conditions
   // let a job level give a different Promised Time per Application Type value.
   const [promisedTimeByJobLevel, setPromisedTimeByJobLevel] = useState<
     Map<string, { defaultMinutes: number | null; conditions: { value: string; minutes: number }[] }>
-  >(new Map());
+  >(summaryReportsCache?.promisedTimeByJobLevel || new Map());
 
   const [activeDeptId, setActiveDeptId] = useState<string>("all");
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
@@ -90,8 +108,8 @@ export default function SummaryReportsPage() {
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS);
 
   // Document data for EditableStageCell (read-only preview)
-  const [allDocuments, setAllDocuments] = useState<Document[]>([]);
-  const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map());
+  const [allDocuments, setAllDocuments] = useState<Document[]>(summaryReportsCache?.allDocuments || []);
+  const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(summaryReportsCache?.kycDocuments || new Map());
 
   // Memorized Reports
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
@@ -103,7 +121,7 @@ export default function SummaryReportsPage() {
   // to each column's header label so it can be cross-referenced against the same numbers
   // MemorizedReportDialog shows in its ID column for that field/stage. Null with no report active.
   const [reportFieldNumbers, setReportFieldNumbers] = useState<Record<string, string> | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(summaryReportsCache?.currentUserId || null);
 
   // ── Row actions (Edit / Cancel / Reactivate / Delete) — same dialogs and tm_tasks writes
   // DepartmentTasksManager's renderActionButtons uses, driven from this page's own allTasks
@@ -124,9 +142,13 @@ export default function SummaryReportsPage() {
       // Doesn't depend on (or get depended on by) anything else in this function — kick it
       // off now instead of waiting until the very end, so it resolves concurrently with the
       // rest of the load instead of adding its own round trip on top.
+      let resolvedUserId: string | null = null;
       const sessionPromise = fetch('/api/auth/session')
         .then(res => res.json())
-        .then(json => setCurrentUserId(json?.authenticated && json?.user ? (json.user.id || null) : null))
+        .then(json => {
+          resolvedUserId = json?.authenticated && json?.user ? (json.user.id || null) : null;
+          setCurrentUserId(resolvedUserId);
+        })
         .catch(sessionErr => console.error('[SummaryReports] Failed to fetch current user session:', sessionErr));
 
       // Departments and companies don't depend on each other — fetch both up front in
@@ -246,6 +268,15 @@ export default function SummaryReportsPage() {
       setKycDocuments(kycDocsMap);
 
       await sessionPromise;
+
+      summaryReportsCache = {
+        departments: depts, companies: comps, allTasks: newAllTasks, stagesByDept: newStagesByDept,
+        unifiedOfficers: unifiedUserData.officers || [], unifiedManagers: unifiedUserData.managers || [],
+        unifiedAssistants: unifiedUserData.assistants || [], unifiedUserData,
+        enhancedTasksData: enhancedMap, expectedTimeByJobLevel: newExpectedTimeMap,
+        promisedTimeByJobLevel: newPromisedTimeMap, allDocuments: documentsData, kycDocuments: kycDocsMap,
+        currentUserId: resolvedUserId,
+      };
     } catch (err) {
       toast({ title: "Error", description: "Could not load summary reports data.", variant: "destructive" });
     } finally {
@@ -253,7 +284,10 @@ export default function SummaryReportsPage() {
     }
   }, []);
 
-  useEffect(() => { loadAllData(); }, [loadAllData]);
+  // silent (no spinner, initial state already seeded from the cache above) when a previous mount
+  // already populated summaryReportsCache — this component may have unmounted and remounted (e.g.
+  // navigating away and back via the sidebar) without the page itself reloading.
+  useEffect(() => { loadAllData(!!summaryReportsCache); }, [loadAllData]);
 
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -595,6 +629,7 @@ export default function SummaryReportsPage() {
       counts.all += c;
     });
     const unallocated = pool.filter(t => getStageOfficerIdsForTask(t, officerFilterMode).length === 0).length;
+    counts.__unallocated__ = unallocated;
     counts.all += unallocated;
     return counts;
   }, [statusScopedTasks, availableOfficers, getCurrentOfficerStageForTask, getStageOfficerIdsForTask, officerFilterMode]);
@@ -611,24 +646,36 @@ export default function SummaryReportsPage() {
       counts[m.id.toString()] = c;
       counts.all += c;
     });
+    const unallocated = pool.filter(t => !t.task_manager_id).length;
+    counts.__unallocated__ = unallocated;
+    counts.all += unallocated;
     return counts;
   }, [statusScopedTasks, availableTaskManagers, getCanonicalCurrentStageForTask]);
 
   const perspectiveScopedTasks = useMemo(() => statusScopedTasks.filter(task => {
     if (activePerspective === 'officers') {
-      // Same current/history split as ReportsPage's tasksByFilters: 'current' is gated to
-      // tasks AT an officer stage right now; 'history' has no such gate — a task can have
-      // moved on to BCL/Client while still counting toward an officer's completed history.
       if (officerFilterMode === 'current') {
         if (!getCurrentOfficerStageForTask(task)) return false;
-        if (activeOfficerId !== 'all' && !getStageOfficerIdsForTask(task, 'current').includes(activeOfficerId)) return false;
+        if (activeOfficerId === '__unallocated__') {
+          if (getStageOfficerIdsForTask(task, 'current').length > 0) return false;
+        } else if (activeOfficerId !== 'all') {
+          if (!getStageOfficerIdsForTask(task, 'current').includes(activeOfficerId)) return false;
+        }
       } else {
-        if (activeOfficerId !== 'all' && !getStageOfficerIdsForTask(task, 'history').includes(activeOfficerId)) return false;
+        if (activeOfficerId === '__unallocated__') {
+          if (getStageOfficerIdsForTask(task, 'history').length > 0) return false;
+        } else if (activeOfficerId !== 'all') {
+          if (!getStageOfficerIdsForTask(task, 'history').includes(activeOfficerId)) return false;
+        }
       }
     }
     if (activePerspective === 'managers') {
       if (getCanonicalCurrentStageForTask(task)?.follow_up?.toLowerCase() !== 'bcl') return false;
-      if (activeManagerId !== 'all' && task.task_manager?.id?.toString() !== activeManagerId) return false;
+      if (activeManagerId === '__unallocated__') {
+        if (task.task_manager_id) return false;
+      } else if (activeManagerId !== 'all') {
+        if (task.task_manager?.id?.toString() !== activeManagerId) return false;
+      }
     }
     if (activePerspective === 'clients' && !isTaskWithClientForTask(task)) return false;
     return true;
@@ -766,81 +813,81 @@ export default function SummaryReportsPage() {
               Unload
             </button>
           )}
+        </div>
 
-          {/* Secondary controls — normal squared buttons matching the tab design above. */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsReportDialogOpen(true)}
-              className="h-9 px-4 rounded-md text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 shrink-0 transition-all"
-            >
-              <TableIcon className="h-3.5 w-3.5" /> Reports
-            </Button>
-            <ColumnVisibilityDialog visibleColumnIds={visibleColumnIds} setVisibleColumnIds={setVisibleColumnIds} />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowEmptySubDepts((v) => !v)}
-              className={cn(
-                "h-9 px-4 rounded-md text-sm font-bold gap-2 transition-all",
-                !showEmptySubDepts ? "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue" : "border-slate-200 text-slate-600 hover:bg-slate-50"
-              )}
-              title={showEmptySubDepts ? "Hide sub-departments with no tasks" : "Show every sub-department, including empty ones"}
-            >
-              <ListFilter className="h-3.5 w-3.5" />
-              {showEmptySubDepts ? "Show With Tasks" : "Show All"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowTime((v) => !v)}
-              className={cn(
-                "h-9 px-4 rounded-md text-sm font-bold gap-2 transition-all",
-                showTime ? "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue" : "border-slate-200 text-slate-600 hover:bg-slate-50"
-              )}
-            >
-              <Clock className="h-3.5 w-3.5" />
-              {showTime ? "Hide Time" : "Show Time"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowDelta((v) => !v)}
-              className={cn(
-                "h-9 px-4 rounded-md text-sm font-bold gap-2 transition-all",
-                showDelta ? "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue" : "border-slate-200 text-slate-600 hover:bg-slate-50"
-              )}
-            >
-              <GitCompare className="h-3.5 w-3.5" />
-              {showDelta ? "Hide Time Gaps" : "Show Time Gaps"}
-            </Button>
-            <div className="h-6 w-px bg-slate-200 mx-1" />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="sm"
-                  disabled={!!isExporting}
-                  className="h-9 px-4 rounded-md text-sm font-bold gap-2 text-white hover:bg-[#2d5a94] shadow-sm disabled:opacity-70"
-                  style={{ backgroundColor: '#376bae' }}
-                >
-                  {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />}
-                  {isExporting ? `Exporting ${isExporting.toUpperCase()}...` : "Export"}
-                  {!isExporting && <ChevronDown className="h-3.5 w-3.5 opacity-70" />}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem onClick={() => handleExport('excel')} disabled={!!isExporting} className="gap-2 cursor-pointer">
-                  <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-                  Export as Excel
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleExport('pdf')} disabled={!!isExporting} className="gap-2 cursor-pointer">
-                  <FileText className="h-4 w-4 text-red-600" />
-                  Export as PDF
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+        {/* Secondary controls — normal squared buttons matching the tab design above. */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsReportDialogOpen(true)}
+            className="h-9 px-4 rounded-md text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 shrink-0 transition-all"
+          >
+            <TableIcon className="h-3.5 w-3.5" /> Reports
+          </Button>
+          <ColumnVisibilityDialog visibleColumnIds={visibleColumnIds} setVisibleColumnIds={setVisibleColumnIds} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowEmptySubDepts((v) => !v)}
+            className={cn(
+              "h-9 px-4 rounded-md text-sm font-bold gap-2 transition-all",
+              !showEmptySubDepts ? "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+            )}
+            title={showEmptySubDepts ? "Hide sub-departments with no tasks" : "Show every sub-department, including empty ones"}
+          >
+            <ListFilter className="h-3.5 w-3.5" />
+            {showEmptySubDepts ? "Show With Tasks" : "Show All"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowTime((v) => !v)}
+            className={cn(
+              "h-9 px-4 rounded-md text-sm font-bold gap-2 transition-all",
+              showTime ? "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+            )}
+          >
+            <Clock className="h-3.5 w-3.5" />
+            {showTime ? "Hide Time" : "Show Time"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowDelta((v) => !v)}
+            className={cn(
+              "h-9 px-4 rounded-md text-sm font-bold gap-2 transition-all",
+              showDelta ? "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+            )}
+          >
+            <GitCompare className="h-3.5 w-3.5" />
+            {showDelta ? "Hide Time Gaps" : "Show Time Gaps"}
+          </Button>
+          <div className="h-6 w-px bg-slate-200 mx-1" />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                disabled={!!isExporting}
+                className="h-9 px-4 rounded-md text-sm font-bold gap-2 text-white hover:bg-[#2d5a94] shadow-sm disabled:opacity-70"
+                style={{ backgroundColor: '#376bae' }}
+              >
+                {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />}
+                {isExporting ? `Exporting ${isExporting.toUpperCase()}...` : "Export"}
+                {!isExporting && <ChevronDown className="h-3.5 w-3.5 opacity-70" />}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={() => handleExport('excel')} disabled={!!isExporting} className="gap-2 cursor-pointer">
+                <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                Export as Excel
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('pdf')} disabled={!!isExporting} className="gap-2 cursor-pointer">
+                <FileText className="h-4 w-4 text-red-600" />
+                Export as PDF
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 

@@ -1569,13 +1569,13 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   // status icon, no overdue color/badge, no elapsed timer, all of which now live exclusively
   // in the Status column so the two never disagree about what "late" looks like.
   const renderPlainDateContent = (isCompact = false) => {
-    if (!isStageApplicable) return <span className="text-xs text-gray-400 italic">N/A</span>;
+    if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
 
     const stageData = task.stages?.[stage.id];
     const stageStatus = stageData?.status;
     const isSkipped = stageStatus === 'skipped';
 
-    if (isSkipped) return <span className="text-xs text-gray-300">—</span>;
+    if (isSkipped) return <span className="text-sm text-gray-300">—</span>;
 
     const isExplicitlyCompleted = stageStatus === 'completed';
     const isLegacyCompleted = !stageStatus && (!!value || stageData?.documentsUploaded === true);
@@ -1599,7 +1599,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         );
       }
 
-      if (readOnly) return <span className="text-xs text-gray-300">—</span>;
+      if (readOnly) return <span className="text-sm text-gray-300">—</span>;
       return (
         <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-slate-500 border border-dashed border-gray-300 hover:border-gray-400 shrink-0" onClick={() => { setIsEditing(true); setCustomInputValue(currentValue); if (inputType === 'multiselect') setCustomMultiSelectValues(currentValue ? currentValue.split(', ') : []); }}>
           {getInputTypeLabel(inputType)}
@@ -1610,9 +1610,9 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     if (isEditing) return renderCompositeDateEditor();
 
     if ((isExplicitlyCompleted || isLegacyCompleted) && (!stageDate || stageDate === 'NaN/NaN/NaN') && !requiresUpload) {
-      if (readOnly) return <span className="text-xs text-gray-300">—</span>;
+      if (readOnly) return <span className="text-sm text-gray-300">—</span>;
       return (
-        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-slate-500 border border-dashed border-gray-300 hover:border-gray-400" onClick={() => setIsEditing(true)}>
+        <Button variant="ghost" size="sm" className="h-7 px-3 text-xs text-slate-500 border border-dashed border-gray-300 hover:border-gray-400" onClick={() => setIsEditing(true)}>
           Set Date
         </Button>
       );
@@ -1622,7 +1622,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       const editable = !readOnly && !requiresUpload;
       return (
         <span
-          className={cn("text-xs text-slate-600 truncate", editable && "cursor-pointer hover:underline")}
+          className={cn("text-sm text-slate-600 truncate", editable && "cursor-pointer hover:underline")}
           title={formatDateDisplay(stageDate)}
           onClick={(e) => { if (!editable) return; e.stopPropagation(); setIsEditing(true); }}
         >
@@ -1631,11 +1631,11 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       );
     }
 
-    if (readOnly) return <span className="text-xs text-gray-300">—</span>;
+    if (readOnly) return <span className="text-sm text-gray-300">—</span>;
 
     if (!requiresUpload) {
       return (
-        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-slate-500 border border-dashed border-gray-300 hover:border-gray-400" onClick={() => setIsEditing(true)}>
+        <Button variant="ghost" size="sm" className="h-7 px-3 text-xs text-slate-500 border border-dashed border-gray-300 hover:border-gray-400" onClick={() => setIsEditing(true)}>
           <Calendar className="h-3 w-3 mr-1" /> Add Date
         </Button>
       );
@@ -1650,7 +1650,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   // into the Other Actions menu (renderOtherActionsContent) so this column never has to carry
   // both a badge AND an icon-button crammed next to it.
   const renderStatusContent = (isCompact = false) => {
-    if (!isStageApplicable) return <span className="text-xs text-gray-400 italic">N/A</span>;
+    if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
 
     const stageData = task.stages?.[stage.id];
     const stageStatus = stageData?.status;
@@ -1668,7 +1668,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex items-center gap-1 text-xs text-amber-600 font-semibold cursor-help truncate">
+              <div className="flex items-center gap-1 text-sm text-amber-600 font-semibold cursor-help truncate">
                 <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate">Skipped</span>
               </div>
@@ -1697,7 +1697,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 font-semibold text-xs ${textColorClass} cursor-default select-none truncate`}>
+              <div className={`flex items-center gap-1 font-semibold text-sm ${textColorClass} cursor-default select-none truncate`}>
                 {icon}
                 <span className="truncate">{isCompletedOverdue ? "Overdue" : "Completed"}</span>
               </div>
@@ -1724,7 +1724,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 font-semibold text-xs ${textColorClass} cursor-default truncate`}>
+              <div className={`flex items-center gap-1 font-semibold text-sm ${textColorClass} cursor-default truncate`}>
                 {icon}<span className="truncate">{timeStatus.isOverdue ? 'Overdue' : 'In Progress'}</span>
               </div>
             </TooltipTrigger>
@@ -1741,7 +1741,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       );
     }
 
-    return <span className="text-xs text-gray-400 italic">Not started</span>;
+    return <span className="text-sm text-gray-400 italic">Not started</span>;
   };
 
   // Document-only view for the transposed table's dedicated Upload/View column.

@@ -1,6 +1,15 @@
 // @ts-nocheck
 "use client";
 
+// Tailwind JIT safelist — classes below are dynamically constructed in STATUS_ITEMS / PERSPECTIVES arrays
+// and may not be detected by content scanning. Keep this comment to guarantee generation.
+// data-[state=active]:bg-sky-600 data-[state=active]:bg-teal-600 data-[state=active]:bg-cyan-600
+// data-[state=active]:bg-amber-500 data-[state=active]:bg-emerald-600 data-[state=active]:bg-red-600
+// data-[state=active]:bg-indigo-600 data-[state=active]:bg-violet-600 data-[state=active]:bg-custom-blue
+// data-[state=active]:text-white group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white
+// bg-sky-500 bg-teal-500 bg-amber-500 bg-emerald-500 bg-violet-500 bg-red-500 bg-indigo-500 bg-custom-blue
+// bg-white/25
+
 import React, { useState } from "react";
 import { Search, X, Shield, User, RotateCcw, Loader2, Eye, Check, ChevronsUpDown, Layers, CornerDownRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -281,13 +290,19 @@ export function StatusTabs({
   // Distinct semantic color per status so the tab bar reads at a glance instead of every
   // tab looking identical except for label — active tab gets a solid fill in that color,
   // idle tab gets a tinted badge in the same hue so the count stays legible either way.
+  //
+  // `activeHex` (inline style) rather than a `data-[state=active]:bg-*` Tailwind class — the
+  // latter collides with TabsTrigger's own base `data-[state=active]:bg-background` (components/
+  // ui/tabs.tsx) and, in this project's Tailwind setup, reliably loses the cascade (the active
+  // tab rendered white/gray instead of its color). Inline style always wins regardless of
+  // class order/specificity, so it's used for every dynamically-active-colored tab in this file.
   const STATUS_ITEMS = [
-    { id: 'all', label: 'All Tasks', active: 'data-[state=active]:bg-custom-blue data-[state=active]:text-white', badgeIdle: 'bg-custom-blue text-white' },
-    { id: 'active', label: 'All Enquiry + WIP', active: 'data-[state=active]:bg-teal-600 data-[state=active]:text-white', badgeIdle: 'bg-teal-500 text-white' },
-    { id: 'enquiry', label: 'Enquiry', active: 'data-[state=active]:bg-sky-600 data-[state=active]:text-white', badgeIdle: 'bg-sky-500 text-white' },
-    { id: 'wip', label: 'WIP', active: 'data-[state=active]:bg-amber-500 data-[state=active]:text-white', badgeIdle: 'bg-amber-500 text-white' },
-    { id: 'completed', label: 'Completed', active: 'data-[state=active]:bg-emerald-600 data-[state=active]:text-white', badgeIdle: 'bg-emerald-500 text-white' },
-    { id: 'overdue', label: 'Overdue Tasks Based on Promised Time', active: 'data-[state=active]:bg-red-600 data-[state=active]:text-white', badgeIdle: 'bg-red-500 text-white' },
+    { id: 'all', label: 'All Tasks', activeHex: '#376bae', badgeHex: '#376bae' },
+    { id: 'active', label: 'All Enquiry + WIP', activeHex: '#0d9488', badgeHex: '#14b8a6' },
+    { id: 'enquiry', label: 'Enquiry', activeHex: '#0284c7', badgeHex: '#0ea5e9' },
+    { id: 'wip', label: 'WIP', activeHex: '#f59e0b', badgeHex: '#f59e0b' },
+    { id: 'completed', label: 'Completed', activeHex: '#059669', badgeHex: '#10b981' },
+    { id: 'overdue', label: 'Overdue Tasks Based on Promised Time', activeHex: '#dc2626', badgeHex: '#ef4444' },
   ];
 
   const perspectiveCounts = { all: allCount || 0, officers: officersCount || 0, managers: managersCount || 0, clients: clientsCount || 0 };
@@ -304,26 +319,30 @@ export function StatusTabs({
       <div className="overflow-x-auto custom-scrollbar shrink-0 min-w-0">
         <Tabs value={activeTaskStatus} onValueChange={setActiveTaskStatus}>
           <TabsList className={TAB_LIST_CLASS}>
-            {STATUS_ITEMS.map(tab => (
-              <TabsTrigger
-                key={tab.id}
-                value={tab.id}
-                className={cn(
-                  "group gap-2 rounded-2xl px-4 h-9 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-white transition-colors data-[state=active]:shadow-sm",
-                  tab.active
-                )}
-              >
-                {tab.label}
-                {(counts[tab.id] || 0) > 0 && (
-                  <span className={cn(
-                    "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white",
-                    tab.badgeIdle
-                  )}>
-                    {counts[tab.id] || 0}
-                  </span>
-                )}
-              </TabsTrigger>
-            ))}
+            {STATUS_ITEMS.map(tab => {
+              const isActive = activeTaskStatus === tab.id;
+              return (
+                <TabsTrigger
+                  key={tab.id}
+                  value={tab.id}
+                  className={cn(
+                    "group gap-2 rounded-2xl px-4 h-9 text-sm font-bold transition-colors",
+                    isActive ? "shadow-sm" : "text-slate-600 hover:text-slate-900 hover:bg-white"
+                  )}
+                  style={isActive ? { backgroundColor: tab.activeHex, color: '#fff' } : undefined}
+                >
+                  {tab.label}
+                  {(counts[tab.id] || 0) > 0 && (
+                    <span
+                      className="inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm"
+                      style={isActive ? { backgroundColor: 'rgba(255,255,255,0.25)', color: '#fff' } : { backgroundColor: tab.badgeHex, color: '#fff' }}
+                    >
+                      {counts[tab.id] || 0}
+                    </span>
+                  )}
+                </TabsTrigger>
+              );
+            })}
           </TabsList>
         </Tabs>
       </div>
@@ -419,45 +438,83 @@ export function PerspectiveTabs({
         </div>
 
         {/* Right: Assignee Sub-tabs (Officers/Managers) */}
-        {isPersonView && (
+        {isPersonView && (() => {
+          // Inline style, not a `data-[state=active]:bg-violet-600`/`bg-indigo-600` Tailwind
+          // class — see StatusTabs' own comment above: that variant collides with TabsTrigger's
+          // base `data-[state=active]:bg-background` and loses the cascade in this project's
+          // Tailwind setup, rendering the active tab white/gray instead of its color.
+          const activeHex = isOfficer ? '#7c3aed' : '#4f46e5'; // violet-600 / indigo-600
+          return (
           <Tabs value={currentActive} onValueChange={setTab} className="w-full lg:w-auto">
             <TabsList className={cn(TAB_LIST_CLASS, "flex-wrap lg:flex-nowrap overflow-x-auto custom-scrollbar")}>
-              <TabsTrigger value="all" className={cn(
-                "group gap-2 rounded-2xl px-4 h-9 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-white transition-colors data-[state=active]:text-white data-[state=active]:shadow-sm",
-                isOfficer ? "data-[state=active]:bg-violet-600" : "data-[state=active]:bg-indigo-600"
-              )}>
-                <User className="h-4 w-4 text-slate-400 group-data-[state=active]:text-white" /> All {isOfficer ? "Officers" : "Managers"}
-                <span className={cn(
-                  "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm",
-                  "group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white",
-                  isOfficer ? "bg-violet-500 text-white" : "bg-indigo-500 text-white"
-                )}>
-                  {counts.all ?? 0}
-                </span>
+              <TabsTrigger
+                value="all"
+                className={cn(
+                  "group gap-2 rounded-2xl px-4 h-9 text-sm font-bold transition-colors",
+                  currentActive === 'all' ? "shadow-sm" : "text-slate-600 hover:text-slate-900 hover:bg-white"
+                )}
+                style={currentActive === 'all' ? { backgroundColor: activeHex, color: '#fff' } : undefined}
+              >
+                <User className={cn("h-4 w-4", currentActive === 'all' ? "text-white" : "text-slate-400")} /> All {isOfficer ? "Officers" : "Managers"}
+                {(counts.all ?? 0) > 0 && (
+                  <span className={cn(
+                    "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm",
+                    currentActive === 'all' ? "bg-white/25 text-white" : (isOfficer ? "bg-violet-500 text-white" : "bg-indigo-500 text-white")
+                  )}>
+                    {counts.all ?? 0}
+                  </span>
+                )}
               </TabsTrigger>
 
               {currentData.map((p: any) => {
                 const displayName = p.displayName || p.full_name || p.name || `User ${p.id}`;
                 const count = counts[p.id.toString()] || 0;
+                const isActiveTab = currentActive === p.id.toString();
                 return (
-                  <TabsTrigger key={p.id} value={p.id.toString()} className={cn(
-                    "group gap-2 rounded-2xl px-4 h-9 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-white transition-colors data-[state=active]:text-white data-[state=active]:shadow-sm",
-                    isOfficer ? "data-[state=active]:bg-violet-600" : "data-[state=active]:bg-indigo-600"
-                  )}>
+                  <TabsTrigger
+                    key={p.id}
+                    value={p.id.toString()}
+                    className={cn(
+                      "group gap-2 rounded-2xl px-4 h-9 text-sm font-bold transition-colors",
+                      isActiveTab ? "shadow-sm" : "text-slate-600 hover:text-slate-900 hover:bg-white"
+                    )}
+                    style={isActiveTab ? { backgroundColor: activeHex, color: '#fff' } : undefined}
+                  >
                     {displayName}
-                    <span className={cn(
-                      "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm",
-                      "group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white",
-                      isOfficer ? "bg-violet-500 text-white" : "bg-indigo-500 text-white"
-                    )}>
-                      {count}
-                    </span>
+                    {count > 0 && (
+                      <span className={cn(
+                        "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm",
+                        isActiveTab ? "bg-white/25 text-white" : (isOfficer ? "bg-violet-500 text-white" : "bg-indigo-500 text-white")
+                      )}>
+                        {count}
+                      </span>
+                    )}
                   </TabsTrigger>
                 );
               })}
+
+              <TabsTrigger
+                value="__unallocated__"
+                className={cn(
+                  "group gap-2 rounded-2xl px-4 h-9 text-sm font-bold transition-colors",
+                  currentActive === '__unallocated__' ? "shadow-sm" : "text-amber-600 hover:text-amber-700 hover:bg-white border border-amber-200 hover:border-amber-300"
+                )}
+                style={currentActive === '__unallocated__' ? { backgroundColor: '#f59e0b', color: '#fff' } : undefined}
+              >
+                Unallocated
+                {(counts.__unallocated__ || 0) > 0 && (
+                  <span className={cn(
+                    "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm",
+                    currentActive === '__unallocated__' ? "bg-white/25 text-white" : "bg-amber-500 text-white"
+                  )}>
+                    {counts.__unallocated__ || 0}
+                  </span>
+                )}
+              </TabsTrigger>
             </TabsList>
           </Tabs>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

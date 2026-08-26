@@ -231,6 +231,7 @@ const MemoizedTableRow = React.memo(({
   processedDocuments,
   kycDocuments,
   renderCellContent,
+  getStageMergedState,
   onEditTask,
   setEditingTask,
   setEditDialogOpen,
@@ -250,6 +251,7 @@ const MemoizedTableRow = React.memo(({
   processedDocuments: Map<string, any[]>;
   kycDocuments: Map<string, any>;
   renderCellContent: (content: any, item: any, header: any) => React.ReactNode;
+  getStageMergedState?: (row: any, task: any) => React.ReactNode | null;
   onEditTask?: (task: any) => void;
   setEditingTask: (task: any) => void;
   setEditDialogOpen: (open: boolean) => void;
@@ -321,7 +323,7 @@ const MemoizedTableRow = React.memo(({
 
           if (!isApplicable) {
             return (
-              <TableCell key={`${row.key}-${colIndex}`} colSpan={4} className={cn("text-center text-sm py-1 px-2 align-middle border-l-2 border-l-gray-300 border-t border-b border-gray-100 bg-slate-50/50 text-gray-400 italic text-[11px]", item.type === 'dependant' ? 'bg-orange-50/20' : '')}>
+              <TableCell key={`${row.key}-${colIndex}`} colSpan={4} className={cn("text-center text-sm py-1 px-2 align-middle border-l-2 border-l-gray-300 border-t border-b border-gray-100 bg-slate-50/50 text-gray-400 italic text-[11px] w-[365px] min-w-[365px] max-w-[365px]", item.type === 'dependant' ? 'bg-orange-50/20' : '')}>
                 N/A
               </TableCell>
             );
@@ -451,6 +453,17 @@ const MemoizedTableRow = React.memo(({
         const groupStartBorder = "border-l-2 border-l-gray-300";
 
         if (row.type === 'stage' && item.type === 'principal') {
+          // N/A (stage not applicable to this task's job level) or Locked (an unmet dependency)
+          // is the SAME state regardless of sub-column — showing it once in a merged cell reads
+          // far cleaner than repeating identical text across all 4 boxes.
+          const mergedContent = getStageMergedState?.(row, item.task);
+          if (mergedContent) {
+            return (
+              <TableCell key={`${row.key}-${colIndex}`} colSpan={4} className={`text-center text-sm py-1 px-2 align-middle ${cellBorder} ${groupStartBorder} w-[365px] min-w-[365px] max-w-[365px] ${depBg}`}>
+                {mergedContent}
+              </TableCell>
+            );
+          }
           return (
             <React.Fragment key={`${row.key}-${colIndex}`}>
               <TableCell className={`text-center text-sm py-1 px-2 align-middle ${cellBorder} ${groupStartBorder} w-[140px] min-w-[140px] max-w-[140px] ${depBg}`}>
@@ -473,7 +486,7 @@ const MemoizedTableRow = React.memo(({
           <TableCell
             key={`${row.key}-${colIndex}`}
             colSpan={4}
-            className={`text-center text-sm py-1 px-2 align-middle ${cellBorder} ${groupStartBorder} ${depBg}`}
+            className={`text-center text-sm py-1 px-2 align-middle ${cellBorder} ${groupStartBorder} w-[365px] min-w-[365px] max-w-[365px] ${depBg}`}
           >
             {item.type === 'principal' ? (
               safeRender(renderCellContent(row, item.task, 'date'))
@@ -503,6 +516,7 @@ interface EnhancedTableProps {
   error: string | null;
   getCellContent: (task: any, headerId: string) => any;
   renderCellContent: (content: any, item: any, header: any) => React.ReactNode;
+  getStageMergedState?: (row: any, task: any) => React.ReactNode | null;
   toggleSectionExpansion: (sectionId: string) => void;
   toggleStageExpansion: (taskId: string, stageId: string) => void;
   toggleDocumentExpansion: (taskId: string, documentId: string) => void;
@@ -539,6 +553,7 @@ export const EnhancedTable = forwardRef<any, EnhancedTableProps>(({
   error,
   getCellContent,
   renderCellContent,
+  getStageMergedState,
   toggleSectionExpansion,
   toggleStageExpansion,
   toggleDocumentExpansion,
@@ -800,6 +815,26 @@ export const EnhancedTable = forwardRef<any, EnhancedTableProps>(({
 
       <div className="bg-white overflow-auto shadow-sm border-b border-slate-200" style={{ maxHeight: `calc(100vh - ${areTabsVisible ? 260 : 145}px)` }}>
         <Table className="min-w-full border-separate border-spacing-0">
+          {/* Authoritative column widths — stage rows split each task's group into 4 unevenly-
+              sized cells (Date/Status/Upload/Other = 140/110/65/50), but every other row type
+              (document/field/delta/actions/report_doc N/A) renders that same group as ONE
+              colSpan={4} cell. Under table-layout: auto the browser reconciles column widths
+              per row independently, so those two shapes drifted out of alignment despite both
+              summing to 365px (see the w-[365px] on the merged cells). A <colgroup> pins each
+              of the 4 sub-columns' widths once, for the whole table, so every row — merged or
+              split — lines up against the exact same boundaries. */}
+          <colgroup>
+            <col style={{ width: 56 }} />
+            <col style={{ width: 280 }} />
+            {paginatedHeaderStructure.map((item, colIndex) => (
+              <React.Fragment key={`colgroup-${item.key}`}>
+                <col style={{ width: 140 }} />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 65 }} />
+                <col style={{ width: 50 }} />
+              </React.Fragment>
+            ))}
+          </colgroup>
           <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
             {expandedSections.has('case_details') && visibleCaseDetailHeaders.map((header, index) => (
               <TableRow key={header.id} className="bg-blue-600 text-white group border-b border-slate-200">
@@ -852,6 +887,7 @@ export const EnhancedTable = forwardRef<any, EnhancedTableProps>(({
                   processedDocuments={processedDocuments}
                   kycDocuments={kycDocuments}
                   renderCellContent={renderCellContent}
+                  getStageMergedState={getStageMergedState}
                   onEditTask={onEditTask}
                   setEditingTask={setEditingTask}
                   setEditDialogOpen={setEditDialogOpen}
@@ -875,6 +911,7 @@ export const EnhancedTable = forwardRef<any, EnhancedTableProps>(({
                   processedDocuments={processedDocuments}
                   kycDocuments={kycDocuments}
                   renderCellContent={renderCellContent}
+                  getStageMergedState={getStageMergedState}
                   onEditTask={onEditTask}
                   setEditingTask={setEditingTask}
                   setEditDialogOpen={setEditDialogOpen}

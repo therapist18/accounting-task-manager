@@ -1,11 +1,16 @@
 // @ts-nocheck
 "use client"
 
+// Tailwind JIT safelist — classes below are dynamically constructed in status tabs / badge arrays
+// bg-sky-600 bg-teal-600 bg-amber-500 bg-emerald-600 bg-violet-600 bg-red-600 bg-slate-800
+// bg-sky-500 bg-teal-500 bg-amber-500 bg-emerald-500 bg-violet-500 bg-red-500
+// bg-white/25 bg-custom-blue
+
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { unstable_batchedUpdates } from 'react-dom'
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Settings, Search, X, TableProperties, RotateCcw, Edit, AlertCircle, Plus, Minus, Download, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2, LinkIcon, RefreshCw, UserPlus, LayoutGrid, Settings2, Clock, GitCompare } from "lucide-react"
+import { Settings, Search, X, TableProperties, RotateCcw, Edit, AlertCircle, Plus, Minus, Download, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2, LinkIcon, RefreshCw, UserPlus, LayoutGrid, Settings2, Clock, GitCompare, Lock as LockIcon } from "lucide-react"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { CancelConfirmationDialog } from "./components/CancelConfirmationDialog"
 import { EnquiryDialog } from "./components/EnquiryDialog"
@@ -2485,6 +2490,49 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     }
   }, [onTaskAction, activeDepartmentTab, activeSubdepartmentTab, activeSubTab, refreshAllData, loadTasksData])
 
+  // The transposed view's stage rows normally split into 4 sub-columns (Date/Status/Upload/
+  // Other — see EnhancedTable's MemoizedTableRow). When a stage is N/A for a task (not
+  // applicable to its job level) or locked (an unmet dependency), that's the SAME state
+  // regardless of sub-column, so showing it 4 times just repeats identical text across 4 boxes.
+  // This tells EnhancedTable when that's the case so it can render ONE merged cell instead —
+  // returns null for the normal case (still render the 4-way split).
+  const getStageMergedState = useCallback((row: any, task: any): React.ReactNode | null => {
+    if (row.type !== 'stage' || !row.stage) return null;
+    const value = row.getValue?.(task) ?? '';
+    if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
+      return <span className="text-sm text-gray-400 italic">N/A</span>;
+    }
+
+    // Mirrors EditableStageCell.tsx's own isDependencyMet check (tasks/components/
+    // EditableStageCell.tsx) — duplicated rather than shared since that component computes it
+    // from its own stage/task props and there's no exported helper for it yet.
+    const deps = row.stage?.dependencies || [];
+    if (deps.length > 0) {
+      const waitingOn: string[] = [];
+      for (const dep of deps) {
+        const parentStageData = task?.stages?.[dep.stageId];
+        const hasData = parentStageData?.date || parentStageData?.value || parentStageData?.status;
+        const isCompleted = parentStageData?.status === 'completed';
+        const unmet = (dep.dependencyType === 'visible_when_completed' || dep.dependencyType === 'sequential')
+          ? !isCompleted
+          : dep.dependencyType === 'visible_when_started' ? !hasData : false;
+        if (unmet) waitingOn.push(dep.stageName || 'Unknown');
+      }
+      if (waitingOn.length > 0) {
+        return (
+          <div
+            className="flex items-center gap-1.5 px-1 py-0.5 rounded bg-gray-50 border border-dashed border-gray-200 cursor-default justify-center mx-auto w-fit"
+            title={`Waiting for: ${waitingOn.join(', ')}`}
+          >
+            <LockIcon className="h-3 w-3 text-gray-300 shrink-0" />
+            <span className="text-[10px] text-gray-300 italic truncate">Locked</span>
+          </div>
+        );
+      }
+    }
+    return null;
+  }, []);
+
   const renderCellContent = useCallback((row: any, task: any, columnType?: 'date' | 'actions' | 'combined' | 'status' | 'upload' | 'other') => {
     const value = row.getValue?.(task) ?? '';
 
@@ -3772,12 +3820,12 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         <div className="px-8 py-2.5 flex items-center bg-white">
           <div className="flex gap-1.5">
             {[
-              { id: 'enquiries', label: 'Enquiries', count: enquiryTasks.length, active: 'bg-sky-600', badgeIdle: 'bg-sky-500 text-white' },
-              { id: 'active', label: 'All Enquiry + WIP', count: activeEnquiryWipTasks.length, active: 'bg-teal-600', badgeIdle: 'bg-teal-500 text-white' },
-              { id: 'wip-stages', label: 'WIP Stages', count: wipTasks.length, active: 'bg-amber-500', badgeIdle: 'bg-amber-500 text-white' },
-              { id: 'write_up_completed', label: 'Write Up Completed', count: completedTasks.length, active: 'bg-emerald-600', badgeIdle: 'bg-emerald-500 text-white' },
-              { id: 'endorsed', label: 'Endorsed', count: endorsedTasks.length, active: 'bg-violet-600', badgeIdle: 'bg-violet-500 text-white' },
-              { id: 'cancelled', label: 'Cancelled', count: cancelledTasks.length, active: 'bg-red-600', badgeIdle: 'bg-red-500 text-white' },
+              { id: 'enquiries', label: 'Enquiries', count: enquiryTasks.length, activeHex: '#0284c7', badgeHex: '#0ea5e9' },
+              { id: 'active', label: 'All Enquiry + WIP', count: activeEnquiryWipTasks.length, activeHex: '#0d9488', badgeHex: '#14b8a6' },
+              { id: 'wip-stages', label: 'WIP Stages', count: wipTasks.length, activeHex: '#f59e0b', badgeHex: '#f59e0b' },
+              { id: 'write_up_completed', label: 'Write Up Completed', count: completedTasks.length, activeHex: '#059669', badgeHex: '#10b981' },
+              { id: 'endorsed', label: 'Endorsed', count: endorsedTasks.length, activeHex: '#7c3aed', badgeHex: '#8b5cf6' },
+              { id: 'cancelled', label: 'Cancelled', count: cancelledTasks.length, activeHex: '#dc2626', badgeHex: '#ef4444' },
             ].map(tab => {
               const isActive = activeSubTab === tab.id;
               return (
@@ -3786,17 +3834,16 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                   onClick={() => setActiveSubTab(tab.id)}
                   className={cn(
                     "group h-9 px-4 text-sm font-bold rounded-2xl transition-all flex items-center gap-2",
-                    isActive
-                      ? cn(tab.active, "text-white shadow-sm")
-                      : "bg-white text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300"
+                    isActive ? "shadow-sm" : "bg-white text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300"
                   )}
+                  style={isActive ? { backgroundColor: tab.activeHex, color: '#fff' } : undefined}
                 >
                   {tab.label}
                   {tab.count > 0 && (
-                    <span className={cn(
-                      "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm",
-                      isActive ? "bg-white/25 text-white" : tab.badgeIdle
-                    )}>
+                    <span
+                      className="inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm"
+                      style={isActive ? { backgroundColor: 'rgba(255,255,255,0.25)', color: '#fff' } : { backgroundColor: tab.badgeHex, color: '#fff' }}
+                    >
                       {tab.count}
                     </span>
                   )}
@@ -3855,8 +3902,12 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                     onClick={() => setActivePerspective(p.id)}
                     className={cn(
                       "h-9 px-4 text-sm font-bold rounded-2xl transition-all flex items-center gap-2",
-                      isActive ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300"
+                      isActive ? "shadow-sm" : "bg-white text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300"
                     )}
+                    // Same custom-blue (#376bae) summary-reports' Overview/Officers/Managers/
+                    // Clients row uses — was bg-slate-800 here, the one visible mismatch between
+                    // the two modules' otherwise-matching tab color schemes.
+                    style={isActive ? { backgroundColor: '#376bae', color: '#fff' } : undefined}
                   >
                     {p.label}
                     {typeof p.count === 'number' && p.count > 0 && (
@@ -3951,7 +4002,9 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
               className={cn("h-9 px-4 text-sm font-bold rounded-2xl transition-all flex items-center gap-2", activeOfficerTab === 'all' ? "bg-violet-600 text-white shadow-sm" : "bg-white text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300")}
             >
               All
-              <span className={cn("inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm", activeOfficerTab === 'all' ? "bg-white/25 text-white" : "bg-violet-500 text-white")}>{officerTaskCounts.all}</span>
+              {officerTaskCounts.all > 0 && (
+                <span className={cn("inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm", activeOfficerTab === 'all' ? "bg-white/25 text-white" : "bg-violet-500 text-white")}>{officerTaskCounts.all}</span>
+              )}
             </button>
             {perspectiveDepartmentUsers.officers.map((o: any) => {
               const isActive = activeOfficerTab === o.id.toString();
@@ -3963,7 +4016,9 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                   className={cn("h-9 px-4 text-sm font-bold rounded-2xl transition-all flex items-center gap-2", isActive ? "bg-violet-600 text-white shadow-sm" : "bg-white text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300")}
                 >
                   {getOfficerDisplayName(o)}
-                  <span className={cn("inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm", isActive ? "bg-white/25 text-white" : "bg-violet-500 text-white")}>{count}</span>
+                  {count > 0 && (
+                    <span className={cn("inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm", isActive ? "bg-white/25 text-white" : "bg-violet-500 text-white")}>{count}</span>
+                  )}
                 </button>
               );
             })}
@@ -3972,7 +4027,9 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
               className={cn("h-9 px-4 text-sm font-bold rounded-2xl transition-all flex items-center gap-2", activeOfficerTab === '__unallocated__' ? "bg-amber-500 text-white shadow-sm" : "bg-white text-amber-600 hover:text-amber-700 border border-amber-200 hover:border-amber-300")}
             >
               Unallocated
-              <span className={cn("inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm", activeOfficerTab === '__unallocated__' ? "bg-white/25 text-white" : "bg-amber-500 text-white")}>{officerTaskCounts.__unallocated__ || 0}</span>
+              {(officerTaskCounts.__unallocated__ || 0) > 0 && (
+                <span className={cn("inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm", activeOfficerTab === '__unallocated__' ? "bg-white/25 text-white" : "bg-amber-500 text-white")}>{officerTaskCounts.__unallocated__ || 0}</span>
+              )}
             </button>
 
             <Select value={officerFilterMode} onValueChange={(v) => setOfficerFilterMode(v as 'current' | 'history')}>
@@ -3994,7 +4051,9 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
               className={cn("h-9 px-4 text-sm font-bold rounded-2xl transition-all flex items-center gap-2", activeTaskManagerTab === 'all' ? "bg-indigo-600 text-white shadow-sm" : "bg-white text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300")}
             >
               All
-              <span className={cn("inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm", activeTaskManagerTab === 'all' ? "bg-white/25 text-white" : "bg-indigo-500 text-white")}>{taskManagerTaskCounts.all}</span>
+              {taskManagerTaskCounts.all > 0 && (
+                <span className={cn("inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm", activeTaskManagerTab === 'all' ? "bg-white/25 text-white" : "bg-indigo-500 text-white")}>{taskManagerTaskCounts.all}</span>
+              )}
             </button>
             {perspectiveDepartmentUsers.managers.map((m: any) => {
               const isActive = activeTaskManagerTab === m.id.toString();
@@ -4006,7 +4065,9 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                   className={cn("h-9 px-4 text-sm font-bold rounded-2xl transition-all flex items-center gap-2", isActive ? "bg-indigo-600 text-white shadow-sm" : "bg-white text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300")}
                 >
                   {getOfficerDisplayName(m)}
-                  <span className={cn("inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm", isActive ? "bg-white/25 text-white" : "bg-indigo-500 text-white")}>{count}</span>
+                  {count > 0 && (
+                    <span className={cn("inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm", isActive ? "bg-white/25 text-white" : "bg-indigo-500 text-white")}>{count}</span>
+                  )}
                 </button>
               );
             })}
@@ -4015,7 +4076,9 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
               className={cn("h-9 px-4 text-sm font-bold rounded-2xl transition-all flex items-center gap-2", activeTaskManagerTab === '__unallocated__' ? "bg-amber-500 text-white shadow-sm" : "bg-white text-amber-600 hover:text-amber-700 border border-amber-200 hover:border-amber-300")}
             >
               Unallocated
-              <span className={cn("inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm", activeTaskManagerTab === '__unallocated__' ? "bg-white/25 text-white" : "bg-amber-500 text-white")}>{taskManagerTaskCounts.__unallocated__ || 0}</span>
+              {(taskManagerTaskCounts.__unallocated__ || 0) > 0 && (
+                <span className={cn("inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm", activeTaskManagerTab === '__unallocated__' ? "bg-white/25 text-white" : "bg-amber-500 text-white")}>{taskManagerTaskCounts.__unallocated__ || 0}</span>
+              )}
             </button>
           </div>
         )}
@@ -4044,6 +4107,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                 enhancedTasksData={enhancedTasksData}
                 getCellContent={getCellContentWrapper}
                 renderCellContent={renderCellContent}
+                getStageMergedState={getStageMergedState}
                 toggleSectionExpansion={toggleSectionExpansion}
                 toggleStageExpansion={toggleStageExpansion}
                 toggleDocumentExpansion={toggleDocumentExpansion}
