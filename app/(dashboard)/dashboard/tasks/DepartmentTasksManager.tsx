@@ -34,7 +34,7 @@ import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKyc
 import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog';
 import { StandardTable } from './overall-view/StandardTable';
 import { EnhancedTable } from './overall-view/EnhancedTable';
-import { ENHANCED_TABLE_HEADERS_IMMIGRATION, STATS_HEADERS, calculateAge, getEnhancedImmigrationStatus, getCurrentStageStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, getCellContent as utilGetCellContent, sortTasks, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, filterTasksBySearch, ENHANCED_TABLE_HEADERS, isDocumentApplicable, fetchAndEnhanceIndividuals, getRawCellValue, enhanceTasksWithIndividualData, STAGE_PRIORITY } from './overall-view/tableUtils';
+import { ENHANCED_TABLE_HEADERS_IMMIGRATION, STATS_HEADERS, calculateAge, getEnhancedImmigrationStatus, getCurrentStageStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, getCellContent as utilGetCellContent, sortTasks, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, filterTasksBySearch, ENHANCED_TABLE_HEADERS, isDocumentApplicable, fetchAndEnhanceIndividuals, getRawCellValue, enhanceTasksWithIndividualData, STAGE_PRIORITY, stageApplicabilityConditionsMet, isStageOptionalForTask } from './overall-view/tableUtils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { OtherDialog } from "./components/OtherDialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
@@ -116,6 +116,11 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [visibleStats, setVisibleStats] = useState<Set<string>>(new Set(STATS_HEADERS.filter(h => h.default).map(h => h.id)))
   const [visibleStageIds, setVisibleStageIds] = useState<Set<string>>(new Set())
   const [showNAStages, setShowNAStages] = useState<boolean>(false);
+  // Optional/branch stages (StageAllocation.display === false, e.g. "Deferred (Depends)") are
+  // hidden from the transposed table by default unless a visible task already has data for
+  // them (see the row-builder below) — this toggle overrides that, same convention as
+  // showNAStages right above it.
+  const [showOptionalStages, setShowOptionalStages] = useState<boolean>(false);
   const [showStats, setShowStats] = useState<boolean>(true);
   const [expandedDependants, setExpandedDependants] = useState<Set<string>>(new Set())
   const [kycDocuments, setKycDocuments] = useState<Map<string, KycDocument>>(new Map())
@@ -202,7 +207,13 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [selectedTaskForOfficers, setSelectedTaskForOfficers] = useState<any>(null);
   const [selectedStageForOfficers, setSelectedStageForOfficers] = useState<any>(null);
 
+  // Structural (job-level) applicability — unchanged from before. Attribute-based
+  // applicability (renewal status/nationality/age) is layered on separately via
+  // stageApplicabilityConditionsMet (tableUtils.tsx), ANDed in below, so a "For Fresh only"
+  // stage renders N/A for a Renewal task the same way a structurally-N/A stage always has.
   const isStageApplicableToTask = useCallback((stage: any, task: any, departments: any[]): boolean => {
+    if (!stageApplicabilityConditionsMet(stage, task, enhancedTasksData)) return false;
+
     if (!task || !stage || !Array.isArray(departments) || departments.length === 0) {
       return true;
     }
@@ -232,7 +243,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       console.error('Error in isStageApplicableToTask:', error);
       return true; // Failsafe
     }
-  }, []);
+  }, [enhancedTasksData]);
 
   useEffect(() => {
     const loadKycData = async () => {
@@ -493,16 +504,24 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const tableRowsCacheRef = useRef<Map<string, { rows: any[], timestamp: number }>>(new Map())
   const CACHE_DURATION = 5 * 60 * 1000
 
-  const clearTasksCache = useCallback((departmentId?: string, subdepartmentId?: string) => {
-    const cacheKey = `${departmentId || 'all'}-${subdepartmentId || 'all'}`;
+  // Cached and fetched per DEPARTMENT only — subdepartmentId is accepted for call-site
+  // compatibility (most callers pass activeSubdepartmentTab) but deliberately ignored here.
+  // getFilteredTasks already narrows the loaded department's tasks down to the active
+  // sub-department client-side, so fetching per-subdepartment on top of that was fetching the
+  // same department's data over and over (once per subdept tab ever visited) and — worse —
+  // meant every subdept tab click re-ran this effect and could flash the loading state on a
+  // cache miss/expiry. Loading once per department and filtering the rest client-side means
+  // switching subdepartment (or status/perspective) tabs never touches the network again.
+  const clearTasksCache = useCallback((departmentId?: string, _subdepartmentId?: string) => {
+    const cacheKey = departmentId || 'all';
     tasksCacheRef.current.delete(cacheKey);
     tableRowsCacheRef.current.clear();
   }, []);
 
-  const loadTasksData = useCallback(async (departmentId?: string, subdepartmentId?: string, forceRefresh: boolean = false, silent: boolean = false) => {
+  const loadTasksData = useCallback(async (departmentId?: string, _subdepartmentId?: string, forceRefresh: boolean = false, silent: boolean = false) => {
     if (!departmentId) return null;
 
-    const cacheKey = `${departmentId}-${subdepartmentId || 'all'}`;
+    const cacheKey = departmentId;
 
     // Clear cache if force refresh is requested
     if (forceRefresh) {
@@ -522,7 +541,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     try {
       if (!silent) setIsLoadingTasks(true);
       const [tasksData, stagesData] = await Promise.all([
-        fetchTasks(departmentId, subdepartmentId, companies),
+        fetchTasks(departmentId, undefined, companies),
         fetchStages(departmentId, departments)
       ])
 
@@ -633,18 +652,21 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     }
   }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData, loadUserAssignmentData, fetchLiveTaskCounts])
 
+  // Department-scoped only, deliberately not narrowed to activeSubdepartmentTab: `tasks` now
+  // holds the whole active department (loadTasksData caches per-department, see its own
+  // comment), so a realtime change for a task in a currently-inactive sub-department is still
+  // relevant to that cached state — it must stay in sync so switching to that sub-department's
+  // tab later (a pure client-side filter, no refetch) shows the update instead of stale data.
+  // This also means the realtime subscription below never needs to resubscribe on subdept
+  // tab switches, only on a genuine department change.
   const isTaskRelevantToActiveView = useCallback((task: any) => {
     if (!task || !activeDepartmentTab) return false;
 
     const jobLevel = task.job_level || {};
     const departmentId = jobLevel.department_id ?? task.department_id;
-    const subdepartmentId = jobLevel.subdepartment_id ?? task.subdepartment_id;
 
-    const matchesDepartment = departmentId?.toString() === activeDepartmentTab;
-    const matchesSubdepartment = !activeSubdepartmentTab || subdepartmentId?.toString() === activeSubdepartmentTab;
-
-    return matchesDepartment && matchesSubdepartment;
-  }, [activeDepartmentTab, activeSubdepartmentTab])
+    return departmentId?.toString() === activeDepartmentTab;
+  }, [activeDepartmentTab])
 
   const getKycFields = useCallback((doc: any) => {
     if (!doc.kycId) return Promise.resolve([]);
@@ -717,9 +739,30 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       return isStageCompleted(stage) ? index : lastIndex;
     }, -1);
 
+    // A stage is eligible to be "current" when it's applicable (structural + attribute
+    // conditions, via isStageApplicableToTask above) and, if it's optional
+    // (StageAllocation.display === false — see isStageOptionalForTask), only once the task
+    // actually has data for it. Mirrors getCurrentStageStatus's findFirstApplicableStage/
+    // findNextApplicableStage (tableUtils.tsx) so this component's own current-stage pointer
+    // (used for save-time metadata and the Assign Officers dialog) never disagrees with what
+    // the Current Stage columns show. Previously this walk didn't filter by applicability at
+    // all, unlike every other current-stage implementation in the codebase.
+    const isStageEligibleAsCurrent = (stage: Stage): boolean => {
+      if (!isStageApplicableToTask(stage, task, departments)) return false;
+      if (isStageOptionalForTask(stage, task, departments)) {
+        const stageData = task.stages?.[stage.id];
+        const hasData = !!(stageData?.date || stageData?.status || stageData?.value || stageData?.completedAt);
+        if (!hasData) return false;
+      }
+      return true;
+    };
+
     // Determine the appropriate stage to return
-    if (lastCompletedIndex === -1) return sortedStages[0] || null;
-    return sortedStages[lastCompletedIndex + 1] ?? sortedStages[lastCompletedIndex];
+    if (lastCompletedIndex === -1) {
+      return sortedStages.find(isStageEligibleAsCurrent) || sortedStages[0] || null;
+    }
+    const nextEligible = sortedStages.slice(lastCompletedIndex + 1).find(isStageEligibleAsCurrent);
+    return nextEligible ?? sortedStages[lastCompletedIndex];
   };
 
   // Create wrapper functions for utility functions
@@ -728,8 +771,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   }, [stages, allDocuments, kycDocuments]);
 
   const getCurrentStageStatusWrapper = useCallback((task: UtilTask) => {
-    return getCurrentStageStatus(task, stages, departments, allDocuments);
-  }, [stages, departments, allDocuments]);
+    return getCurrentStageStatus(task, stages, departments, allDocuments, enhancedTasksData);
+  }, [stages, departments, allDocuments, enhancedTasksData]);
 
   const getUserDisplayName = useCallback((userId: number | null | undefined) => {
     if (!userId) return 'N/A'
@@ -1793,6 +1836,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       stageIds: stages.map(s => s.id).sort(),
       visibleStageIds: Array.from(visibleStageIds).sort(),
       showNAStages,
+      showOptionalStages,
       showDelta,
       expandedSections: Array.from(expandedSections).sort(),
       visibleStats: Array.from(visibleStats).sort()
@@ -1880,7 +1924,21 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         const stage = allStages[stageIdx];
         const isApplicableToAnyTask = tasks.some(task => isStageApplicableToTask(stage, task, departments));
 
-        if (showNAStages || isApplicableToAnyTask) {
+        // Optional/branch stages (StageAllocation.display === false, e.g. "Deferred
+        // (Depends)") stay hidden by default — same "relevant to anyone in the visible set"
+        // convention as the N/A check above — unless it's actually required (non-optional) for
+        // at least one visible task, or a task already has data recorded for it (a case that
+        // genuinely went down that branch keeps showing it even with the toggle off).
+        const isNonOptionalForAnyTask = tasks.some(task =>
+          isStageApplicableToTask(stage, task, departments) && !isStageOptionalForTask(stage, task, departments)
+        );
+        const hasDataForAnyTask = tasks.some(task => {
+          const stageData = task.stages?.[stage.id];
+          return !!(stageData?.date || stageData?.status || stageData?.value || stageData?.completedAt);
+        });
+        const shouldHideAsOptional = !isNonOptionalForAnyTask && !hasDataForAnyTask;
+
+        if ((showNAStages || isApplicableToAnyTask) && (showOptionalStages || !shouldHideAsOptional)) {
           // "Show Δ" — one row per gap between two rendered stage rows, showing the day-count
           // between them per task (walking back through every stage since lastRenderedStage if
           // this stage's immediate predecessor isn't dated yet). Same algorithm as
@@ -2029,7 +2087,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     });
 
     return rows
-  }, [stages, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage, departments, showDelta])
+  }, [stages, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage, departments, showDelta, showNAStages, showOptionalStages, isStageApplicableToTask])
 
   const handleStageDocumentUpload = useCallback((task: any, stage: any) => {
     const enrichedTask = {
@@ -2698,6 +2756,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         onShowDocuments={handleViewDocument}
         requiresUpload={requiresUpload}
         departments={departments}
+        enhancedTaskData={enhancedTasksData.get(task.id?.toString())}
         onAutomationClick={isReadOnly ? undefined : (e) => handleAutomationClick(e, row.stage, task.id)}
         getKycFields={getKycFields}
         linkedDocuments={linkedDocs}
@@ -3259,11 +3318,14 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     performInitialLoad();
   }, []);
 
+  // Deliberately NOT keyed on activeSubdepartmentTab — loadTasksData fetches/caches a whole
+  // department at once, so switching sub-department tabs must stay a pure client-side filter
+  // (getFilteredTasks) instead of re-triggering this effect and risking a loading-state flash.
   useEffect(() => {
     if (activeDepartmentTab && departments.length > 0) {
-      loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+      loadTasksData(activeDepartmentTab);
     }
-  }, [activeDepartmentTab, activeSubdepartmentTab, departments.length, loadTasksData])
+  }, [activeDepartmentTab, departments.length, loadTasksData])
 
   // Realtime subscription for tm_tasks table
   useEffect(() => {
@@ -3275,7 +3337,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     }
 
     const subscription = supabase
-      .channel(`tm_tasks_changes:${activeDepartmentTab}:${activeSubdepartmentTab || 'all'}`)
+      .channel(`tm_tasks_changes:${activeDepartmentTab}`)
       .on(
         'postgres_changes',
         {
@@ -3322,11 +3384,11 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                 participants_details: newTask.participants_details ?? t.participants_details,
               };
             }));
-            clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+            clearTasksCache(activeDepartmentTab);
           } else if (payload.eventType === 'INSERT') {
-            clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+            clearTasksCache(activeDepartmentTab);
             // Use silent mode so the insert doesn't flash a full-table loading spinner
-            await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true);
+            await loadTasksData(activeDepartmentTab, undefined, true, true);
             toast({
               title: "New Task Added",
               description: "A new task has been added to the current view.",
@@ -3334,7 +3396,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
             });
           } else if (payload.eventType === 'DELETE') {
             setTasks(prevTasks => prevTasks.filter(t => t.id?.toString() !== oldTask?.id?.toString()));
-            clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+            clearTasksCache(activeDepartmentTab);
             toast({
               title: "Task Removed",
               description: "A task has been removed from the current view.",
@@ -3367,7 +3429,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         console.log('Realtime subscription cleaned up');
       }
     };
-  }, [activeDepartmentTab, activeSubdepartmentTab, clearTasksCache, isTaskRelevantToActiveView, loadTasksData]); // Re-subscribe when filters change
+  }, [activeDepartmentTab, clearTasksCache, isTaskRelevantToActiveView, loadTasksData]); // Re-subscribe only on a real department change — see isTaskRelevantToActiveView's own comment
 
   useEffect(() => {
     if (activeDepartmentTab && departments.length > 0) {
@@ -3526,6 +3588,11 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                   {showNAStages ? <EyeOff className="h-4 w-4 text-blue-600" /> : <Eye className="h-4 w-4 text-slate-400" />}
                   <span>{showNAStages ? 'Hide N/A Stages' : 'Show N/A Stages'}</span>
                   {showNAStages && <CheckCircle2 className="h-3.5 w-3.5 text-blue-600 ml-auto" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowOptionalStages(!showOptionalStages)} className="flex items-center gap-2 cursor-pointer">
+                  {showOptionalStages ? <EyeOff className="h-4 w-4 text-blue-600" /> : <Eye className="h-4 w-4 text-slate-400" />}
+                  <span>{showOptionalStages ? 'Hide Optional Stages' : 'Show Optional Stages'}</span>
+                  {showOptionalStages && <CheckCircle2 className="h-3.5 w-3.5 text-blue-600 ml-auto" />}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setShowStats(!showStats)} className="flex items-center gap-2 cursor-pointer">
                   {showStats ? <EyeOff className="h-4 w-4 text-blue-600" /> : <Eye className="h-4 w-4 text-slate-400" />}

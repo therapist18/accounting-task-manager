@@ -28,6 +28,23 @@ export interface StageDependency {
     dependencyType: StageDependencyType
 }
 
+// Attribute-based applicability — distinct from StageAllocation.applicable (which is
+// structural, per subdept/class/subclass). A condition here gates a stage on the TASK's own
+// data (e.g. "only for New/Fresh applications") regardless of which job level it's assigned
+// to. Multiple conditions on one stage are AND'd together (see
+// tasks/overall-view/tableUtils.tsx's stageApplicabilityConditionsMet, the single shared
+// evaluator tasks/DepartmentTasksManager.tsx and tasks/components/EditableStageCell.tsx both
+// call — deliberately not re-implemented per-consumer, unlike the older applicable/dependency
+// checks which ended up with ~20 hand-duplicated copies across the codebase).
+export type StageConditionField = 'renewal_status' | 'nationality' | 'age'
+export type StageConditionOperator = 'equals' | 'not_equals' | 'gte' | 'lte' // gte/lte only meaningful for 'age'
+
+export interface StageApplicabilityCondition {
+    field: StageConditionField
+    operator: StageConditionOperator
+    value: string | number
+}
+
 export interface StageMasterFieldLink {
     masterFieldId: string
     masterFieldLabel?: string
@@ -123,6 +140,8 @@ export interface NewStage {
     defaultValue?: string
     // New: Stage dependencies
     dependencies?: StageDependency[]
+    // New: Attribute-based applicability conditions (renewal status / nationality / age)
+    applicabilityConditions?: StageApplicabilityCondition[]
 }
 
 // Update Stage interface if needed
@@ -145,6 +164,8 @@ export interface Stage {
     defaultValue?: string
     // New: Stage dependencies
     dependencies?: StageDependency[]
+    // New: Attribute-based applicability conditions (renewal status / nationality / age)
+    applicabilityConditions?: StageApplicabilityCondition[]
     allocations?: {
         [key: string]: {
             applicable: boolean

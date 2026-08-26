@@ -573,6 +573,46 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
     });
   };
 
+  // Attribute-based applicability — gates this stage on the TASK's own data (renewal status/
+  // nationality/age), separate from dependencies above (which gate on other stages) and from
+  // the per-subdept/class/subclass "Applicable" toggle in the main Stages grid (which gates on
+  // job level). See stagesdb.ts's StageApplicabilityCondition comment. Conditions are AND'd.
+  const addApplicabilityCondition = () => {
+    setFormData(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        applicabilityConditions: [...(prev.applicabilityConditions || []), {
+          field: 'renewal_status',
+          operator: 'equals',
+          value: ''
+        }]
+      };
+    });
+  };
+
+  const updateApplicabilityCondition = (index: number, updates: Partial<any>) => {
+    setFormData(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        applicabilityConditions: (prev.applicabilityConditions || []).map((cond, i) =>
+          i === index ? { ...cond, ...updates } : cond
+        )
+      };
+    });
+  };
+
+  const removeApplicabilityCondition = (index: number) => {
+    setFormData(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        applicabilityConditions: (prev.applicabilityConditions || []).filter((_, i) => i !== index)
+      };
+    });
+  };
+
   const addDropdownOption = () => {
     setFormData(prev => {
       if (!prev) return null;
@@ -811,6 +851,78 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                       )}
                     </div>
                   </FormField>
+                </SectionWrapper>
+                <SectionWrapper
+                  title="Applicability Conditions"
+                  icon={<Layers />}
+                  actionButton={
+                    <Button type="button" variant="outline" size="sm" onClick={addApplicabilityCondition} className="gap-1.5">
+                      <Plus className="h-3.5 w-3.5" /> Add Condition
+                    </Button>
+                  }
+                >
+                  <p className="text-sm text-muted-foreground -mt-2">
+                    Gate this stage on the task's own data (e.g. only for New/Fresh applications) — separate from the per-job-level
+                    "Applicable" toggle in the main Stages grid. All conditions below must match (AND).
+                  </p>
+                  {(formData.applicabilityConditions || []).length > 0 ? (
+                    <div className="space-y-2">
+                      {(formData.applicabilityConditions || []).map((condition: any, index: number) => (
+                        <div key={index} className="flex items-center gap-2 p-3 border rounded-lg bg-slate-50">
+                          <SearchableSelect
+                            value={condition.field}
+                            onValueChange={(value) => updateApplicabilityCondition(index, {
+                              field: value,
+                              operator: value === 'age' ? 'equals' : (condition.operator === 'gte' || condition.operator === 'lte' ? 'equals' : condition.operator)
+                            })}
+                            options={[
+                              { value: 'renewal_status', label: 'Renewal Status' },
+                              { value: 'nationality', label: 'Nationality' },
+                              { value: 'age', label: 'Age' }
+                            ]}
+                            className="w-40"
+                          />
+                          <SearchableSelect
+                            value={condition.operator}
+                            onValueChange={(value) => updateApplicabilityCondition(index, { operator: value })}
+                            options={
+                              condition.field === 'age'
+                                ? [
+                                    { value: 'equals', label: 'Equals' },
+                                    { value: 'gte', label: 'At least (≥)' },
+                                    { value: 'lte', label: 'At most (≤)' }
+                                  ]
+                                : [
+                                    { value: 'equals', label: 'Equals' },
+                                    { value: 'not_equals', label: 'Not Equals' }
+                                  ]
+                            }
+                            className="w-40"
+                          />
+                          <Input
+                            type={condition.field === 'age' ? 'number' : 'text'}
+                            value={condition.value ?? ''}
+                            onChange={(e) => updateApplicabilityCondition(index, {
+                              value: condition.field === 'age' ? (parseInt(e.target.value) || 0) : e.target.value
+                            })}
+                            placeholder={condition.field === 'renewal_status' ? 'e.g. New' : condition.field === 'nationality' ? 'e.g. Kenyan' : 'e.g. 18'}
+                            className="flex-1"
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                            onClick={() => removeApplicabilityCondition(index)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">No conditions configured. This stage applies to every task regardless of its attributes.</p>
+                  )}
                 </SectionWrapper>
               </TabsContent>
               <TabsContent value="input-config" className="mt-6 space-y-6">

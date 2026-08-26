@@ -11,7 +11,7 @@ import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
-import { formatDuration, getTimeStatus, isDocumentApplicable } from "../overall-view/tableUtils"
+import { formatDuration, getTimeStatus, isDocumentApplicable, stageApplicabilityConditionsMet } from "../overall-view/tableUtils"
 import { parseDate } from "@/app/generic-functions/dateUtils"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -35,6 +35,11 @@ interface EditableStageCellProps {
   documentData?: any
   onAutomationClick?: (e: React.MouseEvent, documentData?: any) => void
   departments?: any[]
+  // The applied stage's own enhancedTasksData entry (enhancedTasksData.get(task.id) —
+  // tableUtils.tsx's createEnhancedTaskData), carrying nationality/age/renewal_status. Only
+  // needed when `stage.applicabilityConditions` references nationality/age (renewal_status
+  // also falls back to the raw task); passed down from DepartmentTasksManager.tsx.
+  enhancedTaskData?: any
   // 'status' / 'upload' / 'other' split 'actions' into dedicated columns (status badge;
   // view+upload; officer/billing-link/skip-menu) for the transposed table's 4-column layout —
   // 'actions' itself is untouched so other consumers (StandardTable, TransposedStagesTable,
@@ -108,7 +113,7 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[] = [])
   }
 };
 
-export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, renderMode = 'date', taskName, clientName, getKycFields, onFetchData, officers = [], onOfficerChange, readOnly = false, onOpenRequirements, showTime = true, previewOnly = false }: EditableStageCellProps) {
+export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, enhancedTaskData, renderMode = 'date', taskName, clientName, getKycFields, onFetchData, officers = [], onOfficerChange, readOnly = false, onOpenRequirements, showTime = true, previewOnly = false }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -241,7 +246,15 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     return calculateStageDate(stage, stageData, linkedDocument, documentFields, value, isLoadingFields);
   }, [stage?.id, task?.stages, linkedDocument, documentFields, value, isLoadingFields]);
 
-  const isStageApplicable = useMemo(() => isStageApplicableToTask(stage, task, departments), [stage, task, departments]);
+  const isStageApplicable = useMemo(() => {
+    if (!isStageApplicableToTask(stage, task, departments)) return false;
+    // stageApplicabilityConditionsMet takes a taskId -> enhancedTask map (tableUtils.tsx); this
+    // cell only ever has its own single task's resolved entry, passed down as enhancedTaskData.
+    const enhancedTasksData = enhancedTaskData && task?.id != null
+      ? new Map([[task.id.toString(), enhancedTaskData]])
+      : undefined;
+    return stageApplicabilityConditionsMet(stage, task, enhancedTasksData);
+  }, [stage, task, departments, enhancedTaskData]);
 
   const isStageCompleted = useMemo(() => {
     const stageStatus = task?.stages?.[stage?.id]?.status;

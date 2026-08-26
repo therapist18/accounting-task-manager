@@ -818,11 +818,85 @@ export const enhanceTasksWithIndividualData = async (
   return createEnhancedTaskData(tasks, applicantsMap, dependantsMap);
 };
 
+// Attribute-based applicability — gates a stage on the TASK's own data (renewal status/
+// nationality/age), separate from the structural applicable check above (which only looks at
+// job-level: dept/subdept/class). Exported so DepartmentTasksManager.tsx and
+// EditableStageCell.tsx both AND it onto their own existing structural checks instead of each
+// re-implementing condition matching — see stagesdb.ts's StageApplicabilityCondition comment
+// for why this stays a single shared evaluator.
+//
+// renewal_status is a real tm_tasks column, so it's always resolvable from the raw task as a
+// fallback. nationality/age only exist on enhancedTasksData (createEnhancedTaskData above,
+// joined from registry_individuals) — when that map isn't supplied or doesn't have this task
+// (any caller outside the three in-scope files), a nationality/age condition is treated as
+// passed rather than failing closed, so out-of-scope consumers see zero behavior change.
+export const stageApplicabilityConditionsMet = (
+  stage: any,
+  task: any,
+  enhancedTasksData: Map<string, any> = new Map()
+): boolean => {
+  const conditions = stage?.applicabilityConditions;
+  if (!conditions || conditions.length === 0) return true;
+  const enhanced = task?.id != null ? enhancedTasksData.get(task.id.toString()) : undefined;
+
+  return conditions.every((condition: any) => {
+    let actual: string | number | undefined;
+    if (condition.field === 'renewal_status') {
+      actual = enhanced?.renewal_status || task?.renewal_status;
+    } else if (condition.field === 'nationality') {
+      if (!enhanced) return true; // not evaluable outside the in-scope callers — don't block
+      actual = enhanced.nationality;
+    } else if (condition.field === 'age') {
+      if (!enhanced) return true;
+      actual = enhanced.age;
+    } else {
+      return true;
+    }
+    if (actual === undefined || actual === null || actual === '') return true;
+
+    if (condition.operator === 'gte') return Number(actual) >= Number(condition.value);
+    if (condition.operator === 'lte') return Number(actual) <= Number(condition.value);
+    const same = String(actual).trim().toLowerCase() === String(condition.value).trim().toLowerCase();
+    return condition.operator === 'not_equals' ? !same : same;
+  });
+};
+
+// Reads StageAllocation.display (subdept/class/subclass tiering, same shape as the applicable
+// check right below) — "optional" means the stage is structurally applicable but shouldn't be
+// treated as the mandatory next step, or clutter the row list, unless the task already has
+// data recorded for it. See DepartmentTasksManager.tsx's showOptionalStages toggle and row
+// builder, and this file's own findNextApplicableStage.
+export const isStageOptionalForTask = (stage: any, task: any, departments: any[] = []): boolean => {
+  if (!task || !departments.length) return false;
+  const dept = departments.find(d => d.id === (task.department?.id || task.department_id));
+  if (!dept) return false;
+  const subdept = dept.tm_subdepartments?.find((s: any) => s.id === (task.subdepartment?.id || task.subdepartment_id));
+  if (subdept) {
+    if (task.class_id) {
+      const cls = subdept.classes?.find((c: any) => c.id.toString() === task.class_id.toString());
+      const classStage = cls?.stages?.find((s: any) => s.stage_id === stage.id);
+      if (classStage && typeof classStage.display === 'boolean') return classStage.display === false;
+    }
+    const subdeptStage = subdept.stages?.find((s: any) => s.stage_id === stage.id);
+    if (subdeptStage && typeof subdeptStage.display === 'boolean') return subdeptStage.display === false;
+  }
+  return false;
+};
+
+// A stage counts as "has data" the moment anything's been recorded for it — even if not
+// formally completed — so an optional stage a case actually went through never gets silently
+// re-hidden/skipped once it's genuinely relevant.
+const hasStageData = (task: any, stageId: string): boolean => {
+  const d = task?.stages?.[stageId];
+  return !!(d?.date || d?.status || d?.value || d?.completedAt);
+};
+
 export const getCurrentStageStatus = (
   task: any,
   stages: any[],
   departments: any[] = [],
-  allDocuments: any[] = []
+  allDocuments: any[] = [],
+  enhancedTasksData: Map<string, any> = new Map()
 ): StageStatusInfo => {
   if (!stages.length || !task) {
     return { stageName: 'No Stage', stageStatus: 'N/A', stageFollowUp: null };
@@ -868,7 +942,7 @@ export const getCurrentStageStatus = (
   let stageStatus = 'Pending';
 
   if (highestCompletedIndex === -1) {
-    currentStage = findFirstApplicableStage(sortedStages, task, departments) || sortedStages[0];
+    currentStage = findFirstApplicableStage(sortedStages, task, departments, enhancedTasksData) || sortedStages[0];
     if (currentStage) {
       const stageData = task.stages?.[currentStage.id];
       stageStatus = stageData?.status || currentStage.status || 'Pending';
@@ -884,7 +958,8 @@ export const getCurrentStageStatus = (
         currentStage,
         sortedStages.slice(nextStageIndex),
         task,
-        departments
+        departments,
+        enhancedTasksData
       );
 
       if (nextStage) {
@@ -906,12 +981,21 @@ export const getCurrentStageStatus = (
   };
 };
 
-const findFirstApplicableStage = (sortedStages: any[], task: any, departments: any[]): any => {
-  return sortedStages.find(stage => isStageApplicableToTask(stage, task, departments)) || null;
+// A stage is skipped when walking to "next" if it's optional (StageAllocation.display ===
+// false) AND the task has no data for it yet — see isStageOptionalForTask/hasStageData above.
+const isStageEligibleAsCurrent = (stage: any, task: any, departments: any[], enhancedTasksData: Map<string, any>): boolean => {
+  if (!isStageApplicableToTask(stage, task, departments)) return false;
+  if (!stageApplicabilityConditionsMet(stage, task, enhancedTasksData)) return false;
+  if (isStageOptionalForTask(stage, task, departments) && !hasStageData(task, stage.id)) return false;
+  return true;
 };
 
-const findNextApplicableStage = (currentStage: any, remainingStages: any[], task: any, departments: any[]): any => {
-  return remainingStages.find(stage => isStageApplicableToTask(stage, task, departments)) || null;
+const findFirstApplicableStage = (sortedStages: any[], task: any, departments: any[], enhancedTasksData: Map<string, any> = new Map()): any => {
+  return sortedStages.find(stage => isStageEligibleAsCurrent(stage, task, departments, enhancedTasksData)) || null;
+};
+
+const findNextApplicableStage = (currentStage: any, remainingStages: any[], task: any, departments: any[], enhancedTasksData: Map<string, any> = new Map()): any => {
+  return remainingStages.find(stage => isStageEligibleAsCurrent(stage, task, departments, enhancedTasksData)) || null;
 };
 
 const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boolean => {

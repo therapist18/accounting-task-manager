@@ -9,8 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw, Trash2, Zap, Settings, Users, Link2, ArrowDownCircle } from "lucide-react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw, Trash2, Zap, Settings, Users, Link2, ArrowDownCircle, Search, X } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { AddStageDialog } from "./components/add-stage-dialog"
 import { EditStageDialog } from "./components/edit-stage-dialog"
@@ -127,6 +126,19 @@ export default function Stages() {
     Map<string, { defaultMinutes: number | null; conditions: { value: string; minutes: number }[] }>
   >(new Map())
   const [savingPromisedTimeKey, setSavingPromisedTimeKey] = useState<string | null>(null)
+  const [stageSearchQuery, setStageSearchQuery] = useState("")
+
+  const currentDept = departments.find((d) => d.id === activeTab)
+  const filteredStages = useMemo(() => {
+    if (!currentDept?.stages) return []
+    if (!stageSearchQuery.trim()) return currentDept.stages
+    const q = stageSearchQuery.toLowerCase()
+    return currentDept.stages.filter((stage) =>
+      stage.name?.toLowerCase().includes(q) ||
+      stage.description?.toLowerCase().includes(q) ||
+      stage.id?.toString().includes(q)
+    )
+  }, [currentDept?.stages, stageSearchQuery])
 
   const getEntityAutomation = (stage: Stage, entityKey: string) => {
     if (!stage.documents) return null;
@@ -2353,8 +2365,6 @@ export default function Stages() {
     setKycDocuments(filteredDocuments)
   }
 
-  const currentDept = getCurrentDepartment()
-
   const styleCell = (cell: ExcelJS.Cell, customStyle: Partial<ExcelJS.Style> = {}) => {
     cell.font = { name: 'Calibri', size: 11, ...customStyle.font };
     cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true, ...customStyle.alignment };
@@ -3061,7 +3071,7 @@ export default function Stages() {
               )}
             </TableHeader>
             <TableBody>
-              {currentDept.stages.map((stage, stageIndex) => (
+              {filteredStages.map((stage, stageIndex) => (
                 <TableRow key={stage.id} className="border-b border-slate-300">
                   {columnVisibility.index && (
                     <TableCell className="sticky left-0 bg-slate-100 border-r-2 border-slate-300 text-center text-sm z-10 font-medium">
@@ -3405,7 +3415,7 @@ export default function Stages() {
                     Stage Name
                   </TableHead>
                 )}
-                {currentDept.stages.map((stage, index) => (
+                {filteredStages.map((stage, index) => (
                   <TableHead
                     key={stage.id}
                     className="border-r border-blue-500 text-center font-bold text-white min-w-[200px] bg-blue-700"
@@ -3591,7 +3601,7 @@ export default function Stages() {
                       Duration
                     </TableHead>
                   )}
-                  {currentDept.stages.map((stage, index) => (
+                  {filteredStages.map((stage, index) => (
                     <TableHead
                       key={`duration-${stage.id}`}
                       className="border-r border-blue-400 text-center bg-blue-600"
@@ -3613,7 +3623,7 @@ export default function Stages() {
                       Follow Up
                     </TableHead>
                   )}
-                  {currentDept.stages.map((stage) => (
+                  {filteredStages.map((stage) => (
                     <TableHead
                       key={`followup-${stage.id}`}
                       className="border-r border-blue-400 text-center bg-blue-600"
@@ -3638,7 +3648,7 @@ export default function Stages() {
                     Automation
                   </TableHead>
                 )}
-                {currentDept.stages.map((stage) => {
+                {filteredStages.map((stage) => {
                   const isAutomated = hasAnyAutomation(stage);
                   return (
                     <TableHead key={`auto-${stage.id}`} className="border-r border-blue-400 text-center bg-blue-600">
@@ -3664,7 +3674,7 @@ export default function Stages() {
                       Status
                     </TableHead>
                   )}
-                  {currentDept.stages.map((stage) => (
+                  {filteredStages.map((stage) => (
                     <TableHead
                       key={`status-${stage.id}`}
                       className="border-r border-blue-400 text-center bg-blue-600"
@@ -3685,7 +3695,7 @@ export default function Stages() {
                       className={cn("sticky bg-slate-500 border-r-2 border-slate-300 z-20", stageNameLeftClass)}
                     ></TableHead>
                   )}
-                  {currentDept.stages.map((stage, index) => (
+                  {filteredStages.map((stage, index) => (
                     <TableHead key={`controls-${stage.id}`} className="border-r border-slate-300 bg-slate-500">
                       <div className="grid grid-cols-2 gap-1 p-1">
                         <div className="text-center text-xs font-medium text-white">Applicable</div>
@@ -3759,7 +3769,7 @@ export default function Stages() {
                         className={cn("sticky bg-slate-100 border-r-2 border-slate-300 text-center text-sm z-10", stageNameLeftClass)}
                       ></TableCell>
                     )}
-                    {currentDept.stages.map((stage, stageIndex) => {
+                    {filteredStages.map((stage, stageIndex) => {
                       const stageAllocation = subdept.stages?.find((s) => s.stage_id === stage.id)
                       const hasAllocation = stageAllocation?.applicable ?? true
                       const hasDisplay = stageAllocation?.display ?? true
@@ -3901,7 +3911,7 @@ export default function Stages() {
                             className={cn("sticky bg-gray-50 border-r-2 border-gray-200 text-center text-sm z-10", stageNameLeftClass)}
                           ></TableCell>
                         )}
-                        {currentDept.stages.map((stage, stageIndex) => {
+                        {filteredStages.map((stage, stageIndex) => {
                           const stageAllocation = cls.stages?.find((s) => s.stage_id === stage.id)
                           const hasAllocation = stageAllocation?.applicable ?? true
                           const hasDisplay = stageAllocation?.display ?? true
@@ -4011,7 +4021,7 @@ export default function Stages() {
                                 className={cn("sticky bg-white border-r-2 border-gray-200 text-center text-sm z-10", stageNameLeftClass)}
                               ></TableCell>
                             )}
-                            {currentDept.stages.map((stage, stageIndex) => {
+                            {filteredStages.map((stage, stageIndex) => {
                               const stageAllocation = subCls.stages?.find((s) => s.stage_id === stage.id)
                               const hasAllocation = stageAllocation?.applicable ?? true
                               const hasDisplay = stageAllocation?.display ?? true
@@ -4164,58 +4174,77 @@ export default function Stages() {
   return (
     <div className="w-full min-h-screen">
       <div className="mx-auto p-4">
-        <div className="flex justify-between items-center mb-4">
-          <div>
-            <h1 className="text-3xl font-semibold text-gray-900">Stages Management</h1>
-            <p className="text-gray-600 mt-1">
-              Configure workflow stages and their allocations
-              {kycDocumentsLoading ? (
-                <span className="ml-2 text-blue-600">Loading KYC documents...</span>
-              ) : (
-                <span className="ml-2 text-green-600">• {allKycDocuments.size} KYC documents loaded</span>
+        {/* Header Bar */}
+        <div className="border-b border-slate-200 bg-white px-8 py-4 flex items-center justify-between antialiased">
+          <div className="flex items-center gap-8">
+            <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight leading-none text-center">Stages Management</h1>
+            <div className="flex items-center text-base font-bold gap-2">
+              <span className="text-slate-900">{currentDept?.name || "Select Department"}</span>
+              {isTransposed && (
+                <>
+                  <ChevronRight className="h-4 w-4 text-slate-400" />
+                  <span className="text-slate-500">Transposed View</span>
+                </>
               )}
-            </p>
+              {stageSearchQuery && (
+                <>
+                  <ChevronRight className="h-4 w-4 text-slate-400" />
+                  <span className="text-amber-600">Searching: "{stageSearchQuery}"</span>
+                </>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            {/* View Toggle Button */}
+
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Stage Search */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Input
+                placeholder="Search stages..."
+                value={stageSearchQuery}
+                onChange={(e) => setStageSearchQuery(e.target.value)}
+                className="w-56 h-9 pl-9 pr-8 bg-white border-slate-300 rounded-md text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
+              />
+              {stageSearchQuery && (
+                <button
+                  onClick={() => setStageSearchQuery("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-md hover:bg-slate-100 transition-colors"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            <div className="h-6 w-px bg-slate-200 mx-1" />
+
+            {/* View Toggle */}
             <Button
               variant="outline"
+              size="sm"
               onClick={() => setIsTransposed(!isTransposed)}
-              className="flex items-center gap-2"
-            >
-              {isTransposed ? (
-                <>
-                  <RotateCcw className="h-4 w-4" />
-                  Normal View
-                </>
-              ) : (
-                <>
-                  <RotateCw className="h-4 w-4" />
-                  Transposed View
-                </>
+              className={cn(
+                "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+                isTransposed
+                  ? "bg-blue-50 border-blue-300 text-blue-700"
+                  : "border-slate-200 text-slate-600 hover:bg-slate-50"
               )}
+            >
+              {isTransposed ? <RotateCcw className="h-3.5 w-3.5" /> : <RotateCw className="h-3.5 w-3.5" />}
+              {isTransposed ? 'Normal View' : 'Transposed View'}
             </Button>
 
-            {/* Expand/Collapse All Buttons */}
+            {/* Expand/Collapse All */}
             <Button
               variant="outline"
+              size="sm"
               onClick={areAllRowsExpanded ? collapseAllRows : expandAllRows}
-              className="flex items-center gap-2 bg-transparent"
+              className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
             >
-              {areAllRowsExpanded ? (
-                <>
-                  <ChevronUp className="h-4 w-4" />
-                  Collapse All
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="h-4 w-4" />
-                  Expand All
-                </>
-              )}
+              {areAllRowsExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              {areAllRowsExpanded ? 'Collapse All' : 'Expand All'}
             </Button>
 
-            {/* Column Visibility Control */}
+            {/* Column Visibility */}
             <ColumnVisibilityControl
               columns={columnVisibilityOptions}
               onVisibilityChange={handleColumnVisibilityChange}
@@ -4226,7 +4255,7 @@ export default function Stages() {
               description="Control which columns are visible in the table"
             />
 
-            {/* Entity Visibility Control */}
+            {/* Entity Visibility */}
             <EntityVisibilityControl
               entities={entityVisibilityOptions}
               onVisibilityChange={handleEntityVisibilityChange}
@@ -4242,15 +4271,18 @@ export default function Stages() {
                   : "Control which departments, classes, and subclasses are visible as rows. Items marked with ★ are set as default display."
               }
             />
+
+            <div className="h-6 w-px bg-slate-200 mx-1" />
+
             <Button
               variant="outline"
               size="sm"
               onClick={handleExportToExcel}
               disabled={!currentDept || !currentDept.stages || currentDept.stages.length === 0}
-              className="flex items-center gap-2 bg-transparent"
+              className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
             >
-              <FileSpreadsheet className="mr-2 h-4 w-4" />
-              Export to Excel
+              <FileSpreadsheet className="h-3.5 w-3.5" />
+              Export
             </Button>
 
             <Button
@@ -4258,11 +4290,11 @@ export default function Stages() {
               size="sm"
               onClick={handleRecalculateExpectedTimes}
               disabled={!currentDept || isRecalculatingExpectedTimes}
-              className="flex items-center gap-2 bg-transparent"
+              className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
               title="Recompute and persist Overall Expected Time for every job level in this department"
             >
-              <Clock className={cn("mr-2 h-4 w-4", isRecalculatingExpectedTimes && "animate-spin")} />
-              {isRecalculatingExpectedTimes ? "Recalculating..." : "Recalculate Expected Times"}
+              <Clock className={cn("h-3.5 w-3.5", isRecalculatingExpectedTimes && "animate-spin")} />
+              {isRecalculatingExpectedTimes ? 'Recalculating...' : 'Recalculate Times'}
             </Button>
 
             <AddStageDialog
@@ -4275,44 +4307,70 @@ export default function Stages() {
           </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="mb-4">
-            {departments.map((dept) => (
-              <TabsTrigger key={dept.id} value={dept.id}>
-                {dept.name}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        {/* Department Tabs */}
+        <div className="px-8 py-3 flex items-center border-b border-slate-200 bg-white">
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-full border border-slate-200">
+            {departments.map((dept) => {
+              const isActive = activeTab === dept.id
+              return (
+                <button
+                  key={dept.id}
+                  onClick={() => setActiveTab(dept.id)}
+                  className={cn(
+                    "group px-5 py-2 text-sm font-bold rounded-full transition-all flex items-center gap-2",
+                    isActive
+                      ? "bg-custom-blue text-white shadow-sm"
+                      : "text-slate-500 hover:text-slate-800"
+                  )}
+                >
+                  {dept.name}
+                  {dept.stages.length > 0 && (
+                    <span
+                      className="inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm"
+                      style={isActive ? { backgroundColor: 'rgba(255,255,255,0.25)', color: '#fff' } : { backgroundColor: '#376bae', color: '#fff' }}
+                    >
+                      {dept.stages.length}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
 
-          {departments.map((dept) => (
-            <TabsContent key={dept.id} value={dept.id} className="space-y-4">
-              {dept.stages.length === 0 ? (
-                <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-                  <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No stages yet</h3>
-                  <p className="text-sm text-gray-500 mb-4">Create your first stage to get started with the workflow</p>
-                  <Button onClick={() => setIsDialogOpen(true)}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add First Stage
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  {/* View indicator */}
-                  <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
-                    <span className="font-medium">Current View:</span>
-                    <Badge variant="outline" className="text-xs">
-                      {isTransposed ? "Transposed (Stages as Rows)" : "Standard (Entities as Rows)"}
-                    </Badge>
+        {/* Tabs Content */}
+        <div className="px-8 py-4">
+
+          {(() => {
+            const dept = departments.find(d => d.id === activeTab)
+            if (!dept) return null
+            return (
+              <div className="space-y-4">
+                {dept.stages.length === 0 ? (
+                  <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+                    <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">No stages yet</h3>
+                    <p className="text-sm text-gray-500 mb-4">Create your first stage to get started with the workflow</p>
+                    <Button onClick={() => setIsDialogOpen(true)}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add First Stage
+                    </Button>
                   </div>
-
-                  {/* Render appropriate table based on view mode */}
-                  {isTransposed ? renderTransposedTable() : renderNormalTable()}
-                </>
-              )}
-            </TabsContent>
-          ))}
-        </Tabs>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
+                      <span className="font-medium">Current View:</span>
+                      <Badge variant="outline" className="text-xs">
+                        {isTransposed ? "Transposed (Stages as Rows)" : "Standard (Entities as Rows)"}
+                      </Badge>
+                    </div>
+                    {isTransposed ? renderTransposedTable() : renderNormalTable()}
+                  </>
+                )}
+              </div>
+            )
+          })()}
+        </div>
 
         <EditStageDialog
           open={isEditDialogOpen || !!editingStage}
