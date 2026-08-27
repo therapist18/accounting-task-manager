@@ -148,7 +148,9 @@
       "Bash(npx supabase *)",
       "Bash(node -e \"console.log\\(require.resolve\\('nodemailer'\\)\\)\")",
       "Bash(mkdir -p \"/e/GitHub/kra-tools/app/api/send-rm-request-email\")",
-      "Bash(tail -40 /tmp/tscout2.txt)"
+      "Bash(tail -40 /tmp/tscout2.txt)",
+      "Bash(grep -v \"Try \\\\`npm i\")",
+      "Bash(supabase --version)"
     ],
     "additionalDirectories": [
       "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals",

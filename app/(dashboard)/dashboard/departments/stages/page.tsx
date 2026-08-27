@@ -1491,6 +1491,108 @@ export default function Stages() {
     }
   }
 
+  // Bulk version of handleDisplayToggle — sets `display` for every given stage_id on ONE
+  // entity (subdept/class/subclass) in a single read-modify-write. Looping the single-stage
+  // handler instead would race: each call re-reads component state fresh via getCurrentDepartment(),
+  // so N sequential calls targeting the same entity within one event-handler execution would
+  // each build their update from the same stale pre-loop snapshot, and the last write would
+  // silently undo everything but its own change. Used by the "Default Display" column header's
+  // bulk select/deselect-all checkbox, which only ever passes the currently-FILTERED stage ids
+  // (filteredStages), so the bulk action respects whatever search/filter is in place.
+  const handleBulkDisplayToggle = async (
+    entity: { subdeptId: number; classId?: number | string | null; subclassId?: number | string | null },
+    stageIds: string[],
+    checked: boolean,
+  ) => {
+    if (stageIds.length === 0) return
+    try {
+      const currentDept = getCurrentDepartment()
+      if (!currentDept) return
+
+      const { subdeptId, classId = null, subclassId = null } = entity
+      const subdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
+      if (!subdept) {
+        toast({ title: "Error", description: "Subdepartment not found", variant: "destructive" })
+        return
+      }
+
+      const ensureAllocation = (list: any[], stageId: string) => {
+        let allocation = list.find((s: any) => s.stage_id === stageId)
+        if (!allocation) {
+          allocation = { stage_id: stageId, applicable: true, display: true }
+          list.push(allocation)
+        }
+        return allocation
+      }
+
+      let updateData: any = {}
+
+      if (classId !== null && subclassId !== null) {
+        const updatedClasses = JSON.parse(JSON.stringify(subdept.classes || []))
+        const updatedClass = updatedClasses.find((c: any) => c.id === classId)
+        const updatedSubClass = updatedClass?.subClasses?.find((sc: any) => sc.id === subclassId)
+        if (!updatedClass || !updatedSubClass) {
+          toast({ title: "Error", description: "Subclass not found", variant: "destructive" })
+          return
+        }
+        if (!updatedSubClass.stages) updatedSubClass.stages = []
+        stageIds.forEach((stageId) => {
+          ensureAllocation(updatedSubClass.stages, stageId).display = checked
+        })
+        updateData = { classes: updatedClasses }
+      } else if (classId !== null) {
+        const updatedClasses = JSON.parse(JSON.stringify(subdept.classes || []))
+        const updatedClass = updatedClasses.find((c: any) => c.id === classId)
+        if (!updatedClass) {
+          toast({ title: "Error", description: "Class not found", variant: "destructive" })
+          return
+        }
+        if (!updatedClass.stages) updatedClass.stages = []
+        stageIds.forEach((stageId) => {
+          ensureAllocation(updatedClass.stages, stageId).display = checked
+        })
+
+        const subdeptStages = [...(subdept.stages || [])]
+        stageIds.forEach((stageId) => {
+          const allocation = ensureAllocation(subdeptStages, stageId)
+          allocation.display = checked || subdeptStages.some((s) => s.stage_id === stageId && s.display)
+        })
+        updateData = { classes: updatedClasses, stages: subdeptStages }
+      } else {
+        const subdeptStages = [...(subdept.stages || [])]
+        stageIds.forEach((stageId) => {
+          ensureAllocation(subdeptStages, stageId).display = checked
+        })
+        updateData = { stages: subdeptStages }
+      }
+
+      const { error } = await supabase.from("tm_subdepartments").update(updateData).eq("id", subdeptId)
+      if (error) throw error
+
+      setDepartments((prevDepartments) =>
+        prevDepartments.map((dept) => {
+          if (dept.id !== activeTab) return dept
+          return {
+            ...dept,
+            subdepartments: dept.subdepartments?.map((sd) => (sd.id === subdeptId ? { ...sd, ...updateData } : sd)) || [],
+          }
+        }),
+      )
+
+      toast({
+        title: "Success",
+        description: `Default Display ${checked ? "enabled" : "disabled"} for ${stageIds.length} stage${stageIds.length === 1 ? "" : "s"}`,
+      })
+    } catch (err) {
+      console.error("Error bulk-updating display setting:", err)
+      toast({
+        title: "Error",
+        description: "Failed to update display settings. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
+
   const handleAddStages = async (stages: any[], departmentId: string) => {
     const currentDept = departments.find((d) => d.id === departmentId)
     if (!currentDept) {
@@ -3057,16 +3159,50 @@ export default function Stages() {
               {/* Applicable/Display Controls Header Row */}
               {columnVisibility.controls && (
                 <TableRow className="border-b-0">
-                  {leafEntities.map((entity) => (
-                    <React.Fragment key={`controls-${entity.id}`}>
-                      <TableHead className="border-r border-slate-300 bg-slate-500 text-center text-xs font-medium text-white w-16 p-1">
-                        Applicable
-                      </TableHead>
-                      <TableHead className="border-r border-slate-300 bg-slate-500 text-center text-xs font-medium text-white w-16 p-1">
-                        Default Display
-                      </TableHead>
-                    </React.Fragment>
-                  ))}
+                  {leafEntities.map((entity) => {
+                    // Bulk select/deselect for this entity's "Default Display" column — scoped
+                    // to filteredStages (the same search/filter-narrowed row set the table body
+                    // is currently rendering) and further narrowed to stages actually applicable
+                    // to this entity, matching the single-row checkbox's own disabled-when-not-
+                    // applicable rule.
+                    const applicableFilteredStages = filteredStages.filter(
+                      (stage) => getStageAllocation(stage, entity).applicable,
+                    )
+                    const allDisplayed =
+                      applicableFilteredStages.length > 0 &&
+                      applicableFilteredStages.every((stage) => getStageAllocation(stage, entity).display)
+                    const someDisplayed = applicableFilteredStages.some(
+                      (stage) => getStageAllocation(stage, entity).display,
+                    )
+
+                    return (
+                      <React.Fragment key={`controls-${entity.id}`}>
+                        <TableHead className="border-r border-slate-300 bg-slate-500 text-center text-xs font-medium text-white w-16 p-1">
+                          Applicable
+                        </TableHead>
+                        <TableHead className="border-r border-slate-300 bg-slate-500 text-center text-xs font-medium text-white w-16 p-1">
+                          <div
+                            className="flex items-center justify-center gap-1"
+                            title={`${allDisplayed ? "Deselect all" : "Select all"} (${applicableFilteredStages.length} visible stage${applicableFilteredStages.length === 1 ? "" : "s"})`}
+                          >
+                            <span>Default Display</span>
+                            <Checkbox
+                              checked={allDisplayed ? true : someDisplayed ? "indeterminate" : false}
+                              onCheckedChange={() =>
+                                handleBulkDisplayToggle(
+                                  entity,
+                                  applicableFilteredStages.map((stage) => stage.id),
+                                  !allDisplayed,
+                                )
+                              }
+                              disabled={applicableFilteredStages.length === 0}
+                              className="h-3.5 w-3.5 border-white data-[state=checked]:bg-white data-[state=checked]:text-slate-700"
+                            />
+                          </div>
+                        </TableHead>
+                      </React.Fragment>
+                    )
+                  })}
                 </TableRow>
               )}
             </TableHeader>

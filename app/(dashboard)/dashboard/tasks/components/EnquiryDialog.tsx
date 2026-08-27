@@ -241,6 +241,7 @@ export function EnquiryDialog({
         passport_number: '',
         duration: '',
         renewal_status: 'New',
+        passport_handling_mode: null as 'bcl' | 'client' | null,
         job_level: {
             level: 1,
             department_id: null,
@@ -556,6 +557,7 @@ export function EnquiryDialog({
             passport_number: '',
             duration: '',
             renewal_status: 'New',
+            passport_handling_mode: null as 'bcl' | 'client' | null,
             job_level: {
                 level: 1,
                 department_id: null,
@@ -669,6 +671,7 @@ export function EnquiryDialog({
             passport_number: taskToEdit.passport_number || '',
             duration: taskToEdit.duration || '',
             renewal_status: taskToEdit.renewal_status || 'New',
+            passport_handling_mode: taskToEdit.passport_handling_mode || null,
             // Participants extracted below
             officer_id: taskToEdit.participants_details?.find(p => p.role?.includes('officer'))?.id?.toString() || '',
             task_manager_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_manager'))?.id?.toString() || '',
@@ -1565,6 +1568,7 @@ export function EnquiryDialog({
                 passport_number: formData.passport_number,
                 duration: syncedDuration,
                 renewal_status: syncedRenewalStatus,
+                passport_handling_mode: formData.passport_handling_mode || null,
                 applicant_details: {
                     id: selectedIndividual.id,
                     name: selectedIndividual.full_name,
@@ -2203,6 +2207,37 @@ export function EnquiryDialog({
                                                 className="h-11 border-slate-200 bg-white"
                                             />
                                         </TableRow>
+
+                                        {formData.department_id === '1' && (
+                                            <TableRow label="Passport Endorsement" hasValue={!!formData.passport_handling_mode}>
+                                                <RadioGroup
+                                                    value={formData.passport_handling_mode || ''}
+                                                    onValueChange={(v: any) => setFormData(prev => ({ ...prev, passport_handling_mode: v }))}
+                                                    className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-lg max-w-sm"
+                                                >
+                                                    {[
+                                                        { value: 'bcl', label: 'BCL Handles Stamping' },
+                                                        { value: 'client', label: 'Client Handles It' },
+                                                    ].map(opt => (
+                                                        <div key={opt.value} className="relative">
+                                                            <RadioGroupItem value={opt.value} id={`phm-${opt.value}`} className="sr-only" />
+                                                            <Label
+                                                                htmlFor={`phm-${opt.value}`}
+                                                                className={cn(
+                                                                    "flex items-center justify-center text-center py-2 px-2 rounded-md cursor-pointer text-xs font-bold transition-all",
+                                                                    formData.passport_handling_mode === opt.value ? "bg-white text-blue-600 shadow-sm" : "text-slate-500"
+                                                                )}
+                                                            >
+                                                                {opt.label}
+                                                            </Label>
+                                                        </div>
+                                                    ))}
+                                                </RadioGroup>
+                                                <p className="text-xs text-slate-400 mt-1.5">
+                                                    Whether BCL staff will carry the passport to Nyayo House for stamping, or the client handles that themselves. Tracked in Passport Endorsement Tracking once this job reaches Write-up Completed.
+                                                </p>
+                                            </TableRow>
+                                        )}
                                     </CardContent>
                                 </Card>
                             </div>
