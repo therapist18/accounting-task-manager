@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw, Trash2, Zap, Settings, Users, Link2, ArrowDownCircle, Search, X } from "lucide-react"
+import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw, Trash2, Zap, Settings, Users, Link2, ArrowDownCircle, Search, X, Save, Loader2 } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { AddStageDialog } from "./components/add-stage-dialog"
 import { EditStageDialog } from "./components/edit-stage-dialog"
@@ -84,6 +84,103 @@ const sortByOrder = <T extends { order?: number; order_num?: number }>(items: T[
   return [...items].sort((a, b) => (a.order || a.order_num || 0) - (b.order || b.order_num || 0))
 }
 
+// Allocation edits (Applicable / Default Display, at subdept/class/subclass level) used to
+// write to Supabase on every single click, which for a bulk selection meant dozens of
+// sequential round trips and a hung UI. Every edit — single-cell or bulk — now only stages a
+// change into the pendingAllocations map (see the Stages component); nothing touches the
+// network until "Save Changes" is clicked, which batches everything by subdepartment (one
+// read-modify-write per affected tm_subdepartments row, in parallel via Promise.all).
+const allocationKey = (
+  subdeptId: number,
+  stageId: string,
+  classId: number | string | null = null,
+  subclassId: number | string | null = null,
+) => `${subdeptId}:${classId ?? "null"}:${subclassId ?? "null"}:${stageId}`
+
+export type PendingAllocation = {
+  subdeptId: number
+  classId: number | string | null
+  subclassId: number | string | null
+  stageId: string
+  applicable?: boolean
+  display?: boolean
+}
+
+// Applies ONE staged change to a working (already-cloned) subdept object — mutates it in
+// place. Faithfully replicates the exact cascade rules the old immediate-write handlers used:
+//   - Setting applicable=false at any level also forces display=false at that same level
+//     (done at stage-time in stageAllocationChange, so `updates` arriving here is already
+//     internally consistent — this function doesn't need to re-derive that).
+//   - A class/subclass-level change can only ever RAISE (never lower) its parent's own
+//     top-level allocation entry for that stage, checked against the array *after* this
+//     mutation's own ensure-default-entry step — same quirky-but-intentional-to-preserve
+//     ordering the original handleAllocationChange/handleDisplayToggle used, so a cascaded
+//     write behaves identically whether it went through immediately (before this refactor) or
+//     via the batched Save Changes path.
+const ensureStageAllocation = (list: any[], stageId: string) => {
+  let allocation = list.find((s: any) => s.stage_id === stageId)
+  if (!allocation) {
+    allocation = { stage_id: stageId, applicable: true, display: true }
+    list.push(allocation)
+  }
+  return allocation
+}
+
+const applyAllocationMutation = (
+  working: any,
+  stageId: string,
+  updates: { applicable?: boolean; display?: boolean },
+  classId: number | string | null,
+  subclassId: number | string | null,
+) => {
+  if (classId !== null && subclassId !== null) {
+    const cls = working.classes?.find((c: any) => c.id === classId)
+    const subCls = cls?.subClasses?.find((sc: any) => sc.id === subclassId)
+    if (!cls || !subCls) return
+    if (!subCls.stages) subCls.stages = []
+    const alloc = ensureStageAllocation(subCls.stages, stageId)
+    if (updates.applicable !== undefined) alloc.applicable = updates.applicable
+    if (updates.display !== undefined) alloc.display = updates.display
+
+    if (!cls.stages) cls.stages = []
+    const classAlloc = ensureStageAllocation(cls.stages, stageId)
+    if (updates.applicable !== undefined) {
+      classAlloc.applicable =
+        updates.applicable || !!cls.subClasses?.some((sc: any) => sc.stages?.some((s: any) => s.stage_id === stageId && s.applicable))
+    }
+
+    if (!working.stages) working.stages = []
+    const subdeptAlloc = ensureStageAllocation(working.stages, stageId)
+    if (updates.applicable !== undefined) {
+      subdeptAlloc.applicable = updates.applicable || working.stages.some((s: any) => s.stage_id === stageId && s.applicable)
+    }
+    if (updates.display !== undefined) {
+      subdeptAlloc.display = updates.display || working.stages.some((s: any) => s.stage_id === stageId && s.display)
+    }
+  } else if (classId !== null) {
+    const cls = working.classes?.find((c: any) => c.id === classId)
+    if (!cls) return
+    if (!cls.stages) cls.stages = []
+    const classAlloc = ensureStageAllocation(cls.stages, stageId)
+    if (updates.applicable !== undefined) classAlloc.applicable = updates.applicable
+    if (updates.display !== undefined) classAlloc.display = updates.display
+
+    if (!working.stages) working.stages = []
+    const subdeptAlloc = ensureStageAllocation(working.stages, stageId)
+    if (updates.applicable !== undefined) {
+      subdeptAlloc.applicable = updates.applicable || working.stages.some((s: any) => s.stage_id === stageId && s.applicable)
+    }
+    if (updates.display !== undefined) {
+      subdeptAlloc.display = updates.display || working.stages.some((s: any) => s.stage_id === stageId && s.display)
+    }
+  } else {
+    if (!working.stages) working.stages = []
+    const alloc = ensureStageAllocation(working.stages, stageId)
+    if (updates.applicable !== undefined) alloc.applicable = updates.applicable
+    if (updates.display !== undefined) alloc.display = updates.display
+  }
+}
+
 const filterByDefaultDisplay = <T extends { default_display?: boolean }>(items: T[], showDefaultOnly: boolean): T[] => {
   if (!showDefaultOnly) return items
   // Ensure we only keep items where default_display is explicitly true
@@ -100,6 +197,12 @@ export default function Stages() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(false)
+  // Unsaved Applicable/Default Display edits — every toggle (single-cell or bulk) stages a
+  // change here instead of writing to Supabase immediately. Keyed by allocationKey so the
+  // same cell's applicable and display can each be edited independently before Save Changes
+  // commits everything at once. See applyAllocationMutation/handleSaveAllocationChanges.
+  const [pendingAllocations, setPendingAllocations] = useState<Map<string, PendingAllocation>>(new Map())
+  const [isSavingAllocations, setIsSavingAllocations] = useState(false)
   const [isTransposed, setIsTransposed] = useState(false)
   const [allKycDocuments, setAllKycDocuments] = useState<Map<string, any>>(new Map())
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map())
@@ -723,6 +826,158 @@ export default function Stages() {
     return departments.find((d) => d.id === activeTab)
   }
 
+  // The single read path every Applicable/Default Display cell (both table views, both
+  // header bulk-checkboxes) goes through — pending (unsaved) edits win over the saved value,
+  // so the UI reflects staged changes instantly with no round trip. Resolves the SAVED value
+  // the same way the table bodies always did: subdept/class/subclass tiering off currentDept's
+  // live subdepartments, not getProcessedSubdepartments (a filtered view that can disagree
+  // with what's actually being edited).
+  const getEffectiveAllocation = useCallback(
+    (
+      stageId: string,
+      subdeptId: number,
+      classId: number | string | null = null,
+      subclassId: number | string | null = null,
+    ): { applicable: boolean; display: boolean } => {
+      const pending = pendingAllocations.get(allocationKey(subdeptId, stageId, classId, subclassId))
+
+      const currentDept = getCurrentDepartment()
+      const subdept = currentDept?.subdepartments?.find((sd: any) => sd.id === subdeptId)
+      let saved: { applicable?: boolean; display?: boolean } | undefined
+      if (subdept) {
+        if (classId !== null && subclassId !== null) {
+          const cls = subdept.classes?.find((c: any) => c.id === classId)
+          saved = cls?.subClasses?.find((sc: any) => sc.id === subclassId)?.stages?.find((s: any) => s.stage_id === stageId)
+        } else if (classId !== null) {
+          const cls = subdept.classes?.find((c: any) => c.id === classId)
+          saved = cls?.stages?.find((s: any) => s.stage_id === stageId)
+        } else {
+          saved = subdept.stages?.find((s: any) => s.stage_id === stageId)
+        }
+      }
+
+      return {
+        applicable: pending?.applicable ?? saved?.applicable ?? true,
+        display: pending?.display ?? saved?.display ?? true,
+      }
+    },
+    [departments, activeTab, pendingAllocations],
+  )
+
+  // Stages ONE cell's edit — the only thing every Applicable select / Default Display
+  // checkbox (single-cell or looped by a bulk action) calls now; no network call happens here.
+  const stageAllocationChange = useCallback(
+    (
+      subdeptId: number,
+      stageId: string,
+      updates: { applicable?: boolean; display?: boolean },
+      classId: number | string | null = null,
+      subclassId: number | string | null = null,
+    ) => {
+      setPendingAllocations((prev) => {
+        const next = new Map(prev)
+        const key = allocationKey(subdeptId, stageId, classId, subclassId)
+        const existing = next.get(key) || { subdeptId, classId, subclassId, stageId }
+        const merged: PendingAllocation = { ...existing, ...updates }
+        // Same immediate-write semantic the old handlers had: turning applicable off also
+        // turns display off at that same cell — done here (not deferred to save time) so a
+        // pending entry is always internally consistent even if display was staged earlier.
+        if (updates.applicable === false) merged.display = false
+        next.set(key, merged)
+        return next
+      })
+    },
+    [],
+  )
+
+  const handleDiscardAllocationChanges = useCallback(() => {
+    setPendingAllocations(new Map())
+  }, [])
+
+  // Batches every staged edit into one read-modify-write per affected subdepartment (grouping
+  // is what makes this safe — see applyAllocationMutation's own comment on why edits can't
+  // just be looped as independent immediate writes), then fires all the subdepartment writes
+  // together via Promise.all.
+  const handleSaveAllocationChanges = useCallback(async () => {
+    if (pendingAllocations.size === 0) return
+    setIsSavingAllocations(true)
+    try {
+      const currentDept = getCurrentDepartment()
+      if (!currentDept) return
+
+      const bySubdept = new Map<number, PendingAllocation[]>()
+      pendingAllocations.forEach((change) => {
+        if (!bySubdept.has(change.subdeptId)) bySubdept.set(change.subdeptId, [])
+        bySubdept.get(change.subdeptId)!.push(change)
+      })
+
+      const results = await Promise.all(
+        Array.from(bySubdept.entries()).map(async ([subdeptId, changes]) => {
+          const subdept = currentDept.subdepartments?.find((sd: any) => sd.id === subdeptId)
+          if (!subdept) return null
+
+          const working = JSON.parse(JSON.stringify(subdept))
+          // Insertion order == the order the user actually made the edits in (Map preserves
+          // insertion order), so applying them sequentially to one working clone reproduces
+          // exactly what N sequential immediate saves would have produced.
+          changes.forEach((change) => {
+            applyAllocationMutation(
+              working,
+              change.stageId,
+              { applicable: change.applicable, display: change.display },
+              change.classId,
+              change.subclassId,
+            )
+          })
+
+          const updateData = { classes: working.classes, stages: working.stages }
+          const { error } = await supabase.from("tm_subdepartments").update(updateData).eq("id", subdeptId)
+          if (error) throw error
+
+          recalcExpectedTimeTotals({
+            departmentId: currentDept.id,
+            stages: currentDept.stages,
+            subdepartments: [{ ...subdept, ...updateData }],
+            scope: { type: "subdepartment", subdeptId },
+          })
+
+          return { subdeptId, updateData }
+        }),
+      )
+
+      setDepartments((prevDepartments) =>
+        prevDepartments.map((dept) => {
+          if (dept.id !== activeTab) return dept
+          return {
+            ...dept,
+            subdepartments:
+              dept.subdepartments?.map((sd: any) => {
+                const result = results.find((r) => r && r.subdeptId === sd.id)
+                return result ? { ...sd, ...result.updateData } : sd
+              }) || [],
+          }
+        }),
+      )
+
+      setPendingAllocations(new Map())
+      toast({
+        title: "Success",
+        description: `Saved ${pendingAllocations.size} change${pendingAllocations.size === 1 ? "" : "s"} across ${bySubdept.size} subdepartment${bySubdept.size === 1 ? "" : "s"}`,
+      })
+    } catch (err) {
+      console.error("Error saving allocation changes:", err)
+      // Deliberately keep pendingAllocations intact on failure — the user's edits shouldn't
+      // vanish just because the save failed; they can retry Save Changes.
+      toast({
+        title: "Error",
+        description: "Failed to save changes. Your edits are still staged — please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingAllocations(false)
+    }
+  }, [pendingAllocations, activeTab, departments])
+
   const getProcessedSubdepartments = useCallback((dept: Department) => {
     if (!dept?.subdepartments) return []
 
@@ -987,710 +1242,84 @@ export default function Stages() {
     [departments],
   )
 
-  const handleAllocationChangeInternal = async (subdeptId: number, stageId: string, shouldAllocate: boolean) => {
+  const handleAllocationChangeInternal = (subdeptId: number, stageId: string, shouldAllocate: boolean) => {
     return handleAllocationChange(subdeptId, stageId, shouldAllocate)
   }
 
-  const handleAllocationChange = async (
+  // Stages an Applicable change (see stageAllocationChange) — no network call, no
+  // read-modify-write, nothing until Save Changes. Same name/signature as before so every
+  // existing onValueChange/onClick call site in the JSX keeps working unchanged.
+  const handleAllocationChange = (
     subdeptId: number,
     stageId: string,
     shouldAllocate: boolean,
     classId: number | string | null = null,
     subclassId: number | string | null = null,
   ) => {
-    try {
-      const currentDept = getCurrentDepartment()
-      if (!currentDept) return
-
-      let updateData: any = {}
-      let subdeptName = ""
-      let className = ""
-      const stageName = currentDept.stages.find((s) => s.id === stageId)?.name || "this stage"
-
-      if (classId !== null && subclassId !== null) {
-        // Handle subclass allocation. Always locate the class/subclass by their stable id
-        // within the RAW (unfiltered) subdepartment — never by a positional index, since
-        // any caller's index could be a position within an entity-visibility-filtered list
-        // that doesn't line up with this raw array once rows above it are hidden.
-        const subdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
-        const rawClass = subdept?.classes?.find((c: any) => c.id === classId)
-        const rawSubClass = rawClass?.subClasses?.find((sc: any) => sc.id === subclassId)
-        if (!subdept || !rawClass || !rawSubClass) {
-          toast({
-            title: "Error",
-            description: "Subclass not found",
-            variant: "destructive",
-          })
-          return
-        }
-
-        subdeptName = subdept.name
-        className = rawClass.name
-
-        const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
-        const updatedClass = updatedClasses.find((c: any) => c.id === classId)
-        const updatedSubClass = updatedClass.subClasses.find((sc: any) => sc.id === subclassId)
-        if (!updatedSubClass.stages) {
-          updatedSubClass.stages = []
-        }
-
-        let stageAllocation = updatedSubClass.stages.find((s: any) => s.stage_id === stageId)
-        if (!stageAllocation) {
-          stageAllocation = { stage_id: stageId, applicable: true, display: true }
-          updatedSubClass.stages.push(stageAllocation)
-        }
-
-        stageAllocation.applicable = shouldAllocate
-        if (!shouldAllocate) {
-          stageAllocation.display = false
-        }
-
-        updateData = { classes: updatedClasses }
-
-        // Update parent class and subdepartment stages as well
-        if (!updatedClass.stages) {
-          updatedClass.stages = []
-        }
-
-        let classStageAllocation = updatedClass.stages.find((s: any) => s.stage_id === stageId)
-        if (!classStageAllocation) {
-          classStageAllocation = { stage_id: stageId, applicable: true, display: true }
-          updatedClass.stages.push(classStageAllocation)
-        }
-
-        classStageAllocation.applicable =
-          shouldAllocate ||
-          updatedClass.subClasses?.some((sc: any) =>
-            sc.stages?.some((s: any) => s.stage_id === stageId && s.applicable),
-          )
-
-        const subdeptStages = [...(subdept.stages || [])]
-        let subdeptStageAllocation = subdeptStages.find((s) => s.stage_id === stageId)
-        if (!subdeptStageAllocation) {
-          subdeptStageAllocation = { stage_id: stageId, applicable: true, display: true }
-          subdeptStages.push(subdeptStageAllocation)
-        }
-
-        subdeptStageAllocation.applicable =
-          shouldAllocate || subdeptStages.some((s) => s.stage_id === stageId && s.applicable)
-        updateData.stages = subdeptStages
-      } else if (classId !== null) {
-        // Handle class allocation — same id-based lookup as above.
-        const subdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
-        const rawClass = subdept?.classes?.find((c: any) => c.id === classId)
-        if (!subdept || !rawClass) {
-          toast({
-            title: "Error",
-            description: "Class not found",
-            variant: "destructive",
-          })
-          return
-        }
-
-        subdeptName = subdept.name
-        className = rawClass.name
-
-        const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
-        const updatedClass = updatedClasses.find((c: any) => c.id === classId)
-        if (!updatedClass.stages) {
-          updatedClass.stages = []
-        }
-
-        let stageAllocation = updatedClass.stages.find((s: any) => s.stage_id === stageId)
-        if (!stageAllocation) {
-          stageAllocation = { stage_id: stageId, applicable: true, display: true }
-          updatedClass.stages.push(stageAllocation)
-        }
-
-        stageAllocation.applicable = shouldAllocate
-        if (!shouldAllocate) {
-          stageAllocation.display = false
-        }
-
-        updateData = { classes: updatedClasses }
-
-        // Also update subdepartment stages
-        const subdeptStages = [...(subdept.stages || [])]
-        let subdeptStageAllocation = subdeptStages.find((s) => s.stage_id === stageId)
-        if (!subdeptStageAllocation) {
-          subdeptStageAllocation = { stage_id: stageId, applicable: true, display: true }
-          subdeptStages.push(subdeptStageAllocation)
-        }
-
-        subdeptStageAllocation.applicable =
-          shouldAllocate || subdeptStages.some((s) => s.stage_id === stageId && s.applicable)
-        updateData.stages = subdeptStages
-      } else {
-        // Handle subdepartment allocation
-        const subdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
-        if (!subdept) {
-          toast({
-            title: "Error",
-            description: "Subdepartment not found",
-            variant: "destructive",
-          })
-          return
-        }
-
-        subdeptName = subdept.name
-
-        const subdeptStages = [...(subdept.stages || [])]
-        let stageAllocation = subdeptStages.find((s) => s.stage_id === stageId)
-        if (!stageAllocation) {
-          stageAllocation = { stage_id: stageId, applicable: true, display: true }
-          subdeptStages.push(stageAllocation)
-        }
-
-        stageAllocation.applicable = shouldAllocate
-        if (!shouldAllocate) {
-          stageAllocation.display = false
-        }
-
-        updateData = { stages: subdeptStages }
-      }
-
-      // Update in Supabase
-      const { error } = await supabase.from("tm_subdepartments").update(updateData).eq("id", subdeptId)
-
-      if (error) throw error
-
-      // updateData only ever carries `classes` and/or `stages` — spread it over the
-      // original subdept so recalcExpectedTimeTotals sees the freshly-updated allocation
-      // arrays without waiting on the (async, same-tick-stale) setDepartments below.
-      const originalSubdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
-      recalcExpectedTimeTotals({
-        departmentId: currentDept.id,
-        stages: currentDept.stages,
-        subdepartments: originalSubdept ? [{ ...originalSubdept, ...updateData }] : [],
-        scope: { type: "subdepartment", subdeptId },
-      })
-
-      // Update local state
-      setDepartments((prevDepartments) =>
-        prevDepartments.map((dept) => {
-          if (dept.id !== activeTab) return dept
-
-          return {
-            ...dept,
-            subdepartments:
-              dept.subdepartments?.map((subdept) => {
-                if (subdept.id !== subdeptId) return subdept
-
-                if (classId !== null && subclassId !== null) {
-                  // Update subclass
-                  const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
-                  const updatedClass = updatedClasses.find((c: any) => c.id === classId)
-                  const updatedSubClass = updatedClass?.subClasses?.find((sc: any) => sc.id === subclassId)
-                  if (!updatedClass || !updatedSubClass) return subdept
-                  if (!updatedSubClass.stages) {
-                    updatedSubClass.stages = []
-                  }
-
-                  let stageAllocation = updatedSubClass.stages.find((s: any) => s.stage_id === stageId)
-                  if (!stageAllocation) {
-                    stageAllocation = { stage_id: stageId, applicable: true, display: true }
-                    updatedSubClass.stages.push(stageAllocation)
-                  }
-
-                  stageAllocation.applicable = shouldAllocate
-                  if (!shouldAllocate) {
-                    stageAllocation.display = false
-                  }
-
-                  return {
-                    ...subdept,
-                    classes: updatedClasses,
-                  }
-                } else if (classId !== null) {
-                  // Update class
-                  const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
-                  const updatedClass = updatedClasses.find((c: any) => c.id === classId)
-                  if (!updatedClass) return subdept
-                  if (!updatedClass.stages) {
-                    updatedClass.stages = []
-                  }
-
-                  let stageAllocation = updatedClass.stages.find((s: any) => s.stage_id === stageId)
-                  if (!stageAllocation) {
-                    stageAllocation = { stage_id: stageId, applicable: true, display: true }
-                    updatedClass.stages.push(stageAllocation)
-                  }
-
-                  stageAllocation.applicable = shouldAllocate
-                  if (!shouldAllocate) {
-                    stageAllocation.display = false
-                  }
-
-                  const subdeptStages = [...(subdept.stages || [])]
-                  let subdeptStageAllocation = subdeptStages.find((s) => s.stage_id === stageId)
-                  if (!subdeptStageAllocation) {
-                    subdeptStageAllocation = { stage_id: stageId, applicable: true, display: true }
-                    subdeptStages.push(subdeptStageAllocation)
-                  }
-
-                  subdeptStageAllocation.applicable =
-                    shouldAllocate || subdeptStages.some((s) => s.stage_id === stageId && s.applicable)
-
-                  return {
-                    ...subdept,
-                    classes: updatedClasses,
-                    stages: subdeptStages,
-                  }
-                }
-
-                // Update subdepartment
-                const subdeptStages = [...(subdept.stages || [])]
-                let stageAllocation = subdeptStages.find((s) => s.stage_id === stageId)
-                if (!stageAllocation) {
-                  stageAllocation = { stage_id: stageId, applicable: true, display: true }
-                  subdeptStages.push(stageAllocation)
-                }
-
-                stageAllocation.applicable = shouldAllocate
-                if (!shouldAllocate) {
-                  stageAllocation.display = false
-                }
-
-                return {
-                  ...subdept,
-                  stages: subdeptStages,
-                }
-              }) || [],
-          }
-        }),
-      )
-
-      toast({
-        title: "Success",
-        description: `${stageName} has been ${shouldAllocate ? "applied to" : "removed from"} ${className ? `${className} in ${subdeptName}` : subdeptName}`,
-      })
-    } catch (err) {
-      console.error("Error updating allocation:", err)
-      toast({
-        title: "Error",
-        description: "Failed to update allocation. Please try again.",
-        variant: "destructive",
-      })
-    }
+    stageAllocationChange(subdeptId, stageId, { applicable: shouldAllocate }, classId, subclassId)
   }
 
-  const handleDisplayToggle = async (
+  // Stages a Default Display change (see stageAllocationChange) — no network call. Same
+  // name/signature as before so every existing onCheckedChange call site keeps working
+  // unchanged.
+  const handleDisplayToggle = (
     subdeptId: number,
     stageId: string,
     checked: boolean,
     classId: number | string | null = null,
     subclassId: number | string | null = null,
   ) => {
-    try {
-      const currentDept = getCurrentDepartment()
-      if (!currentDept) return
-
-      let updateData: any = {}
-      let subdeptName = ""
-      let className = ""
-      const stageName = currentDept.stages.find((s) => s.id === stageId)?.name || "this stage"
-
-      if (classId !== null && subclassId !== null) {
-        // Handle subclass display toggle. Same id-based lookup into the RAW/unfiltered
-        // data as handleAllocationChange — see the comment there for why this can't be a
-        // positional index sourced from an entity-visibility-filtered render list.
-        const subdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
-        const rawClass = subdept?.classes?.find((c: any) => c.id === classId)
-        const rawSubClass = rawClass?.subClasses?.find((sc: any) => sc.id === subclassId)
-        if (!subdept || !rawClass || !rawSubClass) {
-          toast({
-            title: "Error",
-            description: "Subclass not found",
-            variant: "destructive",
-          })
-          return
-        }
-
-        subdeptName = subdept.name
-        className = rawClass.name
-
-        const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
-        const updatedClass = updatedClasses.find((c: any) => c.id === classId)
-        const updatedSubClass = updatedClass.subClasses.find((sc: any) => sc.id === subclassId)
-        if (!updatedSubClass.stages) {
-          updatedSubClass.stages = []
-        }
-
-        let stageAllocation = updatedSubClass.stages.find((s: any) => s.stage_id === stageId)
-        if (!stageAllocation) {
-          stageAllocation = { stage_id: stageId, applicable: true, display: true }
-          updatedSubClass.stages.push(stageAllocation)
-        }
-
-        stageAllocation.display = checked
-        updateData = { classes: updatedClasses }
-      } else if (classId !== null) {
-        // Handle class display toggle
-        const subdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
-        const rawClass = subdept?.classes?.find((c: any) => c.id === classId)
-        if (!subdept || !rawClass) {
-          toast({
-            title: "Error",
-            description: "Class not found",
-            variant: "destructive",
-          })
-          return
-        }
-
-        subdeptName = subdept.name
-        className = rawClass.name
-
-        const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
-        const updatedClass = updatedClasses.find((c: any) => c.id === classId)
-        if (!updatedClass.stages) {
-          updatedClass.stages = []
-        }
-
-        let stageAllocation = updatedClass.stages.find((s: any) => s.stage_id === stageId)
-        if (!stageAllocation) {
-          stageAllocation = { stage_id: stageId, applicable: true, display: true }
-          updatedClass.stages.push(stageAllocation)
-        }
-
-        stageAllocation.display = checked
-        updateData = { classes: updatedClasses }
-
-        const subdeptStages = [...(subdept.stages || [])]
-        let subdeptStageAllocation = subdeptStages.find((s) => s.stage_id === stageId)
-        if (!subdeptStageAllocation) {
-          subdeptStageAllocation = { stage_id: stageId, applicable: true, display: true }
-          subdeptStages.push(subdeptStageAllocation)
-        }
-
-        subdeptStageAllocation.display = checked || subdeptStages.some((s) => s.stage_id === stageId && s.display)
-        updateData.stages = subdeptStages
-      } else {
-        // Handle subdepartment display toggle
-        const subdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
-        if (!subdept) {
-          toast({
-            title: "Error",
-            description: "Subdepartment not found",
-            variant: "destructive",
-          })
-          return
-        }
-
-        subdeptName = subdept.name
-
-        const subdeptStages = [...(subdept.stages || [])]
-        let stageAllocation = subdeptStages.find((s) => s.stage_id === stageId)
-        if (!stageAllocation) {
-          stageAllocation = { stage_id: stageId, applicable: true, display: true }
-          subdeptStages.push(stageAllocation)
-        }
-
-        stageAllocation.display = checked
-        updateData = { stages: subdeptStages }
-      }
-
-      // Update in Supabase
-      const { error } = await supabase.from("tm_subdepartments").update(updateData).eq("id", subdeptId)
-
-      if (error) throw error
-
-      // Update local state
-      setDepartments((prevDepartments) =>
-        prevDepartments.map((dept) => {
-          if (dept.id !== activeTab) return dept
-
-          return {
-            ...dept,
-            subdepartments:
-              dept.subdepartments?.map((subdept) => {
-                if (subdept.id !== subdeptId) return subdept
-
-                if (classId !== null && subclassId !== null) {
-                  const updatedClasses = JSON.parse(JSON.stringify(subdept.classes || []))
-                  const updatedClass = updatedClasses.find((c: any) => c.id === classId)
-                  const updatedSubClass = updatedClass?.subClasses?.find((sc: any) => sc.id === subclassId)
-                  if (!updatedClass || !updatedSubClass) return subdept
-                  if (!updatedSubClass.stages) {
-                    updatedSubClass.stages = []
-                  }
-
-                  let stageAllocation = updatedSubClass.stages.find((s: any) => s.stage_id === stageId)
-                  if (!stageAllocation) {
-                    stageAllocation = { stage_id: stageId, applicable: true, display: true }
-                    updatedSubClass.stages.push(stageAllocation)
-                  }
-
-                  stageAllocation.display = checked
-
-                  return {
-                    ...subdept,
-                    classes: updatedClasses,
-                  }
-                } else if (classId !== null) {
-                  const updatedClasses = JSON.parse(JSON.stringify(subdept.classes || []))
-                  const updatedClass = updatedClasses.find((c: any) => c.id === classId)
-                  if (!updatedClass) return subdept
-                  if (!updatedClass.stages) {
-                    updatedClass.stages = []
-                  }
-
-                  let stageAllocation = updatedClass.stages.find((s: any) => s.stage_id === stageId)
-                  if (!stageAllocation) {
-                    stageAllocation = { stage_id: stageId, applicable: true, display: true }
-                    updatedClass.stages.push(stageAllocation)
-                  }
-
-                  stageAllocation.display = checked
-
-                  const subdeptStages = [...(subdept.stages || [])]
-                  let subdeptStageAllocation = subdeptStages.find((s) => s.stage_id === stageId)
-                  if (!subdeptStageAllocation) {
-                    subdeptStageAllocation = { stage_id: stageId, applicable: true, display: true }
-                    subdeptStages.push(subdeptStageAllocation)
-                  }
-
-                  subdeptStageAllocation.display =
-                    checked || subdeptStages.some((s) => s.stage_id === stageId && s.display)
-
-                  return {
-                    ...subdept,
-                    classes: updatedClasses,
-                    stages: subdeptStages,
-                  }
-                }
-
-                const subdeptStages = [...(subdept.stages || [])]
-                let stageAllocation = subdeptStages.find((s) => s.stage_id === stageId)
-                if (!stageAllocation) {
-                  stageAllocation = { stage_id: stageId, applicable: true, display: true }
-                  subdeptStages.push(stageAllocation)
-                }
-
-                stageAllocation.display = checked
-
-                return {
-                  ...subdept,
-                  stages: subdeptStages,
-                }
-              }) || [],
-          }
-        }),
-      )
-
-      toast({
-        title: "Success",
-        description: `Display setting updated for ${stageName} in ${className ? `${className} (${subdeptName})` : subdeptName}`,
-      })
-    } catch (err) {
-      console.error("Error updating display setting:", err)
-      toast({
-        title: "Error",
-        description: "Failed to update display setting. Please try again.",
-        variant: "destructive",
-      })
-    }
+    stageAllocationChange(subdeptId, stageId, { display: checked }, classId, subclassId)
   }
 
-  // Bulk version of handleDisplayToggle — sets `display` for every given stage_id on ONE
-  // entity (subdept/class/subclass) in a single read-modify-write. Looping the single-stage
-  // handler instead would race: each call re-reads component state fresh via getCurrentDepartment(),
-  // so N sequential calls targeting the same entity within one event-handler execution would
-  // each build their update from the same stale pre-loop snapshot, and the last write would
-  // silently undo everything but its own change. Used by the "Default Display" column header's
-  // bulk select/deselect-all checkbox, which only ever passes the currently-FILTERED stage ids
-  // (filteredStages), so the bulk action respects whatever search/filter is in place.
-  const handleBulkDisplayToggle = async (
+  // Bulk Default Display for many stages on ONE entity — now just loops
+  // stageAllocationChange (pure local staging, no network), used by the transposed table's
+  // per-entity-column header checkbox.
+  const handleBulkDisplayToggle = (
     entity: { subdeptId: number; classId?: number | string | null; subclassId?: number | string | null },
     stageIds: string[],
     checked: boolean,
   ) => {
-    if (stageIds.length === 0) return
-    try {
-      const currentDept = getCurrentDepartment()
-      if (!currentDept) return
-
-      const { subdeptId, classId = null, subclassId = null } = entity
-      const subdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
-      if (!subdept) {
-        toast({ title: "Error", description: "Subdepartment not found", variant: "destructive" })
-        return
-      }
-
-      const ensureAllocation = (list: any[], stageId: string) => {
-        let allocation = list.find((s: any) => s.stage_id === stageId)
-        if (!allocation) {
-          allocation = { stage_id: stageId, applicable: true, display: true }
-          list.push(allocation)
-        }
-        return allocation
-      }
-
-      let updateData: any = {}
-
-      if (classId !== null && subclassId !== null) {
-        const updatedClasses = JSON.parse(JSON.stringify(subdept.classes || []))
-        const updatedClass = updatedClasses.find((c: any) => c.id === classId)
-        const updatedSubClass = updatedClass?.subClasses?.find((sc: any) => sc.id === subclassId)
-        if (!updatedClass || !updatedSubClass) {
-          toast({ title: "Error", description: "Subclass not found", variant: "destructive" })
-          return
-        }
-        if (!updatedSubClass.stages) updatedSubClass.stages = []
-        stageIds.forEach((stageId) => {
-          ensureAllocation(updatedSubClass.stages, stageId).display = checked
-        })
-        updateData = { classes: updatedClasses }
-      } else if (classId !== null) {
-        const updatedClasses = JSON.parse(JSON.stringify(subdept.classes || []))
-        const updatedClass = updatedClasses.find((c: any) => c.id === classId)
-        if (!updatedClass) {
-          toast({ title: "Error", description: "Class not found", variant: "destructive" })
-          return
-        }
-        if (!updatedClass.stages) updatedClass.stages = []
-        stageIds.forEach((stageId) => {
-          ensureAllocation(updatedClass.stages, stageId).display = checked
-        })
-
-        const subdeptStages = [...(subdept.stages || [])]
-        stageIds.forEach((stageId) => {
-          const allocation = ensureAllocation(subdeptStages, stageId)
-          allocation.display = checked || subdeptStages.some((s) => s.stage_id === stageId && s.display)
-        })
-        updateData = { classes: updatedClasses, stages: subdeptStages }
-      } else {
-        const subdeptStages = [...(subdept.stages || [])]
-        stageIds.forEach((stageId) => {
-          ensureAllocation(subdeptStages, stageId).display = checked
-        })
-        updateData = { stages: subdeptStages }
-      }
-
-      const { error } = await supabase.from("tm_subdepartments").update(updateData).eq("id", subdeptId)
-      if (error) throw error
-
-      setDepartments((prevDepartments) =>
-        prevDepartments.map((dept) => {
-          if (dept.id !== activeTab) return dept
-          return {
-            ...dept,
-            subdepartments: dept.subdepartments?.map((sd) => (sd.id === subdeptId ? { ...sd, ...updateData } : sd)) || [],
-          }
-        }),
-      )
-
-      toast({
-        title: "Success",
-        description: `Default Display ${checked ? "enabled" : "disabled"} for ${stageIds.length} stage${stageIds.length === 1 ? "" : "s"}`,
-      })
-    } catch (err) {
-      console.error("Error bulk-updating display setting:", err)
-      toast({
-        title: "Error",
-        description: "Failed to update display settings. Please try again.",
-        variant: "destructive",
-      })
-    }
+    stageIds.forEach((stageId) => {
+      stageAllocationChange(entity.subdeptId, stageId, { display: checked }, entity.classId ?? null, entity.subclassId ?? null)
+    })
   }
 
-  // Inverse of handleBulkDisplayToggle — one stage across MULTIPLE entities (the normal
-  // table's own orientation: stages are columns, entities are rows). Entities are grouped by
-  // subdeptId first — each subdepartment is an independent tm_subdepartments row, so grouping
-  // (one read-modify-write per subdept covering every class/subclass target within it) avoids
-  // both the stale-snapshot race a naive per-entity loop would hit, and N redundant writes to
-  // the same row. The per-subdept writes then run in parallel since they're independent rows.
-  const handleBulkDisplayToggleForStageAcrossEntities = async (
+  // Bulk Applicable for many stages on ONE entity — same shape as handleBulkDisplayToggle,
+  // used by the transposed table's per-entity-column "Applicable" header checkbox.
+  const handleBulkApplicableToggle = (
+    entity: { subdeptId: number; classId?: number | string | null; subclassId?: number | string | null },
+    stageIds: string[],
+    checked: boolean,
+  ) => {
+    stageIds.forEach((stageId) => {
+      stageAllocationChange(entity.subdeptId, stageId, { applicable: checked }, entity.classId ?? null, entity.subclassId ?? null)
+    })
+  }
+
+  // Bulk Default Display for ONE stage across MANY entities — the normal table's own
+  // orientation (stages are columns, entities are rows). Just loops stageAllocationChange now.
+  const handleBulkDisplayToggleForStageAcrossEntities = (
     entities: { subdeptId: number; classId?: string | number | null; subclassId?: string | number | null }[],
     stageId: string,
     checked: boolean,
   ) => {
-    if (entities.length === 0) return
-    try {
-      const currentDept = getCurrentDepartment()
-      if (!currentDept) return
+    entities.forEach(({ subdeptId, classId = null, subclassId = null }) => {
+      stageAllocationChange(subdeptId, stageId, { display: checked }, classId, subclassId)
+    })
+  }
 
-      const bySubdept = new Map<number, { classId: string | number | null; subclassId: string | number | null }[]>()
-      entities.forEach(({ subdeptId, classId = null, subclassId = null }) => {
-        if (!bySubdept.has(subdeptId)) bySubdept.set(subdeptId, [])
-        bySubdept.get(subdeptId)!.push({ classId, subclassId })
-      })
-
-      const ensureAllocation = (list: any[], sId: string) => {
-        let allocation = list.find((s: any) => s.stage_id === sId)
-        if (!allocation) {
-          allocation = { stage_id: sId, applicable: true, display: true }
-          list.push(allocation)
-        }
-        return allocation
-      }
-
-      await Promise.all(
-        Array.from(bySubdept.entries()).map(async ([subdeptId, targets]) => {
-          const subdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
-          if (!subdept) return
-
-          const updatedClasses = JSON.parse(JSON.stringify(subdept.classes || []))
-          const subdeptStages = [...(subdept.stages || [])]
-          let touchedClasses = false
-          let touchedSubdeptStages = false
-
-          targets.forEach(({ classId, subclassId }) => {
-            if (classId !== null && subclassId !== null) {
-              const updatedClass = updatedClasses.find((c: any) => c.id === classId)
-              const updatedSubClass = updatedClass?.subClasses?.find((sc: any) => sc.id === subclassId)
-              if (updatedSubClass) {
-                if (!updatedSubClass.stages) updatedSubClass.stages = []
-                ensureAllocation(updatedSubClass.stages, stageId).display = checked
-                touchedClasses = true
-              }
-            } else if (classId !== null) {
-              const updatedClass = updatedClasses.find((c: any) => c.id === classId)
-              if (updatedClass) {
-                if (!updatedClass.stages) updatedClass.stages = []
-                ensureAllocation(updatedClass.stages, stageId).display = checked
-                touchedClasses = true
-              }
-              const allocation = ensureAllocation(subdeptStages, stageId)
-              allocation.display = checked || subdeptStages.some((s) => s.stage_id === stageId && s.display)
-              touchedSubdeptStages = true
-            } else {
-              ensureAllocation(subdeptStages, stageId).display = checked
-              touchedSubdeptStages = true
-            }
-          })
-
-          const updateData: any = {}
-          if (touchedClasses) updateData.classes = updatedClasses
-          if (touchedSubdeptStages) updateData.stages = subdeptStages
-          if (Object.keys(updateData).length === 0) return
-
-          const { error } = await supabase.from("tm_subdepartments").update(updateData).eq("id", subdeptId)
-          if (error) throw error
-
-          setDepartments((prevDepartments) =>
-            prevDepartments.map((dept) => {
-              if (dept.id !== activeTab) return dept
-              return {
-                ...dept,
-                subdepartments: dept.subdepartments?.map((sd) => (sd.id === subdeptId ? { ...sd, ...updateData } : sd)) || [],
-              }
-            }),
-          )
-        }),
-      )
-
-      toast({
-        title: "Success",
-        description: `Default Display ${checked ? "enabled" : "disabled"} for ${entities.length} row${entities.length === 1 ? "" : "s"}`,
-      })
-    } catch (err) {
-      console.error("Error bulk-updating display setting across entities:", err)
-      toast({
-        title: "Error",
-        description: "Failed to update display settings. Please try again.",
-        variant: "destructive",
-      })
-    }
+  // Bulk Applicable for ONE stage across MANY entities — same shape as
+  // handleBulkDisplayToggleForStageAcrossEntities, used by the normal table's per-stage-column
+  // "Applicable" header checkbox.
+  const handleBulkApplicableToggleForStageAcrossEntities = (
+    entities: { subdeptId: number; classId?: string | number | null; subclassId?: string | number | null }[],
+    stageId: string,
+    checked: boolean,
+  ) => {
+    entities.forEach(({ subdeptId, classId = null, subclassId = null }) => {
+      stageAllocationChange(subdeptId, stageId, { applicable: checked }, classId, subclassId)
+    })
   }
 
   const handleAddStages = async (stages: any[], departmentId: string) => {
@@ -3002,36 +2631,14 @@ export default function Stages() {
   };
 
   // Function to get stage allocation for an entity
+  // Delegates to getEffectiveAllocation (pending edits win over saved) so every consumer of
+  // this — both table bodies, both header bulk checkboxes, the Excel export — reflects
+  // unsaved staged changes instantly, with no round trip. Kept as a thin (stage, entity)
+  // wrapper since that's the shape every existing call site already uses.
   const getStageAllocation = (stage: Stage, entity: any) => {
-    if (!currentDept) return { applicable: true, display: true };
-
-    const processedSubdepartments = getProcessedSubdepartments(currentDept);
-    let stageAllocation;
-
-    const subdept = processedSubdepartments.find((sd) => sd.id === entity.subdeptId);
-    if (!subdept) return { applicable: true, display: true };
-
-    // Resolve directly by the entity's own stable classId/subclassId (captured in
-    // getLeafEntities off the already-filtered class/subclass), never by re-indexing
-    // into currentDept's raw/unfiltered arrays with a position that was only ever valid
-    // within the filtered list — that mismatch used to return the wrong class/subclass
-    // (or throw, when the index ran past the raw array's length) whenever entity-visibility
-    // filters hid any rows above the one being read.
-    if (entity.type === "subdepartment") {
-      stageAllocation = subdept.stages?.find((s) => s.stage_id === stage.id);
-    } else if (entity.type === "class" && entity.classId != null) {
-      const processedClass = subdept.classes?.find((c) => c.id === entity.classId);
-      stageAllocation = processedClass?.stages?.find((s) => s.stage_id === stage.id);
-    } else if (entity.type === "subclass" && entity.classId != null && entity.subclassId != null) {
-      const processedClass = subdept.classes?.find((c) => c.id === entity.classId);
-      const processedSubClass = processedClass?.subClasses?.find((sc) => sc.id === entity.subclassId);
-      stageAllocation = processedSubClass?.stages?.find((s) => s.stage_id === stage.id);
-    }
-
-    return {
-      applicable: stageAllocation?.applicable ?? true,
-      display: stageAllocation?.display ?? true,
-    };
+    if (entity.type === "class") return getEffectiveAllocation(stage.id, entity.subdeptId, entity.classId ?? null, null);
+    if (entity.type === "subclass") return getEffectiveAllocation(stage.id, entity.subdeptId, entity.classId ?? null, entity.subclassId ?? null);
+    return getEffectiveAllocation(stage.id, entity.subdeptId, null, null);
   };
 
   const buildHeaderTree = useCallback(
@@ -3275,10 +2882,35 @@ export default function Stages() {
                       (stage) => getStageAllocation(stage, entity).display,
                     )
 
+                    // Bulk select/deselect this entity's "Applicable" column — scoped to
+                    // filteredStages same as Default Display above, but not pre-filtered by
+                    // applicable (this IS the applicable toggle itself).
+                    const allApplicable =
+                      filteredStages.length > 0 &&
+                      filteredStages.every((stage) => getStageAllocation(stage, entity).applicable)
+                    const someApplicable = filteredStages.some((stage) => getStageAllocation(stage, entity).applicable)
+
                     return (
                       <React.Fragment key={`controls-${entity.id}`}>
                         <TableHead className="border-r border-slate-300 bg-slate-500 text-center text-xs font-medium text-white w-16 p-1">
-                          Applicable
+                          <div
+                            className="flex items-center justify-center gap-1"
+                            title={`${allApplicable ? "Deselect all" : "Select all"} (${filteredStages.length} visible stage${filteredStages.length === 1 ? "" : "s"})`}
+                          >
+                            <span>Applicable</span>
+                            <Checkbox
+                              checked={allApplicable ? true : someApplicable ? "indeterminate" : false}
+                              onCheckedChange={() =>
+                                handleBulkApplicableToggle(
+                                  entity,
+                                  filteredStages.map((stage) => stage.id),
+                                  !allApplicable,
+                                )
+                              }
+                              disabled={filteredStages.length === 0}
+                              className="h-3.5 w-3.5 border-white data-[state=checked]:bg-white data-[state=checked]:text-slate-700"
+                            />
+                          </div>
                         </TableHead>
                         <TableHead className="border-r border-slate-300 bg-slate-500 text-center text-xs font-medium text-white w-16 p-1">
                           <div
@@ -3599,10 +3231,6 @@ export default function Stages() {
     // rows the user can actually currently see — not the whole department, and not anything
     // collapsed or paginated out of view.
     const visibleEntities: { subdeptId: number; classId: string | number | null; subclassId: string | number | null; getAllocation: (stageId: string) => { applicable: boolean; display: boolean } }[] = []
-    const resolveAllocation = (list: any[] | undefined, stageId: string) => {
-      const allocation = list?.find((s: any) => s.stage_id === stageId)
-      return { applicable: allocation?.applicable ?? true, display: allocation?.display ?? true }
-    }
     paginatedSubdepartments.forEach((subdept) => {
       const isSubdeptExpanded = expandedRows.has(`subdept-${subdept.id}`)
       const hasClasses = subdept.classes && subdept.classes.length > 0
@@ -3611,7 +3239,7 @@ export default function Stages() {
           subdeptId: subdept.id,
           classId: null,
           subclassId: null,
-          getAllocation: (stageId: string) => resolveAllocation(subdept.stages, stageId),
+          getAllocation: (stageId: string) => getEffectiveAllocation(stageId, subdept.id),
         })
         return
       }
@@ -3623,7 +3251,7 @@ export default function Stages() {
             subdeptId: subdept.id,
             classId: cls.id,
             subclassId: null,
-            getAllocation: (stageId: string) => resolveAllocation(cls.stages, stageId),
+            getAllocation: (stageId: string) => getEffectiveAllocation(stageId, subdept.id, cls.id),
           })
           return
         }
@@ -3634,7 +3262,7 @@ export default function Stages() {
             subdeptId: subdept.id,
             classId: cls.id,
             subclassId: subCls.id,
-            getAllocation: (stageId: string) => resolveAllocation(subCls.stages, stageId),
+            getAllocation: (stageId: string) => getEffectiveAllocation(stageId, subdept.id, cls.id, subCls.id),
           })
         })
       })
@@ -3997,10 +3625,33 @@ export default function Stages() {
                       applicableVisibleEntities.every((entity) => entity.getAllocation(stage.id).display)
                     const someDisplayed = applicableVisibleEntities.some((entity) => entity.getAllocation(stage.id).display)
 
+                    // Bulk select/deselect this stage's "Applicable" across every visible row —
+                    // not pre-filtered by applicable (this IS the applicable toggle itself).
+                    const allApplicable =
+                      visibleEntities.length > 0 && visibleEntities.every((entity) => entity.getAllocation(stage.id).applicable)
+                    const someApplicable = visibleEntities.some((entity) => entity.getAllocation(stage.id).applicable)
+
                     return (
                       <TableHead key={`controls-${stage.id}`} className="border-r border-slate-300 bg-slate-500">
                         <div className="grid grid-cols-2 gap-1 p-1">
-                          <div className="text-center text-xs font-medium text-white">Applicable</div>
+                          <div
+                            className="flex items-center justify-center gap-1"
+                            title={`${allApplicable ? "Deselect all" : "Select all"} (${visibleEntities.length} visible row${visibleEntities.length === 1 ? "" : "s"})`}
+                          >
+                            <span className="text-center text-xs font-medium text-white">Applicable</span>
+                            <Checkbox
+                              checked={allApplicable ? true : someApplicable ? "indeterminate" : false}
+                              onCheckedChange={() =>
+                                handleBulkApplicableToggleForStageAcrossEntities(
+                                  visibleEntities.map(({ subdeptId, classId, subclassId }) => ({ subdeptId, classId, subclassId })),
+                                  stage.id,
+                                  !allApplicable,
+                                )
+                              }
+                              disabled={visibleEntities.length === 0}
+                              className="h-3.5 w-3.5 border-white data-[state=checked]:bg-white data-[state=checked]:text-slate-700"
+                            />
+                          </div>
                           <div
                             className="flex items-center justify-center gap-1"
                             title={`${allDisplayed ? "Deselect all" : "Select all"} (${applicableVisibleEntities.length} visible row${applicableVisibleEntities.length === 1 ? "" : "s"})`}
@@ -4090,9 +3741,7 @@ export default function Stages() {
                       ></TableCell>
                     )}
                     {filteredStages.map((stage, stageIndex) => {
-                      const stageAllocation = subdept.stages?.find((s) => s.stage_id === stage.id)
-                      const hasAllocation = stageAllocation?.applicable ?? true
-                      const hasDisplay = stageAllocation?.display ?? true
+                      const { applicable: hasAllocation, display: hasDisplay } = getEffectiveAllocation(stage.id, subdept.id)
                       const columnClass = stageIndex % 2 === 0 ? "bg-slate-50" : "bg-slate-100/80"
 
                       return (
@@ -4232,9 +3881,7 @@ export default function Stages() {
                           ></TableCell>
                         )}
                         {filteredStages.map((stage, stageIndex) => {
-                          const stageAllocation = cls.stages?.find((s) => s.stage_id === stage.id)
-                          const hasAllocation = stageAllocation?.applicable ?? true
-                          const hasDisplay = stageAllocation?.display ?? true
+                          const { applicable: hasAllocation, display: hasDisplay } = getEffectiveAllocation(stage.id, subdept.id, cls.id)
                           const columnClass = stageIndex % 2 === 0 ? "bg-white" : "bg-gray-100/80"
 
                           return (
@@ -4342,9 +3989,7 @@ export default function Stages() {
                               ></TableCell>
                             )}
                             {filteredStages.map((stage, stageIndex) => {
-                              const stageAllocation = subCls.stages?.find((s) => s.stage_id === stage.id)
-                              const hasAllocation = stageAllocation?.applicable ?? true
-                              const hasDisplay = stageAllocation?.display ?? true
+                              const { applicable: hasAllocation, display: hasDisplay } = getEffectiveAllocation(stage.id, subdept.id, cls.id, subCls.id)
                               const columnClass = stageIndex % 2 === 0 ? "bg-white" : "bg-gray-50/80"
 
                               return (
@@ -4593,6 +4238,38 @@ export default function Stages() {
             />
 
             <div className="h-6 w-px bg-slate-200 mx-1" />
+
+            {/* Save/Discard — Applicable and Default Display edits (single-cell and bulk) are
+                staged locally in pendingAllocations and never touch the network until Save
+                Changes is clicked, which batches everything into one Promise.all across
+                affected subdepartments. Only shown once there's actually something staged. */}
+            {pendingAllocations.size > 0 && (
+              <>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-sm font-bold">
+                  {pendingAllocations.size} unsaved change{pendingAllocations.size === 1 ? "" : "s"}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDiscardAllocationChanges}
+                  disabled={isSavingAllocations}
+                  className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Discard
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleSaveAllocationChanges}
+                  disabled={isSavingAllocations}
+                  className="h-9 px-4 rounded-full text-sm font-bold gap-2 bg-custom-blue hover:bg-[#2d5a94] text-white transition-all"
+                >
+                  {isSavingAllocations ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  {isSavingAllocations ? "Saving..." : "Save Changes"}
+                </Button>
+                <div className="h-6 w-px bg-slate-200 mx-1" />
+              </>
+            )}
 
             <Button
               variant="outline"

@@ -2,7 +2,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { Search, X, RotateCcw, Download, Truck, Eye, Layers, CornerDownRight, Check, ChevronsUpDown } from "lucide-react";
+import { format } from "date-fns";
+import { Search, X, RotateCcw, Download, Truck, Eye, Layers, CornerDownRight, Check, ChevronsUpDown, CalendarRange, ListFilter } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -35,9 +36,88 @@ const STATUS_TAB_ORDER: HandlingStep[] = [
   "mode_unset",
 ];
 
+// dd/mm/yyyy free-typed text — same convention EnquiryDialog's own Enquiry Date field uses
+// (parseable, forgiving of partial input while typing) rather than a native <input
+// type="date">, whose browser-native segmented editor most users here don't actually type
+// into directly.
+const DATE_TEXT_RE = /^\d{2}\/\d{2}\/\d{4}$/;
+
+function parseDateText(text: string): Date | undefined {
+  if (!DATE_TEXT_RE.test(text)) return undefined;
+  const [day, month, year] = text.split("/").map(Number);
+  const d = new Date(year, month - 1, day);
+  return isNaN(d.getTime()) ? undefined : d;
+}
+
+function DateTextInput({ value, onChange, placeholder }: { value: Date | undefined; onChange: (d: Date | undefined) => void; placeholder: string }) {
+  const [text, setText] = useState(() => (value ? format(value, "dd/MM/yyyy") : ""));
+
+  // Keep in sync when the value is changed externally (e.g. the Clear button) — but not on
+  // every keystroke's own resulting value, so mid-typing text isn't fought/reformatted.
+  React.useEffect(() => {
+    const resolved = parseDateText(text);
+    const same = (resolved && value && resolved.getTime() === value.getTime()) || (!resolved && !value);
+    if (!same) setText(value ? format(value, "dd/MM/yyyy") : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  const handleChange = (raw: string) => {
+    setText(raw);
+    if (raw === "") { onChange(undefined); return; }
+    const parsed = parseDateText(raw);
+    if (parsed) onChange(parsed);
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={text}
+      onChange={(e) => handleChange(e.target.value)}
+      placeholder={placeholder}
+      className={cn(
+        "w-[100px] bg-transparent text-sm font-semibold text-slate-700 outline-none placeholder:text-slate-300 placeholder:font-normal",
+        text && !DATE_TEXT_RE.test(text) && "text-red-500"
+      )}
+    />
+  );
+}
+
+function DateRangeFilter({ dateRange, setDateRange }: any) {
+  const hasRange = !!(dateRange?.from || dateRange?.to);
+
+  return (
+    <div className="flex items-center gap-1.5 h-9 pl-3 pr-2 rounded-full border border-slate-200 bg-white">
+      <CalendarRange className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+      <DateTextInput
+        value={dateRange?.from}
+        onChange={(d) => setDateRange((prev: any) => ({ ...prev, from: d }))}
+        placeholder="DD/MM/YYYY"
+      />
+      <span className="text-slate-300 text-sm">–</span>
+      <DateTextInput
+        value={dateRange?.to}
+        onChange={(d) => setDateRange((prev: any) => ({ ...prev, to: d }))}
+        placeholder="DD/MM/YYYY"
+      />
+      {hasRange && (
+        <button
+          onClick={() => setDateRange({ from: undefined, to: undefined })}
+          className="text-slate-400 hover:text-slate-600 shrink-0"
+          title="Clear date range"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function PageHeader({
   searchQuery,
   setSearchQuery,
+  dateRange,
+  setDateRange,
   onRefresh,
   onExportExcel,
   onOpenCouriers,
@@ -45,6 +125,8 @@ export function PageHeader({
   columns,
   visibleColumnIds,
   setVisibleColumnIds,
+  onOpenMultiSort,
+  sortLevelCount = 0,
 }: any) {
   return (
     <div className="border-b border-slate-200 bg-white antialiased">
@@ -77,6 +159,8 @@ export function PageHeader({
             )}
           </div>
 
+          <DateRangeFilter dateRange={dateRange} setDateRange={setDateRange} />
+
           <div className="h-6 w-px bg-slate-200" />
 
           <Button
@@ -92,6 +176,20 @@ export function PageHeader({
             visibleColumnIds={visibleColumnIds}
             setVisibleColumnIds={setVisibleColumnIds}
           />
+
+          <Button
+            variant="outline"
+            onClick={onOpenMultiSort}
+            className="h-9 px-4 rounded-full border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 gap-2"
+            title="Sort by multiple columns"
+          >
+            <ListFilter className="h-3.5 w-3.5 text-slate-400" /> Multi-level Sort
+            {sortLevelCount > 1 && (
+              <span className="min-w-[18px] h-[18px] inline-flex items-center justify-center rounded-full bg-custom-blue text-white text-[11px] font-bold px-1 leading-none">
+                {sortLevelCount}
+              </span>
+            )}
+          </Button>
 
           <Button
             variant="outline"

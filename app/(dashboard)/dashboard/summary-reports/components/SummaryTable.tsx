@@ -869,7 +869,7 @@ export function SummaryTable({
                         </TableCell>
                         <TableCell
                           colSpan={headerSpacerColSpan}
-                          className="bg-white px-4 py-2 border-t-2 border-t-custom-blue border-b border-b-slate-200"
+                          className="sticky z-30 bg-white px-4 py-2 border-t-2 border-t-custom-blue border-b border-b-slate-200"
                           style={{ top: groupHeaderTop }}
                         />
                         <TableCell

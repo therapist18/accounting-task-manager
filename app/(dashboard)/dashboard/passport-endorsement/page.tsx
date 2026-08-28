@@ -3,9 +3,11 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { startOfDay, endOfDay } from "date-fns";
+import { parseDateSafe } from "../summary-reports/utils/reportStageLogic";
 import * as XLSX from "xlsx";
 import { toast } from "@/lib/hooks/use-toast";
-import { fetchCompanies } from "../tasks/utils/taskManagerData";
+import { fetchCompanies, fetchStages, fetchAllDocuments, fetchAllKycFields } from "../tasks/utils/taskManagerData";
 import { fetchDepartments } from "../departments/departments/database";
 import {
   fetchQualifyingTasks,
@@ -13,6 +15,8 @@ import {
   fetchCouriers,
   fetchHandlingRecords,
   getHandlingStep,
+  resolveWriteUpDate,
+  WRITE_UP_STAGE_ID,
   STEP_LABELS,
   IMMIGRATION_DEPT_ID,
   type PassportHandlingRecord,
@@ -20,9 +24,15 @@ import {
   type HandlingStep,
 } from "./utils/database";
 import { PageHeader, StatusTabs, HierarchyTabs } from "./components/PageHeader";
-import { HandlingTable, HANDLING_COLUMNS, DEFAULT_VISIBLE_COLUMN_IDS } from "./components/HandlingTable";
+import { StatsRow } from "./components/StatsRow";
+import { HandlingTable, HANDLING_COLUMNS, DEFAULT_VISIBLE_COLUMN_IDS, fmtStageDate } from "./components/HandlingTable";
 import { HandlingWizardDialog } from "./components/HandlingWizardDialog";
 import { CourierRegistryDialog } from "./components/CourierRegistryDialog";
+import { MultiSort, type SortLevel } from "@/app/generic-components/MultiSort";
+
+// Column ids whose sort values are timestamps (numeric sort, not alphabetic) — used only to
+// tag MultiSort's column options with a type so the dialog can present them sensibly.
+const MULTISORT_DATE_COLUMN_IDS = new Set(["write_up_date", "received", "taken", "returned", "notified", "completed"]);
 
 export default function PassportEndorsementPage() {
   const [loading, setLoading] = useState(true);
@@ -34,14 +44,26 @@ export default function PassportEndorsementPage() {
   const [couriers, setCouriers] = useState<Courier[]>([]);
   const [handlingRecords, setHandlingRecords] = useState<Map<number, PassportHandlingRecord>>(new Map());
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  // Real Write Up stage config (its `documents` requirement in particular) plus the linked-
+  // document/KYC-field data resolveWriteUpDate needs to replicate EditableStageCell's own
+  // date resolution (immigration-flagged document field > completedAt fallback > plain
+  // workflow date) instead of reading stages[id].date/.completedAt directly.
+  const [writeUpStage, setWriteUpStage] = useState<any>(null);
+  const [allDocuments, setAllDocuments] = useState<any[]>([]);
+  const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map());
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({ from: undefined, to: undefined });
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
   const [activeClassIds, setActiveClassIds] = useState<string[]>([]);
   const [activeSubClassIds, setActiveSubClassIds] = useState<string[]>([]);
   const [activeStep, setActiveStep] = useState<HandlingStep | "all">("all");
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(DEFAULT_VISIBLE_COLUMN_IDS);
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
+  // Single source of truth for sorting — the MultiSort dialog manages it as an ordered list of
+  // SortLevels; a plain header-click (handleSort) collapses the list to that one column. The
+  // first level is what SummaryTable's active-column highlight reads (derived into sortConfig).
+  const [sortLevels, setSortLevels] = useState<SortLevel[]>([]);
+  const [multiSortOpen, setMultiSortOpen] = useState(false);
 
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardTask, setWizardTask] = useState<any>(null);
@@ -57,7 +79,12 @@ export default function PassportEndorsementPage() {
         fetchCouriers(false),
         fetch("/api/auth/session").then((r) => r.json()).catch(() => ({})),
       ]);
-      const qualifyingTasks = await fetchQualifyingTasks(comps);
+      const [qualifyingTasks, stages, docs, kycFieldsResult] = await Promise.all([
+        fetchQualifyingTasks(comps),
+        fetchStages(IMMIGRATION_DEPT_ID, depts),
+        fetchAllDocuments(),
+        fetchAllKycFields(),
+      ]);
       const records = await fetchHandlingRecords(qualifyingTasks.map((t: any) => t.id));
 
       setCompanies(comps);
@@ -66,6 +93,9 @@ export default function PassportEndorsementPage() {
       setCouriers(couriersData);
       setTasks(qualifyingTasks);
       setHandlingRecords(records);
+      setWriteUpStage(stages.find((s: any) => s.id === WRITE_UP_STAGE_ID) || null);
+      setAllDocuments(docs);
+      setKycDocuments(kycFieldsResult.kycDocsMap);
       if (sessionRes?.authenticated && sessionRes?.user?.id) setCurrentUserId(sessionRes.user.id);
     } catch (err) {
       console.error("Error loading passport endorsement data:", err);
@@ -90,12 +120,32 @@ export default function PassportEndorsementPage() {
     return u?.name || "";
   }, [bclUsers]);
 
+  const getSubDeptName = useCallback((task: any) => {
+    const sdId = task.subdepartment_id?.toString();
+    if (!sdId) return "";
+    const dept = departments.find((d: any) => (d.tm_subdepartments || []).some((s: any) => s.id.toString() === sdId));
+    return dept?.tm_subdepartments?.find((s: any) => s.id.toString() === sdId)?.name || "";
+  }, [departments]);
+
+  const getClassName = useCallback((task: any) => {
+    const cid = task.class_id?.toString();
+    if (!cid) return "";
+    for (const d of departments) {
+      for (const s of d.tm_subdepartments || []) {
+        const c = (s.classes || []).find((x: any) => x.id.toString() === cid);
+        if (c) return c.name || "";
+      }
+    }
+    return "";
+  }, [departments]);
+
   const rows = useMemo(() => tasks.map((task) => {
     const record = handlingRecords.get(task.id);
     const mode = task.passport_handling_mode || null;
     const step = getHandlingStep(mode, record);
-    return { task, record, mode, step };
-  }), [tasks, handlingRecords]);
+    const writeUpDate = resolveWriteUpDate(task, writeUpStage, allDocuments, kycDocuments);
+    return { task, record, mode, step, writeUpDate };
+  }), [tasks, handlingRecords, writeUpStage, allDocuments, kycDocuments]);
 
   const immigrationDept = useMemo(
     () => departments.find((d: any) => d.id.toString() === IMMIGRATION_DEPT_ID),
@@ -170,15 +220,34 @@ export default function PassportEndorsementPage() {
     return counts;
   }, [subDeptScopedRows]);
 
+  // Filters by the task's own initiation date (date_initiated, falling back to created_at) —
+  // the one date every row has regardless of how far along its passport handling is, so the
+  // filter always narrows the list rather than hiding rows that haven't reached a given step
+  // (e.g. a task still "Awaiting Receipt" has no received_at yet, but always has a start date).
+  const dateFilteredRows = useMemo(() => {
+    if (!dateRange.from && !dateRange.to) return hierarchyScopedRows;
+    const from = dateRange.from ? startOfDay(dateRange.from) : null;
+    const to = dateRange.to ? endOfDay(dateRange.to) : (dateRange.from ? endOfDay(dateRange.from) : null);
+    return hierarchyScopedRows.filter(({ task }) => {
+      const raw = task.date_initiated || task.created_at;
+      if (!raw) return false;
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) return false;
+      if (from && d < from) return false;
+      if (to && d > to) return false;
+      return true;
+    });
+  }, [hierarchyScopedRows, dateRange]);
+
   const searchedRows = useMemo(() => {
-    if (!searchQuery.trim()) return hierarchyScopedRows;
+    if (!searchQuery.trim()) return dateFilteredRows;
     const q = searchQuery.toLowerCase();
-    return hierarchyScopedRows.filter(({ task }) =>
+    return dateFilteredRows.filter(({ task }) =>
       task.applicant_name?.toLowerCase().includes(q) ||
       task.passport_number?.toLowerCase().includes(q) ||
       companies.get(task.company_id)?.name?.toLowerCase().includes(q)
     );
-  }, [hierarchyScopedRows, searchQuery, companies]);
+  }, [dateFilteredRows, searchQuery, companies]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: searchedRows.length };
@@ -192,10 +261,18 @@ export default function PassportEndorsementPage() {
   }, [searchedRows, activeStep]);
 
   const getSortableValue = useCallback((row: any, columnId: string) => {
-    const { task, record, mode, step } = row;
+    const { task, record, mode, step, writeUpDate } = row;
     switch (columnId) {
+      case "task_id": return task.id;
       case "applicant": return (task.applicant_name || "").toLowerCase();
       case "company": return (companies.get(task.company_id)?.name || task.company_name || "").toLowerCase();
+      case "company_prefix": return (companies.get(task.company_id)?.prefix || "").toLowerCase();
+      case "sub_department": return getSubDeptName(task).toLowerCase();
+      case "class_name": return getClassName(task).toLowerCase();
+      case "write_up_date": {
+        const d = parseDateSafe(writeUpDate);
+        return d ? d.getTime() : 0;
+      }
       case "passport_number": return (task.passport_number || "").toLowerCase();
       case "mode": return mode || "";
       case "current_step": return STEP_LABELS[step] || "";
@@ -210,22 +287,50 @@ export default function PassportEndorsementPage() {
       }
       default: return "";
     }
-  }, [companies]);
+  }, [companies, getSubDeptName, getClassName]);
+
+  // First sort level shapes the table's active-column highlight — same shape SummaryTable's
+  // sortConfig prop always received, so nothing downstream needs to change.
+  const sortConfig = useMemo(() => {
+    if (sortLevels.length === 0) return null;
+    const first = sortLevels[0];
+    return { key: first.key, direction: first.direction as "asc" | "desc" };
+  }, [sortLevels]);
 
   const handleSort = useCallback((columnId: string) => {
-    setSortConfig((cur) => cur?.key === columnId ? { key: columnId, direction: cur.direction === "asc" ? "desc" : "asc" } : { key: columnId, direction: "asc" });
+    setSortLevels((cur) => {
+      if (cur.length > 0 && cur[0].key === columnId) {
+        return [{ ...cur[0], direction: cur[0].direction === "asc" ? "desc" : "asc" }];
+      }
+      return [{ id: crypto.randomUUID(), key: columnId, sortOn: "Cell Values", direction: "asc" }];
+    });
   }, []);
 
+  // Multi-level sort — levels apply in priority order (a tie on the first column falls through
+  // to the next, and so on), matching the MultiSort dialog's "Initial sort / Then by" model.
   const sortedRows = useMemo(() => {
-    if (!sortConfig) return filteredRows;
+    if (sortLevels.length === 0) return filteredRows;
     return [...filteredRows].sort((a, b) => {
-      const av = getSortableValue(a, sortConfig.key);
-      const bv = getSortableValue(b, sortConfig.key);
-      if (av < bv) return sortConfig.direction === "asc" ? -1 : 1;
-      if (av > bv) return sortConfig.direction === "asc" ? 1 : -1;
+      for (const level of sortLevels) {
+        const av = getSortableValue(a, level.key);
+        const bv = getSortableValue(b, level.key);
+        if (av < bv) return level.direction === "asc" ? -1 : 1;
+        if (av > bv) return level.direction === "asc" ? 1 : -1;
+      }
       return 0;
     });
-  }, [filteredRows, sortConfig, getSortableValue]);
+  }, [filteredRows, sortLevels, getSortableValue]);
+
+  // Options the MultiSort dialog offers — every HANDLING_COLUMNS column, keyed by the same ids
+  // getSortableValue switches on.
+  const multisortColumns = useMemo(() =>
+    HANDLING_COLUMNS.map((col) => ({
+      value: col.id,
+      label: col.label,
+      type: (col.id === "task_id" ? "number" : MULTISORT_DATE_COLUMN_IDS.has(col.id) ? "date" : "text") as "text" | "number" | "date",
+    })),
+    []
+  );
 
   const handleManage = useCallback((task: any) => {
     setWizardTask(task);
@@ -255,9 +360,14 @@ export default function PassportEndorsementPage() {
       return;
     }
     try {
-      const exportRows = sortedRows.map(({ task, record, mode, step }) => ({
+      const exportRows = sortedRows.map(({ task, record, mode, step, writeUpDate }) => ({
+        "Task ID": task.id,
         "Applicant": task.applicant_name || "",
+        "Write Up Date": fmtStageDate(writeUpDate) || "",
         "Company": companies.get(task.company_id)?.name || task.company_name || "",
+        "Company Prefix": companies.get(task.company_id)?.prefix || "",
+        "Sub-Department": getSubDeptName(task),
+        "Class": getClassName(task),
         "Passport No.": task.passport_number || "",
         "Mode": mode === "bcl" ? "BCL Handles" : mode === "client" ? "Client Handles" : "Not Set",
         "Current Step": STEP_LABELS[step],
@@ -283,7 +393,7 @@ export default function PassportEndorsementPage() {
       console.error("Export error:", err);
       toast({ title: "Export Failed", description: "Could not export data.", variant: "destructive" });
     }
-  }, [sortedRows, companies, getStaffName]);
+  }, [sortedRows, companies, getStaffName, getSubDeptName, getClassName]);
 
   if (loading) {
     return (
@@ -297,10 +407,12 @@ export default function PassportEndorsementPage() {
   }
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden bg-slate-50">
+    <div className="flex flex-col flex-1 overflow-auto bg-slate-50">
       <PageHeader
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
+        dateRange={dateRange}
+        setDateRange={setDateRange}
         onRefresh={handleRefresh}
         onExportExcel={handleExportExcel}
         onOpenCouriers={() => setCourierDialogOpen(true)}
@@ -308,6 +420,8 @@ export default function PassportEndorsementPage() {
         columns={HANDLING_COLUMNS}
         visibleColumnIds={visibleColumnIds}
         setVisibleColumnIds={setVisibleColumnIds}
+        onOpenMultiSort={() => setMultiSortOpen(true)}
+        sortLevelCount={sortLevels.length}
       />
 
       <HierarchyTabs
@@ -327,17 +441,20 @@ export default function PassportEndorsementPage() {
 
       <StatusTabs activeStep={activeStep} setActiveStep={setActiveStep} counts={counts} />
 
-      <div className="flex-1 overflow-hidden p-4">
-        <HandlingTable
-          rows={sortedRows}
-          visibleColumnIds={visibleColumnIds}
-          getStaffName={getStaffName}
-          companies={companies}
-          onManage={handleManage}
-          sortConfig={sortConfig}
-          handleSort={handleSort}
-        />
-      </div>
+      <StatsRow counts={counts} />
+
+      <HandlingTable
+        rows={sortedRows}
+        visibleColumnIds={visibleColumnIds}
+        getStaffName={getStaffName}
+        companies={companies}
+        departments={departments}
+        subDepartments={subDepartments}
+        activeSubDeptId={activeSubDeptId}
+        onManage={handleManage}
+        sortConfig={sortConfig}
+        handleSort={handleSort}
+      />
 
       <HandlingWizardDialog
         open={wizardOpen}
@@ -357,6 +474,19 @@ export default function PassportEndorsementPage() {
         couriers={couriers}
         onChanged={handleCouriersChanged}
       />
+
+      {/* Mounted only while open so initialLevels reseeds from the current sortLevels on every
+          open — MultiSort seeds its internal state from initialLevels at mount time only. */}
+      {multiSortOpen && (
+        <MultiSort
+          columns={multisortColumns}
+          initialLevels={sortLevels}
+          open
+          onOpenChange={setMultiSortOpen}
+          hideTrigger
+          onApply={(levels) => setSortLevels(levels)}
+        />
+      )}
     </div>
   );
 }

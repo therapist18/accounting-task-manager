@@ -1,9 +1,45 @@
 // @ts-nocheck
 import { supabase } from "@/lib/supabase/client";
-import { fetchTasks, type Task } from "../../tasks/utils/taskManagerData";
+import { fetchTasks, getLinkedDocumentsForTaskStage, type Task } from "../../tasks/utils/taskManagerData";
+import { calculateStageDate } from "../../tasks/utils/dateUtils";
 
 export const QUALIFYING_STATUSES = ["write_up_completed", "endorsed"];
 export const IMMIGRATION_DEPT_ID = "1";
+
+// Same "Write Up" stage DepartmentTasksManager itself renders/edits (flips tm_tasks.status to
+// 'write_up_completed' when its date is set — see DepartmentTasksManager.tsx's
+// STAGE_STATUS_MAPPING) — this is exactly the moment a task becomes eligible to appear in this
+// module, so surfacing its own date here lets staff see how long a task has been sitting since.
+export const WRITE_UP_STAGE_ID = "072b9710-45df-4a05-ba65-01b4ef29d61d";
+
+// A stage cell's displayed date is NOT just task.stages[id].date/.completedAt — EditableStageCell
+// (app/(dashboard)/dashboard/tasks/components/EditableStageCell.tsx:240-247) always recomputes it
+// via calculateStageDate (../tasks/utils/dateUtils.ts:249), which for a document-backed stage
+// prioritizes a document field flagged isImmigrationDate (a fact printed on the uploaded
+// document, e.g. a permit's own date) over the plain workflow "completedAt" timestamp (when
+// staff marked the stage done) — falling back to completedAt only if no such document field
+// resolves, or to stageData.date for stages with no document requirement at all. Replicated
+// here with the real inputs (the actual stage config's `documents` requirement, the task's
+// linked document, and that document's KYC field definitions) rather than reading
+// stages[id].date/.completedAt directly, so this shows the exact same value DepartmentTasksManager
+// itself would render for this stage — not a workflow-timestamp approximation of it.
+export function resolveWriteUpDate(
+  task: any,
+  writeUpStage: any,
+  allDocuments: any[],
+  kycDocuments: Map<string, any>
+): string | null {
+  const stageData = task?.stages?.[WRITE_UP_STAGE_ID];
+  if (!stageData) return null;
+  const stage = writeUpStage || { id: WRITE_UP_STAGE_ID };
+  const linkedDocument = getLinkedDocumentsForTaskStage(task, stage, allDocuments || [])?.[0] || null;
+  // getKycFields({ kycId }) is always called with linkedDocument.document_id as the kycId (see
+  // EditableStageCell.tsx:213 and DepartmentTasksManager.tsx:1150-1154) — document_id is the FK
+  // to the KYC document TYPE, not the uploaded row's own id.
+  const documentFields = linkedDocument ? (kycDocuments?.get(linkedDocument.document_id)?.fields || []) : [];
+  const value = stageData?.date || stageData?.status || null;
+  return calculateStageDate(stage, stageData, linkedDocument, documentFields, value, false) || null;
+}
 
 export interface Courier {
   id: string;
@@ -95,20 +131,27 @@ export async function fetchQualifyingTasks(
   return (Array.isArray(tasks) ? tasks : []).filter((t) => QUALIFYING_STATUSES.includes(t.status));
 }
 
+// Goes through the server-side /api/auth/users/company10 route (service-role client) rather
+// than querying scanner_users directly with the anon client — that table's RLS has a
+// self-referencing policy that throws "infinite recursion detected in policy for relation
+// scanner_users" (Postgres 42P17) on any client-side anon query. The API route bypasses RLS
+// entirely via the service-role key, same pattern the sibling registry app already uses.
 export async function fetchBclUsers(): Promise<{ id: string; name: string }[]> {
-  const { data, error } = await supabase
-    .from("scanner_users")
-    .select("id, first_name, last_name, email")
-    .eq("company_id", 10)
-    .eq("is_active", true);
-  if (error) {
+  try {
+    const res = await fetch("/api/auth/users/company10");
+    const json = await res.json();
+    if (!res.ok || !json?.success) {
+      console.error("Error fetching BCL users:", json?.error || res.statusText);
+      return [];
+    }
+    return (json.data || []).map((u: any) => ({
+      id: u.id,
+      name: u.displayName || u.id,
+    }));
+  } catch (error) {
     console.error("Error fetching BCL users:", error);
     return [];
   }
-  return (data || []).map((u: any) => ({
-    id: u.id,
-    name: `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.email || u.id,
-  }));
 }
 
 export async function fetchCouriers(activeOnly = true): Promise<Courier[]> {

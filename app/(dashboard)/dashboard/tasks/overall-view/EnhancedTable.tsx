@@ -813,7 +813,7 @@ export const EnhancedTable = forwardRef<any, EnhancedTableProps>(({
       </div>
       )}
 
-      <div className="bg-white overflow-auto shadow-sm border-b border-slate-200" style={{ maxHeight: `calc(100vh - ${areTabsVisible ? 260 : 145}px)` }}>
+      <div className="bg-white overflow-auto shadow-sm border-b border-slate-200" style={{ maxHeight: `calc(100vh - ${areTabsVisible ? 220 : 130}px)` }}>
         <Table className="min-w-full border-separate border-spacing-0">
           {/* Authoritative column widths — stage rows split each task's group into 4 unevenly-
               sized cells (Date/Status/Upload/Other = 140/110/65/50), but every other row type

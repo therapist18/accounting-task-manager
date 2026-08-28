@@ -150,7 +150,18 @@
       "Bash(mkdir -p \"/e/GitHub/kra-tools/app/api/send-rm-request-email\")",
       "Bash(tail -40 /tmp/tscout2.txt)",
       "Bash(grep -v \"Try \\\\`npm i\")",
-      "Bash(supabase --version)"
+      "Bash(supabase --version)",
+      "Bash(sed -i 's/px-2 py-1\\\\.5/px-3 py-2.5/g' app/individuals/individual-categories/page.tsx)",
+      "Bash(sed -i -E 's/px-2 py-1\\([\" ]\\)/px-3 py-1.5\\\\1/g' app/individuals/individual-categories/page.tsx)",
+      "Bash(grep -n '\\\\-[0-9]\\\\{2,3\\\\}\\\\b' lib/statusBadge.tsx)",
+      "Bash(ls \"C:\\\\Users\\\\user\\\\.claude\\\\projects\" 2>/dev/null | head -50)",
+      "Read(//c/Users/user/.claude/projects/**)",
+      "Bash(ls \"C:\\\\Users\\\\user\\\\.claude\\\\projects\\\\e--GitHub-accounting-task-manager\" | head -50)",
+      "Read(//c/Users/user/.claude/projects/e--GitHub-accounting-task-manager/**)",
+      "Bash(timeout 90 npx tsc --noEmit -p .)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(wc -l /tmp/tsc_out2.txt /tmp/tsc_out.txt)",
+      "Bash(grep -n \"getWriteUpDate\\\\|write_up_date\\\\|const { task, record, mode, step }\" \"e:/GitHub/accounting-task-manager/app/\\(dashboard\\)/dashboard/passport-endorsement/components/HandlingTable.tsx\")"
     ],
     "additionalDirectories": [
       "E:\\GitHub\\Appointment-Booking\\app\\api\\registry\\individuals",

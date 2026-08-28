@@ -39,6 +39,7 @@ import {
   getPlannedExecutionDate,
   getActualExecutionInfo,
 } from "./utils/executionMath";
+import { MultiSort, type SortLevel } from "@/app/generic-components/MultiSort";
 
 const TERMINAL_STATUSES = ['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'];
 const STATUS_LABELS: Record<string, string> = {
@@ -104,7 +105,11 @@ export default function SummaryReportsPage() {
   // With Tasks" hides those and only lists sub-departments that actually have rows.
   const [showEmptySubDepts, setShowEmptySubDepts] = useState(true);
   const [isExporting, setIsExporting] = useState<'excel' | 'pdf' | null>(null);
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+  // Single source of truth for sorting — the MultiSort dialog manages it as an ordered list of
+  // SortLevels; a plain header-click (handleSort) collapses the list to that one column. The
+  // first level is what SummaryTable's active-column highlight reads (derived into sortConfig).
+  const [sortLevels, setSortLevels] = useState<SortLevel[]>([]);
+  const [multiSortOpen, setMultiSortOpen] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS);
 
   // Document data for EditableStageCell (read-only preview)
@@ -722,19 +727,50 @@ export default function SummaryReportsPage() {
   }, [companies, departments, enhancedTasksData, getExpectedMinutesForTask, getActualTimeInfoForTask, getPromisedMinutesForTask, getPlannedExecutionDateForTask, getCurrentStageNameForTask, getStaffName, getCurrentStageFollowUpForTask, getEnhancedStatusForTask]);
 
   const handleSort = useCallback((columnId: string) => {
-    setSortConfig(cur => cur?.key === columnId ? { key: columnId, direction: cur.direction === 'asc' ? 'desc' : 'asc' } : { key: columnId, direction: 'asc' });
+    setSortLevels((cur) => {
+      if (cur.length > 0 && cur[0].key === columnId) {
+        return [{ ...cur[0], direction: cur[0].direction === 'asc' ? 'desc' : 'asc' }];
+      }
+      return [{ id: crypto.randomUUID(), key: columnId, sortOn: 'Cell Values', direction: 'asc' }];
+    });
   }, []);
 
+  // First sort level shapes the table's active-column highlight — same shape SummaryTable's
+  // sortConfig prop always received, so nothing downstream needs to change.
+  const sortConfig = useMemo(() => {
+    if (sortLevels.length === 0) return null;
+    const first = sortLevels[0];
+    return { key: first.key, direction: first.direction as 'asc' | 'desc' };
+  }, [sortLevels]);
+
+  // Multi-level sort — levels apply in priority order (a tie on the first column falls through
+  // to the next, and so on), matching the MultiSort dialog's "Initial sort / Then by" model.
   const sortedTasks = useMemo(() => {
-    if (!sortConfig) return searchedTasks;
+    if (sortLevels.length === 0) return searchedTasks;
     return [...searchedTasks].sort((a, b) => {
-      const av = getSortableValue(a, sortConfig.key);
-      const bv = getSortableValue(b, sortConfig.key);
-      if (av < bv) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (av > bv) return sortConfig.direction === 'asc' ? 1 : -1;
+      for (const level of sortLevels) {
+        const av = getSortableValue(a, level.key);
+        const bv = getSortableValue(b, level.key);
+        if (av < bv) return level.direction === 'asc' ? -1 : 1;
+        if (av > bv) return level.direction === 'asc' ? 1 : -1;
+      }
       return 0;
     });
-  }, [searchedTasks, sortConfig, getSortableValue]);
+  }, [searchedTasks, sortLevels, getSortableValue]);
+
+  // Options the MultiSort dialog offers — every static SUMMARY_COLUMNS column plus any
+  // dynamically added report-stage columns, keyed by the same ids getSortableValue switches on.
+  const multisortColumns = useMemo(() => {
+    const typeFor = (def: any): 'text' | 'number' | 'date' => {
+      if (def.type === 'milestone') return 'date';
+      if (def.type === 'computed_time') {
+        if (['promised_time', 'actual_execution', 'execution_delta', 'stages_time_expected'].includes(def.id)) return 'number';
+        return 'date';
+      }
+      return 'text';
+    };
+    return [...SUMMARY_COLUMNS, ...dynamicStageColumns].map((c: any) => ({ value: c.id, label: c.label, type: typeFor(c) }));
+  }, [dynamicStageColumns]);
 
   // Exports exactly what's currently on screen — same filtered/sorted rows and visible
   // columns as the SummaryTable, via the shared cell-resolution helpers it uses.
@@ -826,6 +862,23 @@ export default function SummaryReportsPage() {
             <TableIcon className="h-3.5 w-3.5" /> Reports
           </Button>
           <ColumnVisibilityDialog visibleColumnIds={visibleColumnIds} setVisibleColumnIds={setVisibleColumnIds} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setMultiSortOpen(true)}
+            className={cn(
+              "h-9 px-4 rounded-md text-sm font-bold gap-2 border-slate-200 transition-all",
+              sortLevels.length > 0 ? "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue" : "text-slate-600 hover:bg-slate-50"
+            )}
+            title="Sort by multiple columns"
+          >
+            <ListFilter className="h-3.5 w-3.5" /> Multi-level Sort
+            {sortLevels.length > 1 && (
+              <span className="min-w-[18px] h-[18px] inline-flex items-center justify-center rounded-full bg-white text-custom-blue text-[11px] font-bold px-1 leading-none">
+                {sortLevels.length}
+              </span>
+            )}
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -1018,6 +1071,19 @@ export default function SummaryReportsPage() {
         classes={departments.flatMap((d: any) => (d.tm_subdepartments || []).flatMap((s: any) => s.classes || []))}
         currentUserId={currentUserId}
       />
+
+      {/* Mounted only while open so initialLevels reseeds from the current sortLevels on every
+          open — MultiSort seeds its internal state from initialLevels at mount time only. */}
+      {multiSortOpen && (
+        <MultiSort
+          columns={multisortColumns}
+          initialLevels={sortLevels}
+          open
+          onOpenChange={setMultiSortOpen}
+          hideTrigger
+          onApply={(levels) => setSortLevels(levels)}
+        />
+      )}
     </div>
   );
 }
