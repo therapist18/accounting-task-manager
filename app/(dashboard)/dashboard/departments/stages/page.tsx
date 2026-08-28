@@ -1593,6 +1593,106 @@ export default function Stages() {
     }
   }
 
+  // Inverse of handleBulkDisplayToggle — one stage across MULTIPLE entities (the normal
+  // table's own orientation: stages are columns, entities are rows). Entities are grouped by
+  // subdeptId first — each subdepartment is an independent tm_subdepartments row, so grouping
+  // (one read-modify-write per subdept covering every class/subclass target within it) avoids
+  // both the stale-snapshot race a naive per-entity loop would hit, and N redundant writes to
+  // the same row. The per-subdept writes then run in parallel since they're independent rows.
+  const handleBulkDisplayToggleForStageAcrossEntities = async (
+    entities: { subdeptId: number; classId?: string | number | null; subclassId?: string | number | null }[],
+    stageId: string,
+    checked: boolean,
+  ) => {
+    if (entities.length === 0) return
+    try {
+      const currentDept = getCurrentDepartment()
+      if (!currentDept) return
+
+      const bySubdept = new Map<number, { classId: string | number | null; subclassId: string | number | null }[]>()
+      entities.forEach(({ subdeptId, classId = null, subclassId = null }) => {
+        if (!bySubdept.has(subdeptId)) bySubdept.set(subdeptId, [])
+        bySubdept.get(subdeptId)!.push({ classId, subclassId })
+      })
+
+      const ensureAllocation = (list: any[], sId: string) => {
+        let allocation = list.find((s: any) => s.stage_id === sId)
+        if (!allocation) {
+          allocation = { stage_id: sId, applicable: true, display: true }
+          list.push(allocation)
+        }
+        return allocation
+      }
+
+      await Promise.all(
+        Array.from(bySubdept.entries()).map(async ([subdeptId, targets]) => {
+          const subdept = currentDept.subdepartments?.find((sd) => sd.id === subdeptId)
+          if (!subdept) return
+
+          const updatedClasses = JSON.parse(JSON.stringify(subdept.classes || []))
+          const subdeptStages = [...(subdept.stages || [])]
+          let touchedClasses = false
+          let touchedSubdeptStages = false
+
+          targets.forEach(({ classId, subclassId }) => {
+            if (classId !== null && subclassId !== null) {
+              const updatedClass = updatedClasses.find((c: any) => c.id === classId)
+              const updatedSubClass = updatedClass?.subClasses?.find((sc: any) => sc.id === subclassId)
+              if (updatedSubClass) {
+                if (!updatedSubClass.stages) updatedSubClass.stages = []
+                ensureAllocation(updatedSubClass.stages, stageId).display = checked
+                touchedClasses = true
+              }
+            } else if (classId !== null) {
+              const updatedClass = updatedClasses.find((c: any) => c.id === classId)
+              if (updatedClass) {
+                if (!updatedClass.stages) updatedClass.stages = []
+                ensureAllocation(updatedClass.stages, stageId).display = checked
+                touchedClasses = true
+              }
+              const allocation = ensureAllocation(subdeptStages, stageId)
+              allocation.display = checked || subdeptStages.some((s) => s.stage_id === stageId && s.display)
+              touchedSubdeptStages = true
+            } else {
+              ensureAllocation(subdeptStages, stageId).display = checked
+              touchedSubdeptStages = true
+            }
+          })
+
+          const updateData: any = {}
+          if (touchedClasses) updateData.classes = updatedClasses
+          if (touchedSubdeptStages) updateData.stages = subdeptStages
+          if (Object.keys(updateData).length === 0) return
+
+          const { error } = await supabase.from("tm_subdepartments").update(updateData).eq("id", subdeptId)
+          if (error) throw error
+
+          setDepartments((prevDepartments) =>
+            prevDepartments.map((dept) => {
+              if (dept.id !== activeTab) return dept
+              return {
+                ...dept,
+                subdepartments: dept.subdepartments?.map((sd) => (sd.id === subdeptId ? { ...sd, ...updateData } : sd)) || [],
+              }
+            }),
+          )
+        }),
+      )
+
+      toast({
+        title: "Success",
+        description: `Default Display ${checked ? "enabled" : "disabled"} for ${entities.length} row${entities.length === 1 ? "" : "s"}`,
+      })
+    } catch (err) {
+      console.error("Error bulk-updating display setting across entities:", err)
+      toast({
+        title: "Error",
+        description: "Failed to update display settings. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
+
   const handleAddStages = async (stages: any[], departmentId: string) => {
     const currentDept = departments.find((d) => d.id === departmentId)
     if (!currentDept) {
@@ -3453,11 +3553,19 @@ export default function Stages() {
   const renderNormalTable = () => {
     if (!currentDept) return null
 
+    // The Automation row (below) has no columnVisibility.automation gate — it always renders —
+    // so it's an unconditional +1 here, not tied to a toggle. This count feeds every leading
+    // sticky column's rowSpan (index/entity/expected-time/promised-time cells in the Stage
+    // Names row); under-counting it left those cells' span one row short of the header's real
+    // height, which is what was producing the "<th> cannot be a child of <thead>" hydration
+    // error — the browser's table layout algorithm ends up placing a later header cell at a
+    // DOM position React's SSR pass didn't expect once the row/rowSpan bookkeeping disagrees
+    // with the actual number of <tr> rows.
     const headerRowCount =
       1 +
       (columnVisibility.duration ? 1 : 0) +
       (columnVisibility.followUp ? 1 : 0) +
-      (columnVisibility.automation ? 1 : 0) +
+      1 + // Automation row — always rendered
       (columnVisibility.status ? 1 : 0) +
       (columnVisibility.controls ? 1 : 0)
 
@@ -3482,6 +3590,55 @@ export default function Stages() {
       (standardPage - 1) * standardPageSize,
       standardPage * standardPageSize,
     )
+
+    // Entities that actually get their own interactive "Applicable/Default Display" cell in
+    // the body below — mirrors that rendering exactly: a subdept row is interactive only when
+    // it has no classes, a class row only when expanded (its parent subdept is expanded) and
+    // it has no subclasses, a subclass row only when both its parent subdept and class are
+    // expanded. Used to scope each stage column's bulk "Default Display" header checkbox to
+    // rows the user can actually currently see — not the whole department, and not anything
+    // collapsed or paginated out of view.
+    const visibleEntities: { subdeptId: number; classId: string | number | null; subclassId: string | number | null; getAllocation: (stageId: string) => { applicable: boolean; display: boolean } }[] = []
+    const resolveAllocation = (list: any[] | undefined, stageId: string) => {
+      const allocation = list?.find((s: any) => s.stage_id === stageId)
+      return { applicable: allocation?.applicable ?? true, display: allocation?.display ?? true }
+    }
+    paginatedSubdepartments.forEach((subdept) => {
+      const isSubdeptExpanded = expandedRows.has(`subdept-${subdept.id}`)
+      const hasClasses = subdept.classes && subdept.classes.length > 0
+      if (!hasClasses) {
+        visibleEntities.push({
+          subdeptId: subdept.id,
+          classId: null,
+          subclassId: null,
+          getAllocation: (stageId: string) => resolveAllocation(subdept.stages, stageId),
+        })
+        return
+      }
+      if (!isSubdeptExpanded) return
+      subdept.classes?.forEach((cls: any, clsIndex: number) => {
+        const hasSubClasses = cls.subClasses && cls.subClasses.length > 0
+        if (!hasSubClasses) {
+          visibleEntities.push({
+            subdeptId: subdept.id,
+            classId: cls.id,
+            subclassId: null,
+            getAllocation: (stageId: string) => resolveAllocation(cls.stages, stageId),
+          })
+          return
+        }
+        const isClassExpanded = expandedRows.has(`class-${subdept.id}-${cls.id || clsIndex}`)
+        if (!isClassExpanded) return
+        cls.subClasses?.forEach((subCls: any) => {
+          visibleEntities.push({
+            subdeptId: subdept.id,
+            classId: cls.id,
+            subclassId: subCls.id,
+            getAllocation: (stageId: string) => resolveAllocation(subCls.stages, stageId),
+          })
+        })
+      })
+    })
 
     // The "Overall Expected Time" and "Promised Time" columns sit between Entity and Stage
     // Name (in that order), so every sticky-left offset that used to start at Stage Name
@@ -3820,10 +3977,6 @@ export default function Stages() {
                   ))}
                 </TableRow>
               )}
-              {/* Applicable/Display Headers Row */}
-              <TableRow>
-                <TableHead className="sticky left-0 bg-blue-700 border-r-2 border-blue-500 font-bold w-16 z-40 text-center text-white" rowSpan={2} colSpan={3}></TableHead>
-              </TableRow>
               {columnVisibility.controls && (
                 <TableRow className="border-b-0">
                   {columnVisibility.stageName && (
@@ -3831,14 +3984,45 @@ export default function Stages() {
                       className={cn("sticky bg-slate-500 border-r-2 border-slate-300 z-20", stageNameLeftClass)}
                     ></TableHead>
                   )}
-                  {filteredStages.map((stage, index) => (
-                    <TableHead key={`controls-${stage.id}`} className="border-r border-slate-300 bg-slate-500">
-                      <div className="grid grid-cols-2 gap-1 p-1">
-                        <div className="text-center text-xs font-medium text-white">Applicable</div>
-                        <div className="text-center text-xs font-medium text-white">Default Display</div>
-                      </div>
-                    </TableHead>
-                  ))}
+                  {filteredStages.map((stage, index) => {
+                    // Bulk select/deselect this stage's "Default Display" across every
+                    // currently-visible/expanded entity row (visibleEntities, computed above) —
+                    // further narrowed to rows where the stage is actually applicable, matching
+                    // the per-row checkbox's own disabled-when-not-applicable rule.
+                    const applicableVisibleEntities = visibleEntities.filter(
+                      (entity) => entity.getAllocation(stage.id).applicable,
+                    )
+                    const allDisplayed =
+                      applicableVisibleEntities.length > 0 &&
+                      applicableVisibleEntities.every((entity) => entity.getAllocation(stage.id).display)
+                    const someDisplayed = applicableVisibleEntities.some((entity) => entity.getAllocation(stage.id).display)
+
+                    return (
+                      <TableHead key={`controls-${stage.id}`} className="border-r border-slate-300 bg-slate-500">
+                        <div className="grid grid-cols-2 gap-1 p-1">
+                          <div className="text-center text-xs font-medium text-white">Applicable</div>
+                          <div
+                            className="flex items-center justify-center gap-1"
+                            title={`${allDisplayed ? "Deselect all" : "Select all"} (${applicableVisibleEntities.length} visible row${applicableVisibleEntities.length === 1 ? "" : "s"})`}
+                          >
+                            <span className="text-center text-xs font-medium text-white">Default Display</span>
+                            <Checkbox
+                              checked={allDisplayed ? true : someDisplayed ? "indeterminate" : false}
+                              onCheckedChange={() =>
+                                handleBulkDisplayToggleForStageAcrossEntities(
+                                  applicableVisibleEntities.map(({ subdeptId, classId, subclassId }) => ({ subdeptId, classId, subclassId })),
+                                  stage.id,
+                                  !allDisplayed,
+                                )
+                              }
+                              disabled={applicableVisibleEntities.length === 0}
+                              className="h-3.5 w-3.5 border-white data-[state=checked]:bg-white data-[state=checked]:text-slate-700"
+                            />
+                          </div>
+                        </div>
+                      </TableHead>
+                    )
+                  })}
                 </TableRow>
               )}
             </TableHeader>
