@@ -409,8 +409,6 @@ export default function PassportEndorsementPage() {
   return (
     <div className="flex flex-col flex-1 overflow-auto bg-slate-50">
       <PageHeader
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
         dateRange={dateRange}
         setDateRange={setDateRange}
         onRefresh={handleRefresh}
@@ -439,7 +437,7 @@ export default function PassportEndorsementPage() {
         subClassCounts={subClassCounts}
       />
 
-      <StatusTabs activeStep={activeStep} setActiveStep={setActiveStep} counts={counts} />
+      <StatusTabs activeStep={activeStep} setActiveStep={setActiveStep} counts={counts} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />
 
       <StatsRow counts={counts} />
 

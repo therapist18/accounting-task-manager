@@ -114,8 +114,6 @@ function DateRangeFilter({ dateRange, setDateRange }: any) {
 }
 
 export function PageHeader({
-  searchQuery,
-  setSearchQuery,
   dateRange,
   setDateRange,
   onRefresh,
@@ -141,24 +139,6 @@ export function PageHeader({
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-          <div className="relative w-[260px]">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <Input
-              placeholder="Search name, passport, company..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full h-9 pl-10 pr-9 bg-white border-slate-200 rounded-full text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-
           <DateRangeFilter dateRange={dateRange} setDateRange={setDateRange} />
 
           <div className="h-6 w-px bg-slate-200" />
@@ -251,7 +231,7 @@ function ColumnVisibilityDialog({ columns, visibleColumnIds, setVisibleColumnIds
   );
 }
 
-export function StatusTabs({ activeStep, setActiveStep, counts }: any) {
+export function StatusTabs({ activeStep, setActiveStep, counts, searchQuery, setSearchQuery, }: any) {
   const tabs = [
     { id: "all", label: "All" },
     ...STATUS_TAB_ORDER.filter((s) => (counts[s] || 0) > 0 || s === "awaiting_receipt").map((s) => ({
@@ -262,30 +242,49 @@ export function StatusTabs({ activeStep, setActiveStep, counts }: any) {
 
   return (
     <div className="px-8 py-2.5 flex items-center gap-1.5 border-b border-slate-200 bg-white antialiased overflow-x-auto">
-      {tabs.map((tab) => {
-        const isActive = activeStep === tab.id;
-        const count = tab.id === "all" ? counts.all || 0 : counts[tab.id] || 0;
-        return (
+      <div className="relative w-[260px]">
+        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+        <Input
+          placeholder="Search name, passport, company..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full h-9 pl-10 pr-9 bg-white border-slate-200 rounded-full text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
+        />
+        {searchQuery && (
           <button
-            key={tab.id}
-            onClick={() => setActiveStep(tab.id)}
-            className={cn(
-              "h-8 px-4 text-sm font-bold rounded-lg transition-all flex items-center gap-2 shrink-0",
-              isActive
-                ? "bg-custom-blue text-white shadow-sm"
-                : "bg-white text-slate-600 border border-slate-200 hover:border-slate-300 hover:text-slate-800"
-            )}
+            onClick={() => setSearchQuery("")}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
           >
-            {tab.label}
-            <span className={cn(
-              "px-1.5 py-0.5 rounded-md text-sm font-bold tabular-nums",
-              isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
-            )}>
-              {count}
-            </span>
+            <X className="h-3.5 w-3.5" />
           </button>
-        );
-      })}
+        )}
+      </div>
+      <div className="flex gap-2">
+        {tabs.map((tab) => {
+          const isActive = activeStep === tab.id;
+          const count = tab.id === "all" ? counts.all || 0 : counts[tab.id] || 0;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveStep(tab.id)}
+              className={cn(
+                "h-8 px-4 text-sm font-bold rounded-lg transition-all flex items-center gap-2 shrink-0",
+                isActive
+                  ? "bg-custom-blue text-white shadow-sm"
+                  : "bg-white text-slate-600 border border-slate-200 hover:border-slate-300 hover:text-slate-800"
+              )}
+            >
+              {tab.label}
+              <span className={cn(
+                "px-1.5 py-0.5 rounded-md text-sm font-bold tabular-nums",
+                isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
+              )}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

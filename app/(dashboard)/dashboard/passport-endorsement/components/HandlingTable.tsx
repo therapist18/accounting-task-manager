@@ -66,7 +66,7 @@ const STEP_BADGE_CLASSES: Record<HandlingStep, string> = {
 
 function StepBadge({ step }: { step: HandlingStep }) {
   return (
-    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-black uppercase tracking-widest", STEP_BADGE_CLASSES[step])}>
+    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-widest", STEP_BADGE_CLASSES[step])}>
       {STEP_LABELS[step]}
     </span>
   );
