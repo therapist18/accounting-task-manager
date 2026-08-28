@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { supabase } from "@/lib/supabase/client";
 import { fetchTasks, getLinkedDocumentsForTaskStage, type Task } from "../../tasks/utils/taskManagerData";
-import { calculateStageDate } from "../../tasks/utils/dateUtils";
+import { calculateStageDate, findDateInObject } from "../../tasks/utils/dateUtils";
 
 export const QUALIFYING_STATUSES = ["write_up_completed", "endorsed"];
 export const IMMIGRATION_DEPT_ID = "1";
@@ -39,6 +39,38 @@ export function resolveWriteUpDate(
   const documentFields = linkedDocument ? (kycDocuments?.get(linkedDocument.document_id)?.fields || []) : [];
   const value = stageData?.date || stageData?.status || null;
   return calculateStageDate(stage, stageData, linkedDocument, documentFields, value, false) || null;
+}
+
+export function resolveEffectiveDate(
+  task: any,
+  stage: any,
+  allDocuments: any[],
+  kycDocuments: Map<string, any>,
+  flag: "isEffectiveFrom" | "isEffectiveTo"
+): string | null {
+  const targetStage = stage || { id: WRITE_UP_STAGE_ID };
+  const linkedDocument = getLinkedDocumentsForTaskStage(task, targetStage, allDocuments || [])?.[0] || null;
+  if (!linkedDocument) return null;
+
+  const documentFields = kycDocuments?.get(linkedDocument.document_id)?.fields || [];
+  
+  const targetFields = documentFields
+    .filter((f: any) => f[flag] === true)
+    .map((f: any) => f.fieldName || f.name || f.key)
+    .filter(Boolean);
+
+  if (targetFields.length === 0) return null;
+
+  if (linkedDocument.extracted_details) {
+    const d = findDateInObject(linkedDocument.extracted_details, targetFields);
+    if (d) return d;
+  }
+  if (linkedDocument.extracted_data) {
+    const d = findDateInObject(linkedDocument.extracted_data, targetFields);
+    if (d) return d;
+  }
+
+  return null;
 }
 
 export interface Courier {

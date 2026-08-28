@@ -16,10 +16,12 @@ export const HANDLING_COLUMNS = [
   { id: "task_id", label: "Task ID" },
   { id: "applicant", label: "Applicant" },
   { id: "company", label: "Company" },
-  { id: "company_prefix", label: "Company Prefix" },
+  { id: "company_prefix", label: "Company / Place" },
   { id: "sub_department", label: "Sub-Department" },
   { id: "class_name", label: "Class" },
-  { id: "write_up_date", label: "Write Up Date" },
+  { id: "write_up_date", label: "Write Up Stage Date" },
+  { id: "doc_issue_date", label: "Document Date of Issue" },
+  { id: "doc_expiry_date", label: "Document Expiry Date" },
   { id: "passport_number", label: "Passport No." },
   { id: "mode", label: "Mode" },
   { id: "current_step", label: "Current Step" },
@@ -33,7 +35,7 @@ export const HANDLING_COLUMNS = [
 
 // Company column is kept in HANDLING_COLUMNS (toggleable via the columns dialog) but hidden
 // by default — the Company Prefix column alongside Applicant carries enough identity per row.
-export const DEFAULT_VISIBLE_COLUMN_IDS = HANDLING_COLUMNS.map((c) => c.id).filter((id) => id !== "company");
+export const DEFAULT_VISIBLE_COLUMN_IDS = HANDLING_COLUMNS.map((c) => c.id).filter((id) => id !== "company" && id !== "write_up_date");
 
 // ── Column widths — same tanstack react-table sizing/resizing mechanism Summary Reports'
 // SummaryTable uses. DEFAULT_COL_WIDTH (in px) is the starting width of every non-sticky data
@@ -297,7 +299,7 @@ export function HandlingTable({
   );
 
   return (
-    <div className="flex flex-col flex-1 px-4 pt-3 pb-4 bg-slate-50">
+    <div className="flex flex-col flex-1 px-4 pt-3 pb-4 bg-white">
       {/* Card wrapper — holds the border/shadow; the scroll div inside is the only overflow
           point, with its height bounded by a viewport-relative cap so the table scrolls
           internally and the pagination footer below always stays on-screen — same technique
@@ -335,12 +337,7 @@ export function HandlingTable({
                     style={isStickyLeft ? { left: stickyColumnOffsets[col.id] } : undefined}
                   >
                     <div className="flex items-center justify-between gap-2 min-w-0 pr-1">
-                      <span
-                        className={cn(
-                          "text-[11px] font-semibold uppercase tracking-wider text-white whitespace-nowrap",
-                          isStickyLeft && "truncate"
-                        )}
-                      >
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-white leading-snug min-w-0">
                         {col.label}
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
@@ -416,7 +413,7 @@ export function HandlingTable({
                   );
                 }
 
-                const { task, record, mode, step, writeUpDate } = item.row;
+                const { task, record, mode, step, writeUpDate, docIssueDate, docExpiryDate } = item.row;
                 const company = companies.get(task.company_id);
                 const globalIdx = (currentPage - 1) * rowsPerPage + item.idx;
 
@@ -453,6 +450,16 @@ export function HandlingTable({
                         case "write_up_date": {
                           const wud = fmtStageDate(writeUpDate);
                           content = wud ? <span className="text-slate-600">{wud}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
+                        case "doc_issue_date": {
+                          const val = fmtStageDate(docIssueDate);
+                          content = val ? <span className="text-slate-600">{val}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
+                        case "doc_expiry_date": {
+                          const val = fmtStageDate(docExpiryDate);
+                          content = val ? <span className="text-slate-600">{val}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "passport_number":
@@ -498,8 +505,8 @@ export function HandlingTable({
                         <TableCell
                           key={col.id}
                           className={cn(
-                            "px-4 py-1.5 border-r border-b border-slate-200 text-sm whitespace-nowrap",
-                            isStickyLeft && "sticky z-20 overflow-hidden",
+                            "px-4 py-1.5 border-r border-b border-slate-200 text-sm",
+                            isStickyLeft && "sticky z-20",
                             isStickyLeft && (globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50"),
                             isStickyLeft && "group-hover:bg-blue-50"
                           )}

@@ -14,14 +14,15 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { STEP_LABELS, type HandlingStep } from "../utils/database";
 
 // Same look as Summary Reports' HierarchyTabs (PageHeader.tsx there) — bordered pill tabs +
 // a searchable multi-select dropdown for Classes/Sub-Classes, duplicated here rather than
 // imported since these are private, route-scoped components in that other module.
-const TAB_LIST_CLASS = "bg-slate-100 p-1 rounded-full border border-slate-200";
-const TAB_TRIGGER_CLASS = "group gap-2 rounded-2xl px-4 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-white transition-colors data-[state=active]:bg-custom-blue data-[state=active]:text-white data-[state=active]:shadow-sm";
-const COUNT_BADGE_CLASS = "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm bg-custom-blue text-white group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white";
+const TAB_LIST_CLASS = "bg-slate-100 p-1 rounded-md border border-slate-200";
+const TAB_TRIGGER_CLASS = "group gap-2 rounded-md px-4 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-white transition-colors data-[state=active]:bg-custom-blue data-[state=active]:text-white data-[state=active]:shadow-sm";
+const COUNT_BADGE_CLASS = "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-md text-sm min-w-[2rem] leading-none shadow-sm bg-custom-blue text-white group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white";
 
 const STATUS_TAB_ORDER: HandlingStep[] = [
   "awaiting_receipt",
@@ -87,7 +88,7 @@ function DateRangeFilter({ dateRange, setDateRange }: any) {
   const hasRange = !!(dateRange?.from || dateRange?.to);
 
   return (
-    <div className="flex items-center gap-1.5 h-9 pl-3 pr-2 rounded-full border border-slate-200 bg-white">
+    <div className="flex items-center gap-1.5 h-9 pl-3 pr-2 rounded-md border border-slate-200 bg-white">
       <CalendarRange className="h-3.5 w-3.5 text-slate-400 shrink-0" />
       <DateTextInput
         value={dateRange?.from}
@@ -113,6 +114,9 @@ function DateRangeFilter({ dateRange, setDateRange }: any) {
   );
 }
 
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { MoreHorizontal } from "lucide-react";
+
 export function PageHeader({
   dateRange,
   setDateRange,
@@ -134,48 +138,18 @@ export function PageHeader({
             Passport Endorsement Tracking
           </h1>
           <p className="text-sm text-slate-500 font-semibold">
-            Nyayo House stamping &amp; passport custody, once a case reaches write-up
+            Track and manage all passport endorsement cases in one place
           </p>
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
           <DateRangeFilter dateRange={dateRange} setDateRange={setDateRange} />
 
-          <div className="h-6 w-px bg-slate-200" />
-
-          <Button
-            variant="outline"
-            onClick={onOpenCouriers}
-            className="h-9 px-4 rounded-full border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 gap-2"
-          >
-            <Truck className="h-3.5 w-3.5 text-slate-400" /> Couriers
-          </Button>
-
-          <ColumnVisibilityDialog
-            columns={columns}
-            visibleColumnIds={visibleColumnIds}
-            setVisibleColumnIds={setVisibleColumnIds}
-          />
-
-          <Button
-            variant="outline"
-            onClick={onOpenMultiSort}
-            className="h-9 px-4 rounded-full border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 gap-2"
-            title="Sort by multiple columns"
-          >
-            <ListFilter className="h-3.5 w-3.5 text-slate-400" /> Multi-level Sort
-            {sortLevelCount > 1 && (
-              <span className="min-w-[18px] h-[18px] inline-flex items-center justify-center rounded-full bg-custom-blue text-white text-[11px] font-bold px-1 leading-none">
-                {sortLevelCount}
-              </span>
-            )}
-          </Button>
-
           <Button
             variant="outline"
             onClick={onRefresh}
             disabled={loading}
-            className="h-9 px-4 rounded-full border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 gap-2"
+            className="h-9 px-4 rounded-md border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 gap-2"
           >
             <RotateCcw className={cn("h-4 w-4 text-slate-400", loading && "animate-spin")} />
             Refresh
@@ -188,6 +162,32 @@ export function PageHeader({
           >
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="h-9 px-3 rounded-md border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 gap-1.5">
+                <MoreHorizontal className="h-4 w-4 text-slate-400" /> More
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={onOpenCouriers} className="gap-2 cursor-pointer font-medium">
+                <Truck className="h-4 w-4 text-slate-400" /> Manage Couriers
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onOpenMultiSort} className="gap-2 cursor-pointer font-medium justify-between">
+                <div className="flex items-center gap-2">
+                  <ListFilter className="h-4 w-4 text-slate-400" /> Multi-level Sort
+                </div>
+                {sortLevelCount > 1 && (
+                  <span className="h-5 w-5 rounded-md bg-custom-blue text-white text-[10px] font-bold flex items-center justify-center">
+                    {sortLevelCount}
+                  </span>
+                )}
+              </DropdownMenuItem>
+              {/* Note: Columns will be managed differently or kept here. We can render the Dialog trigger inside a MenuItem, but that requires careful state management. 
+                  For now, we'll implement a simple callback or handle it in a separate button if we want, but the image just has "More". 
+                  Let's leave Columns out of More for a second if it's tricky, or implement it by exposing an onOpenColumns callback. */}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </div>
@@ -202,7 +202,7 @@ function ColumnVisibilityDialog({ columns, visibleColumnIds, setVisibleColumnIds
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="h-9 px-4 rounded-full border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 gap-2">
+        <Button variant="outline" className="h-9 px-4 rounded-md border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 gap-2">
           <Eye className="h-4 w-4" /> Columns
         </Button>
       </DialogTrigger>
@@ -231,60 +231,132 @@ function ColumnVisibilityDialog({ columns, visibleColumnIds, setVisibleColumnIds
   );
 }
 
-export function StatusTabs({ activeStep, setActiveStep, counts, searchQuery, setSearchQuery, }: any) {
-  const tabs = [
-    { id: "all", label: "All" },
-    ...STATUS_TAB_ORDER.filter((s) => (counts[s] || 0) > 0 || s === "awaiting_receipt").map((s) => ({
+export function StatusTabs({ 
+  activeStep, setActiveStep, 
+  activeMode, setActiveMode,
+  counts, 
+  searchQuery, setSearchQuery,
+  availableClasses = [], activeClassIds = [], setActiveClassIds,
+  availableSubClasses = [], activeSubClassIds = [], setActiveSubClassIds,
+}: any) {
+  const statusOptions = [
+    { id: "all", label: "All Statuses" },
+    ...STATUS_TAB_ORDER.map((s) => ({
       id: s,
       label: STEP_LABELS[s],
     })),
   ];
 
+  const modeOptions = [
+    { id: "all", label: "All Modes" },
+    { id: "bcl", label: "BCL Handles" },
+    { id: "client", label: "Client Handles" },
+    { id: "not_set", label: "Not Set" },
+  ];
+
+  const hasFilters = activeStep !== "all" || activeMode !== "all" || activeClassIds.length > 0 || activeSubClassIds.length > 0 || searchQuery !== "";
+
+  const handleClearFilters = () => {
+    setActiveStep("all");
+    setActiveMode("all");
+    setActiveClassIds([]);
+    setActiveSubClassIds([]);
+    setSearchQuery("");
+  };
+
   return (
-    <div className="px-8 py-2.5 flex items-center gap-1.5 border-b border-slate-200 bg-white antialiased overflow-x-auto">
-      <div className="relative w-[260px]">
-        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+    <div className="px-8 py-4 flex flex-wrap items-center gap-4 border-b border-slate-200 bg-white antialiased overflow-x-auto">
+      <div className="relative w-80 shrink-0">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
         <Input
-          placeholder="Search name, passport, company..."
+          placeholder="Search by name, passport no., company..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full h-9 pl-10 pr-9 bg-white border-slate-200 rounded-full text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
+          className="w-full h-10 pl-11 pr-10 bg-white border-slate-200 rounded-md text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
         />
         {searchQuery && (
           <button
             onClick={() => setSearchQuery("")}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-4 w-4" />
           </button>
         )}
       </div>
-      <div className="flex gap-2">
-        {tabs.map((tab) => {
-          const isActive = activeStep === tab.id;
-          const count = tab.id === "all" ? counts.all || 0 : counts[tab.id] || 0;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveStep(tab.id)}
-              className={cn(
-                "h-8 px-4 text-sm font-bold rounded-lg transition-all flex items-center gap-2 shrink-0",
-                isActive
-                  ? "bg-custom-blue text-white shadow-sm"
-                  : "bg-white text-slate-600 border border-slate-200 hover:border-slate-300 hover:text-slate-800"
-              )}
-            >
-              {tab.label}
-              <span className={cn(
-                "px-1.5 py-0.5 rounded-md text-sm font-bold tabular-nums",
-                isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
-              )}>
-                {count}
-              </span>
-            </button>
-          );
-        })}
+      
+      <div className="flex items-center gap-2 shrink-0 h-10 px-1 border border-slate-200 rounded-md bg-white">
+        <span className="text-[13px] font-semibold text-slate-500 pl-3">Status</span>
+        <Select value={activeStep} onValueChange={setActiveStep}>
+          <SelectTrigger className="h-8 w-[160px] border-none shadow-none text-[13px] font-semibold text-slate-700 focus:ring-0 bg-transparent py-0">
+            <SelectValue placeholder="All Statuses" />
+          </SelectTrigger>
+          <SelectContent>
+            {statusOptions.map(opt => (
+              <SelectItem key={opt.id} value={opt.id} className="text-[13px]">{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
+
+      <div className="flex items-center gap-2 shrink-0 h-10 px-1 border border-slate-200 rounded-md bg-white">
+        <span className="text-[13px] font-semibold text-slate-500 pl-3">Mode</span>
+        <Select value={activeMode} onValueChange={setActiveMode}>
+          <SelectTrigger className="h-8 w-[140px] border-none shadow-none text-[13px] font-semibold text-slate-700 focus:ring-0 bg-transparent py-0">
+            <SelectValue placeholder="All Modes" />
+          </SelectTrigger>
+          <SelectContent>
+            {modeOptions.map(opt => (
+              <SelectItem key={opt.id} value={opt.id} className="text-[13px]">{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="h-6 w-px bg-slate-200 mx-2 shrink-0" />
+
+      {availableClasses.length > 0 && (
+        <div className="flex items-center gap-2 shrink-0 h-10 px-1 border border-slate-200 rounded-md bg-white">
+          <span className="text-[13px] font-semibold text-slate-500 pl-3">Class</span>
+          <Select value={activeClassIds.length > 0 ? activeClassIds[0] : "all"} onValueChange={(v) => setActiveClassIds(v === "all" ? [] : [v])}>
+            <SelectTrigger className="h-8 w-[120px] border-none shadow-none text-[13px] font-semibold text-slate-700 focus:ring-0 bg-transparent py-0">
+              <SelectValue placeholder="All Classes" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-[13px]">All Classes</SelectItem>
+              {availableClasses.map((c: any) => (
+                <SelectItem key={c.id.toString()} value={c.id.toString()} className="text-[13px]">{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {availableSubClasses.length > 0 && (
+        <div className="flex items-center gap-2 shrink-0 h-10 px-1 border border-slate-200 rounded-md bg-white">
+          <span className="text-[13px] font-semibold text-slate-500 pl-3">Sub-class</span>
+          <Select value={activeSubClassIds.length > 0 ? activeSubClassIds[0] : "all"} onValueChange={(v) => setActiveSubClassIds(v === "all" ? [] : [v])}>
+            <SelectTrigger className="h-8 w-[140px] border-none shadow-none text-[13px] font-semibold text-slate-700 focus:ring-0 bg-transparent py-0">
+              <SelectValue placeholder="All Sub-classes" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-[13px]">All Sub-classes</SelectItem>
+              {availableSubClasses.map((c: any) => (
+                <SelectItem key={c.id.toString()} value={c.id.toString()} className="text-[13px]">{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {hasFilters && (
+        <Button 
+          variant="ghost" 
+          onClick={handleClearFilters}
+          className="h-10 px-4 rounded-md text-[13px] font-bold text-blue-600 hover:bg-blue-50 hover:text-blue-700 ml-auto gap-2"
+        >
+          Clear Filters <X className="h-4 w-4" />
+        </Button>
+      )}
     </div>
   );
 }
@@ -385,91 +457,34 @@ function MultiSelectSearchableDropdown({
   );
 }
 
-// Sub-Departments (Left) + Class/Sub-Class Categorization (Right) — same layout as Summary
-// Reports' HierarchyTabs, minus the Department level since this module is permanently scoped
-// to Immigration.
 export function HierarchyTabs({
   subDepartments = [],
   activeSubDeptId, setActiveSubDeptId,
   subDeptTaskCounts = {},
-  availableClasses = [], activeClassIds = [], setActiveClassIds, classCounts = {},
-  availableSubClasses = [], activeSubClassIds = [], setActiveSubClassIds, subClassCounts = {},
 }: any) {
   const handleSubDeptChange = (v: string) => {
     setActiveSubDeptId(v);
-    setActiveClassIds?.([]);
-    setActiveSubClassIds?.([]);
-  };
-
-  const toggleClass = (id: string) => {
-    setActiveClassIds?.((prev: string[]) => (prev.includes(id) ? prev.filter((x: string) => x !== id) : [...prev, id]));
-    setActiveSubClassIds?.([]);
-  };
-
-  const toggleSubClass = (id: string) => {
-    setActiveSubClassIds?.((prev: string[]) => (prev.includes(id) ? prev.filter((x: string) => x !== id) : [...prev, id]));
   };
 
   const hasSubDepts = subDepartments.length > 0;
-  const hasClasses = availableClasses.length > 0 || availableSubClasses.length > 0;
-
-  if (!hasSubDepts && !hasClasses) return null;
+  if (!hasSubDepts) return null;
 
   return (
     <div className="flex flex-col border-b border-slate-200 antialiased bg-white">
       <div className="px-8 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0 flex-1">
-          {hasSubDepts && (
-            <>
-              <CornerDownRight className="h-4 w-4 text-slate-300 shrink-0" />
-              <div className="overflow-x-auto custom-scrollbar pb-1 -mb-1">
-                <PillTrack
-                  size="sm"
-                  value={activeSubDeptId}
-                  onValueChange={handleSubDeptChange}
-                  items={[
-                    { id: "all", label: "All Sub-departments", count: subDeptTaskCounts.all },
-                    ...subDepartments.map((s: any) => ({ id: s.id.toString(), label: s.name, count: subDeptTaskCounts[s.id.toString()] })),
-                  ]}
-                />
-              </div>
-            </>
-          )}
-        </div>
-
-        {hasClasses && (
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="flex items-center gap-1.5 text-slate-400">
-              <Layers className="h-3.5 w-3.5" />
-              <span className="text-[11px] font-black uppercase tracking-widest">Categorization</span>
-            </div>
-            <div className="h-6 w-px bg-slate-200 mx-1" />
-            {availableClasses.length > 0 && (
-              <MultiSelectSearchableDropdown
-                label="Classes"
-                items={availableClasses}
-                selectedIds={activeClassIds}
-                counts={classCounts}
-                onToggle={toggleClass}
-                onClear={() => { setActiveClassIds?.([]); setActiveSubClassIds?.([]); }}
-                searchPlaceholder="Search classes..."
-                accentActive={activeClassIds.length > 0}
-              />
-            )}
-            {availableSubClasses.length > 0 && (
-              <MultiSelectSearchableDropdown
-                label="Sub-Classes"
-                items={availableSubClasses}
-                selectedIds={activeSubClassIds}
-                counts={subClassCounts}
-                onToggle={toggleSubClass}
-                onClear={() => setActiveSubClassIds?.([])}
-                searchPlaceholder="Search sub-classes..."
-                accentActive={activeSubClassIds.length > 0}
-              />
-            )}
+          <div className="overflow-x-auto custom-scrollbar">
+            <PillTrack
+              size="sm"
+              value={activeSubDeptId}
+              onValueChange={handleSubDeptChange}
+              items={[
+                { id: "all", label: "All", count: subDeptTaskCounts.all },
+                ...subDepartments.map((s: any) => ({ id: s.id.toString(), label: s.name, count: subDeptTaskCounts[s.id.toString()] })),
+              ]}
+            />
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

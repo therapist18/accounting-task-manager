@@ -16,6 +16,7 @@ import {
   fetchHandlingRecords,
   getHandlingStep,
   resolveWriteUpDate,
+  resolveEffectiveDate,
   WRITE_UP_STAGE_ID,
   STEP_LABELS,
   IMMIGRATION_DEPT_ID,
@@ -32,7 +33,7 @@ import { MultiSort, type SortLevel } from "@/app/generic-components/MultiSort";
 
 // Column ids whose sort values are timestamps (numeric sort, not alphabetic) — used only to
 // tag MultiSort's column options with a type so the dialog can present them sensibly.
-const MULTISORT_DATE_COLUMN_IDS = new Set(["write_up_date", "received", "taken", "returned", "notified", "completed"]);
+const MULTISORT_DATE_COLUMN_IDS = new Set(["write_up_date", "doc_issue_date", "doc_expiry_date", "received", "taken", "returned", "notified", "completed"]);
 
 export default function PassportEndorsementPage() {
   const [loading, setLoading] = useState(true);
@@ -58,6 +59,7 @@ export default function PassportEndorsementPage() {
   const [activeClassIds, setActiveClassIds] = useState<string[]>([]);
   const [activeSubClassIds, setActiveSubClassIds] = useState<string[]>([]);
   const [activeStep, setActiveStep] = useState<HandlingStep | "all">("all");
+  const [activeMode, setActiveMode] = useState<string>("all");
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(DEFAULT_VISIBLE_COLUMN_IDS);
   // Single source of truth for sorting — the MultiSort dialog manages it as an ordered list of
   // SortLevels; a plain header-click (handleSort) collapses the list to that one column. The
@@ -144,7 +146,9 @@ export default function PassportEndorsementPage() {
     const mode = task.passport_handling_mode || null;
     const step = getHandlingStep(mode, record);
     const writeUpDate = resolveWriteUpDate(task, writeUpStage, allDocuments, kycDocuments);
-    return { task, record, mode, step, writeUpDate };
+    const docIssueDate = resolveEffectiveDate(task, writeUpStage, allDocuments, kycDocuments, "isEffectiveFrom");
+    const docExpiryDate = resolveEffectiveDate(task, writeUpStage, allDocuments, kycDocuments, "isEffectiveTo");
+    return { task, record, mode, step, writeUpDate, docIssueDate, docExpiryDate };
   }), [tasks, handlingRecords, writeUpStage, allDocuments, kycDocuments]);
 
   const immigrationDept = useMemo(
@@ -256,9 +260,15 @@ export default function PassportEndorsementPage() {
   }, [searchedRows]);
 
   const filteredRows = useMemo(() => {
-    if (activeStep === "all") return searchedRows;
-    return searchedRows.filter((r) => r.step === activeStep);
-  }, [searchedRows, activeStep]);
+    let result = searchedRows;
+    if (activeStep !== "all") result = result.filter((r) => r.step === activeStep);
+    if (activeMode !== "all") {
+      if (activeMode === "bcl") result = result.filter((r) => r.mode === "bcl");
+      else if (activeMode === "client") result = result.filter((r) => r.mode === "client");
+      else if (activeMode === "not_set") result = result.filter((r) => !r.mode);
+    }
+    return result;
+  }, [searchedRows, activeStep, activeMode]);
 
   const getSortableValue = useCallback((row: any, columnId: string) => {
     const { task, record, mode, step, writeUpDate } = row;
@@ -271,6 +281,14 @@ export default function PassportEndorsementPage() {
       case "class_name": return getClassName(task).toLowerCase();
       case "write_up_date": {
         const d = parseDateSafe(writeUpDate);
+        return d ? d.getTime() : 0;
+      }
+      case "doc_issue_date": {
+        const d = parseDateSafe(row.docIssueDate);
+        return d ? d.getTime() : 0;
+      }
+      case "doc_expiry_date": {
+        const d = parseDateSafe(row.docExpiryDate);
         return d ? d.getTime() : 0;
       }
       case "passport_number": return (task.passport_number || "").toLowerCase();
@@ -360,10 +378,12 @@ export default function PassportEndorsementPage() {
       return;
     }
     try {
-      const exportRows = sortedRows.map(({ task, record, mode, step, writeUpDate }) => ({
+      const exportRows = sortedRows.map(({ task, record, mode, step, writeUpDate, docIssueDate, docExpiryDate }) => ({
         "Task ID": task.id,
         "Applicant": task.applicant_name || "",
-        "Write Up Date": fmtStageDate(writeUpDate) || "",
+        "Write Up Stage Date": fmtStageDate(writeUpDate) || "",
+        "Document Date of Issue": fmtStageDate(docIssueDate) || "",
+        "Document Expiry Date": fmtStageDate(docExpiryDate) || "",
         "Company": companies.get(task.company_id)?.name || task.company_name || "",
         "Company Prefix": companies.get(task.company_id)?.prefix || "",
         "Sub-Department": getSubDeptName(task),
@@ -397,7 +417,7 @@ export default function PassportEndorsementPage() {
 
   if (loading) {
     return (
-      <div className="flex-1 p-8 bg-slate-100 flex items-center justify-center min-h-screen">
+      <div className="flex-1 p-8 bg-white flex items-center justify-center min-h-screen">
         <div className="text-center space-y-4">
           <Loader2 className="h-10 w-10 animate-spin text-slate-400 mx-auto" />
           <p className="text-sm font-medium text-slate-500">Loading Passport Endorsement Tracking...</p>
@@ -407,7 +427,7 @@ export default function PassportEndorsementPage() {
   }
 
   return (
-    <div className="flex flex-col flex-1 overflow-auto bg-slate-50">
+    <div className="flex flex-col flex-1 overflow-auto bg-white">
       <PageHeader
         dateRange={dateRange}
         setDateRange={setDateRange}
@@ -427,17 +447,16 @@ export default function PassportEndorsementPage() {
         activeSubDeptId={activeSubDeptId}
         setActiveSubDeptId={setActiveSubDeptId}
         subDeptTaskCounts={subDeptTaskCounts}
-        availableClasses={availableClasses}
-        activeClassIds={activeClassIds}
-        setActiveClassIds={setActiveClassIds}
-        classCounts={classCounts}
-        availableSubClasses={availableSubClasses}
-        activeSubClassIds={activeSubClassIds}
-        setActiveSubClassIds={setActiveSubClassIds}
-        subClassCounts={subClassCounts}
       />
 
-      <StatusTabs activeStep={activeStep} setActiveStep={setActiveStep} counts={counts} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />
+      <StatusTabs 
+        activeStep={activeStep} setActiveStep={setActiveStep} 
+        activeMode={activeMode} setActiveMode={setActiveMode}
+        counts={counts} 
+        searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+        availableClasses={availableClasses} activeClassIds={activeClassIds} setActiveClassIds={setActiveClassIds} classCounts={classCounts}
+        availableSubClasses={availableSubClasses} activeSubClassIds={activeSubClassIds} setActiveSubClassIds={setActiveSubClassIds} subClassCounts={subClassCounts}
+      />
 
       <StatsRow counts={counts} />
 
