@@ -8,7 +8,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Settings2, ArrowUpDown, ArrowLeftRight, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, SearchX, Layers } from "lucide-react";
+import { Settings2, ArrowUpDown, ArrowLeftRight, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, SearchX, Layers, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STEP_LABELS, type HandlingStep } from "../utils/database";
 
@@ -25,12 +25,23 @@ export const HANDLING_COLUMNS = [
   { id: "passport_number", label: "Passport No." },
   { id: "mode", label: "Mode" },
   { id: "current_step", label: "Current Step" },
-  { id: "received", label: "Received" },
-  { id: "taken", label: "Taken to Nyayo" },
-  { id: "returned", label: "Returned" },
-  { id: "notified", label: "Client Notified" },
-  { id: "dispatch", label: "Dispatch" },
-  { id: "completed", label: "Completed" },
+  { id: "received_by", label: "Received By" },
+  { id: "received_date", label: "Received Date" },
+  { id: "received_time", label: "Received Time" },
+  { id: "taken_by", label: "Taken By" },
+  { id: "taken_date", label: "Taken Date" },
+  { id: "taken_time", label: "Taken Time" },
+  { id: "returned_by", label: "Returned By" },
+  { id: "returned_date", label: "Returned Date" },
+  { id: "returned_time", label: "Returned Time" },
+  { id: "notified_by", label: "Notified By" },
+  { id: "notified_date", label: "Notified Date" },
+  { id: "notified_time", label: "Notified Time" },
+  { id: "dispatch_by", label: "Dispatch By" },
+  { id: "dispatch_date", label: "Dispatch Date" },
+  { id: "dispatch_time", label: "Dispatch Time" },
+  { id: "completed_date", label: "Completed Date" },
+  { id: "completed_time", label: "Completed Time" },
 ];
 
 // Company column is kept in HANDLING_COLUMNS (toggleable via the columns dialog) but hidden
@@ -74,10 +85,22 @@ function StepBadge({ step }: { step: HandlingStep }) {
   );
 }
 
-function fmtDateTime(iso: string | null | undefined) {
+// Same dd/mm/yyyy convention as every other date column in this module (Write Up Date,
+// Document Date of Issue, etc.) — split out from the combined PersonDate cell into their own
+// Date/Time columns.
+function fmtDateOnly(iso: string | null | undefined): string | null {
   if (!iso) return null;
   try {
-    return format(new Date(iso), "dd MMM yyyy, HH:mm");
+    return format(new Date(iso), "dd/MM/yyyy");
+  } catch {
+    return null;
+  }
+}
+
+function fmtTimeOnly(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  try {
+    return format(new Date(iso), "HH:mm");
   } catch {
     return null;
   }
@@ -105,17 +128,6 @@ export function fmtStageDate(dateStr: string | null | undefined): string | null 
   return dateStr;
 }
 
-function PersonDate({ dateIso, personName }: { dateIso: string | null | undefined; personName?: string | null }) {
-  const formatted = fmtDateTime(dateIso);
-  if (!formatted) return <span className="text-slate-300">—</span>;
-  return (
-    <div className="flex flex-col">
-      <span className="text-slate-700 font-semibold text-sm">{formatted}</span>
-      {personName && <span className="text-[11px] text-slate-400">{personName}</span>}
-    </div>
-  );
-}
-
 const PaginationButton = ({ children, onClick, disabled }: any) => (
   <Button
     variant="ghost"
@@ -139,6 +151,7 @@ export function HandlingTable({
   onManage,
   sortConfig,
   handleSort,
+  loading = false,
 }: any) {
   const visibleCols = HANDLING_COLUMNS.filter((c) => visibleColumnIds.includes(c.id));
 
@@ -381,7 +394,16 @@ export function HandlingTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sectionedRows.length > 0 ? (
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={visibleCols.length + 2} className="h-64 bg-slate-50">
+                  <div className="flex flex-col items-center justify-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-slate-400 mb-3" />
+                    <p className="text-[14px] font-semibold text-slate-700">Loading tasks...</p>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : sectionedRows.length > 0 ? (
               sectionedRows.map((item) => {
                 if (item.type === "section") {
                   // The name/count cell must NOT span every column if it's going to stay
@@ -478,26 +500,91 @@ export function HandlingTable({
                         case "current_step":
                           content = <StepBadge step={step} />;
                           break;
-                        case "received":
-                          content = <PersonDate dateIso={record?.received_at} personName={getStaffName(record?.received_by) || record?.brought_by_name} />;
+                        case "received_by": {
+                          const by = getStaffName(record?.received_by) || record?.brought_by_name;
+                          content = by ? <span className="text-slate-700 font-medium">{by}</span> : <span className="text-slate-300">—</span>;
                           break;
-                        case "taken":
-                          content = <PersonDate dateIso={record?.taken_at} personName={getStaffName(record?.taken_by)} />;
+                        }
+                        case "received_date": {
+                          const d = fmtDateOnly(record?.received_at);
+                          content = d ? <span className="text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
                           break;
-                        case "returned":
-                          content = <PersonDate dateIso={record?.returned_at} personName={getStaffName(record?.returned_by)} />;
+                        }
+                        case "received_time": {
+                          const t = fmtTimeOnly(record?.received_at);
+                          content = t ? <span className="text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
                           break;
-                        case "notified":
-                          content = <PersonDate dateIso={record?.client_notified_at} personName={getStaffName(record?.client_notified_by)} />;
+                        }
+                        case "taken_by": {
+                          const by = getStaffName(record?.taken_by);
+                          content = by ? <span className="text-slate-700 font-medium">{by}</span> : <span className="text-slate-300">—</span>;
                           break;
-                        case "dispatch":
-                          content = dispatchLabelFor(record) || <span className="text-slate-300">—</span>;
+                        }
+                        case "taken_date": {
+                          const d = fmtDateOnly(record?.taken_at);
+                          content = d ? <span className="text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
                           break;
-                        case "completed":
-                          content = step === "completed"
-                            ? <PersonDate dateIso={record?.delivered_at || record?.pickup_at || record?.returned_at} />
-                            : <span className="text-slate-300">—</span>;
+                        }
+                        case "taken_time": {
+                          const t = fmtTimeOnly(record?.taken_at);
+                          content = t ? <span className="text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
                           break;
+                        }
+                        case "returned_by": {
+                          const by = getStaffName(record?.returned_by);
+                          content = by ? <span className="text-slate-700 font-medium">{by}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
+                        case "returned_date": {
+                          const d = fmtDateOnly(record?.returned_at);
+                          content = d ? <span className="text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
+                        case "returned_time": {
+                          const t = fmtTimeOnly(record?.returned_at);
+                          content = t ? <span className="text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
+                        case "notified_by": {
+                          const by = getStaffName(record?.client_notified_by);
+                          content = by ? <span className="text-slate-700 font-medium">{by}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
+                        case "notified_date": {
+                          const d = fmtDateOnly(record?.client_notified_at);
+                          content = d ? <span className="text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
+                        case "notified_time": {
+                          const t = fmtTimeOnly(record?.client_notified_at);
+                          content = t ? <span className="text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
+                        case "dispatch_by": {
+                          const by = dispatchLabelFor(record);
+                          content = by ? <span className="text-slate-700 font-medium">{by}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
+                        case "dispatch_date": {
+                          const d = fmtDateOnly(record?.delivered_at || record?.pickup_at);
+                          content = d ? <span className="text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
+                        case "dispatch_time": {
+                          const t = fmtTimeOnly(record?.delivered_at || record?.pickup_at);
+                          content = t ? <span className="text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
+                        case "completed_date": {
+                          const d = step === "completed" ? fmtDateOnly(record?.delivered_at || record?.pickup_at || record?.returned_at) : null;
+                          content = d ? <span className="text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
+                        case "completed_time": {
+                          const t = step === "completed" ? fmtTimeOnly(record?.delivered_at || record?.pickup_at || record?.returned_at) : null;
+                          content = t ? <span className="text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
                         default:
                           content = "—";
                       }

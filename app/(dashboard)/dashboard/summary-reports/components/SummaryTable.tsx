@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, ArrowLeftRight, Layers, AlertTriangle, Edit, X, RefreshCw, Trash2, ExternalLink } from "lucide-react";
+import { SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, ArrowLeftRight, Layers, AlertTriangle, Edit, X, RefreshCw, Trash2, ExternalLink, Loader2 } from "lucide-react";
 import { differenceInDays } from "date-fns";
 import { cn } from "@/lib/utils";
 import { formatDateCell, formatEstimatedMins } from "./reportCellRenderers";
@@ -280,6 +280,7 @@ export function SummaryTable({
   stagesByDept = new Map(),
   dynamicStageColumns = [],
   getKycFields,
+  loading = false,
 }: {
   tasks: any[];
   companies: Map<number, { name: string; prefix: string }>;
@@ -315,6 +316,7 @@ export function SummaryTable({
   onRequestDelete?: (task: any) => void;
   dynamicStageColumns?: any[];
   getKycFields?: (doc: any) => Promise<any[]>;
+  loading?: boolean;
 }) {
   // dynamicStageColumns (built by page.tsx from the applied report's non-milestone stage
   // selections, see stageColumnConfig.ts's 'report_stage' column type) are appended after the
@@ -839,7 +841,16 @@ export function SummaryTable({
             </TableHeader>
 
             <TableBody>
-              {sectionedRows.length > 0 ? (
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={interleavedColumns.length + 2} className="h-64 bg-slate-50">
+                    <div className="flex flex-col items-center justify-center">
+                      <Loader2 className="h-8 w-8 animate-spin text-slate-400 mb-3" />
+                      <p className="text-[14px] font-semibold text-slate-700">Loading tasks...</p>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : sectionedRows.length > 0 ? (
                 sectionedRows.map((item) => {
                   if (item.type === 'section') {
                     // The name/count cell must NOT span every column if it's going to stay

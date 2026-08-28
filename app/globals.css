@@ -35,7 +35,7 @@ body {
        MAIN SURFACES
     ============================== */
 
-    --background: 210 20% 98%;
+    --background: 0, 0%, 100%;
     --foreground: 222 47% 11%;
 
     --card: 0 0% 100%;

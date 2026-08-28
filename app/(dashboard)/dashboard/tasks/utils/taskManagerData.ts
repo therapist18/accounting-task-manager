@@ -163,7 +163,20 @@ export const fetchClassRequirements = (): Promise<any[]> => {
 /**
  * Fetch tasks with related data
  */
-export const fetchTasks = async (departmentId?: string, subdepartmentId?: string, companies?: Map<number, string>): Promise<Task[]> => {
+export const fetchTasks = async (
+  departmentId?: string,
+  subdepartmentId?: string,
+  companies?: Map<number, string>,
+  // statusFilter pushes an `.in('status', ...)` down into the query instead of the caller
+  // fetching everything and filtering client-side. includeRequirements (default true, so
+  // every existing caller is unaffected) skips the tm_class_requirements match/reportDocDefaults
+  // computation and the whole reference-documents fetch below for callers that never read
+  // task.requirements/report_doc_defaults/referenceDocuments (confirmed via repo-wide grep for
+  // summary-reports and passport-endorsement) — those two do a full-table select('*') across
+  // either every department or a whole department's task history just to throw this work away.
+  options?: { statusFilter?: string[]; includeRequirements?: boolean }
+): Promise<Task[]> => {
+  const includeRequirements = options?.includeRequirements !== false;
   try {
     let query = supabase
       .from('tm_tasks')
@@ -186,11 +199,15 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
       }
     }
 
+    if (options?.statusFilter?.length) {
+      query = query.in('status', options.statusFilter);
+    }
+
     // Requirements don't depend on the tasks query, so fetch both at once instead of
     // chaining requirements after tasks resolves.
     const [{ data, error }, requirementsData] = await Promise.all([
       query,
-      fetchClassRequirements(),
+      includeRequirements ? fetchClassRequirements() : Promise.resolve([]),
     ]);
 
     if (error) throw error;
@@ -202,91 +219,96 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
       const taskManager = task.participants_details?.find((p: any) => p.role?.includes('task_manager'));
       const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
 
-      // Find matching requirements based on job_level with inheritance support
-      // Collect all requirements that match at any level of the hierarchy
-      const matchingRequirements = requirementsData?.filter((req: any) => {
-        const reqJobLevel = req.job_level || {};
+      let taskRequirements: { requirements: any[] } = { requirements: [] };
+      let reportDocDefaults: any[] = [];
 
-        // Exact match (most specific)
-        if (String(reqJobLevel.department_id) === String(jobLevel.department_id) &&
-          String(reqJobLevel.subdepartment_id) === String(jobLevel.subdepartment_id) &&
-          String(reqJobLevel.class_id || 'null') === String(jobLevel.class_id || 'null') &&
-          String(reqJobLevel.subclass_id || 'null') === String(jobLevel.subclass_id || 'null')) {
-          return true;
+      if (includeRequirements) {
+        // Find matching requirements based on job_level with inheritance support
+        // Collect all requirements that match at any level of the hierarchy
+        const matchingRequirements = requirementsData?.filter((req: any) => {
+          const reqJobLevel = req.job_level || {};
+
+          // Exact match (most specific)
+          if (String(reqJobLevel.department_id) === String(jobLevel.department_id) &&
+            String(reqJobLevel.subdepartment_id) === String(jobLevel.subdepartment_id) &&
+            String(reqJobLevel.class_id || 'null') === String(jobLevel.class_id || 'null') &&
+            String(reqJobLevel.subclass_id || 'null') === String(jobLevel.subclass_id || 'null')) {
+            return true;
+          }
+
+          // Match at class level (if task has subclass but requirement is at class level)
+          if (jobLevel.subclass_id && !reqJobLevel.subclass_id &&
+            String(reqJobLevel.department_id) === String(jobLevel.department_id) &&
+            String(reqJobLevel.subdepartment_id) === String(jobLevel.subdepartment_id) &&
+            String(reqJobLevel.class_id || 'null') === String(jobLevel.class_id || 'null')) {
+            return true;
+          }
+
+          // Match at subdepartment level (if task has class but requirement is at subdepartment level)
+          if (jobLevel.class_id && !reqJobLevel.class_id &&
+            String(reqJobLevel.department_id) === String(jobLevel.department_id) &&
+            String(reqJobLevel.subdepartment_id) === String(jobLevel.subdepartment_id)) {
+            return true;
+          }
+
+          // Match at department level (if task has subdepartment but requirement is at department level)
+          if (jobLevel.subdepartment_id && !reqJobLevel.subdepartment_id &&
+            String(reqJobLevel.department_id) === String(jobLevel.department_id)) {
+            return true;
+          }
+
+          return false;
+        });
+
+        // Merge all requirements from matching levels, with inheritance for reference requirements
+        const allRequirements: any[] = [];
+        matchingRequirements?.forEach((req: any) => {
+          if (req.requirements) {
+            allRequirements.push(...req.requirements);
+          }
+        });
+
+        // For reference requirements, also collect from parent levels and deduplicate
+        const referenceRequirements: any[] = [];
+        matchingRequirements?.forEach((req: any) => {
+          if (req.requirements) {
+            req.requirements.forEach((r: any) => {
+              if (r.category === 'reference') {
+                referenceRequirements.push(r);
+              }
+            });
+          }
+        });
+
+        // Merge reference requirements (deduplicate by id)
+        const mergedReferenceRequirements = referenceRequirements.filter((req, index, self) =>
+          index === self.findIndex(r => r.id === req.id)
+        );
+
+        // Remove reference requirements from allRequirements and add merged ones
+        const nonReferenceRequirements = allRequirements.filter((r: any) => r.category !== 'reference');
+        const finalRequirements = [...nonReferenceRequirements, ...mergedReferenceRequirements];
+
+        taskRequirements = {
+          requirements: finalRequirements
+        };
+
+        // Find the single best matching requirements record to get its report_doc_defaults
+        let bestMatch = null;
+        if (jobLevel.subclass_id) {
+          bestMatch = matchingRequirements?.find((r: any) => r.job_level?.subclass_id === jobLevel.subclass_id);
         }
-
-        // Match at class level (if task has subclass but requirement is at class level)
-        if (jobLevel.subclass_id && !reqJobLevel.subclass_id &&
-          String(reqJobLevel.department_id) === String(jobLevel.department_id) &&
-          String(reqJobLevel.subdepartment_id) === String(jobLevel.subdepartment_id) &&
-          String(reqJobLevel.class_id || 'null') === String(jobLevel.class_id || 'null')) {
-          return true;
+        if (!bestMatch && jobLevel.class_id) {
+          bestMatch = matchingRequirements?.find((r: any) => r.job_level?.class_id === jobLevel.class_id && !r.job_level?.subclass_id);
         }
-
-        // Match at subdepartment level (if task has class but requirement is at subdepartment level)
-        if (jobLevel.class_id && !reqJobLevel.class_id &&
-          String(reqJobLevel.department_id) === String(jobLevel.department_id) &&
-          String(reqJobLevel.subdepartment_id) === String(jobLevel.subdepartment_id)) {
-          return true;
+        if (!bestMatch && jobLevel.subdepartment_id) {
+          bestMatch = matchingRequirements?.find((r: any) => r.job_level?.subdepartment_id === jobLevel.subdepartment_id && !r.job_level?.class_id);
         }
-
-        // Match at department level (if task has subdepartment but requirement is at department level)
-        if (jobLevel.subdepartment_id && !reqJobLevel.subdepartment_id &&
-          String(reqJobLevel.department_id) === String(jobLevel.department_id)) {
-          return true;
+        if (!bestMatch && jobLevel.department_id) {
+          bestMatch = matchingRequirements?.find((r: any) => r.job_level?.department_id === jobLevel.department_id && !r.job_level?.subdepartment_id);
         }
-
-        return false;
-      });
-
-      // Merge all requirements from matching levels, with inheritance for reference requirements
-      const allRequirements: any[] = [];
-      matchingRequirements?.forEach((req: any) => {
-        if (req.requirements) {
-          allRequirements.push(...req.requirements);
-        }
-      });
-
-      // For reference requirements, also collect from parent levels and deduplicate
-      const referenceRequirements: any[] = [];
-      matchingRequirements?.forEach((req: any) => {
-        if (req.requirements) {
-          req.requirements.forEach((r: any) => {
-            if (r.category === 'reference') {
-              referenceRequirements.push(r);
-            }
-          });
-        }
-      });
-
-      // Merge reference requirements (deduplicate by id)
-      const mergedReferenceRequirements = referenceRequirements.filter((req, index, self) =>
-        index === self.findIndex(r => r.id === req.id)
-      );
-
-      // Remove reference requirements from allRequirements and add merged ones
-      const nonReferenceRequirements = allRequirements.filter((r: any) => r.category !== 'reference');
-      const finalRequirements = [...nonReferenceRequirements, ...mergedReferenceRequirements];
-
-      const taskRequirements = {
-        requirements: finalRequirements
-      };
-
-      // Find the single best matching requirements record to get its report_doc_defaults
-      let bestMatch = null;
-      if (jobLevel.subclass_id) {
-        bestMatch = matchingRequirements?.find((r: any) => r.job_level?.subclass_id === jobLevel.subclass_id);
+        reportDocDefaults = bestMatch?.report_doc_defaults || [];
       }
-      if (!bestMatch && jobLevel.class_id) {
-        bestMatch = matchingRequirements?.find((r: any) => r.job_level?.class_id === jobLevel.class_id && !r.job_level?.subclass_id);
-      }
-      if (!bestMatch && jobLevel.subdepartment_id) {
-        bestMatch = matchingRequirements?.find((r: any) => r.job_level?.subdepartment_id === jobLevel.subdepartment_id && !r.job_level?.class_id);
-      }
-      if (!bestMatch && jobLevel.department_id) {
-        bestMatch = matchingRequirements?.find((r: any) => r.job_level?.department_id === jobLevel.department_id && !r.job_level?.subdepartment_id);
-      }
-      const reportDocDefaults = bestMatch?.report_doc_defaults || [];
 
       const processedTask: Task = {
         ...task,
@@ -321,6 +343,10 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
       };
       return processedTask;
     });
+
+    if (!includeRequirements) {
+      return processedTasks;
+    }
 
     // Fetch reference documents for tasks with reference requirements
     // Optimize by grouping fetches by sourceTable and linkingVariable

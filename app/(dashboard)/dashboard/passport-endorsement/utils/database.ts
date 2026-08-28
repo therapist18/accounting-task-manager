@@ -159,8 +159,15 @@ export function getHandlingStep(
 export async function fetchQualifyingTasks(
   companies: Map<number, { name: string; prefix: string }>
 ): Promise<Task[]> {
-  const tasks = await fetchTasks(IMMIGRATION_DEPT_ID, undefined, companies);
-  return (Array.isArray(tasks) ? tasks : []).filter((t) => QUALIFYING_STATUSES.includes(t.status));
+  // Pushes the status filter into the query (instead of fetching every immigration-department
+  // task and discarding all but the ~2 qualifying statuses client-side) and skips fetchTasks'
+  // per-task tm_class_requirements matching + reference-documents fetch — this page never reads
+  // task.requirements/report_doc_defaults/referenceDocuments.
+  const tasks = await fetchTasks(IMMIGRATION_DEPT_ID, undefined, companies, {
+    statusFilter: QUALIFYING_STATUSES,
+    includeRequirements: false,
+  });
+  return Array.isArray(tasks) ? tasks : [];
 }
 
 // Goes through the server-side /api/auth/users/company10 route (service-role client) rather

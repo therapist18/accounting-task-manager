@@ -67,6 +67,10 @@ let summaryReportsCache: {
 
 export default function SummaryReportsPage() {
   const [loading, setLoading] = useState(!summaryReportsCache);
+  // Gates the table body specifically (vs `loading`, which now only gates the page shell —
+  // header/tabs, renderable off just departments+companies). Splitting them lets the shell paint
+  // as soon as it can instead of blocking on the full ~8-request chain below.
+  const [tableLoading, setTableLoading] = useState(!summaryReportsCache);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [departments, setDepartments] = useState<any[]>(summaryReportsCache?.departments || []);
   const [companies, setCompanies] = useState<Map<number, { name: string; prefix: string }>>(summaryReportsCache?.companies || new Map());
@@ -142,7 +146,7 @@ export default function SummaryReportsPage() {
   const [isMutatingTask, setIsMutatingTask] = useState(false);
 
   const loadAllData = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
+    if (!silent) { setLoading(true); setTableLoading(true); }
     try {
       // Doesn't depend on (or get depended on by) anything else in this function — kick it
       // off now instead of waiting until the very end, so it resolves concurrently with the
@@ -162,6 +166,11 @@ export default function SummaryReportsPage() {
       const [depts, comps] = await Promise.all([fetchDepartments(), fetchCompanies()]);
       setDepartments(depts);
       setCompanies(comps);
+      // Shell (title bar/Hierarchy/Status/Perspective tabs) only needs departments+companies —
+      // everything they render is either static or a useMemo derived off state that's still
+      // empty at this point, so it just shows 0 counts until the rest streams in below rather
+      // than needing to be blocked on it.
+      if (!silent) setLoading(false);
 
       // fetchTasks() internally fetches the ENTIRE tm_class_requirements table (plus a
       // reference-documents lookup) on top of its own tm_tasks query — calling it once per
@@ -171,9 +180,13 @@ export default function SummaryReportsPage() {
       // network call at all — it just reads the already-fetched `depts` payload — so it's fine
       // to keep per-department. tasks fetch happens exactly once for the whole company here,
       // then gets grouped by department client-side downstream via job_level.department_id.
+      // includeRequirements: false — this page never reads task.requirements/report_doc_defaults/
+      // referenceDocuments (confirmed via repo-wide grep), so the per-task tm_class_requirements
+      // matching and the reference-documents fetch inside fetchTasks are pure wasted work here;
+      // skipping them removes a company-wide requirements match + an extra network round trip.
       const [unifiedUserData, allTasksData, stagesResults] = await Promise.all([
         userService.getAllUserData({ payrollAccess: true }, depts),
-        fetchTasks(undefined, undefined, comps),
+        fetchTasks(undefined, undefined, comps, { includeRequirements: false }),
         Promise.all(depts.map(async (d: any) => ({
           deptId: d.id.toString(),
           stages: (await fetchStages(d.id.toString(), depts)) || [],
@@ -199,6 +212,10 @@ export default function SummaryReportsPage() {
         fetchClassRequirements(),
       ]);
       setEnhancedTasksData(enhancedMap);
+      // SummaryTable can render real rows now (tasks + stages + enhanced data are all in state);
+      // expected/promised-time maps and document/KYC preview data below stream in afterward
+      // without blocking the table any further.
+      if (!silent) setTableLoading(false);
 
       // Expected total time per job level (tm_class_requirements.expected_total_time_minutes),
       // same source ReportsPage's "Expected Time" column reads from — fetched here across
@@ -285,7 +302,10 @@ export default function SummaryReportsPage() {
     } catch (err) {
       toast({ title: "Error", description: "Could not load summary reports data.", variant: "destructive" });
     } finally {
-      if (!silent) setLoading(false);
+      // Safety net: an error thrown before either flag's normal flip-off point (e.g. the
+      // departments/companies fetch itself failing) would otherwise leave the shell spinner or
+      // table skeleton stuck forever.
+      if (!silent) { setLoading(false); setTableLoading(false); }
     }
   }, []);
 
@@ -996,6 +1016,7 @@ export default function SummaryReportsPage() {
         stagesByDept={stagesByDept}
         dynamicStageColumns={dynamicStageColumns}
         getKycFields={getKycFields}
+        loading={tableLoading}
       />
 
       {/* Edit dialog — the exact EnquiryDialog DepartmentTasksManager reuses for editing,

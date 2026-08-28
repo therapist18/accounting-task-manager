@@ -33,10 +33,20 @@ import { MultiSort, type SortLevel } from "@/app/generic-components/MultiSort";
 
 // Column ids whose sort values are timestamps (numeric sort, not alphabetic) — used only to
 // tag MultiSort's column options with a type so the dialog can present them sensibly.
-const MULTISORT_DATE_COLUMN_IDS = new Set(["write_up_date", "doc_issue_date", "doc_expiry_date", "received", "taken", "returned", "notified", "completed"]);
+const MULTISORT_DATE_COLUMN_IDS = new Set([
+  "write_up_date", "doc_issue_date", "doc_expiry_date",
+  "received_date", "received_time", "taken_date", "taken_time",
+  "returned_date", "returned_time", "notified_date", "notified_time",
+  "dispatch_date", "dispatch_time", "completed_date", "completed_time",
+]);
 
 export default function PassportEndorsementPage() {
-  const [loading, setLoading] = useState(true);
+  // shellLoading gates the page chrome (header/tabs — renderable off just departments+
+  // companies); tableLoading gates HandlingTable specifically (needs tasks/handlingRecords/
+  // writeUpStage/documents). Splitting them lets the shell paint as soon as it can instead of
+  // blocking on the full fetch chain below.
+  const [shellLoading, setShellLoading] = useState(true);
+  const [tableLoading, setTableLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [tasks, setTasks] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
@@ -72,15 +82,24 @@ export default function PassportEndorsementPage() {
   const [courierDialogOpen, setCourierDialogOpen] = useState(false);
 
   const loadAll = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
+    if (!silent) { setShellLoading(true); setTableLoading(true); }
     try {
-      const [comps, depts, bcl, couriersData, sessionRes] = await Promise.all([
-        fetchCompanies(),
-        fetchDepartments(),
-        fetchBclUsers(),
-        fetchCouriers(false),
-        fetch("/api/auth/session").then((r) => r.json()).catch(() => ({})),
-      ]);
+      // Staff names, couriers and the session are fire-and-forget — none of them block the
+      // shell or the table (getStaffName already falls back to "" until bclUsers arrives), and
+      // each of these three already self-catches and returns a safe default on error.
+      fetchBclUsers().then(setBclUsers);
+      fetchCouriers(false).then(setCouriers);
+      fetch("/api/auth/session").then((r) => r.json()).catch(() => ({})).then((sessionRes) => {
+        if (sessionRes?.authenticated && sessionRes?.user?.id) setCurrentUserId(sessionRes.user.id);
+      });
+
+      const [comps, depts] = await Promise.all([fetchCompanies(), fetchDepartments()]);
+      setCompanies(comps);
+      setDepartments(depts);
+      // Shell (header/HierarchyTabs) only needs departments+companies — the rest streams in
+      // below and StatsRow/HandlingTable just show 0/skeleton until it arrives.
+      if (!silent) setShellLoading(false);
+
       const [qualifyingTasks, stages, docs, kycFieldsResult] = await Promise.all([
         fetchQualifyingTasks(comps),
         fetchStages(IMMIGRATION_DEPT_ID, depts),
@@ -89,21 +108,18 @@ export default function PassportEndorsementPage() {
       ]);
       const records = await fetchHandlingRecords(qualifyingTasks.map((t: any) => t.id));
 
-      setCompanies(comps);
-      setDepartments(depts);
-      setBclUsers(bcl);
-      setCouriers(couriersData);
       setTasks(qualifyingTasks);
       setHandlingRecords(records);
       setWriteUpStage(stages.find((s: any) => s.id === WRITE_UP_STAGE_ID) || null);
       setAllDocuments(docs);
       setKycDocuments(kycFieldsResult.kycDocsMap);
-      if (sessionRes?.authenticated && sessionRes?.user?.id) setCurrentUserId(sessionRes.user.id);
     } catch (err) {
       console.error("Error loading passport endorsement data:", err);
       toast({ title: "Error", description: "Failed to load passport endorsement data.", variant: "destructive" });
     } finally {
-      if (!silent) setLoading(false);
+      // Safety net: an error thrown before either flag's normal flip-off point would otherwise
+      // leave the shell spinner or table skeleton stuck forever.
+      if (!silent) { setShellLoading(false); setTableLoading(false); }
     }
   }, []);
 
@@ -294,18 +310,42 @@ export default function PassportEndorsementPage() {
       case "passport_number": return (task.passport_number || "").toLowerCase();
       case "mode": return mode || "";
       case "current_step": return STEP_LABELS[step] || "";
-      case "received": return record?.received_at ? new Date(record.received_at).getTime() : 0;
-      case "taken": return record?.taken_at ? new Date(record.taken_at).getTime() : 0;
-      case "returned": return record?.returned_at ? new Date(record.returned_at).getTime() : 0;
-      case "notified": return record?.client_notified_at ? new Date(record.client_notified_at).getTime() : 0;
-      case "dispatch": return record?.dispatch_method || "";
-      case "completed": {
+      case "received_by": return (getStaffName(record?.received_by) || record?.brought_by_name || "").toLowerCase();
+      case "received_date":
+      case "received_time":
+        return record?.received_at ? new Date(record.received_at).getTime() : 0;
+      case "taken_by": return (getStaffName(record?.taken_by) || "").toLowerCase();
+      case "taken_date":
+      case "taken_time":
+        return record?.taken_at ? new Date(record.taken_at).getTime() : 0;
+      case "returned_by": return (getStaffName(record?.returned_by) || "").toLowerCase();
+      case "returned_date":
+      case "returned_time":
+        return record?.returned_at ? new Date(record.returned_at).getTime() : 0;
+      case "notified_by": return (getStaffName(record?.client_notified_by) || "").toLowerCase();
+      case "notified_date":
+      case "notified_time":
+        return record?.client_notified_at ? new Date(record.client_notified_at).getTime() : 0;
+      case "dispatch_by": {
+        const by = record?.dispatch_method === "delivery"
+          ? (record.delivery_type === "courier" ? record.courier_rider_name : getStaffName(record.delivered_by))
+          : record?.pickup_person_name;
+        return (by || "").toLowerCase();
+      }
+      case "dispatch_date":
+      case "dispatch_time": {
+        const iso = record?.delivered_at || record?.pickup_at;
+        return iso ? new Date(iso).getTime() : 0;
+      }
+      case "completed_date":
+      case "completed_time": {
+        if (step !== "completed") return 0;
         const iso = record?.delivered_at || record?.pickup_at || record?.returned_at;
         return iso ? new Date(iso).getTime() : 0;
       }
       default: return "";
     }
-  }, [companies, getSubDeptName, getClassName]);
+  }, [companies, getSubDeptName, getClassName, getStaffName]);
 
   // First sort level shapes the table's active-column highlight — same shape SummaryTable's
   // sortConfig prop always received, so nothing downstream needs to change.
@@ -391,18 +431,27 @@ export default function PassportEndorsementPage() {
         "Passport No.": task.passport_number || "",
         "Mode": mode === "bcl" ? "BCL Handles" : mode === "client" ? "Client Handles" : "Not Set",
         "Current Step": STEP_LABELS[step],
-        "Received At": record?.received_at || "",
         "Received By": getStaffName(record?.received_by) || record?.brought_by_name || "",
-        "Taken At": record?.taken_at || "",
-        "Taken By": getStaffName(record?.taken_by),
-        "Returned At": record?.returned_at || "",
-        "Returned By": getStaffName(record?.returned_by),
-        "Client Notified At": record?.client_notified_at || "",
-        "Dispatch Method": record?.dispatch_method || "",
-        "Courier/Delivered By": record?.delivery_type === "courier" ? record?.courier_rider_name : getStaffName(record?.delivered_by),
-        "Delivered At": record?.delivered_at || "",
-        "Picked Up By": record?.pickup_person_name || "",
-        "Picked Up At": record?.pickup_at || "",
+        "Received Date": fmtStageDate(record?.received_at) || "",
+        "Received Time": record?.received_at ? new Date(record.received_at).toTimeString().slice(0, 5) : "",
+        "Taken By": getStaffName(record?.taken_by) || "",
+        "Taken Date": fmtStageDate(record?.taken_at) || "",
+        "Taken Time": record?.taken_at ? new Date(record.taken_at).toTimeString().slice(0, 5) : "",
+        "Returned By": getStaffName(record?.returned_by) || "",
+        "Returned Date": fmtStageDate(record?.returned_at) || "",
+        "Returned Time": record?.returned_at ? new Date(record.returned_at).toTimeString().slice(0, 5) : "",
+        "Notified By": getStaffName(record?.client_notified_by) || "",
+        "Notified Date": fmtStageDate(record?.client_notified_at) || "",
+        "Notified Time": record?.client_notified_at ? new Date(record.client_notified_at).toTimeString().slice(0, 5) : "",
+        "Dispatch By": record?.dispatch_method === "delivery"
+          ? (record.delivery_type === "courier" ? record.courier_rider_name : getStaffName(record.delivered_by))
+          : record?.pickup_person_name || "",
+        "Dispatch Date": fmtStageDate(record?.delivered_at || record?.pickup_at) || "",
+        "Dispatch Time": (record?.delivered_at || record?.pickup_at) ? new Date(record.delivered_at || record.pickup_at).toTimeString().slice(0, 5) : "",
+        "Completed Date": step === "completed" ? (fmtStageDate(record?.delivered_at || record?.pickup_at || record?.returned_at) || "") : "",
+        "Completed Time": step === "completed" && (record?.delivered_at || record?.pickup_at || record?.returned_at)
+          ? new Date(record.delivered_at || record.pickup_at || record.returned_at).toTimeString().slice(0, 5)
+          : "",
       }));
       const ws = XLSX.utils.json_to_sheet(exportRows);
       const wb = XLSX.utils.book_new();
@@ -415,7 +464,7 @@ export default function PassportEndorsementPage() {
     }
   }, [sortedRows, companies, getStaffName, getSubDeptName, getClassName]);
 
-  if (loading) {
+  if (shellLoading) {
     return (
       <div className="flex-1 p-8 bg-white flex items-center justify-center min-h-screen">
         <div className="text-center space-y-4">
@@ -471,6 +520,7 @@ export default function PassportEndorsementPage() {
         onManage={handleManage}
         sortConfig={sortConfig}
         handleSort={handleSort}
+        loading={tableLoading}
       />
 
       <HandlingWizardDialog
