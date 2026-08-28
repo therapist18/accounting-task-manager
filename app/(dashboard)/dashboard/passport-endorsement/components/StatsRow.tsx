@@ -28,80 +28,71 @@ export function StatsRow({ counts }: { counts: Record<string, number> }) {
   };
 
   return (
-    <div className="px-8 py-4 bg-white border-b border-slate-200">
-      <div className="flex gap-4">
-        <div className="grid grid-cols-4 gap-4 flex-1">
-          {/* Total Tracked */}
-          <div className="bg-white rounded-xl p-5 border border-slate-200 flex items-center gap-4">
-            <div className="h-12 w-12 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
-              <Laptop className="h-5 w-5 text-blue-500" />
-            </div>
-            <div>
-              <div className="text-2xl font-black text-slate-900 leading-none">{values.all.toLocaleString()}</div>
-              <div className="text-sm font-bold text-slate-700 mt-1">Total Tracked</div>
-              <div className="text-xs text-slate-500 mt-0.5">All cases</div>
-            </div>
+    <div className="px-8 py-5 bg-white border-b border-slate-200">
+      <div className="flex gap-4 overflow-x-auto pb-2 -mb-2 custom-scrollbar">
+        {/* Total Tracked */}
+        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex items-center gap-4 hover:border-slate-300 transition-colors flex-1 min-w-[200px]">
+          <div className="h-12 w-12 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
+            <Laptop className="h-5 w-5 text-blue-500" />
           </div>
-          
-          {/* Awaiting Receipt */}
-          <div className="bg-white rounded-xl p-5 border border-slate-200 flex items-center gap-4">
-            <div className="h-12 w-12 rounded-full bg-orange-50 flex items-center justify-center shrink-0">
-              <Clock className="h-5 w-5 text-orange-500" />
-            </div>
-            <div>
-              <div className="text-2xl font-black text-slate-900 leading-none">{values.awaiting_receipt.toLocaleString()}</div>
-              <div className="text-sm font-bold text-slate-700 mt-1">Awaiting Receipt</div>
-              <div className="text-xs text-slate-500 mt-0.5">Pending receipt</div>
-            </div>
+          <div>
+            <div className="text-2xl font-black text-slate-900 leading-none">{values.all.toLocaleString()}</div>
+            <div className="text-sm font-bold text-slate-700 mt-1">Total Tracked</div>
           </div>
-          
-          {/* In Progress */}
-          <div className="bg-white rounded-xl p-5 border border-slate-200 flex items-center gap-4">
-            <div className="h-12 w-12 rounded-full bg-purple-50 flex items-center justify-center shrink-0">
-              <Landmark className="h-5 w-5 text-purple-500" />
-            </div>
-            <div>
-              <div className="text-2xl font-black text-slate-900 leading-none">{values.in_progress.toLocaleString()}</div>
-              <div className="text-sm font-bold text-slate-700 mt-1">In Progress</div>
-              <div className="text-xs text-slate-500 mt-0.5">At Nyayo House / Dispatch</div>
-            </div>
+        </div>
+        
+        {/* Awaiting Receipt */}
+        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex items-center gap-4 hover:border-slate-300 transition-colors flex-1 min-w-[200px]">
+          <div className="h-12 w-12 rounded-full bg-orange-50 flex items-center justify-center shrink-0">
+            <Clock className="h-5 w-5 text-orange-500" />
           </div>
-          
-          {/* Completed */}
-          <div className="bg-white rounded-xl p-5 border border-slate-200 flex items-center gap-4">
-            <div className="h-12 w-12 rounded-full bg-green-50 flex items-center justify-center shrink-0">
-              <CheckCircle2 className="h-5 w-5 text-green-500" />
-            </div>
-            <div>
-              <div className="text-2xl font-black text-slate-900 leading-none">{values.completed.toLocaleString()}</div>
-              <div className="text-sm font-bold text-slate-700 mt-1">Completed</div>
-              <div className="text-xs text-slate-500 mt-0.5">Successfully completed</div>
-            </div>
+          <div>
+            <div className="text-2xl font-black text-slate-900 leading-none">{values.awaiting_receipt.toLocaleString()}</div>
+            <div className="text-sm font-bold text-slate-700 mt-1">Awaiting Receipt</div>
+          </div>
+        </div>
+        
+        {/* At Nyayo House */}
+        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex items-center gap-4 hover:border-slate-300 transition-colors flex-1 min-w-[200px]">
+          <div className="h-12 w-12 rounded-full bg-purple-50 flex items-center justify-center shrink-0">
+            <Landmark className="h-5 w-5 text-purple-500" />
+          </div>
+          <div>
+            <div className="text-2xl font-black text-slate-900 leading-none">{values.at_nyayo.toLocaleString()}</div>
+            <div className="text-sm font-bold text-slate-700 mt-1">At Nyayo House</div>
           </div>
         </div>
 
-        {/* Breakdown List */}
-        <div className="w-[280px] shrink-0 bg-white rounded-xl p-4 border border-slate-200 flex flex-col justify-center gap-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-              <span className="text-sm font-bold text-slate-600">At Nyayo House</span>
-            </div>
-            <span className="text-sm font-black text-blue-600">{values.at_nyayo}</span>
+        {/* Ready / Out for Dispatch */}
+        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex items-center gap-4 hover:border-slate-300 transition-colors flex-1 min-w-[200px]">
+          <div className="h-12 w-12 rounded-full bg-sky-50 flex items-center justify-center shrink-0">
+            <Truck className="h-5 w-5 text-sky-500" />
           </div>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-              <span className="text-sm font-bold text-slate-600">Ready / Out for Dispatch</span>
-            </div>
-            <span className="text-sm font-black text-blue-600">{values.in_dispatch}</span>
+          <div>
+            <div className="text-2xl font-black text-slate-900 leading-none">{values.in_dispatch.toLocaleString()}</div>
+            <div className="text-sm font-bold text-slate-700 mt-1">In Dispatch</div>
           </div>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-              <span className="text-sm font-bold text-slate-600">Client Managed</span>
-            </div>
-            <span className="text-sm font-black text-blue-600">{values.client_managed}</span>
+        </div>
+
+        {/* Completed */}
+        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex items-center gap-4 hover:border-slate-300 transition-colors flex-1 min-w-[200px]">
+          <div className="h-12 w-12 rounded-full bg-green-50 flex items-center justify-center shrink-0">
+            <CheckCircle2 className="h-5 w-5 text-green-500" />
+          </div>
+          <div>
+            <div className="text-2xl font-black text-slate-900 leading-none">{values.completed.toLocaleString()}</div>
+            <div className="text-sm font-bold text-slate-700 mt-1">Completed</div>
+          </div>
+        </div>
+        
+        {/* Client Managed */}
+        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex items-center gap-4 hover:border-slate-300 transition-colors flex-1 min-w-[200px]">
+          <div className="h-12 w-12 rounded-full bg-violet-50 flex items-center justify-center shrink-0">
+            <UserCheck className="h-5 w-5 text-violet-500" />
+          </div>
+          <div>
+            <div className="text-2xl font-black text-slate-900 leading-none">{values.client_managed.toLocaleString()}</div>
+            <div className="text-sm font-bold text-slate-700 mt-1">Client Managed</div>
           </div>
         </div>
       </div>

@@ -65,7 +65,7 @@ const STICKY_COLUMN_DEFAULT_WIDTHS: Record<string, number> = {
 const STICKY_COLUMN_IDS = ["task_id", "applicant", "company_prefix"] as const;
 
 const STEP_BADGE_CLASSES: Record<HandlingStep, string> = {
-  mode_unset: "bg-amber-50 text-amber-700 border-amber-200",
+  mode_unset: "bg-slate-50 text-slate-500 border-slate-200",
   client_managed: "bg-violet-50 text-violet-700 border-violet-200",
   awaiting_receipt: "bg-slate-100 text-slate-600 border-slate-200",
   received: "bg-sky-50 text-sky-700 border-sky-200",
@@ -331,8 +331,8 @@ export function HandlingTable({
           </colgroup>
           <TableHeader className="sticky top-0 z-40">
             <TableRow className="hover:bg-transparent border-0">
-              <TableHead className="sticky left-0 z-50 w-12 max-w-12 border-r border-b border-white/30 text-center py-1.5 px-2 bg-custom-blue">
-                <span className="text-[10px] font-semibold text-white uppercase tracking-wider">#</span>
+              <TableHead className="sticky left-0 z-50 w-12 max-w-12 border-r border-b border-white/30 text-center py-2 px-2 bg-custom-blue">
+                <span className="text-[11px] font-bold text-white tracking-wide">#</span>
               </TableHead>
               {visibleCols.map((col) => {
                 const isActive = sortConfig?.key === col.id;
@@ -342,7 +342,7 @@ export function HandlingTable({
                     key={col.id}
                     onClick={() => handleSort?.(col.id)}
                     className={cn(
-                      "group relative border-r border-b border-white/30 px-4 py-1.5 select-none transition-colors bg-custom-blue hover:bg-slate-700",
+                      "group relative border-r border-b border-white/30 px-4 py-2 select-none transition-colors bg-custom-blue hover:bg-slate-700",
                       handleSort && "cursor-pointer",
                       isActive && "bg-slate-700",
                       isStickyLeft && "sticky z-50"
@@ -350,7 +350,7 @@ export function HandlingTable({
                     style={isStickyLeft ? { left: stickyColumnOffsets[col.id] } : undefined}
                   >
                     <div className="flex items-center justify-between gap-2 min-w-0 pr-1">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-white leading-snug min-w-0">
+                      <span className="text-xs font-bold tracking-wide text-white leading-snug min-w-0">
                         {col.label}
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
@@ -388,8 +388,8 @@ export function HandlingTable({
                   </TableHead>
                 );
               })}
-              <TableHead className="sticky right-0 z-50 w-32 max-w-32 border-l border-b border-white/30 text-center py-1.5 px-2 bg-custom-blue">
-                <span className="text-[10px] font-semibold text-white uppercase tracking-wider">Actions</span>
+              <TableHead className="sticky right-0 z-50 w-32 max-w-32 border-l border-b border-white/30 text-center py-2 px-2 bg-custom-blue">
+                <span className="text-[11px] font-bold text-white tracking-wide">Actions</span>
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -495,7 +495,7 @@ export function HandlingTable({
                             )}>
                               {mode === "bcl" ? "BCL Handles" : "Client Handles"}
                             </span>
-                          ) : <span className="text-amber-600 text-xs font-bold">Not Set</span>;
+                          ) : <span className="text-slate-300">—</span>;
                           break;
                         case "current_step":
                           content = <StepBadge step={step} />;

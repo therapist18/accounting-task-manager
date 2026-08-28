@@ -265,14 +265,14 @@ export function StatusTabs({
   };
 
   return (
-    <div className="px-8 py-4 flex flex-wrap items-center gap-4 border-b border-slate-200 bg-white antialiased overflow-x-auto">
-      <div className="relative w-80 shrink-0">
+    <div className="px-8 py-5 flex flex-wrap items-center gap-6 border-b border-slate-200 bg-white antialiased overflow-x-auto">
+      <div className="relative w-[340px] shrink-0">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
         <Input
           placeholder="Search by name, passport no., company..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full h-10 pl-11 pr-10 bg-white border-slate-200 rounded-md text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
+          className="w-full h-11 pl-11 pr-10 bg-white border-slate-200 rounded-lg text-[13px] font-semibold focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400 placeholder:font-medium shadow-sm"
         />
         {searchQuery && (
           <button
@@ -284,47 +284,47 @@ export function StatusTabs({
         )}
       </div>
       
-      <div className="flex items-center gap-2 shrink-0 h-10 px-1 border border-slate-200 rounded-md bg-white">
+      <div className="flex items-center gap-2 shrink-0 h-11 px-2 border border-slate-200 rounded-lg bg-white shadow-sm hover:border-slate-300 transition-colors">
         <span className="text-[13px] font-semibold text-slate-500 pl-3">Status</span>
         <Select value={activeStep} onValueChange={setActiveStep}>
-          <SelectTrigger className="h-8 w-[160px] border-none shadow-none text-[13px] font-semibold text-slate-700 focus:ring-0 bg-transparent py-0">
+          <SelectTrigger className="h-9 w-[170px] border-none shadow-none text-[13px] font-bold text-slate-700 focus:ring-0 bg-transparent py-0">
             <SelectValue placeholder="All Statuses" />
           </SelectTrigger>
           <SelectContent>
             {statusOptions.map(opt => (
-              <SelectItem key={opt.id} value={opt.id} className="text-[13px]">{opt.label}</SelectItem>
+              <SelectItem key={opt.id} value={opt.id} className="text-[13px] font-medium">{opt.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
 
-      <div className="flex items-center gap-2 shrink-0 h-10 px-1 border border-slate-200 rounded-md bg-white">
+      <div className="flex items-center gap-2 shrink-0 h-11 px-2 border border-slate-200 rounded-lg bg-white shadow-sm hover:border-slate-300 transition-colors">
         <span className="text-[13px] font-semibold text-slate-500 pl-3">Mode</span>
         <Select value={activeMode} onValueChange={setActiveMode}>
-          <SelectTrigger className="h-8 w-[140px] border-none shadow-none text-[13px] font-semibold text-slate-700 focus:ring-0 bg-transparent py-0">
+          <SelectTrigger className="h-9 w-[150px] border-none shadow-none text-[13px] font-bold text-slate-700 focus:ring-0 bg-transparent py-0">
             <SelectValue placeholder="All Modes" />
           </SelectTrigger>
           <SelectContent>
             {modeOptions.map(opt => (
-              <SelectItem key={opt.id} value={opt.id} className="text-[13px]">{opt.label}</SelectItem>
+              <SelectItem key={opt.id} value={opt.id} className="text-[13px] font-medium">{opt.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
 
-      <div className="h-6 w-px bg-slate-200 mx-2 shrink-0" />
+      <div className="h-7 w-px bg-slate-200 mx-1 shrink-0" />
 
       {availableClasses.length > 0 && (
-        <div className="flex items-center gap-2 shrink-0 h-10 px-1 border border-slate-200 rounded-md bg-white">
+        <div className="flex items-center gap-2 shrink-0 h-11 px-2 border border-slate-200 rounded-lg bg-white shadow-sm hover:border-slate-300 transition-colors">
           <span className="text-[13px] font-semibold text-slate-500 pl-3">Class</span>
           <Select value={activeClassIds.length > 0 ? activeClassIds[0] : "all"} onValueChange={(v) => setActiveClassIds(v === "all" ? [] : [v])}>
-            <SelectTrigger className="h-8 w-[120px] border-none shadow-none text-[13px] font-semibold text-slate-700 focus:ring-0 bg-transparent py-0">
+            <SelectTrigger className="h-9 w-[130px] border-none shadow-none text-[13px] font-bold text-slate-700 focus:ring-0 bg-transparent py-0">
               <SelectValue placeholder="All Classes" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all" className="text-[13px]">All Classes</SelectItem>
+              <SelectItem value="all" className="text-[13px] font-medium">All Classes</SelectItem>
               {availableClasses.map((c: any) => (
-                <SelectItem key={c.id.toString()} value={c.id.toString()} className="text-[13px]">{c.name}</SelectItem>
+                <SelectItem key={c.id.toString()} value={c.id.toString()} className="text-[13px] font-medium">{c.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -332,16 +332,16 @@ export function StatusTabs({
       )}
 
       {availableSubClasses.length > 0 && (
-        <div className="flex items-center gap-2 shrink-0 h-10 px-1 border border-slate-200 rounded-md bg-white">
+        <div className="flex items-center gap-2 shrink-0 h-11 px-2 border border-slate-200 rounded-lg bg-white shadow-sm hover:border-slate-300 transition-colors">
           <span className="text-[13px] font-semibold text-slate-500 pl-3">Sub-class</span>
           <Select value={activeSubClassIds.length > 0 ? activeSubClassIds[0] : "all"} onValueChange={(v) => setActiveSubClassIds(v === "all" ? [] : [v])}>
-            <SelectTrigger className="h-8 w-[140px] border-none shadow-none text-[13px] font-semibold text-slate-700 focus:ring-0 bg-transparent py-0">
+            <SelectTrigger className="h-9 w-[150px] border-none shadow-none text-[13px] font-bold text-slate-700 focus:ring-0 bg-transparent py-0">
               <SelectValue placeholder="All Sub-classes" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all" className="text-[13px]">All Sub-classes</SelectItem>
+              <SelectItem value="all" className="text-[13px] font-medium">All Sub-classes</SelectItem>
               {availableSubClasses.map((c: any) => (
-                <SelectItem key={c.id.toString()} value={c.id.toString()} className="text-[13px]">{c.name}</SelectItem>
+                <SelectItem key={c.id.toString()} value={c.id.toString()} className="text-[13px] font-medium">{c.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
