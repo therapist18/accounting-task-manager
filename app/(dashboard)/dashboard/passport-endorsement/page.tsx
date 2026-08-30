@@ -23,8 +23,7 @@ import {
   type PassportHandlingRecord,
   type Courier,
 } from "./utils/database";
-import { PageHeader, StatusTabs, HierarchyTabs } from "./components/PageHeader";
-import { StatsRow } from "./components/StatsRow";
+import { PageHeader, StatsRow, HierarchyTabs } from "./components/PageHeader";
 import { HandlingTable, HANDLING_COLUMNS, DEFAULT_VISIBLE_COLUMN_IDS, fmtStageDate } from "./components/HandlingTable";
 import { HandlingWizardDialog } from "./components/HandlingWizardDialog";
 import { CourierRegistryDialog } from "./components/CourierRegistryDialog";
@@ -513,17 +512,13 @@ export default function PassportEndorsementPage() {
         subDeptTaskCounts={subDeptTaskCounts}
       />
 
-      <StatusTabs 
-        activeStep={activeSteps[0] ?? "all"} setActiveStep={(v: any) => setActiveSteps(v === "all" ? [] : [v])}
+      <StatsRow activeStep={activeSteps[0] ?? "all"} setActiveStep={(v: any) => setActiveSteps(v === "all" ? [] : [v])}
         hasStepFilter={activeSteps.length > 0}
         activeMode={activeMode} setActiveMode={setActiveMode}
         counts={counts} 
         searchQuery={searchQuery} setSearchQuery={setSearchQuery}
         availableClasses={availableClasses} activeClassIds={activeClassIds} setActiveClassIds={setActiveClassIds} classCounts={classCounts}
-        availableSubClasses={availableSubClasses} activeSubClassIds={activeSubClassIds} setActiveSubClassIds={setActiveSubClassIds} subClassCounts={subClassCounts}
-      />
-
-      <StatsRow counts={counts} activeSteps={activeSteps} setActiveSteps={setActiveSteps} />
+        availableSubClasses={availableSubClasses} activeSubClassIds={activeSubClassIds} setActiveSubClassIds={setActiveSubClassIds} subClassCounts={subClassCounts} />
 
       <HandlingTable
         rows={sortedRows}
