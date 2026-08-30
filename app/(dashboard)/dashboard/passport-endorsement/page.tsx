@@ -22,7 +22,6 @@ import {
   IMMIGRATION_DEPT_ID,
   type PassportHandlingRecord,
   type Courier,
-  type HandlingStep,
 } from "./utils/database";
 import { PageHeader, StatusTabs, HierarchyTabs } from "./components/PageHeader";
 import { StatsRow } from "./components/StatsRow";
@@ -68,7 +67,10 @@ export default function PassportEndorsementPage() {
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
   const [activeClassIds, setActiveClassIds] = useState<string[]>([]);
   const [activeSubClassIds, setActiveSubClassIds] = useState<string[]>([]);
-  const [activeStep, setActiveStep] = useState<HandlingStep | "all">("all");
+  // Multi-selection of status steps (string[]) rather than a single active step — the Status
+  // dropdown single-selects (last pick wins), while the Stats tiles can combine several steps
+  // (e.g. "In Dispatch" = ready_for_dispatch + out_for_delivery + awaiting_pickup).
+  const [activeSteps, setActiveSteps] = useState<string[]>([]);
   const [activeMode, setActiveMode] = useState<string>("all");
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(DEFAULT_VISIBLE_COLUMN_IDS);
   // Single source of truth for sorting — the MultiSort dialog manages it as an ordered list of
@@ -277,14 +279,14 @@ export default function PassportEndorsementPage() {
 
   const filteredRows = useMemo(() => {
     let result = searchedRows;
-    if (activeStep !== "all") result = result.filter((r) => r.step === activeStep);
+    if (activeSteps.length > 0) result = result.filter((r) => activeSteps.includes(r.step));
     if (activeMode !== "all") {
       if (activeMode === "bcl") result = result.filter((r) => r.mode === "bcl");
       else if (activeMode === "client") result = result.filter((r) => r.mode === "client");
       else if (activeMode === "not_set") result = result.filter((r) => !r.mode);
     }
     return result;
-  }, [searchedRows, activeStep, activeMode]);
+  }, [searchedRows, activeSteps, activeMode]);
 
   const getSortableValue = useCallback((row: any, columnId: string) => {
     const { task, record, mode, step, writeUpDate } = row;
@@ -326,6 +328,13 @@ export default function PassportEndorsementPage() {
       case "notified_date":
       case "notified_time":
         return record?.client_notified_at ? new Date(record.client_notified_at).getTime() : 0;
+      case "dispatch_handled_by":
+        return (getStaffName(record?.dispatch_handled_by) || "").toLowerCase();
+      case "dispatch_mode": {
+        if (!record?.dispatch_method) return "";
+        if (record.dispatch_method === "pickup") return "pickup";
+        return record.delivery_type === "courier" ? "delivery_courier" : "delivery_staff";
+      }
       case "dispatch_by": {
         const by = record?.dispatch_method === "delivery"
           ? (record.delivery_type === "courier" ? record.courier_rider_name : getStaffName(record.delivered_by))
@@ -443,6 +452,12 @@ export default function PassportEndorsementPage() {
         "Notified By": getStaffName(record?.client_notified_by) || "",
         "Notified Date": fmtStageDate(record?.client_notified_at) || "",
         "Notified Time": record?.client_notified_at ? new Date(record.client_notified_at).toTimeString().slice(0, 5) : "",
+        "Dispatch Mode": record?.dispatch_method === "pickup"
+          ? "Client Pickup"
+          : record?.dispatch_method === "delivery"
+          ? (record.delivery_type === "courier" ? "Delivery - Courier" : "Delivery - Staff")
+          : "",
+        "Dispatch Handled By": getStaffName(record?.dispatch_handled_by) || "",
         "Dispatch By": record?.dispatch_method === "delivery"
           ? (record.delivery_type === "courier" ? record.courier_rider_name : getStaffName(record.delivered_by))
           : record?.pickup_person_name || "",
@@ -466,10 +481,10 @@ export default function PassportEndorsementPage() {
 
   if (shellLoading) {
     return (
-      <div className="flex-1 p-8 bg-white flex items-center justify-center min-h-screen">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-10 w-10 animate-spin text-slate-400 mx-auto" />
-          <p className="text-sm font-medium text-slate-500">Loading Passport Endorsement Tracking...</p>
+      <div className="flex-1 p-10 bg-white flex items-center justify-center min-h-screen">
+        <div className="text-center space-y-5">
+          <Loader2 className="h-12 w-12 animate-spin text-custom-blue/60 mx-auto" />
+          <p className="text-base font-semibold text-slate-600">Loading Passport Endorsement Tracking...</p>
         </div>
       </div>
     );
@@ -499,7 +514,8 @@ export default function PassportEndorsementPage() {
       />
 
       <StatusTabs 
-        activeStep={activeStep} setActiveStep={setActiveStep} 
+        activeStep={activeSteps[0] ?? "all"} setActiveStep={(v: any) => setActiveSteps(v === "all" ? [] : [v])}
+        hasStepFilter={activeSteps.length > 0}
         activeMode={activeMode} setActiveMode={setActiveMode}
         counts={counts} 
         searchQuery={searchQuery} setSearchQuery={setSearchQuery}
@@ -507,7 +523,7 @@ export default function PassportEndorsementPage() {
         availableSubClasses={availableSubClasses} activeSubClassIds={activeSubClassIds} setActiveSubClassIds={setActiveSubClassIds} subClassCounts={subClassCounts}
       />
 
-      <StatsRow counts={counts} />
+      <StatsRow counts={counts} activeSteps={activeSteps} setActiveSteps={setActiveSteps} />
 
       <HandlingTable
         rows={sortedRows}

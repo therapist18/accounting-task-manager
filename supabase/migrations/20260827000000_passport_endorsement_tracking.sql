@@ -56,6 +56,7 @@ CREATE TABLE tm_passport_handling (
   -- Getting it back to the client
   dispatch_method TEXT CHECK (dispatch_method IN ('delivery', 'pickup')),
   delivery_type TEXT CHECK (delivery_type IN ('staff', 'courier')),
+  dispatch_handled_by UUID REFERENCES scanner_users(id),
   delivered_by UUID REFERENCES scanner_users(id),
   courier_id UUID REFERENCES tm_couriers(id),
   courier_rider_name TEXT,

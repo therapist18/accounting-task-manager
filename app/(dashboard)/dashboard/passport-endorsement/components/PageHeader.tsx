@@ -17,12 +17,13 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { STEP_LABELS, type HandlingStep } from "../utils/database";
 
-// Same look as Summary Reports' HierarchyTabs (PageHeader.tsx there) — bordered pill tabs +
-// a searchable multi-select dropdown for Classes/Sub-Classes, duplicated here rather than
-// imported since these are private, route-scoped components in that other module.
-const TAB_LIST_CLASS = "bg-slate-100 p-1 rounded-md border border-slate-200";
-const TAB_TRIGGER_CLASS = "group gap-2 rounded-md px-4 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-white transition-colors data-[state=active]:bg-custom-blue data-[state=active]:text-white data-[state=active]:shadow-sm";
-const COUNT_BADGE_CLASS = "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-md text-sm min-w-[2rem] leading-none shadow-sm bg-custom-blue text-white group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white";
+// Sub-department tabs mirror the real-tab (underline) treatment used across the app's tabbed
+// UIs — a transparent trigger strip sitting on the rail, active item gets a blue bottom border
+// instead of the filled-pill look. The Status/"All Statuses" picker effectively replaced the
+// old status pill row entirely, so these underline tabs are only used for sub-departments.
+const TAB_RAIL_CLASS = "w-full h-12 justify-start gap-7 bg-transparent p-0 border-b border-slate-200";
+const TAB_UNDERLINE_TRIGGER_CLASS = "group h-12 rounded-none bg-transparent shadow-none px-1 -mb-px border-b-[3px] border-transparent text-sm font-bold text-slate-500 hover:text-slate-900 transition-all data-[state=active]:border-custom-blue data-[state=active]:text-custom-blue data-[state=active]:bg-transparent data-[state=active]:shadow-none";
+const COUNT_BADGE_CLASS = "ml-2 inline-flex items-center justify-center font-bold tabular-nums rounded-full px-2 py-0.5 text-[11px] leading-none bg-slate-100 text-slate-600 group-data-[state=active]:bg-blue-50 group-data-[state=active]:text-blue-700";
 
 const STATUS_TAB_ORDER: HandlingStep[] = [
   "awaiting_receipt",
@@ -77,7 +78,7 @@ function DateTextInput({ value, onChange, placeholder }: { value: Date | undefin
       onChange={(e) => handleChange(e.target.value)}
       placeholder={placeholder}
       className={cn(
-        "w-[100px] bg-transparent text-sm font-semibold text-slate-700 outline-none placeholder:text-slate-300 placeholder:font-normal",
+        "w-[110px] bg-transparent text-[13px] font-semibold text-slate-700 outline-none placeholder:text-slate-300 placeholder:font-normal",
         text && !DATE_TEXT_RE.test(text) && "text-red-500"
       )}
     />
@@ -88,7 +89,7 @@ function DateRangeFilter({ dateRange, setDateRange }: any) {
   const hasRange = !!(dateRange?.from || dateRange?.to);
 
   return (
-    <div className="flex items-center gap-1.5 h-9 pl-3 pr-2 rounded-md border border-slate-200 bg-white">
+    <div className="flex items-center gap-2 h-11 pl-3.5 pr-2.5 rounded-xl border border-slate-200 bg-white shadow-sm">
       <CalendarRange className="h-3.5 w-3.5 text-slate-400 shrink-0" />
       <DateTextInput
         value={dateRange?.from}
@@ -131,13 +132,20 @@ export function PageHeader({
   sortLevelCount = 0,
 }: any) {
   return (
-    <div className="border-b border-slate-200 bg-white antialiased">
-      <div className="px-8 py-4 flex items-center justify-between gap-4">
-        <div className="flex flex-col gap-1 min-w-0">
-          <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight leading-none">
-            Passport Endorsement Tracking
-          </h1>
-          <p className="text-sm text-slate-500 font-semibold">
+    <div className="border-b border-slate-200 bg-gradient-to-r from-white via-white to-blue-50/30 antialiased">
+      <div className="px-10 py-6 flex items-center justify-between gap-6">
+        <div className="flex flex-col gap-1.5 min-w-0">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-custom-blue flex items-center justify-center shadow-md shadow-blue-500/20">
+              <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+            <h1 className="text-[26px] font-black text-slate-900 tracking-tight leading-none">
+              Passport Endorsement
+            </h1>
+          </div>
+          <p className="text-[15px] text-slate-500 font-medium pl-[52px]">
             Track and manage all passport endorsement cases in one place
           </p>
         </div>
@@ -149,7 +157,7 @@ export function PageHeader({
             variant="outline"
             onClick={onRefresh}
             disabled={loading}
-            className="h-9 px-4 rounded-md border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 gap-2"
+            className="h-11 px-5 rounded-xl border-slate-200 text-[13px] font-bold text-slate-700 bg-white hover:bg-slate-50 gap-2 shadow-sm"
           >
             <RotateCcw className={cn("h-4 w-4 text-slate-400", loading && "animate-spin")} />
             Refresh
@@ -157,35 +165,38 @@ export function PageHeader({
 
           <Button
             onClick={onExportExcel}
-            className="h-9 px-4 rounded-md text-sm font-bold gap-2 text-white hover:bg-[#2d5a94] shadow-sm"
+            className="h-11 px-5 rounded-xl text-[13px] font-bold gap-2 text-white hover:bg-[#2d5a94] shadow-md shadow-blue-500/25"
             style={{ backgroundColor: "#376bae" }}
           >
-            <Download className="h-3.5 w-3.5" /> Export
+            <Download className="h-4 w-4" /> Export
           </Button>
+
+          <ColumnVisibilityDialog
+            columns={columns}
+            visibleColumnIds={visibleColumnIds}
+            setVisibleColumnIds={setVisibleColumnIds}
+          />
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="h-9 px-3 rounded-md border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 gap-1.5">
+              <Button variant="outline" className="h-11 px-4 rounded-xl border-slate-200 text-[13px] font-bold text-slate-700 bg-white hover:bg-slate-50 gap-2 shadow-sm">
                 <MoreHorizontal className="h-4 w-4 text-slate-400" /> More
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={onOpenCouriers} className="gap-2 cursor-pointer font-medium">
+            <DropdownMenuContent align="end" className="w-52 rounded-xl border-slate-200 shadow-xl">
+              <DropdownMenuItem onClick={onOpenCouriers} className="gap-2.5 cursor-pointer font-medium text-[13px] py-2.5">
                 <Truck className="h-4 w-4 text-slate-400" /> Manage Couriers
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={onOpenMultiSort} className="gap-2 cursor-pointer font-medium justify-between">
-                <div className="flex items-center gap-2">
+              <DropdownMenuItem onClick={onOpenMultiSort} className="gap-2.5 cursor-pointer font-medium text-[13px] py-2.5 justify-between">
+                <div className="flex items-center gap-2.5">
                   <ListFilter className="h-4 w-4 text-slate-400" /> Multi-level Sort
                 </div>
                 {sortLevelCount > 1 && (
-                  <span className="h-5 w-5 rounded-md bg-custom-blue text-white text-[10px] font-bold flex items-center justify-center">
+                  <span className="h-5 w-5 rounded-lg bg-custom-blue text-white text-[10px] font-bold flex items-center justify-center">
                     {sortLevelCount}
                   </span>
                 )}
               </DropdownMenuItem>
-              {/* Note: Columns will be managed differently or kept here. We can render the Dialog trigger inside a MenuItem, but that requires careful state management. 
-                  For now, we'll implement a simple callback or handle it in a separate button if we want, but the image just has "More". 
-                  Let's leave Columns out of More for a second if it's tricky, or implement it by exposing an onOpenColumns callback. */}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -194,7 +205,7 @@ export function PageHeader({
   );
 }
 
-function ColumnVisibilityDialog({ columns, visibleColumnIds, setVisibleColumnIds }: any) {
+export function ColumnVisibilityDialog({ columns, visibleColumnIds, setVisibleColumnIds }: any) {
   const [open, setOpen] = useState(false);
   const toggle = (id: string, checked: boolean) =>
     setVisibleColumnIds((prev: string[]) => (checked ? [...prev, id] : prev.filter((x: string) => x !== id)));
@@ -202,29 +213,41 @@ function ColumnVisibilityDialog({ columns, visibleColumnIds, setVisibleColumnIds
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="h-9 px-4 rounded-md border-slate-200 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 gap-2">
+        <Button variant="outline" className="h-11 px-4 rounded-xl border-slate-200 text-[13px] font-bold text-slate-700 bg-white hover:bg-slate-50 gap-2 shadow-sm">
           <Eye className="h-4 w-4" /> Columns
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-sm max-h-[75vh] flex flex-col">
+      <DialogContent className="max-w-md max-h-[78vh] flex flex-col rounded-2xl border-slate-200 shadow-2xl">
         <DialogHeader>
-          <DialogTitle className="text-sm font-black text-slate-800 uppercase tracking-wider">
-            Column Visibility
+          <DialogTitle className="text-[15px] font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+            <Eye className="h-4 w-4 text-custom-blue" /> Column Visibility
           </DialogTitle>
         </DialogHeader>
-        <div className="flex-1 overflow-y-auto space-y-1 mt-2">
+        <div className="flex-1 overflow-y-auto space-y-1 mt-3 custom-scrollbar">
           {columns.map((col: any) => (
-            <div key={col.id} className="flex items-center gap-2.5 px-1 py-1.5 rounded hover:bg-slate-50">
+            <div key={col.id} className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-50 transition-colors">
               <Checkbox
                 id={`col-${col.id}`}
                 checked={visibleColumnIds.includes(col.id)}
                 onCheckedChange={(v) => toggle(col.id, v === true)}
+                className="border-slate-300 data-[state=checked]:bg-custom-blue data-[state=checked]:border-custom-blue"
               />
-              <label htmlFor={`col-${col.id}`} className="text-sm text-slate-700 cursor-pointer flex-1">
+              <label htmlFor={`col-${col.id}`} className="text-[13px] font-semibold text-slate-700 cursor-pointer flex-1">
                 {col.label}
               </label>
             </div>
           ))}
+        </div>
+        <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
+          <span className="text-xs font-bold text-slate-500 tabular-nums">{visibleColumnIds.length} of {columns.length} columns visible</span>
+          <Button
+            size="sm"
+            className="h-9 px-4 rounded-lg text-xs font-bold gap-2 text-white shadow-sm"
+            style={{ backgroundColor: "#376bae" }}
+            onClick={() => setOpen(false)}
+          >
+            Done
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -238,6 +261,7 @@ export function StatusTabs({
   searchQuery, setSearchQuery,
   availableClasses = [], activeClassIds = [], setActiveClassIds,
   availableSubClasses = [], activeSubClassIds = [], setActiveSubClassIds,
+  hasStepFilter,
 }: any) {
   const statusOptions = [
     { id: "all", label: "All Statuses" },
@@ -254,7 +278,7 @@ export function StatusTabs({
     { id: "not_set", label: "Not Set" },
   ];
 
-  const hasFilters = activeStep !== "all" || activeMode !== "all" || activeClassIds.length > 0 || activeSubClassIds.length > 0 || searchQuery !== "";
+  const hasFilters = (hasStepFilter ?? activeStep !== "all") || activeMode !== "all" || activeClassIds.length > 0 || activeSubClassIds.length > 0 || searchQuery !== "";
 
   const handleClearFilters = () => {
     setActiveStep("all");
@@ -265,14 +289,14 @@ export function StatusTabs({
   };
 
   return (
-    <div className="px-8 py-5 flex flex-wrap items-center gap-6 border-b border-slate-200 bg-white antialiased overflow-x-auto">
-      <div className="relative w-[340px] shrink-0">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+    <div className="px-10 py-6 flex flex-wrap items-center gap-4 border-b border-slate-200 bg-white antialiased overflow-x-auto">
+      <div className="relative w-[360px] shrink-0">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-slate-400" />
         <Input
           placeholder="Search by name, passport no., company..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full h-11 pl-11 pr-10 bg-white border-slate-200 rounded-lg text-[13px] font-semibold focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400 placeholder:font-medium shadow-sm"
+          className="w-full h-12 pl-12 pr-10 bg-slate-50/50 border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all placeholder:text-slate-400 placeholder:font-medium hover:bg-white"
         />
         {searchQuery && (
           <button
@@ -284,29 +308,29 @@ export function StatusTabs({
         )}
       </div>
       
-      <div className="flex items-center gap-2 shrink-0 h-11 px-2 border border-slate-200 rounded-lg bg-white shadow-sm hover:border-slate-300 transition-colors">
-        <span className="text-[13px] font-semibold text-slate-500 pl-3">Status</span>
+      <div className="flex items-center gap-2 shrink-0 h-12 pl-3 pr-2 border border-slate-200 rounded-xl bg-white shadow-sm hover:border-slate-300 transition-colors">
+        <span className="text-sm font-semibold text-slate-500 pl-2">Status</span>
         <Select value={activeStep} onValueChange={setActiveStep}>
-          <SelectTrigger className="h-9 w-[170px] border-none shadow-none text-[13px] font-bold text-slate-700 focus:ring-0 bg-transparent py-0">
+          <SelectTrigger className="h-10 w-[180px] border-none shadow-none text-sm font-bold text-slate-700 focus:ring-0 bg-transparent py-0">
             <SelectValue placeholder="All Statuses" />
           </SelectTrigger>
           <SelectContent>
             {statusOptions.map(opt => (
-              <SelectItem key={opt.id} value={opt.id} className="text-[13px] font-medium">{opt.label}</SelectItem>
+              <SelectItem key={opt.id} value={opt.id} className="text-sm font-medium">{opt.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
 
-      <div className="flex items-center gap-2 shrink-0 h-11 px-2 border border-slate-200 rounded-lg bg-white shadow-sm hover:border-slate-300 transition-colors">
-        <span className="text-[13px] font-semibold text-slate-500 pl-3">Mode</span>
+      <div className="flex items-center gap-2 shrink-0 h-12 pl-3 pr-2 border border-slate-200 rounded-xl bg-white shadow-sm hover:border-slate-300 transition-colors">
+        <span className="text-sm font-semibold text-slate-500 pl-2">Mode</span>
         <Select value={activeMode} onValueChange={setActiveMode}>
-          <SelectTrigger className="h-9 w-[150px] border-none shadow-none text-[13px] font-bold text-slate-700 focus:ring-0 bg-transparent py-0">
+          <SelectTrigger className="h-10 w-[160px] border-none shadow-none text-sm font-bold text-slate-700 focus:ring-0 bg-transparent py-0">
             <SelectValue placeholder="All Modes" />
           </SelectTrigger>
           <SelectContent>
             {modeOptions.map(opt => (
-              <SelectItem key={opt.id} value={opt.id} className="text-[13px] font-medium">{opt.label}</SelectItem>
+              <SelectItem key={opt.id} value={opt.id} className="text-sm font-medium">{opt.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -315,16 +339,16 @@ export function StatusTabs({
       <div className="h-7 w-px bg-slate-200 mx-1 shrink-0" />
 
       {availableClasses.length > 0 && (
-        <div className="flex items-center gap-2 shrink-0 h-11 px-2 border border-slate-200 rounded-lg bg-white shadow-sm hover:border-slate-300 transition-colors">
-          <span className="text-[13px] font-semibold text-slate-500 pl-3">Class</span>
+        <div className="flex items-center gap-2 shrink-0 h-12 pl-3 pr-2 border border-slate-200 rounded-xl bg-white shadow-sm hover:border-slate-300 transition-colors">
+          <span className="text-sm font-semibold text-slate-500 pl-2">Class</span>
           <Select value={activeClassIds.length > 0 ? activeClassIds[0] : "all"} onValueChange={(v) => setActiveClassIds(v === "all" ? [] : [v])}>
-            <SelectTrigger className="h-9 w-[130px] border-none shadow-none text-[13px] font-bold text-slate-700 focus:ring-0 bg-transparent py-0">
+            <SelectTrigger className="h-10 w-[140px] border-none shadow-none text-sm font-bold text-slate-700 focus:ring-0 bg-transparent py-0">
               <SelectValue placeholder="All Classes" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all" className="text-[13px] font-medium">All Classes</SelectItem>
+              <SelectItem value="all" className="text-sm font-medium">All Classes</SelectItem>
               {availableClasses.map((c: any) => (
-                <SelectItem key={c.id.toString()} value={c.id.toString()} className="text-[13px] font-medium">{c.name}</SelectItem>
+                <SelectItem key={c.id.toString()} value={c.id.toString()} className="text-sm font-medium">{c.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -332,16 +356,16 @@ export function StatusTabs({
       )}
 
       {availableSubClasses.length > 0 && (
-        <div className="flex items-center gap-2 shrink-0 h-11 px-2 border border-slate-200 rounded-lg bg-white shadow-sm hover:border-slate-300 transition-colors">
-          <span className="text-[13px] font-semibold text-slate-500 pl-3">Sub-class</span>
+        <div className="flex items-center gap-2 shrink-0 h-12 pl-3 pr-2 border border-slate-200 rounded-xl bg-white shadow-sm hover:border-slate-300 transition-colors">
+          <span className="text-sm font-semibold text-slate-500 pl-2">Sub-class</span>
           <Select value={activeSubClassIds.length > 0 ? activeSubClassIds[0] : "all"} onValueChange={(v) => setActiveSubClassIds(v === "all" ? [] : [v])}>
-            <SelectTrigger className="h-9 w-[150px] border-none shadow-none text-[13px] font-bold text-slate-700 focus:ring-0 bg-transparent py-0">
+            <SelectTrigger className="h-10 w-[150px] border-none shadow-none text-sm font-bold text-slate-700 focus:ring-0 bg-transparent py-0">
               <SelectValue placeholder="All Sub-classes" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all" className="text-[13px] font-medium">All Sub-classes</SelectItem>
+              <SelectItem value="all" className="text-sm font-medium">All Sub-classes</SelectItem>
               {availableSubClasses.map((c: any) => (
-                <SelectItem key={c.id.toString()} value={c.id.toString()} className="text-[13px] font-medium">{c.name}</SelectItem>
+                <SelectItem key={c.id.toString()} value={c.id.toString()} className="text-sm font-medium">{c.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -352,33 +376,12 @@ export function StatusTabs({
         <Button 
           variant="ghost" 
           onClick={handleClearFilters}
-          className="h-10 px-4 rounded-md text-[13px] font-bold text-blue-600 hover:bg-blue-50 hover:text-blue-700 ml-auto gap-2"
+          className="h-11 px-5 rounded-xl text-sm font-bold text-blue-600 hover:bg-blue-50 hover:text-blue-700 ml-auto gap-2"
         >
           Clear Filters <X className="h-4 w-4" />
         </Button>
       )}
     </div>
-  );
-}
-
-function PillTrack({ items, value, onValueChange, size = "md" }: any) {
-  return (
-    <Tabs value={value} onValueChange={onValueChange} className="shrink-0">
-      <TabsList className={cn(TAB_LIST_CLASS, "flex-wrap")}>
-        {items.map((item: any) => (
-          <TabsTrigger
-            key={item.id}
-            value={item.id}
-            className={cn(TAB_TRIGGER_CLASS, size === "sm" ? "h-8 px-3 text-sm" : "h-9 px-4")}
-          >
-            {item.label}
-            {typeof item.count === "number" && item.count > 0 && (
-              <span className={COUNT_BADGE_CLASS}>{item.count}</span>
-            )}
-          </TabsTrigger>
-        ))}
-      </TabsList>
-    </Tabs>
   );
 }
 
@@ -398,14 +401,14 @@ function MultiSelectSearchableDropdown({
         <Button
           variant="outline"
           className={cn(
-            "h-10 px-5 rounded-md border-blue-500 text-sm font-semibold text-blue-600 bg-white hover:bg-blue-50 shrink-0",
-            accentActive && "bg-custom-blue border-custom-blue text-white hover:bg-[#2d5a94] hover:text-white shadow-sm"
+            "h-11 px-5 rounded-xl border-blue-500 text-sm font-semibold text-blue-600 bg-white hover:bg-blue-50 shrink-0 shadow-sm",
+            accentActive && "bg-custom-blue border-custom-blue text-white hover:bg-[#2d5a94] hover:text-white shadow-md shadow-blue-500/20"
           )}
         >
           {label}
           {selectedIds.length > 0 && (
             <span className={cn(
-              "ml-2 inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm",
+              "ml-2 inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-lg text-[13px] min-w-[2rem] leading-none shadow-sm",
               accentActive ? "bg-white/25 text-white" : "bg-custom-blue text-white"
             )}>
               {selectedIds.length}
@@ -462,29 +465,28 @@ export function HierarchyTabs({
   activeSubDeptId, setActiveSubDeptId,
   subDeptTaskCounts = {},
 }: any) {
-  const handleSubDeptChange = (v: string) => {
-    setActiveSubDeptId(v);
-  };
+  if (subDepartments.length === 0) return null;
 
-  const hasSubDepts = subDepartments.length > 0;
-  if (!hasSubDepts) return null;
+  const items = [
+    { id: "all", label: "All", count: subDeptTaskCounts.all },
+    ...subDepartments.map((s: any) => ({ id: s.id.toString(), label: s.name, count: subDeptTaskCounts[s.id.toString()] })),
+  ];
 
   return (
-    <div className="flex flex-col border-b border-slate-200 antialiased bg-white">
-      <div className="px-8 py-3 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="overflow-x-auto custom-scrollbar">
-            <PillTrack
-              size="sm"
-              value={activeSubDeptId}
-              onValueChange={handleSubDeptChange}
-              items={[
-                { id: "all", label: "All", count: subDeptTaskCounts.all },
-                ...subDepartments.map((s: any) => ({ id: s.id.toString(), label: s.name, count: subDeptTaskCounts[s.id.toString()] })),
-              ]}
-            />
-          </div>
-        </div>
+    <div className="bg-white antialiased">
+      <div className="px-10 overflow-x-auto custom-scrollbar">
+        <Tabs value={activeSubDeptId} onValueChange={setActiveSubDeptId} className="w-full">
+          <TabsList className={TAB_RAIL_CLASS}>
+            {items.map((item) => (
+              <TabsTrigger key={item.id} value={item.id} className={TAB_UNDERLINE_TRIGGER_CLASS}>
+                {item.label}
+                {typeof item.count === "number" && item.count > 0 && (
+                  <span className={COUNT_BADGE_CLASS}>{item.count}</span>
+                )}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
       </div>
     </div>
   );

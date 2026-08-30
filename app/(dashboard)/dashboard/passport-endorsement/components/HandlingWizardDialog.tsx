@@ -49,7 +49,7 @@ function DateTimeField({ value, onChange, label }: { value: string; onChange: (v
         type="datetime-local"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-11 border-slate-200 bg-white text-sm"
+        className="h-12 border-slate-200 bg-white text-sm"
       />
     </div>
   );
@@ -60,7 +60,7 @@ function StaffSelect({ value, onChange, bclUsers, label, placeholder = "Select s
     <div className="space-y-1.5">
       {label && <Label className="text-xs font-semibold text-slate-500">{label}</Label>}
       <Select value={value || ""} onValueChange={onChange}>
-        <SelectTrigger className="h-11 text-sm border-slate-200 bg-white">
+        <SelectTrigger className="h-12 text-sm border-slate-200 bg-white">
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent className="z-[200]">
@@ -75,15 +75,15 @@ function StaffSelect({ value, onChange, bclUsers, label, placeholder = "Select s
 
 function ToggleButtons({ options, value, onChange }: any) {
   return (
-    <div className="flex gap-2 p-1 bg-slate-100 rounded-lg w-fit">
+    <div className="flex gap-1.5 p-1.5 bg-slate-100/80 rounded-xl w-fit border border-slate-200/60">
       {options.map((opt: any) => (
         <button
           key={opt.value}
           type="button"
           onClick={() => onChange(opt.value)}
           className={cn(
-            "px-4 py-2 rounded-md text-sm font-bold transition-all",
-            value === opt.value ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-800"
+            "px-5 py-2.5 rounded-lg text-sm font-bold transition-all",
+            value === opt.value ? "bg-white text-blue-700 shadow-md shadow-blue-500/10" : "text-slate-500 hover:text-slate-800 hover:bg-white/60"
           )}
         >
           {opt.label}
@@ -93,7 +93,7 @@ function ToggleButtons({ options, value, onChange }: any) {
   );
 }
 
-const PRIMARY_BTN = "h-10 px-5 rounded-md text-sm font-bold gap-2 text-white shadow-sm hover:opacity-95";
+const PRIMARY_BTN = "h-11 px-6 rounded-lg text-sm font-bold gap-2 text-white shadow-md shadow-blue-500/20 hover:opacity-95";
 const PRIMARY_STYLE = { backgroundColor: "#376bae" };
 
 // Horizontal pipeline stepper — gives an at-a-glance read of where this task sits, instead of
@@ -129,15 +129,15 @@ function Stepper({ record }: { record: PassportHandlingRecord | undefined }) {
             )}
             <div className="flex flex-col items-center gap-1.5 shrink-0">
               <div className={cn(
-                "h-9 w-9 rounded-full flex items-center justify-center border-2 transition-colors",
-                done ? "bg-emerald-500 border-emerald-500 text-white"
-                  : isCurrent ? "bg-white border-blue-500 text-blue-600"
+                "h-11 w-11 rounded-full flex items-center justify-center border-2 transition-colors shadow-sm",
+                done ? "bg-emerald-500 border-emerald-500 text-white shadow-emerald-500/30"
+                  : isCurrent ? "bg-white border-blue-500 text-blue-600 shadow-blue-500/20"
                   : "bg-white border-slate-200 text-slate-300"
               )}>
-                {done ? <CheckCircle2 className="h-4.5 w-4.5" /> : <Icon className="h-4 w-4" />}
+                {done ? <CheckCircle2 className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
               </div>
               <span className={cn(
-                "text-[10px] font-black uppercase tracking-wider whitespace-nowrap",
+                "text-[11px] font-black uppercase tracking-wider whitespace-nowrap",
                 done ? "text-emerald-600" : isCurrent ? "text-blue-600" : "text-slate-300"
               )}>
                 {s.label}
@@ -156,10 +156,11 @@ function Stepper({ record }: { record: PassportHandlingRecord | undefined }) {
 function StepShell({ index, title, done, locked, summary, expanded, onToggle, children }: any) {
   if (locked) {
     return (
-      <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-5 py-3.5 flex items-center gap-3 opacity-60">
+      <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-6 py-4 flex items-center gap-3 opacity-60">
         <Lock className="h-4 w-4 text-slate-300 shrink-0" />
         <span className="text-xs font-black uppercase tracking-widest text-slate-400">Step {index}</span>
         <span className="text-sm font-semibold text-slate-400">{title}</span>
+        <span className="ml-auto text-[11px] font-bold text-slate-300">Locked · previous step required</span>
       </div>
     );
   }
@@ -172,7 +173,7 @@ function StepShell({ index, title, done, locked, summary, expanded, onToggle, ch
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center gap-3 px-5 py-3.5 text-left"
+        className="w-full flex items-center gap-3 px-6 py-4 text-left"
       >
         {done ? (
           <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
@@ -180,11 +181,11 @@ function StepShell({ index, title, done, locked, summary, expanded, onToggle, ch
           <Circle className="h-5 w-5 text-blue-500 shrink-0" />
         )}
         <span className="text-xs font-black uppercase tracking-widest text-slate-400 shrink-0">Step {index}</span>
-        <span className="text-sm font-bold text-slate-800 shrink-0">{title}</span>
+        <span className="text-[15px] font-bold text-slate-800 shrink-0">{title}</span>
         {done && !expanded && summary && (
           <span className="text-sm text-slate-500 truncate ml-1">— {summary}</span>
         )}
-        <div className="ml-auto flex items-center gap-2 shrink-0">
+        <div className="ml-auto flex items-center gap-2.5 shrink-0">
           {done && (
             <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-400">
               <Pencil className="h-3 w-3" /> {expanded ? "Editing" : "Edit"}
@@ -193,7 +194,7 @@ function StepShell({ index, title, done, locked, summary, expanded, onToggle, ch
           <ChevronDown className={cn("h-4 w-4 text-slate-400 transition-transform", expanded && "rotate-180")} />
         </div>
       </button>
-      {expanded && <div className="px-5 pb-5 pt-1 space-y-4 border-t border-black/5">{children}</div>}
+      {expanded && <div className="px-6 pb-6 pt-2 space-y-5 border-t border-black/5">{children}</div>}
     </div>
   );
 }
@@ -231,6 +232,7 @@ export function HandlingWizardDialog({
   const [returned, setReturned] = useState({ at: "", by: "" });
   const [notified, setNotified] = useState({ at: "", by: "" });
   const [dispatchMethod, setDispatchMethod] = useState<"delivery" | "pickup" | "">("");
+  const [dispatchHandledBy, setDispatchHandledBy] = useState("");
   const [deliveryType, setDeliveryType] = useState<"staff" | "courier" | "">("");
   const [delivery, setDelivery] = useState({ at: "", staffBy: "", courierId: "", riderName: "", riderPhone: "", trackingRef: "" });
   const [pickup, setPickup] = useState({ at: "", personName: "", relation: "" as "" | "self" | "representative" });
@@ -251,6 +253,7 @@ export function HandlingWizardDialog({
     });
     setNotified({ at: toLocalInputValue(record?.client_notified_at) || nowLocalInputValue(), by: record?.client_notified_by || currentUserId || "" });
     setDispatchMethod(record?.dispatch_method || "");
+    setDispatchHandledBy(record?.dispatch_handled_by || currentUserId || "");
     setDeliveryType(record?.delivery_type || "");
     setDelivery({
       at: toLocalInputValue(record?.delivered_at) || nowLocalInputValue(),
@@ -356,6 +359,7 @@ export function HandlingWizardDialog({
     if (dispatchMethod === "delivery") {
       runStep("dispatch", {
         dispatch_method: "delivery",
+        dispatch_handled_by: dispatchHandledBy || null,
         delivery_type: deliveryType || null,
         delivered_by: deliveryType === "staff" ? delivery.staffBy || null : null,
         courier_id: deliveryType === "courier" ? delivery.courierId || null : null,
@@ -370,6 +374,7 @@ export function HandlingWizardDialog({
     } else if (dispatchMethod === "pickup") {
       runStep("dispatch", {
         dispatch_method: "pickup",
+        dispatch_handled_by: dispatchHandledBy || null,
         pickup_person_name: pickup.personName || null,
         pickup_relation: pickup.relation || null,
         pickup_at: new Date(pickup.at).toISOString(),
@@ -392,24 +397,46 @@ export function HandlingWizardDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b border-slate-100">
-          <DialogTitle className="text-lg font-black text-slate-900">
-            {task.applicant_name}
-          </DialogTitle>
-          <DialogDescription className="text-sm text-slate-500 font-semibold">
-            {task.passport_number ? `Passport ${task.passport_number}` : "No passport number on file"} · Manage endorsement handling
-          </DialogDescription>
+      <DialogContent className="max-w-5xl max-h-[92vh] flex flex-col p-0 gap-0 overflow-hidden rounded-2xl border-slate-200 shadow-2xl">
+        <DialogHeader className="px-8 pt-7 pb-5 border-b border-slate-100 bg-gradient-to-r from-white via-white to-blue-50/40">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-[11px] font-black uppercase tracking-widest text-custom-blue mb-2">
+                Passport Endorsement · Handling Wizard
+              </div>
+              <DialogTitle className="text-2xl font-black text-slate-900 leading-tight">
+                {task.applicant_name}
+              </DialogTitle>
+              <DialogDescription className="text-[15px] text-slate-500 font-semibold mt-1.5">
+                {task.passport_number ? `Passport ${task.passport_number}` : "No passport number on file"} · Task #{task.id} · Manage endorsement handling
+              </DialogDescription>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {mode && (
+                <span className={cn(
+                  "inline-flex items-center px-3.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider border shadow-sm",
+                  mode === "bcl" ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-violet-50 text-violet-700 border-violet-200"
+                )}>
+                  {mode === "bcl" ? "BCL Handles" : "Client Handles"}
+                </span>
+              )}
+              {!!record?.received_at && (
+                <span className="inline-flex items-center px-3.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm">
+                  In progress
+                </span>
+              )}
+            </div>
+          </div>
           {mode === "bcl" && (
-            <div className="pt-3">
+            <div className="pt-5 mt-4 border-t border-slate-100">
               <Stepper record={record} />
             </div>
           )}
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+        <div className="flex-1 overflow-y-auto px-8 py-6 space-y-5 custom-scrollbar">
           {/* Mode selector */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 space-y-2.5">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-5 space-y-3">
             <p className="text-xs font-black uppercase tracking-widest text-slate-500">Handling Mode</p>
             <ToggleButtons
               options={[{ value: "bcl", label: "BCL Handles Stamping" }, { value: "client", label: "Client Handles It" }]}
@@ -420,18 +447,18 @@ export function HandlingWizardDialog({
           </div>
 
           {!mode && (
-            <p className="text-sm text-slate-400 text-center py-10">Select a handling mode above to continue.</p>
+            <p className="text-sm text-slate-400 text-center py-12">Select a handling mode above to continue.</p>
           )}
 
           {mode === "client" && (
-            <div className="rounded-xl border border-violet-200 bg-violet-50/30 p-5 space-y-3.5">
-              <p className="text-sm font-bold text-violet-800">Client is handling passport endorsement independently.</p>
+            <div className="rounded-xl border border-violet-200 bg-violet-50/30 p-6 space-y-4">
+              <p className="text-[15px] font-bold text-violet-800">Client is handling passport endorsement independently.</p>
               <Textarea
                 value={clientNotes}
                 onChange={(e) => setClientNotes(e.target.value)}
                 placeholder="Optional notes..."
                 disabled={isClientConfirmed}
-                className="text-sm bg-white border-slate-200"
+                className="text-sm bg-white border-slate-200 min-h-[110px]"
               />
               {isClientConfirmed ? (
                 <p className="text-sm font-bold text-emerald-700 flex items-center gap-1.5">
@@ -452,7 +479,7 @@ export function HandlingWizardDialog({
           )}
 
           {mode === "bcl" && (
-            <div className="space-y-2.5">
+            <div className="space-y-3">
               <StepShell
                 index={1}
                 title="Received from client"
@@ -462,16 +489,16 @@ export function HandlingWizardDialog({
                 onToggle={() => toggleStep("received")}
                 summary={record?.received_at ? `${fmtDateTime(record.received_at)} by ${bclUsers.find((u) => u.id === record.received_by)?.name || "—"}${record.brought_by_name ? ` · brought in by ${record.brought_by_name}` : ""}` : ""}
               >
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   <DateTimeField label="Received at" value={received.at} onChange={(v) => setReceived((p) => ({ ...p, at: v }))} />
                   <StaffSelect label="Received by (BCL staff)" value={received.by} onChange={(v) => setReceived((p) => ({ ...p, by: v }))} bclUsers={bclUsers} />
-                  <div className="col-span-2 space-y-1.5">
+                  <div className="space-y-1.5">
                     <Label className="text-xs font-semibold text-slate-500">Brought in by</Label>
                     <Input
                       value={received.broughtBy}
                       onChange={(e) => setReceived((p) => ({ ...p, broughtBy: e.target.value }))}
                       placeholder="Name of the person who brought the passport"
-                      className="h-11 text-sm border-slate-200 bg-white"
+                      className="h-12 text-sm border-slate-200 bg-white"
                     />
                   </div>
                 </div>
@@ -556,6 +583,10 @@ export function HandlingWizardDialog({
                   />
                 </div>
 
+                <div className="max-w-sm">
+                  <StaffSelect label="Dispatch handled by (BCL staff)" value={dispatchHandledBy} onChange={setDispatchHandledBy} bclUsers={bclUsers} />
+                </div>
+
                 {dispatchMethod === "delivery" && (
                   <div className="space-y-4">
                     <div className="space-y-1.5">
@@ -576,7 +607,7 @@ export function HandlingWizardDialog({
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold text-slate-500">Courier</Label>
                           <Select value={delivery.courierId} onValueChange={(v) => setDelivery((p) => ({ ...p, courierId: v }))}>
-                            <SelectTrigger className="h-11 text-sm border-slate-200 bg-white">
+                            <SelectTrigger className="h-12 text-sm border-slate-200 bg-white">
                               <SelectValue placeholder="Select courier..." />
                             </SelectTrigger>
                             <SelectContent className="z-[200]">
@@ -588,17 +619,17 @@ export function HandlingWizardDialog({
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold text-slate-500">Tracking ref (optional)</Label>
-                          <Input value={delivery.trackingRef} onChange={(e) => setDelivery((p) => ({ ...p, trackingRef: e.target.value }))} className="h-11 text-sm border-slate-200 bg-white" />
+                          <Input value={delivery.trackingRef} onChange={(e) => setDelivery((p) => ({ ...p, trackingRef: e.target.value }))} className="h-12 text-sm border-slate-200 bg-white" />
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold text-slate-500">
                             Rider name {selectedCourier?.courier_type === "on_demand" && <span className="text-red-500">*</span>}
                           </Label>
-                          <Input value={delivery.riderName} onChange={(e) => setDelivery((p) => ({ ...p, riderName: e.target.value }))} placeholder="e.g. rider's name" className="h-11 text-sm border-slate-200 bg-white" />
+                          <Input value={delivery.riderName} onChange={(e) => setDelivery((p) => ({ ...p, riderName: e.target.value }))} placeholder="e.g. rider's name" className="h-12 text-sm border-slate-200 bg-white" />
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold text-slate-500">Rider phone</Label>
-                          <Input value={delivery.riderPhone} onChange={(e) => setDelivery((p) => ({ ...p, riderPhone: e.target.value }))} className="h-11 text-sm border-slate-200 bg-white" />
+                          <Input value={delivery.riderPhone} onChange={(e) => setDelivery((p) => ({ ...p, riderPhone: e.target.value }))} className="h-12 text-sm border-slate-200 bg-white" />
                         </div>
                       </div>
                     )}
@@ -612,7 +643,7 @@ export function HandlingWizardDialog({
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <Label className="text-xs font-semibold text-slate-500">Picked up by</Label>
-                      <Input value={pickup.personName} onChange={(e) => setPickup((p) => ({ ...p, personName: e.target.value }))} placeholder="Name of person collecting" className="h-11 text-sm border-slate-200 bg-white" />
+                      <Input value={pickup.personName} onChange={(e) => setPickup((p) => ({ ...p, personName: e.target.value }))} placeholder="Name of person collecting" className="h-12 text-sm border-slate-200 bg-white" />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-xs font-semibold text-slate-500">Relation</Label>
@@ -637,6 +668,19 @@ export function HandlingWizardDialog({
               </StepShell>
             </div>
           )}
+        </div>
+
+        <div className="px-8 py-4 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between gap-4">
+          <p className="text-xs text-slate-500 font-semibold">
+            Each step saves on its own — work through them in order and the passport moves along the pipeline.
+          </p>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            className="h-11 px-6 rounded-xl text-[13px] font-bold text-slate-700 bg-white border-slate-200 hover:bg-slate-50 shadow-sm gap-2 shrink-0"
+          >
+            Close Wizard
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

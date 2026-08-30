@@ -97,6 +97,7 @@ export interface PassportHandlingRecord {
   client_notified_by: string | null;
   dispatch_method: "delivery" | "pickup" | null;
   delivery_type: "staff" | "courier" | null;
+  dispatch_handled_by: string | null;
   delivered_by: string | null;
   courier_id: string | null;
   courier_rider_name: string | null;

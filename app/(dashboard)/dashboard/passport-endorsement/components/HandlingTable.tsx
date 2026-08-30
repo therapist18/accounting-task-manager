@@ -37,6 +37,8 @@ export const HANDLING_COLUMNS = [
   { id: "notified_by", label: "Notified By" },
   { id: "notified_date", label: "Notified Date" },
   { id: "notified_time", label: "Notified Time" },
+  { id: "dispatch_mode", label: "Dispatch Mode" },
+  { id: "dispatch_handled_by", label: "Handled By (BCL)" },
   { id: "dispatch_by", label: "Dispatch By" },
   { id: "dispatch_date", label: "Dispatch Date" },
   { id: "dispatch_time", label: "Dispatch Time" },
@@ -77,9 +79,104 @@ const STEP_BADGE_CLASSES: Record<HandlingStep, string> = {
   completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
 };
 
+// ── Column sections ────────────────────────────────────────────────────────────
+// Columns bearing a shared itinerary stage (By / Date / Time) are grouped under a
+// section header label, and each section gets its own accent colour that runs through
+// the group's header cell, a tinted body background, and a heavier right border that
+// cleanly separates one section from the next (both in the header and the body rows).
+const GROUP_ACCENTS: Record<string, {
+  label: string;
+  headerBg: string;
+  headerHover: string;
+  headerActive: string;
+  bodyTint: string;
+  hoverTint: string;
+  endBorder: string;
+}> = {
+  case: {
+    label: "Case Details",
+    headerBg: "bg-custom-blue",
+    headerHover: "hover:bg-slate-700",
+    headerActive: "bg-slate-700",
+    bodyTint: "",
+    hoverTint: "",
+    endBorder: "border-r-2 border-slate-300",
+  },
+  received: {
+    label: "Received at Office",
+    headerBg: "bg-sky-600",
+    headerHover: "hover:bg-sky-700",
+    headerActive: "bg-sky-700",
+    bodyTint: "bg-sky-50/60",
+    hoverTint: "hover:bg-sky-100/60",
+    endBorder: "border-r-2 border-r-sky-400/70",
+  },
+  taken: {
+    label: "Taken to Nyayo",
+    headerBg: "bg-amber-500",
+    headerHover: "hover:bg-amber-600",
+    headerActive: "bg-amber-600",
+    bodyTint: "bg-amber-50/70",
+    hoverTint: "hover:bg-amber-100/60",
+    endBorder: "border-r-2 border-r-amber-400/70",
+  },
+  returned: {
+    label: "Returned Stamped",
+    headerBg: "bg-teal-600",
+    headerHover: "hover:bg-teal-700",
+    headerActive: "bg-teal-700",
+    bodyTint: "bg-teal-50/70",
+    hoverTint: "hover:bg-teal-100/60",
+    endBorder: "border-r-2 border-r-teal-400/70",
+  },
+  notified: {
+    label: "Client Notified",
+    headerBg: "bg-violet-600",
+    headerHover: "hover:bg-violet-700",
+    headerActive: "bg-violet-700",
+    bodyTint: "bg-violet-50/70",
+    hoverTint: "hover:bg-violet-100/60",
+    endBorder: "border-r-2 border-r-violet-400/70",
+  },
+  dispatch: {
+    label: "Dispatch",
+    headerBg: "bg-indigo-600",
+    headerHover: "hover:bg-indigo-700",
+    headerActive: "bg-indigo-700",
+    bodyTint: "bg-indigo-50/70",
+    hoverTint: "hover:bg-indigo-100/60",
+    endBorder: "border-r-2 border-r-indigo-400/70",
+  },
+  completed: {
+    label: "Completed",
+    headerBg: "bg-emerald-600",
+    headerHover: "hover:bg-emerald-700",
+    headerActive: "bg-emerald-700",
+    bodyTint: "bg-emerald-50/70",
+    hoverTint: "hover:bg-emerald-100/60",
+    endBorder: "border-r-2 border-r-emerald-400/70",
+  },
+};
+
+const COLUMN_GROUP_BY_ID: Record<string, string> = {
+  task_id: "case", applicant: "case", company: "case", company_prefix: "case",
+  sub_department: "case", class_name: "case", write_up_date: "case",
+  doc_issue_date: "case", doc_expiry_date: "case", passport_number: "case",
+  mode: "case", current_step: "case",
+  received_by: "received", received_date: "received", received_time: "received",
+  taken_by: "taken", taken_date: "taken", taken_time: "taken",
+  returned_by: "returned", returned_date: "returned", returned_time: "returned",
+  notified_by: "notified", notified_date: "notified", notified_time: "notified",
+  dispatch_mode: "dispatch", dispatch_handled_by: "dispatch", dispatch_by: "dispatch",
+  dispatch_date: "dispatch", dispatch_time: "dispatch",
+  completed_date: "completed", completed_time: "completed",
+};
+
+const colGroupId = (colId: string) => COLUMN_GROUP_BY_ID[colId] || "case";
+
 function StepBadge({ step }: { step: HandlingStep }) {
   return (
-    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-widest", STEP_BADGE_CLASSES[step])}>
+    <span className={cn("inline-flex items-center px-2.5 py-1 rounded-full border text-[10px] font-black uppercase tracking-widest", STEP_BADGE_CLASSES[step])}>
       {STEP_LABELS[step]}
     </span>
   );
@@ -132,7 +229,7 @@ const PaginationButton = ({ children, onClick, disabled }: any) => (
   <Button
     variant="ghost"
     size="icon"
-    className={cn("h-6 w-6 rounded text-slate-600 transition-all", disabled ? "opacity-30 cursor-not-allowed" : "hover:text-slate-700 hover:bg-slate-100")}
+    className={cn("h-7 w-7 rounded-lg text-slate-600 transition-all", disabled ? "opacity-30 cursor-not-allowed" : "hover:text-slate-700 hover:bg-slate-100")}
     onClick={onClick}
     disabled={disabled}
   >
@@ -154,6 +251,41 @@ export function HandlingTable({
   loading = false,
 }: any) {
   const visibleCols = HANDLING_COLUMNS.filter((c) => visibleColumnIds.includes(c.id));
+
+  // Contiguous runs of columns that share a section — each run maps to one group-header
+  // cell in the section header row (colSpan = run length). Because the underlying column
+  // order keeps every group's members together, visibility toggles never interleave groups.
+  const allGroupChunks = useMemo(() => {
+    const chunks: { gid: string; cols: (typeof HANDLING_COLUMNS)[number][] }[] = [];
+    let cur: { gid: string; cols: any[] } | null = null;
+    for (const col of visibleCols) {
+      const gid = colGroupId(col.id);
+      if (!cur || cur.gid !== gid) { cur = { gid, cols: [] }; chunks.push(cur); }
+      cur.cols.push(col);
+    }
+    return chunks;
+  }, [visibleCols]);
+
+  // The section header cells in the first header row run over the itinerary sections only —
+  // every "case" column (index + sticky name columns + the non-sticky case columns) gets its
+  // own tall header cell spanning both header rows instead of a merged label band.
+  const nonStickyChunks = useMemo(() => {
+    const chunks: { gid: string; cols: (typeof HANDLING_COLUMNS)[number][] }[] = [];
+    let cur: { gid: string; cols: any[] } | null = null;
+    for (const col of visibleCols.filter((c) => !STICKY_COLUMN_IDS.includes(c.id as any))) {
+      const gid = colGroupId(col.id);
+      if (!cur || cur.gid !== gid) { cur = { gid, cols: [] }; chunks.push(cur); }
+      cur.cols.push(col);
+    }
+    return chunks;
+  }, [visibleCols]);
+
+  // Last column of every contiguous section — those cells swap their plain right border for
+  // a heavier, section-coloured one so neighbouring sections read as clearly separate blocks.
+  const chunkEndColIds = useMemo(
+    () => new Set(allGroupChunks.map((chunk) => chunk.cols[chunk.cols.length - 1].id)),
+    [allGroupChunks]
+  );
 
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
@@ -287,6 +419,68 @@ export function HandlingTable({
   const headerById: Record<string, any> = {};
   table.getHeaderGroups().forEach((hg) => hg.headers.forEach((h) => { headerById[h.id] = h; }));
 
+  // Shared header-cell renderer: used for the case columns (in the first header row, spanning
+  // both rows) and for the itinerary sub-columns (in the second row). Sort, width-apply and
+  // column-resize all work the same either way.
+  const renderColHeader = (col: any, rowSpan: number) => {
+    const isActive = sortConfig?.key === col.id;
+    const isStickyLeft = STICKY_COLUMN_IDS.includes(col.id as any);
+    const accent = GROUP_ACCENTS[colGroupId(col.id)];
+    return (
+      <TableHead
+        key={col.id}
+        rowSpan={rowSpan}
+        onClick={() => handleSort?.(col.id)}
+        className={cn(
+          "group relative border-r border-b border-white/30 px-4 py-3 select-none transition-colors",
+          accent.headerBg,
+          accent.headerHover,
+          handleSort && "cursor-pointer",
+          isActive && accent.headerActive,
+          isStickyLeft && "sticky left-0 z-50"
+        )}
+        style={isStickyLeft ? { left: stickyColumnOffsets[col.id] } : undefined}
+      >
+        <div className="flex items-center justify-between gap-2 min-w-0 pr-1">
+          <span className="text-[13px] font-bold tracking-wide text-white uppercase leading-snug min-w-0">
+            {col.label}
+          </span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => { e.stopPropagation(); applyWidthToAllColumns(col.id); }}
+                    className="h-4 w-4 shrink-0 hidden group-hover:flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-slate-600 transition-all"
+                  >
+                    <ArrowLeftRight size={10} strokeWidth={2.5} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="bg-slate-900 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[9999]">
+                  Apply this column's width to all columns
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            {handleSort && (
+              <ArrowUpDown className={cn("h-4 w-4 shrink-0", isActive ? "text-white" : "text-white/60")} />
+            )}
+          </div>
+        </div>
+
+        <div
+          onMouseDown={(e) => { e.stopPropagation(); headerById[col.id]?.getResizeHandler()(e); }}
+          onTouchStart={(e) => { e.stopPropagation(); headerById[col.id]?.getResizeHandler()(e); }}
+          onClick={(e) => e.stopPropagation()}
+          className={cn(
+            "absolute inset-y-0 right-0 w-2 cursor-col-resize touch-none select-none transition-colors",
+            headerById[col.id]?.column.getIsResizing() ? "bg-blue-300" : "hover:bg-white/30"
+          )}
+        />
+      </TableHead>
+    );
+  };
+
   // Left offsets accumulate INDEX_COL_WIDTH followed by each sticky column's *current* width —
   // unlike SummaryTable only the sticky columns that are actually visible participate, so
   // hiding task_id/applicant/company_prefix keeps the remaining pinned cells flush against
@@ -312,15 +506,15 @@ export function HandlingTable({
   );
 
   return (
-    <div className="flex flex-col flex-1 px-4 pt-3 pb-4 bg-white">
+    <div className="flex flex-col flex-1 px-10 pt-2 pb-6 bg-white">
       {/* Card wrapper — holds the border/shadow; the scroll div inside is the only overflow
           point, with its height bounded by a viewport-relative cap so the table scrolls
           internally and the pagination footer below always stays on-screen — same technique
           Summary Reports' SummaryTable uses (max-h-[calc(100vh-300px)]) rather than relying
           on an unbroken flex-1/overflow-hidden chain all the way up through the shared
           dashboard layout's <main>, which has no fixed height of its own. */}
-      <div className="relative overflow-hidden rounded-xl border border-slate-200 shadow-sm bg-white flex flex-col">
-        <div className="overflow-auto custom-scrollbar max-h-[calc(100vh-300px)]">
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200 shadow-sm bg-white flex flex-col">
+        <div className="overflow-auto custom-scrollbar max-h-[calc(100vh-320px)]">
         <Table className="border-separate border-spacing-0 table-fixed" style={{ width: totalWidth, minWidth: '100%' }}>
           <colgroup>
             <col style={{ width: INDEX_COL_WIDTH }} />
@@ -330,76 +524,50 @@ export function HandlingTable({
             <col style={{ width: ACTIONS_COL_WIDTH }} />
           </colgroup>
           <TableHeader className="sticky top-0 z-40">
+            {/* First header row — the case block (index + sticky name columns + the rest of
+                the case columns) gets one tall header per column spanning both rows; the
+                itinerary sections keep their coloured banners with the sub-columns stacked
+                underneath in the second row. */}
             <TableRow className="hover:bg-transparent border-0">
-              <TableHead className="sticky left-0 z-50 w-12 max-w-12 border-r border-b border-white/30 text-center py-2 px-2 bg-custom-blue">
-                <span className="text-[11px] font-bold text-white tracking-wide">#</span>
+              <TableHead rowSpan={2} className="sticky left-0 z-50 w-12 max-w-12 border-r border-b border-white/30 text-center px-3 bg-custom-blue">
+                <span className="text-xs font-bold text-white tracking-wide">#</span>
               </TableHead>
-              {visibleCols.map((col) => {
-                const isActive = sortConfig?.key === col.id;
-                const isStickyLeft = STICKY_COLUMN_IDS.includes(col.id as any);
-                return (
-                  <TableHead
-                    key={col.id}
-                    onClick={() => handleSort?.(col.id)}
-                    className={cn(
-                      "group relative border-r border-b border-white/30 px-4 py-2 select-none transition-colors bg-custom-blue hover:bg-slate-700",
-                      handleSort && "cursor-pointer",
-                      isActive && "bg-slate-700",
-                      isStickyLeft && "sticky z-50"
-                    )}
-                    style={isStickyLeft ? { left: stickyColumnOffsets[col.id] } : undefined}
-                  >
-                    <div className="flex items-center justify-between gap-2 min-w-0 pr-1">
-                      <span className="text-xs font-bold tracking-wide text-white leading-snug min-w-0">
-                        {col.label}
-                      </span>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <TooltipProvider delayDuration={300}>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onClick={(e) => { e.stopPropagation(); applyWidthToAllColumns(col.id); }}
-                                className="h-4 w-4 shrink-0 hidden group-hover:flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-slate-600 transition-all"
-                              >
-                                <ArrowLeftRight size={10} strokeWidth={2.5} />
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom" className="bg-slate-900 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[9999]">
-                              Apply this column's width to all columns
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                        {handleSort && (
-                          <ArrowUpDown className={cn("h-3 w-3 shrink-0", isActive ? "text-white" : "text-white/60")} />
-                        )}
-                      </div>
-                    </div>
+              {visibleCols.filter((col) => colGroupId(col.id) === "case").map((col) => renderColHeader(col, 2))}
+              {nonStickyChunks
+                .filter((chunk) => chunk.gid !== "case")
+                .map((chunk) => {
+                  const accent = GROUP_ACCENTS[chunk.gid];
+                  return (
+                    <TableHead
+                      key={chunk.gid}
+                      colSpan={chunk.cols.length}
+                      className={cn("h-9 px-3 text-left border-r border-b border-white/10", accent.headerBg)}
+                    >
+                      <span className="text-[11px] font-bold text-white uppercase tracking-widest">{accent.label}</span>
+                    </TableHead>
+                  );
+                })}
+              <TableHead className="sticky right-0 z-50 border-l border-b border-white/30 bg-custom-blue px-3 text-center">
+                <span className="text-[11px] font-bold text-white uppercase tracking-widest">Actions</span>
+              </TableHead>
+            </TableRow>
 
-                    <div
-                      onMouseDown={(e) => { e.stopPropagation(); headerById[col.id]?.getResizeHandler()(e); }}
-                      onTouchStart={(e) => { e.stopPropagation(); headerById[col.id]?.getResizeHandler()(e); }}
-                      onClick={(e) => e.stopPropagation()}
-                      className={cn(
-                        "absolute inset-y-0 right-0 w-2 cursor-col-resize touch-none select-none transition-colors",
-                        headerById[col.id]?.column.getIsResizing() ? "bg-blue-300" : "hover:bg-white/30"
-                      )}
-                    />
-                  </TableHead>
-                );
-              })}
-              <TableHead className="sticky right-0 z-50 w-32 max-w-32 border-l border-b border-white/30 text-center py-2 px-2 bg-custom-blue">
-                <span className="text-[11px] font-bold text-white tracking-wide">Actions</span>
+            {/* Second header row — only the itinerary section sub-columns; the case columns
+                above span down into this row, so no column here is horizontally sticky. */}
+            <TableRow className="hover:bg-transparent border-0">
+              {visibleCols.filter((col) => colGroupId(col.id) !== "case").map((col) => renderColHeader(col, 1))}
+              <TableHead className="sticky right-0 z-50 w-32 max-w-32 border-l border-b border-white/30 text-center px-3 bg-custom-blue">
+                <span className="text-xs font-bold text-white tracking-wide uppercase">Actions</span>
               </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={visibleCols.length + 2} className="h-64 bg-slate-50">
-                  <div className="flex flex-col items-center justify-center">
-                    <Loader2 className="h-8 w-8 animate-spin text-slate-400 mb-3" />
-                    <p className="text-[14px] font-semibold text-slate-700">Loading tasks...</p>
+                <TableCell colSpan={visibleCols.length + 2} className="h-72 bg-slate-50">
+                  <div className="flex flex-col items-center justify-center gap-1">
+                    <Loader2 className="h-10 w-10 animate-spin text-custom-blue/60 mb-4" />
+                    <p className="text-[15px] font-semibold text-slate-700">Loading tasks...</p>
                   </div>
                 </TableCell>
               </TableRow>
@@ -417,20 +585,20 @@ export function HandlingTable({
                     <TableRow key={`section-${item.name}`} className="border-0 hover:bg-transparent">
                       <TableCell
                         colSpan={1 + stickyColCount}
-                        className="sticky left-0 z-30 bg-white border-r border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2 pl-3 pr-4"
+                        className="sticky left-0 z-30 bg-white border-r border-t-2 border-t-custom-blue border-b border-b-slate-200 py-3 pl-4 pr-4"
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Layers className="h-3 w-3 text-custom-blue/60 shrink-0" />
-                          <span className="text-[11px] font-bold uppercase tracking-wider text-custom-blue whitespace-nowrap">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Layers className="h-4 w-4 text-custom-blue/60 shrink-0" />
+                          <span className="text-[13px] font-bold uppercase tracking-wider text-custom-blue whitespace-nowrap">
                             {item.name === "—" ? "Unassigned" : item.name}
                           </span>
-                          <span className="text-[11px] font-semibold text-slate-400 tabular-nums whitespace-nowrap">
+                          <span className="text-[13px] font-semibold text-slate-400 tabular-nums whitespace-nowrap">
                             · {item.count}
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell colSpan={headerSpacerColSpan} className="bg-white px-4 py-2 border-t-2 border-t-custom-blue border-b border-b-slate-200" />
-                      <TableCell className="sticky right-0 z-30 bg-white border-l border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2 px-2" />
+                      <TableCell colSpan={headerSpacerColSpan} className="bg-white px-4 py-3 border-t-2 border-t-custom-blue border-b border-b-slate-200" />
+                      <TableCell className="sticky right-0 z-30 bg-white border-l border-t-2 border-t-custom-blue border-b border-b-slate-200 py-3 px-2" />
                     </TableRow>
                   );
                 }
@@ -444,12 +612,14 @@ export function HandlingTable({
                     key={task.id}
                     className={cn("group border-0 transition-colors", globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50", "hover:bg-blue-50/50")}
                   >
-                    <TableCell className={cn("sticky left-0 z-20 w-12 border-r border-b border-slate-200 text-center py-1.5", globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50", "group-hover:bg-blue-50")}>
-                      <span className="text-sm font-semibold text-slate-400">{globalIdx + 1}</span>
+                    <TableCell className={cn("sticky left-0 z-20 w-12 border-r border-b border-slate-200 text-center py-3.5", globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50", "group-hover:bg-blue-50")}>
+                      <span className="text-sm font-semibold text-slate-400 tabular-nums">{globalIdx + 1}</span>
                     </TableCell>
                     {visibleCols.map((col) => {
                       let content: React.ReactNode;
                       const isStickyLeft = STICKY_COLUMN_IDS.includes(col.id as any);
+                      const colAccent = GROUP_ACCENTS[colGroupId(col.id)];
+                      const isChunkEnd = chunkEndColIds.has(col.id);
                       switch (col.id) {
                         case "task_id":
                           content = <span className="font-mono text-slate-500">#{task.id}</span>;
@@ -490,7 +660,7 @@ export function HandlingTable({
                         case "mode":
                           content = mode ? (
                             <span className={cn(
-                              "inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-black uppercase tracking-widest",
+                              "inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-black uppercase tracking-widest",
                               mode === "bcl" ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-slate-100 text-slate-600 border-slate-200"
                             )}>
                               {mode === "bcl" ? "BCL Handles" : "Client Handles"}
@@ -560,6 +730,32 @@ export function HandlingTable({
                           content = t ? <span className="text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
+                        case "dispatch_mode": {
+                          if (!record?.dispatch_method) {
+                            content = <span className="text-slate-300">—</span>;
+                            break;
+                          }
+                          const isPickup = record.dispatch_method === "pickup";
+                          const isCourier = record.delivery_type === "courier";
+                          content = (
+                            <span className={cn(
+                              "inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-black uppercase tracking-widest",
+                              isPickup
+                                ? "bg-slate-100 text-slate-600 border-slate-200"
+                                : isCourier
+                                ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                                : "bg-blue-50 text-blue-700 border-blue-200"
+                            )}>
+                              {isPickup ? "Client Pickup" : isCourier ? "Delivery · Courier" : "Delivery · Staff"}
+                            </span>
+                          );
+                          break;
+                        }
+                        case "dispatch_handled_by": {
+                          const by = getStaffName(record?.dispatch_handled_by);
+                          content = by ? <span className="text-slate-700 font-medium">{by}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
                         case "dispatch_by": {
                           const by = dispatchLabelFor(record);
                           content = by ? <span className="text-slate-700 font-medium">{by}</span> : <span className="text-slate-300">—</span>;
@@ -592,7 +788,14 @@ export function HandlingTable({
                         <TableCell
                           key={col.id}
                           className={cn(
-                            "px-4 py-1.5 border-r border-b border-slate-200 text-sm",
+                            "px-4 py-3.5 border-b border-r border-slate-200 text-sm transition-colors",
+                            // Colored section: tint the cell background (unless sticky, which
+                            // keeps the row's zebra fill so pinned cells stay readable) and
+                            // deepen the hover-out within the section's own hue.
+                            !isStickyLeft && colAccent.bodyTint,
+                            !isStickyLeft && colAccent.hoverTint,
+                            // Heavier, section-coloured border on a section's last column.
+                            isChunkEnd && colAccent.endBorder,
                             isStickyLeft && "sticky z-20",
                             isStickyLeft && (globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50"),
                             isStickyLeft && "group-hover:bg-blue-50"
@@ -603,14 +806,14 @@ export function HandlingTable({
                         </TableCell>
                       );
                     })}
-                    <TableCell className={cn("sticky right-0 z-20 w-32 border-l border-b border-slate-200 py-1.5 text-center", globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50", "group-hover:bg-blue-50")}>
+                    <TableCell className={cn("sticky right-0 z-20 w-32 border-l border-b border-slate-200 py-3 text-center", globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50", "group-hover:bg-blue-50")}>
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={() => onManage(task, record)}
-                        className="h-8 px-3 rounded-md text-xs font-bold gap-1.5 border-slate-200 text-slate-600 hover:bg-slate-50"
+                        className="h-9 px-3.5 rounded-lg text-[13px] font-bold gap-1.5 border-slate-200 text-slate-600 hover:bg-slate-50"
                       >
-                        <Settings2 className="h-3.5 w-3.5" /> Manage
+                        <Settings2 className="h-4 w-4" /> Manage
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -618,13 +821,13 @@ export function HandlingTable({
               })
             ) : (
               <TableRow>
-                <TableCell colSpan={visibleCols.length + 2} className="h-64 bg-slate-50">
-                  <div className="flex flex-col items-center justify-center">
-                    <div className="h-12 w-12 rounded-full bg-slate-200 flex items-center justify-center mb-3">
-                      <SearchX size={24} className="text-slate-500" />
+                <TableCell colSpan={visibleCols.length + 2} className="h-72 bg-slate-50">
+                  <div className="flex flex-col items-center justify-center gap-1">
+                    <div className="h-16 w-16 rounded-2xl bg-slate-200/70 flex items-center justify-center mb-4">
+                      <SearchX size={28} className="text-slate-500" />
                     </div>
-                    <p className="text-[14px] font-semibold text-slate-700">No tasks found</p>
-                    <p className="text-sm mt-1 text-slate-500">Adjust your filters to see more results</p>
+                    <p className="text-[15px] font-semibold text-slate-700">No tasks found</p>
+                    <p className="text-sm mt-1.5 text-slate-500">Adjust your filters to see more results</p>
                   </div>
                 </TableCell>
               </TableRow>
@@ -634,30 +837,30 @@ export function HandlingTable({
       </div>
 
       {/* Pagination — same layout/classes as Summary Reports' SummaryTable footer */}
-      <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
-        <div className="text-[11px] text-slate-600 font-semibold">
-          Showing <span className="text-slate-600">{rows.length === 0 ? 0 : ((currentPage - 1) * rowsPerPage) + 1}</span> to{' '}
-          <span className="font-medium text-slate-600">{Math.min(currentPage * rowsPerPage, rows.length)}</span> of{' '}
-          <span className="font-medium text-slate-600">{rows.length}</span>
+      <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/40">
+        <div className="text-xs text-slate-500 font-semibold">
+          Showing <span className="text-slate-700 tabular-nums">{(rows.length === 0 ? 0 : ((currentPage - 1) * rowsPerPage) + 1)}</span> to{' '}
+          <span className="text-slate-700 tabular-nums">{Math.min(currentPage * rowsPerPage, rows.length)}</span> of{' '}
+          <span className="text-slate-700 tabular-nums">{rows.length}</span>
         </div>
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-slate-600 font-semibold">Rows:</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500 font-semibold">Rows:</span>
             <Select value={String(rowsPerPage)} onValueChange={(v) => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
-              <SelectTrigger className="w-[64px] h-8 rounded border-slate-200 text-[11px] font-medium text-slate-600">
+              <SelectTrigger className="w-[68px] h-9 rounded-lg border-slate-200 text-xs font-medium text-slate-600 bg-white">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="rounded">
-                {[10, 25, 50, 100].map((s) => <SelectItem key={s} value={String(s)} className="text-[11px]">{s}</SelectItem>)}
+              <SelectContent className="rounded-xl">
+                {[10, 25, 50, 100].map((s) => <SelectItem key={s} value={String(s)} className="text-xs">{s}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
-          <div className="flex items-center gap-0.5">
-            <PaginationButton onClick={() => setCurrentPage(1)} disabled={currentPage === 1}><ChevronsLeft size={12} /></PaginationButton>
-            <PaginationButton onClick={() => setCurrentPage((p) => p - 1)} disabled={currentPage === 1}><ChevronLeft size={12} /></PaginationButton>
-            <div className="px-2 py-1.5 text-[11px] font-medium text-slate-600 min-w-[24px] text-center">{currentPage}</div>
-            <PaginationButton onClick={() => setCurrentPage((p) => p + 1)} disabled={currentPage === totalPages}><ChevronRight size={12} /></PaginationButton>
-            <PaginationButton onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}><ChevronsRight size={12} /></PaginationButton>
+          <div className="flex items-center gap-1">
+            <PaginationButton onClick={() => setCurrentPage(1)} disabled={currentPage === 1}><ChevronsLeft size={14} /></PaginationButton>
+            <PaginationButton onClick={() => setCurrentPage((p) => p - 1)} disabled={currentPage === 1}><ChevronLeft size={14} /></PaginationButton>
+            <div className="px-2 py-1.5 text-xs font-bold text-slate-700 min-w-[28px] text-center rounded-lg bg-custom-blue/10 text-custom-blue">{currentPage}</div>
+            <PaginationButton onClick={() => setCurrentPage((p) => p + 1)} disabled={currentPage === totalPages}><ChevronRight size={14} /></PaginationButton>
+            <PaginationButton onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}><ChevronsRight size={14} /></PaginationButton>
           </div>
         </div>
       </div>
