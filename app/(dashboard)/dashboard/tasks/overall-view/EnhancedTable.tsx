@@ -486,7 +486,7 @@ const MemoizedTableRow = React.memo(({
           <TableCell
             key={`${row.key}-${colIndex}`}
             colSpan={4}
-            className={`text-center text-sm py-1 px-2 align-middle ${cellBorder} ${groupStartBorder} w-[365px] min-w-[365px] max-w-[365px] ${depBg}`}
+            className={`text-center text-sm py-1 px-2 align-middle ${cellBorder} ${groupStartBorder} w-[365px] min-w-[365px] max-w-[365px] ${depBg} ${row.type === 'actions' ? 'bg-white' : ''}`}
           >
             {item.type === 'principal' ? (
               safeRender(renderCellContent(row, item.task, 'date'))

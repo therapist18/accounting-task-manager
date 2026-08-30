@@ -459,6 +459,16 @@ export default function SummaryReportsPage() {
     return `User ${userId}`;
   }, [unifiedOfficers, unifiedManagers, unifiedAssistants]);
 
+  // Display names of every officer ever assigned to this task's officer-follow-up stages
+  // ('history' mode — all of them, not just the current stage's). Backs the Officers column;
+  // the ids come from the shared getStageOfficerIds helper and resolve to names via
+  // getStaffName (unifiedOfficers lookup), so it works across every department "All
+  // Departments" can surface even if that task's own department isn't the active tab.
+  const getOfficersForTask = useCallback((task: any) => {
+    const ids = getStageOfficerIdsForTask(task, 'history');
+    return ids.map(getStaffName).filter(Boolean) as string[];
+  }, [getStageOfficerIdsForTask, getStaffName]);
+
   // Backs the immigration_document_type/immigration_expiry_date/immigration_days_to_go columns
   // for sorting/export — same getEnhancedImmigrationStatus SummaryTable's own
   // getEnhancedStatusForTask calls for on-screen rendering (built independently there since it
@@ -743,8 +753,8 @@ export default function SummaryReportsPage() {
     // gained to stop memorized reports from dropping them) resolves through the same
     // resolveFieldValue SummaryTable itself renders cells with, so what you see is what you
     // sort by — previously these fell through to a hardcoded '' and sorting them was a no-op.
-    return (resolveFieldValue(columnId, task, companies, enhancedTasksData, departments, { getStaffName, getCurrentStageFollowUpForTask, getEnhancedStatusForTask }) || '').toString().toLowerCase();
-  }, [companies, departments, enhancedTasksData, getExpectedMinutesForTask, getActualTimeInfoForTask, getPromisedMinutesForTask, getPlannedExecutionDateForTask, getCurrentStageNameForTask, getStaffName, getCurrentStageFollowUpForTask, getEnhancedStatusForTask]);
+    return (resolveFieldValue(columnId, task, companies, enhancedTasksData, departments, { getStaffName, getCurrentStageFollowUpForTask, getEnhancedStatusForTask, getOfficersForTask }) || '').toString().toLowerCase();
+  }, [companies, departments, enhancedTasksData, getExpectedMinutesForTask, getActualTimeInfoForTask, getPromisedMinutesForTask, getPlannedExecutionDateForTask, getCurrentStageNameForTask, getStaffName, getCurrentStageFollowUpForTask, getEnhancedStatusForTask, getOfficersForTask]);
 
   const handleSort = useCallback((columnId: string) => {
     setSortLevels((cur) => {
@@ -813,6 +823,7 @@ export default function SummaryReportsPage() {
       getCurrentStageNameForTask,
       getCurrentStageFollowUpForTask,
       getStaffName,
+      getOfficersForTask,
       getEnhancedStatusForTask,
       showTime,
       scopeName: departments.find((d: any) => d.id.toString() === activeDeptId)?.name,
@@ -829,7 +840,7 @@ export default function SummaryReportsPage() {
     } finally {
       setIsExporting(null);
     }
-  }, [sortedTasks, visibleColumnIds, companies, departments, enhancedTasksData, getExpectedMinutesForTask, getActualTimeInfoForTask, getPromisedMinutesForTask, getPlannedExecutionDateForTask, getCurrentStageNameForTask, getCurrentStageFollowUpForTask, getStaffName, getEnhancedStatusForTask, showTime, activeDeptId, activeTaskStatus]);
+  }, [sortedTasks, visibleColumnIds, companies, departments, enhancedTasksData, getExpectedMinutesForTask, getActualTimeInfoForTask, getPromisedMinutesForTask, getPlannedExecutionDateForTask, getCurrentStageNameForTask, getCurrentStageFollowUpForTask, getStaffName, getOfficersForTask, getEnhancedStatusForTask, showTime, activeDeptId, activeTaskStatus]);
 
   if (loading) {
     return (
@@ -1004,6 +1015,7 @@ export default function SummaryReportsPage() {
         getCurrentStageNameForTask={getCurrentStageNameForTask}
         getCurrentStageFollowUpForTask={getCurrentStageFollowUpForTask}
         getStaffName={getStaffName}
+        getOfficersForTask={getOfficersForTask}
         visibleColumnIds={visibleColumnIds}
         reportColumnOrder={reportColumnOrder}
         reportFieldNumbers={reportFieldNumbers}

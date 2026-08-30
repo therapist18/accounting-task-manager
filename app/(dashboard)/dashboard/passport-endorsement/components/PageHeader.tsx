@@ -23,9 +23,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { STEP_LABELS, type HandlingStep } from "../utils/database";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
-const TAB_RAIL_CLASS = "w-full h-16 justify-start gap-3 bg-transparent p-0 overflow-x-auto flex items-center px-8 border-b border-slate-200";
-const TAB_UNDERLINE_TRIGGER_CLASS = "group h-10 rounded-md bg-transparent shadow-none px-5 py-2 border border-transparent text-[13px] font-bold text-slate-900 hover:bg-slate-100 transition-all data-[state=active]:bg-custom-blue data-[state=active]:text-white flex items-center whitespace-nowrap";
-const COUNT_BADGE_CLASS = "ml-2.5 inline-flex items-center justify-center font-bold tabular-nums rounded-md px-2 py-0.5 text-[11px] leading-none bg-slate-100 text-custom-blue border border-slate-200 group-data-[state=active]:bg-[#3669AE] group-data-[state=active]:text-white group-data-[state=active]:border-transparent";
+const TAB_RAIL_CLASS = "w-full h-12 justify-start gap-2 bg-transparent p-0 overflow-x-auto flex items-center px-8 border-b border-slate-200";
+const TAB_UNDERLINE_TRIGGER_CLASS = "group h-8 rounded-md bg-transparent shadow-none px-4 py-1 border border-transparent text-[12px] font-bold text-slate-900 hover:bg-slate-100 transition-all data-[state=active]:bg-custom-blue data-[state=active]:text-white flex items-center whitespace-nowrap";
+const COUNT_BADGE_CLASS = "ml-2 inline-flex items-center justify-center font-bold tabular-nums rounded-md px-2 py-0.5 text-[10px] leading-none bg-slate-100 text-custom-blue border border-slate-200 group-data-[state=active]:bg-[#3669AE] group-data-[state=active]:text-white group-data-[state=active]:border-transparent";
 
 const STATUS_TAB_ORDER: HandlingStep[] = [
   "awaiting_receipt",
@@ -277,7 +277,7 @@ export function StatsRow({
   };
 
   return (
-    <div className="px-8 py-6 bg-[#f8fafc] antialiased space-y-6">
+    <div className="px-8 py-4 bg-[#f8fafc] antialiased space-y-4">
       {/* FILTER BAR */}
       <div className="flex flex-wrap items-center gap-4">
         <div className="relative w-[340px] shrink-0">
@@ -286,11 +286,11 @@ export function StatsRow({
             placeholder="Search by name, passport no., company..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full h-11 pl-11 pr-10 bg-white border-slate-200 rounded-lg text-[13px] font-medium focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500 transition-all placeholder:text-slate-400 shadow-sm"
+            className="w-full h-10 pl-11 pr-10 bg-white border-slate-200 rounded-lg text-[13px] font-medium focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500 transition-all placeholder:text-slate-400 shadow-sm"
           />
         </div>
         
-        <div className="flex items-center h-11 border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden">
+        <div className="flex items-center h-10 border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden">
           <span className="text-sm font-semibold text-slate-700 px-4 bg-slate-50 border-r border-slate-200 h-full flex items-center">Status</span>
           <Select value={activeStep} onValueChange={setActiveStep}>
             <SelectTrigger className="h-full w-[170px] px-4 border-none shadow-none text-[13px] font-medium text-slate-600 focus:ring-0 bg-transparent rounded-none">
@@ -304,7 +304,7 @@ export function StatsRow({
           </Select>
         </div>
 
-        <div className="flex items-center h-11 border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden">
+        <div className="flex items-center h-10 border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden">
           <span className="text-sm font-semibold text-slate-700 px-4 bg-slate-50 border-r border-slate-200 h-full flex items-center">Mode</span>
           <Select value={activeMode} onValueChange={setActiveMode}>
             <SelectTrigger className="h-full w-[160px] px-4 border-none shadow-none text-[13px] font-medium text-slate-600 focus:ring-0 bg-transparent rounded-none">
@@ -319,7 +319,7 @@ export function StatsRow({
         </div>
 
         {availableClasses.length > 0 && (
-          <div className="flex items-center h-11 border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden">
+          <div className="flex items-center h-10 border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden">
             <span className="text-sm font-semibold text-slate-700 px-4 bg-slate-50 border-r border-slate-200 h-full flex items-center">Class</span>
             <Select value={activeClassIds.length > 0 ? activeClassIds[0] : "all"} onValueChange={(v) => setActiveClassIds(v === "all" ? [] : [v])}>
               <SelectTrigger className="h-full w-[150px] px-4 border-none shadow-none text-[13px] font-medium text-slate-600 focus:ring-0 bg-transparent rounded-none">
@@ -336,7 +336,7 @@ export function StatsRow({
         )}
 
         {availableSubClasses.length > 0 && (
-          <div className="flex items-center h-11 border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden">
+          <div className="flex items-center h-10 border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden">
             <span className="text-sm font-semibold text-slate-700 px-4 bg-slate-50 border-r border-slate-200 h-full flex items-center">Sub-class</span>
             <Select value={activeSubClassIds.length > 0 ? activeSubClassIds[0] : "all"} onValueChange={(v) => setActiveSubClassIds(v === "all" ? [] : [v])}>
               <SelectTrigger className="h-full w-[160px] px-4 border-none shadow-none text-[13px] font-medium text-slate-600 focus:ring-0 bg-transparent rounded-none">
@@ -356,7 +356,7 @@ export function StatsRow({
           <Button 
             variant="ghost" 
             onClick={handleClearFilters}
-            className="h-11 px-5 rounded-lg text-[13px] font-bold text-custom-blue hover:bg-slate-100 gap-1.5"
+            className="h-10 px-5 rounded-lg text-[13px] font-bold text-custom-blue hover:bg-slate-100 gap-1.5"
           >
             Clear Filters <XCircle className="h-4 w-4" />
           </Button>
@@ -366,12 +366,12 @@ export function StatsRow({
       {/* KPI SUMMARY CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         {/* Card 1 */}
-        <div className="bg-white rounded-lg border border-slate-200 p-5 flex items-center gap-4 shadow-sm">
-          <div className="h-14 w-14 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-            <Monitor className="h-6 w-6" />
+        <div className="bg-white rounded-lg border border-slate-200 p-4 flex items-center gap-4 shadow-sm">
+          <div className="h-11 w-11 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+            <Monitor className="h-5 w-5" />
           </div>
           <div>
-            <div className="text-[22px] font-black text-slate-900 tracking-tight leading-none mb-1">
+            <div className="text-[20px] font-black text-slate-900 tracking-tight leading-none mb-1">
               {counts?.total ? counts.total.toLocaleString() : "1,291"}
             </div>
             <div className="text-[13px] font-bold text-custom-blue leading-tight">Total Tracked</div>
@@ -380,12 +380,12 @@ export function StatsRow({
         </div>
 
         {/* Card 2 */}
-        <div className="bg-white rounded-lg border border-slate-200 p-5 flex items-center gap-4 shadow-sm">
-          <div className="h-14 w-14 rounded-full bg-orange-50 text-orange-500 flex items-center justify-center shrink-0">
-            <Clock className="h-6 w-6" />
+        <div className="bg-white rounded-lg border border-slate-200 p-4 flex items-center gap-4 shadow-sm">
+          <div className="h-11 w-11 rounded-full bg-orange-50 text-orange-500 flex items-center justify-center shrink-0">
+            <Clock className="h-5 w-5" />
           </div>
           <div>
-            <div className="text-[22px] font-black text-slate-900 tracking-tight leading-none mb-1">
+            <div className="text-[20px] font-black text-slate-900 tracking-tight leading-none mb-1">
               {counts?.awaiting_receipt ? counts.awaiting_receipt.toLocaleString() : "1"}
             </div>
             <div className="text-[13px] font-bold text-custom-blue leading-tight">Awaiting Receipt</div>
@@ -394,12 +394,12 @@ export function StatsRow({
         </div>
 
         {/* Card 3 */}
-        <div className="bg-white rounded-lg border border-slate-200 p-5 flex items-center gap-4 shadow-sm">
-          <div className="h-14 w-14 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
-            <Landmark className="h-6 w-6" />
+        <div className="bg-white rounded-lg border border-slate-200 p-4 flex items-center gap-4 shadow-sm">
+          <div className="h-11 w-11 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+            <Landmark className="h-5 w-5" />
           </div>
           <div>
-            <div className="text-[22px] font-black text-slate-900 tracking-tight leading-none mb-1">
+            <div className="text-[20px] font-black text-slate-900 tracking-tight leading-none mb-1">
               {counts?.in_progress ? counts.in_progress.toLocaleString() : "0"}
             </div>
             <div className="text-[13px] font-bold text-custom-blue leading-tight">In Progress</div>
@@ -408,12 +408,12 @@ export function StatsRow({
         </div>
 
         {/* Card 4 */}
-        <div className="bg-white rounded-lg border border-slate-200 p-5 flex items-center gap-4 shadow-sm">
-          <div className="h-14 w-14 rounded-full bg-green-50 text-green-600 flex items-center justify-center shrink-0">
-            <CheckCircle2 className="h-6 w-6" />
+        <div className="bg-white rounded-lg border border-slate-200 p-4 flex items-center gap-4 shadow-sm">
+          <div className="h-11 w-11 rounded-full bg-green-50 text-green-600 flex items-center justify-center shrink-0">
+            <CheckCircle2 className="h-5 w-5" />
           </div>
           <div>
-            <div className="text-[22px] font-black text-slate-900 tracking-tight leading-none mb-1">
+            <div className="text-[20px] font-black text-slate-900 tracking-tight leading-none mb-1">
               {counts?.completed ? counts.completed.toLocaleString() : "0"}
             </div>
             <div className="text-[13px] font-bold text-custom-blue leading-tight">Completed</div>
@@ -422,7 +422,7 @@ export function StatsRow({
         </div>
 
         {/* Card 5 - Mini List */}
-        <div className="bg-white rounded-lg border border-slate-200 p-5 flex flex-col justify-center space-y-3 shadow-sm pl-6">
+        <div className="bg-white rounded-lg border border-slate-200 p-4 flex flex-col justify-center space-y-2.5 shadow-sm pl-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center text-[12px] font-semibold text-slate-600">
               <span className="h-1.5 w-1.5 rounded-full bg-slate-300 mr-2.5"></span>

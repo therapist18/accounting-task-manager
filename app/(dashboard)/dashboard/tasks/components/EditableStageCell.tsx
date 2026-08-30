@@ -5,6 +5,7 @@ import { useState, useRef, useEffect, useCallback, useMemo, memo } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, Loader2, SkipForward, Clock3, MoreHorizontal, MoreVertical, CheckCircle2, Timer, AlertCircle, User, UserPlus, List, Link2, Type, Hash, Globe, Mail, Phone, AlignLeft, FileText as FileTextIcon, RotateCcw, ArrowUpRight, CreditCard, ClipboardList, Lock } from "lucide-react"
 import { toast } from "@/lib/hooks/use-toast"
@@ -1071,22 +1072,20 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         }
         return (
           <div className="flex items-center gap-1.5 min-w-0">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center gap-1 text-xs text-amber-600 font-medium cursor-help bg-transparent border-0 p-0 truncate">
-                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">Skipped</span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent className="bg-amber-50 text-amber-900 border-amber-200">
-                  <div className="text-xs text-left space-y-1">
-                    <p><span className="font-semibold">Reason:</span> {reason}</p>
-                    <p><span className="font-semibold">Date:</span> {formattedSkippedDate}</p>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <HoverCard openDelay={100} closeDelay={100}>
+              <HoverCardTrigger asChild>
+                <div className="flex items-center gap-1 text-xs text-amber-600 font-medium cursor-help bg-transparent border-0 p-0 truncate">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">Skipped</span>
+                </div>
+              </HoverCardTrigger>
+              <HoverCardContent className="bg-amber-50 text-amber-900 border-amber-200">
+                <div className="text-xs text-left space-y-1">
+                  <p><span className="font-semibold">Reason:</span> {reason}</p>
+                  <p><span className="font-semibold">Date:</span> {formattedSkippedDate}</p>
+                </div>
+              </HoverCardContent>
+            </HoverCard>
           </div>
         );
       }
@@ -1109,21 +1108,19 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
           </div>
         );
         return (
-          <TooltipProvider delayDuration={150}>
-            <Tooltip>
-              <TooltipTrigger asChild>{completedBlock}</TooltipTrigger>
-              <TooltipContent
-                side="top"
-                className={cn(
-                  "border shadow-lg text-xs rounded-lg px-3 py-2 z-[9999]",
-                  isStageOverdue ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-emerald-50 border-emerald-200 text-emerald-900"
-                )}
-              >
-                <p className="font-bold mb-0.5">{isStageOverdue ? "Completed — Overdue" : "Completed On Time"}</p>
-                {renderStageTimingDetails({ isCompleted: true })}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <HoverCard openDelay={100} closeDelay={100}>
+            <HoverCardTrigger asChild>{completedBlock}</HoverCardTrigger>
+            <HoverCardContent
+              side="top"
+              className={cn(
+                "border shadow-lg text-xs rounded-lg px-3 py-2 z-[9999] min-w-[260px]",
+                isStageOverdue ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-emerald-50 border-emerald-200 text-emerald-900"
+              )}
+            >
+              <p className="font-bold mb-0.5">{isStageOverdue ? "Completed — Overdue" : "Completed On Time"}</p>
+              {renderStageTimingDetails({ isCompleted: true })}
+            </HoverCardContent>
+          </HoverCard>
         );
       }
 
@@ -1131,27 +1128,25 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         const textColorClass = timeStatus.isOverdue ? "text-red-600" : "text-blue-600";
         const icon = timeStatus.isOverdue ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> : <Timer className="h-3.5 w-3.5 shrink-0" />;
         return (
-          <TooltipProvider delayDuration={150}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-1">
-                  <div className={`flex items-center gap-1 font-medium text-xs ${textColorClass} cursor-default truncate`}>
-                    {icon}<span className="truncate">{timeStatus.formattedElapsed} elapsed</span>
-                  </div>
+          <HoverCard openDelay={100} closeDelay={100}>
+            <HoverCardTrigger asChild>
+              <div className="flex items-center gap-1">
+                <div className={`flex items-center gap-1 font-medium text-xs ${textColorClass} cursor-default truncate`}>
+                  {icon}<span className="truncate">{timeStatus.formattedElapsed} elapsed</span>
                 </div>
-              </TooltipTrigger>
-              <TooltipContent
-                side="top"
-                className={cn(
-                  "border shadow-lg text-xs rounded-lg px-3 py-2 z-[9999]",
-                  timeStatus.isOverdue ? "bg-red-50 border-red-200 text-red-900" : "bg-blue-50 border-blue-200 text-blue-900"
-                )}
-              >
-                <p className="font-bold mb-0.5">{timeStatus.isOverdue ? "In Progress — Overdue" : "In Progress — On Track"}</p>
-                {renderStageTimingDetails({ isCompleted: false })}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+              </div>
+            </HoverCardTrigger>
+            <HoverCardContent
+              side="top"
+              className={cn(
+                "border shadow-lg text-xs rounded-lg px-3 py-2 z-[9999] min-w-[260px]",
+                timeStatus.isOverdue ? "bg-red-50 border-red-200 text-red-900" : "bg-blue-50 border-blue-200 text-blue-900"
+              )}
+            >
+              <p className="font-bold mb-0.5">{timeStatus.isOverdue ? "In Progress — Overdue" : "In Progress — On Track"}</p>
+              {renderStageTimingDetails({ isCompleted: false })}
+            </HoverCardContent>
+          </HoverCard>
         );
       }
 
@@ -1171,22 +1166,20 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       }
       return (
         <div className="flex items-center gap-1.5 min-w-0">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-1 text-xs text-amber-600 font-medium cursor-help bg-transparent border-0 p-0 truncate">
-                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">Skipped</span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent className="bg-amber-50 text-amber-900 border-amber-200">
-                <div className="text-xs text-left space-y-1">
-                  <p><span className="font-semibold">Reason:</span> {reason}</p>
-                  <p><span className="font-semibold">Date:</span> {formattedSkippedDate}</p>
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <HoverCard openDelay={100} closeDelay={100}>
+            <HoverCardTrigger asChild>
+              <div className="flex items-center gap-1 text-xs text-amber-600 font-medium cursor-help bg-transparent border-0 p-0 truncate">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">Skipped</span>
+              </div>
+            </HoverCardTrigger>
+            <HoverCardContent className="bg-amber-50 text-amber-900 border-amber-200">
+              <div className="text-xs text-left space-y-1">
+                <p><span className="font-semibold">Reason:</span> {reason}</p>
+                <p><span className="font-semibold">Date:</span> {formattedSkippedDate}</p>
+              </div>
+            </HoverCardContent>
+          </HoverCard>
           {!isCompact && (
             <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-blue-600 hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); handleUnskip(); }} disabled={isLoading}>
               Undo
@@ -1278,32 +1271,29 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
 
       return (
         <div className="flex items-center gap-1 min-w-0">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div
-                  className={`flex items-center gap-1 font-semibold text-xs ${textColorClass} cursor-pointer hover:underline select-none truncate`}
-                  onClick={(e) => { e.stopPropagation(); if (!requiresUpload) setIsEditing(true); }}
-                  onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-                >
-                  {icon}
-                  <span className="truncate" title={formatDateDisplay(stageDate)}>{formatDateDisplay(stageDate)}</span>
-                  {isCompletedOverdue && (
-                    <span className="text-[8px] font-black text-amber-600 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded uppercase shrink-0">LATE</span>
-                  )}
+          <HoverCard openDelay={100} closeDelay={100}>
+            <HoverCardTrigger asChild>
+              <div
+                className={`flex items-center gap-1 font-semibold text-xs ${textColorClass} cursor-help select-none truncate`}
+                onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+              >
+                {icon}
+                <span className="truncate" title={formatDateDisplay(stageDate)}>{formatDateDisplay(stageDate)}</span>
+                {isCompletedOverdue && (
+                  <span className="text-[8px] font-black text-amber-600 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded uppercase shrink-0">LATE</span>
+                )}
+              </div>
+            </HoverCardTrigger>
+            <HoverCardContent className={`${borderColorClass} text-slate-900 border shadow-md min-w-[260px]`}>
+              <div className="space-y-2 p-1">
+                <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
+                  <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
                 </div>
-              </TooltipTrigger>
-              <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
-                <div className="space-y-2 p-1">
-                  <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
-                    <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
-                  </div>
-                  {renderStageTimingDetails({ isCompleted: true })}
-                  <p className="text-[10px] text-slate-400 pt-1 italic border-t border-slate-200 mt-1">Double-click to edit date</p>
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+                {renderStageTimingDetails({ isCompleted: true })}
+                <p className="text-[10px] text-slate-400 pt-1 italic border-t border-slate-200 mt-1">Double-click to edit date</p>
+              </div>
+            </HoverCardContent>
+          </HoverCard>
           {!readOnly && !requiresUpload && (
             <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 shrink-0" onClick={handleClearStage} disabled={isLoading} title="Clear">
               <RotateCcw className="h-3 w-3" />
@@ -1324,28 +1314,26 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
 
       return (
         <div className="flex items-center min-w-0">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-1">
-                  <div className={`flex items-center gap-1 font-medium text-xs ${textColorClass} cursor-default truncate`}>
-                    {icon}<span className="truncate">{timeStatus.formattedElapsed} elapsed</span>
-                  </div>
-                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 border border-dashed border-gray-300 hover:border-gray-400 shrink-0 ml-1" onClick={() => setIsEditing(true)}>
-                    <Check className="h-3 w-3 text-green-600" />
-                  </Button>
+          <HoverCard openDelay={100} closeDelay={100}>
+            <HoverCardTrigger asChild>
+              <div className="flex items-center gap-1">
+                <div className={`flex items-center gap-1 font-medium text-xs ${textColorClass} cursor-default truncate`}>
+                  {icon}<span className="truncate">{timeStatus.formattedElapsed} elapsed</span>
                 </div>
-              </TooltipTrigger>
-              <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md max-w-[250px]`}>
-                <div className="space-y-2 p-1">
-                  <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
-                    <span className={`font-bold ${textColorClass}`}>{timeStatus.isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}</span>
-                  </div>
-                  {renderStageTimingDetails({ isCompleted: false })}
+                <Button variant="ghost" size="sm" className="h-5 w-5 p-0 border border-dashed border-gray-300 hover:border-gray-400 shrink-0 ml-1" onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}>
+                  <Check className="h-3 w-3 text-green-600" />
+                </Button>
+              </div>
+            </HoverCardTrigger>
+            <HoverCardContent className={`${borderColorClass} text-slate-900 border shadow-md min-w-[260px]`}>
+              <div className="space-y-2 p-1">
+                <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
+                  <span className={`font-bold ${textColorClass}`}>{timeStatus.isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}</span>
                 </div>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+                {renderStageTimingDetails({ isCompleted: false })}
+              </div>
+            </HoverCardContent>
+          </HoverCard>
         </div>
       );
     }
@@ -1678,22 +1666,20 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         if (d) formattedSkippedDate = format(d, 'dd/MM/yyyy');
       }
       return (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="flex items-center gap-1 text-sm text-amber-600 font-semibold cursor-help truncate">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">Skipped</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent className="bg-amber-50 text-amber-900 border-amber-200">
-              <div className="text-xs text-left space-y-1">
-                <p><span className="font-semibold">Reason:</span> {reason}</p>
-                <p><span className="font-semibold">Date:</span> {formattedSkippedDate}</p>
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <HoverCard openDelay={100} closeDelay={100}>
+          <HoverCardTrigger asChild>
+            <div className="flex items-center gap-1 text-sm text-amber-600 font-semibold cursor-help truncate">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">Skipped</span>
+            </div>
+          </HoverCardTrigger>
+          <HoverCardContent className="bg-amber-50 text-amber-900 border-amber-200">
+            <div className="text-xs text-left space-y-1">
+              <p><span className="font-semibold">Reason:</span> {reason}</p>
+              <p><span className="font-semibold">Date:</span> {formattedSkippedDate}</p>
+            </div>
+          </HoverCardContent>
+        </HoverCard>
       );
     }
 
@@ -1707,24 +1693,22 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       const borderColorClass = isCompletedOverdue ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-100";
 
       return (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 font-semibold text-sm ${textColorClass} cursor-default select-none truncate`}>
-                {icon}
-                <span className="truncate">{isCompletedOverdue ? "Overdue" : "Completed"}</span>
+        <HoverCard openDelay={100} closeDelay={100}>
+          <HoverCardTrigger asChild>
+            <div className={`flex items-center gap-1 font-semibold text-sm ${textColorClass} cursor-help select-none truncate`}>
+              {icon}
+              <span className="truncate">{isCompletedOverdue ? "Overdue" : "Completed"}</span>
+            </div>
+          </HoverCardTrigger>
+          <HoverCardContent className={`${borderColorClass} text-slate-900 border shadow-md min-w-[260px]`}>
+            <div className="space-y-2 p-1">
+              <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
+                <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
               </div>
-            </TooltipTrigger>
-            <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
-              <div className="space-y-2 p-1">
-                <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
-                  <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
-                </div>
-                {renderStageTimingDetails({ isCompleted: true })}
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+              {renderStageTimingDetails({ isCompleted: true })}
+            </div>
+          </HoverCardContent>
+        </HoverCard>
       );
     }
 
@@ -1734,23 +1718,21 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       const borderColorClass = timeStatus.isOverdue ? "border-red-200 bg-red-50" : "border-blue-200 bg-blue-50";
 
       return (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 font-semibold text-sm ${textColorClass} cursor-default truncate`}>
-                {icon}<span className="truncate">{timeStatus.isOverdue ? 'Overdue' : 'In Progress'}</span>
+        <HoverCard openDelay={100} closeDelay={100}>
+          <HoverCardTrigger asChild>
+            <div className={`flex items-center gap-1 font-semibold text-sm ${textColorClass} cursor-help truncate`}>
+              {icon}<span className="truncate">{timeStatus.isOverdue ? 'Overdue' : 'In Progress'}</span>
+            </div>
+          </HoverCardTrigger>
+          <HoverCardContent className={`${borderColorClass} text-slate-900 border shadow-md min-w-[260px]`}>
+            <div className="space-y-2 p-1">
+              <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
+                <span className={`font-bold ${textColorClass}`}>{timeStatus.isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}</span>
               </div>
-            </TooltipTrigger>
-            <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md max-w-[250px]`}>
-              <div className="space-y-2 p-1">
-                <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
-                  <span className={`font-bold ${textColorClass}`}>{timeStatus.isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}</span>
-                </div>
-                {renderStageTimingDetails({ isCompleted: false })}
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+              {renderStageTimingDetails({ isCompleted: false })}
+            </div>
+          </HoverCardContent>
+        </HoverCard>
       );
     }
 
@@ -2009,19 +1991,17 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       if (!isLegacyMode && renderMode !== 'status') return null;
 
       return (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="flex items-center gap-1.5 px-1 py-0.5 rounded bg-gray-50 border border-dashed border-gray-200 cursor-default w-full">
-                <Lock className="h-3 w-3 text-gray-300 shrink-0" />
-                <span className="text-[10px] text-gray-300 italic truncate">Locked</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className="text-xs">Waiting for: {waitingOn}</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <HoverCard openDelay={100} closeDelay={100}>
+          <HoverCardTrigger asChild>
+            <div className="flex items-center gap-1.5 px-1 py-0.5 rounded bg-gray-50 border border-dashed border-gray-200 cursor-help w-full">
+              <Lock className="h-3 w-3 text-gray-300 shrink-0" />
+              <span className="text-[10px] text-gray-300 italic truncate">Locked</span>
+            </div>
+          </HoverCardTrigger>
+          <HoverCardContent>
+            <p className="text-xs">Waiting for: {waitingOn}</p>
+          </HoverCardContent>
+        </HoverCard>
       );
     }
 

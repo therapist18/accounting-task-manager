@@ -49,6 +49,7 @@ export interface Department {
   name: string;
   stages: any[];
   tm_subdepartments?: any[];
+  officer_sections?: Array<{ id: string, name: string, stage_ids: string[] }>;
 }
 
 export interface KycDocument {

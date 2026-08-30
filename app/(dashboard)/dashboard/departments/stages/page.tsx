@@ -13,6 +13,7 @@ import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, 
 import { supabase } from "@/lib/supabase/client"
 import { AddStageDialog } from "./components/add-stage-dialog"
 import { EditStageDialog } from "./components/edit-stage-dialog"
+import { OfficerSectionsDialog } from "./components/officer-sections-dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import type { Department, Stage, DepartmentOption } from "./stagesdb"
@@ -193,6 +194,7 @@ export default function Stages() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [isOfficerSectionsOpen, setIsOfficerSectionsOpen] = useState(false)
   const [editingStage, setEditingStage] = useState<Stage | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
@@ -4285,6 +4287,23 @@ export default function Stages() {
             <Button
               variant="outline"
               size="sm"
+              onClick={() => setIsOfficerSectionsOpen(true)}
+              disabled={!currentDept}
+              className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
+              title="Group officer follow-up stages into sections handled by one officer"
+            >
+              <Users className="h-3.5 w-3.5" />
+              Officer Sections
+              {currentDept?.officer_sections?.length > 0 && (
+                <span className="inline-flex items-center justify-center font-bold tabular-nums px-1.5 py-0.5 min-w-[1.25rem] rounded-full text-[10px] leading-none bg-blue-100 text-custom-blue">
+                  {currentDept.officer_sections.length}
+                </span>
+              )}
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
               onClick={handleRecalculateExpectedTimes}
               disabled={!currentDept || isRecalculatingExpectedTimes}
               className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
@@ -4382,6 +4401,22 @@ export default function Stages() {
           officers={userData.officers}
           departmentName={currentDept?.name}
         />
+
+        {currentDept && (
+          <OfficerSectionsDialog
+            open={isOfficerSectionsOpen}
+            onOpenChange={setIsOfficerSectionsOpen}
+            departmentId={currentDept.id}
+            departmentName={currentDept.name}
+            stages={currentDept.stages}
+            sections={currentDept.officer_sections || []}
+            onSaved={(sections) => {
+              setDepartments((prev) =>
+                prev.map((dept) => (dept.id === currentDept.id ? { ...dept, officer_sections: sections } : dept)),
+              )
+            }}
+          />
+        )}
       </div>
     </div>
   )

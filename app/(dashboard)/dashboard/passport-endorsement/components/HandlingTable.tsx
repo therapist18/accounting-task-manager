@@ -388,7 +388,7 @@ export function HandlingTable({
         rowSpan={rowSpan}
         onClick={() => handleSort?.(col.id)}
         className={cn(
-          "group relative border-r border-b border-white/20 px-4 py-3.5 select-none transition-colors",
+          "group relative border-r border-b border-white/20 px-4 py-2 select-none transition-colors",
           accent.headerBg,
           accent.headerHover,
           handleSort && "cursor-pointer",
@@ -479,7 +479,7 @@ export function HandlingTable({
                     <TableHead
                       key={chunk.gid}
                       colSpan={chunk.cols.length}
-                      className={cn("h-9 px-3 text-center border-r border-b border-white/10", accent.headerBg)}
+                      className={cn("h-7 px-3 text-center border-r border-b border-white/10", accent.headerBg)}
                     >
                       <span className="text-[11px] font-bold text-white/90 uppercase tracking-widest">{accent.label}</span>
                     </TableHead>
@@ -782,24 +782,43 @@ export function HandlingTable({
               </SelectContent>
             </Select>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <PaginationButton onClick={() => setCurrentPage(1)} disabled={currentPage === 1}><ChevronsLeft size={16} /></PaginationButton>
             <PaginationButton onClick={() => setCurrentPage((p) => p - 1)} disabled={currentPage === 1}><ChevronLeft size={16} /></PaginationButton>
-            
-            {/* Active state exactly matches screenshot blue rounded square */}
-            <div className="h-8 w-8 flex items-center justify-center text-[13px] font-bold text-white rounded-md bg-custom-blue shadow-sm">
-              {currentPage}
-            </div>
-            {/* Minimal static ellipses to match standard UI layout impression */}
-            {totalPages > 3 && currentPage < totalPages - 1 && (
-              <>
-                <div className="h-8 w-8 flex items-center justify-center text-[13px] font-semibold text-slate-500">2</div>
-                <div className="h-8 w-8 flex items-center justify-center text-[13px] font-semibold text-slate-500">3</div>
-                <div className="h-8 w-8 flex items-center justify-center text-[13px] text-slate-400">...</div>
-                <div className="h-8 w-8 flex items-center justify-center text-[13px] font-semibold text-slate-500">{totalPages}</div>
-              </>
+
+            {(() => {
+              const pages: (number | "…")[] = [];
+              if (totalPages <= 7) {
+                for (let i = 1; i <= totalPages; i++) pages.push(i);
+              } else {
+                pages.push(1);
+                if (currentPage > 4) pages.push("…");
+                const start = Math.max(2, currentPage - 1);
+                const end = Math.min(totalPages - 1, currentPage + 1);
+                for (let i = start; i <= end; i++) pages.push(i);
+                if (currentPage < totalPages - 3) pages.push("…");
+                pages.push(totalPages);
+              }
+              return pages;
+            })().map((p, i) =>
+              p === "…" ? (
+                <span key={`ellipsis-${i}`} className="h-8 w-8 flex items-center justify-center text-[13px] text-slate-400 select-none">…</span>
+              ) : (
+                <button
+                  key={p}
+                  onClick={() => setCurrentPage(p)}
+                  className={cn(
+                    "h-8 w-8 rounded-md text-[13px] font-bold flex items-center justify-center select-none transition-all",
+                    p === currentPage
+                      ? "bg-custom-blue text-white shadow-sm"
+                      : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                  )}
+                >
+                  {p}
+                </button>
+              )
             )}
-            
+
             <PaginationButton onClick={() => setCurrentPage((p) => p + 1)} disabled={currentPage === totalPages}><ChevronRight size={16} /></PaginationButton>
             <PaginationButton onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}><ChevronsRight size={16} /></PaginationButton>
           </div>

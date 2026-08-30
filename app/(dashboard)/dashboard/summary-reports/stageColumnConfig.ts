@@ -112,6 +112,10 @@ export const SUMMARY_COLUMNS: SummaryColumnDef[] = [
   { id: 'passport_number', label: 'Passport Number', type: 'field' },
   { id: 'task_manager', label: 'Task Manager', type: 'field' },
   { id: 'task_assistant', label: 'Task Assistant', type: 'field' },
+  // Officers assigned to this task's officer-follow-up stages (across its whole workflow, not
+  // just the current stage) — resolved via ctx.getOfficersForTask in SummaryTable's
+  // resolveFieldValue and the page's own getOfficersForTask getter.
+  { id: 'officers', label: 'Officers', type: 'field' },
   { id: 'current_stage_follow_up', label: 'Current Stage Follow-up', type: 'field' },
   { id: 'cancellation_reason', label: 'Cancellation Reason', type: 'field' },
   { id: 'cancellation_date', label: 'Cancellation Date', type: 'field' },
@@ -136,6 +140,7 @@ const DEFAULT_HIDDEN_SUMMARY_COLUMN_IDS = new Set([
   'passport_number',
   'task_manager',
   'task_assistant',
+  'officers',
   'current_stage_follow_up',
   'cancellation_reason',
   'cancellation_date',

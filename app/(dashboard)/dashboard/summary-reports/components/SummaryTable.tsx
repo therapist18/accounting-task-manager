@@ -67,6 +67,9 @@ export interface ResolveFieldValueContext {
   getStaffName?: (userId: any) => string;
   getCurrentStageFollowUpForTask?: (task: any) => string | null;
   getEnhancedStatusForTask?: (task: any) => { date: Date | null; documentType: string | null; daysRemaining: number | null };
+  // Officer display names associated with a task (all officers assigned across its
+  // officer-follow-up stages) — returns an empty array when none are assigned.
+  getOfficersForTask?: (task: any) => string[];
 }
 
 export const resolveFieldValue = (colId: string, task: any, companies: Map<number, any>, enhancedTasksData: Map<string, any>, departments: any[] = [], ctx: ResolveFieldValueContext = {}): any => {
@@ -107,6 +110,11 @@ export const resolveFieldValue = (colId: string, task: any, companies: Map<numbe
     case 'cancelled_by': return task.participants_details?.cancelled_by || null;
     case 'task_manager': return ctx.getStaffName ? (getStaffFromParticipants(task, 'task_manager', ctx.getStaffName, departments) || null) : null;
     case 'task_assistant': return ctx.getStaffName ? (getStaffFromParticipants(task, 'task_assistant', ctx.getStaffName, departments) || null) : null;
+    case 'officers': {
+      if (!ctx.getOfficersForTask) return null;
+      const names = ctx.getOfficersForTask(task) || [];
+      return names.length > 0 ? names.join(', ') : null;
+    }
     case 'current_stage_follow_up': return ctx.getCurrentStageFollowUpForTask ? ctx.getCurrentStageFollowUpForTask(task) : null;
     case 'immigration_document_type': {
       if (!ctx.getEnhancedStatusForTask) return null;
@@ -271,6 +279,7 @@ export function SummaryTable({
   getCurrentStageNameForTask,
   getCurrentStageFollowUpForTask,
   getStaffName,
+  getOfficersForTask,
   visibleColumnIds = DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS,
   reportColumnOrder = null,
   reportFieldNumbers = null,
@@ -301,6 +310,7 @@ export function SummaryTable({
   getCurrentStageNameForTask?: (task: any) => string | null;
   getCurrentStageFollowUpForTask?: (task: any) => string | null;
   getStaffName?: (userId: any) => string;
+  getOfficersForTask?: (task: any) => string[];
   visibleColumnIds?: string[];
   // The order applyReportToSummaryColumns derived from the applied report's own stored field
   // order (stageColumnConfig.ts) — null when no report is active, in which case columns fall
@@ -368,7 +378,7 @@ export function SummaryTable({
     return getEnhancedImmigrationStatus(task, stageList, allDocuments, kycDocuments);
   }, [tasksStagesByDept, allDocuments, kycDocuments]);
 
-  const fieldValueCtx: ResolveFieldValueContext = { getStaffName, getCurrentStageFollowUpForTask, getEnhancedStatusForTask };
+  const fieldValueCtx: ResolveFieldValueContext = { getStaffName, getCurrentStageFollowUpForTask, getEnhancedStatusForTask, getOfficersForTask };
 
   // Group (sub-department) headers pin directly beneath the sticky column header instead of
   // just being a divider line — measured (not hardcoded) so it stays correct if the header
@@ -710,14 +720,14 @@ export function SummaryTable({
               )}
 
               <TableRow ref={headerRowRef} className="hover:bg-transparent border-0">
-                <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-2.5 px-2 bg-custom-blue">
+                <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-1.5 px-2 bg-custom-blue">
                   <span className="text-[10px] font-semibold text-white uppercase tracking-wider">#</span>
                 </TableHead>
 
                 {interleavedColumns.map((col: any) => {
                   if (col.isDelta) {
                     return (
-                      <TableHead key={col.id} className="border-r border-b border-white/30 text-center px-1 py-2.5 bg-custom-blue" style={{ width: DELTA_COL_WIDTH }}>
+                      <TableHead key={col.id} className="border-r border-b border-white/30 text-center px-1 py-1.5 bg-custom-blue" style={{ width: DELTA_COL_WIDTH }}>
                         <TooltipProvider delayDuration={300}>
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -741,7 +751,7 @@ export function SummaryTable({
                       key={col.id}
                       onClick={() => handleSort?.(col.id)}
                       className={cn(
-                        "group relative border-r border-b border-white/30 transition-colors select-none px-4 py-2.5",
+                        "group relative border-r border-b border-white/30 transition-colors select-none px-4 py-1.5",
                         handleSort && "cursor-pointer",
                         col.highlight ? "bg-amber-500 hover:bg-amber-600" : col.type === 'computed_time' ? "bg-violet-600 hover:bg-violet-700" : "bg-custom-blue hover:bg-slate-700",
                         isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.15)]",

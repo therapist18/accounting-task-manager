@@ -182,6 +182,19 @@ export interface Stage {
     }
 }
 
+// An "officer section" groups a contiguous-ish set of steps in a department's workflow that
+// are handled by the same officer (e.g. "Processing to Approval" then "Approval to Write up").
+// Membership is keyed by stable stage UUIDs (never order indexes), so reordering or inserting
+// stages elsewhere in the department can never displace which stages belong to a section.
+// Stored on the department as `tm_departments.officer_sections` (JSONB array). When officers
+// are assigned per task, an officer picked for a section fans out to every member stage whose
+// follow_up === 'Officer'.
+export interface OfficerSection {
+    id: string
+    name: string
+    stage_ids: string[]
+}
+
 export type TimeConfig = {
     applicationType: string
     days: number
@@ -224,6 +237,7 @@ export type Department = {
     stages: Stage[]
     tm_subdepartments?: Subdepartment[]
     subdepartments?: Subdepartment[]
+    officer_sections?: OfficerSection[]
 }
 
 export type DepartmentOption = {
@@ -433,6 +447,24 @@ export async function deleteStage(departmentId: string, stageId: string): Promis
     } catch (error) {
         console.error('Error deleting stage:', error)
         throw new Error('Failed to delete stage')
+    }
+}
+
+// Replace the department's officer_sections wholesale.
+export async function updateOfficerSections(departmentId: string, sections: OfficerSection[]): Promise<void> {
+    try {
+        const { error } = await supabase
+            .from('tm_departments')
+            .update({
+                officer_sections: sections,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', departmentId)
+
+        if (error) throw error
+    } catch (error) {
+        console.error('Error updating officer sections:', error)
+        throw new Error('Failed to update officer sections')
     }
 }
 

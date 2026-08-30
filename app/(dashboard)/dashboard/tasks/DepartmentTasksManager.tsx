@@ -129,7 +129,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set())
   const [isDocumentPreviewOpen, setIsDocumentPreviewOpen] = useState(false);
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages', 'report_docs']))
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages', 'report_docs', 'actions']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
   const [activeReport, setActiveReport] = useState<any | null>(null);
   const [areTabsVisible, setAreTabsVisible] = useState(true);
@@ -1839,7 +1839,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       showOptionalStages,
       showDelta,
       expandedSections: Array.from(expandedSections).sort(),
-      visibleStats: Array.from(visibleStats).sort()
+      visibleStats: Array.from(visibleStats).sort(),
+      reportDocDefaults: reportDocDefaults?.map(d => d.id) || []
     });
 
     const cached = tableRowsCacheRef.current.get(cacheKey);
@@ -2087,7 +2088,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     });
 
     return rows
-  }, [stages, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage, departments, showDelta, showNAStages, showOptionalStages, isStageApplicableToTask])
+  }, [stages, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage, departments, showDelta, showNAStages, showOptionalStages, isStageApplicableToTask, reportDocDefaults])
 
   const handleStageDocumentUpload = useCallback((task: any, stage: any) => {
     const enrichedTask = {
@@ -4326,6 +4327,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         task={selectedTaskForOfficers}
         officers={realOfficers}
         stages={stages}
+        departments={departments}
+        officerSections={departments.find(d => d.id.toString() === activeDepartmentTab)?.officer_sections || []}
         initialStageAssignments={selectedTaskForOfficers?.stages ? Object.entries(selectedTaskForOfficers.stages).reduce((acc, [stageId, stageData]: [string, any]) => {
           if (stageData?.officer_ids) {
             acc[stageId] = stageData.officer_ids;

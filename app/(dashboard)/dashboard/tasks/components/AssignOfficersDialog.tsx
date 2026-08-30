@@ -27,6 +27,7 @@ import {
   AlertCircle
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { isStageApplicableToTask } from "../../reports/utils/reportStageLogic"
 
 interface AssignOfficersDialogProps {
   open: boolean
@@ -34,6 +35,8 @@ interface AssignOfficersDialogProps {
   task: any
   officers: any[]
   stages?: any[]
+  departments?: any[]
+  officerSections?: Array<{ id: string, name: string, stage_ids: string[] }>
   initialStageAssignments?: Record<string, string[]>
   onAssign: (stageAssignments: Record<string, string[]>) => void
 }
@@ -44,6 +47,8 @@ export function AssignOfficersDialog({
   task,
   officers,
   stages,
+  departments,
+  officerSections,
   initialStageAssignments,
   onAssign
 }: AssignOfficersDialogProps) {
@@ -52,19 +57,54 @@ export function AssignOfficersDialog({
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // 1. Filter stages that require officer follow-up
+  // 1. Filter stages that require officer follow-up AND are applicable to this task's job level,
+  //    so the "Assigning to:" list only surfaces stages the current task can actually go through.
   const officerFollowUpStages = useMemo(() => {
-    return (stages || []).filter(s => s.follow_up?.toLowerCase() === 'officer');
-  }, [stages]);
+    return (stages || []).filter(s =>
+      s.follow_up?.toLowerCase() === 'officer' &&
+      isStageApplicableToTask(s, task, departments || [])
+    );
+  }, [stages, task, departments]);
+
+  // 1b. Section-aware groupings of officer stages. Each configured section groups the officer
+  //    stages whose ids it contains; any officer stage not in a section falls back into an
+  //    "Ungrouped" bucket. Rendering against these groups lets an admin assign one officer to a
+  //    whole contiguous block of steps instead of clicking each stage.
+  const officerGroups = useMemo(() => {
+    const groups: Array<{ id: string, isSection: boolean, name: string, stages: any[] }> = [];
+    const sectioned = new Set<string>();
+
+    (officerSections || []).forEach(sec => {
+      const memberStages = officerFollowUpStages.filter(s =>
+        Array.isArray(sec.stage_ids) && sec.stage_ids.includes(s.id)
+      );
+      if (memberStages.length === 0) return;
+      memberStages.forEach(s => sectioned.add(s.id));
+      groups.push({ id: sec.id, isSection: true, name: sec.name || 'Section', stages: memberStages });
+    });
+
+    const ungrouped = officerFollowUpStages.filter(s => !sectioned.has(s.id));
+    if (ungrouped.length > 0) {
+      groups.push({ id: '__ungrouped__', isSection: false, name: 'Ungrouped', stages: ungrouped });
+    }
+
+    return groups;
+  }, [officerSections, officerFollowUpStages]);
 
   // 2. Initialize local state when dialog opens
   useEffect(() => {
     if (open) {
-      setLocalAssignments(initialStageAssignments || {});
-      // Default to first stage
-      setSelectedStageId(officerFollowUpStages[0]?.id || null);
+      // Normalize to a single officer per stage so pre-existing multi-officer data still obeys
+      // the one-officer rule (keep the first assigned officer for each stage).
+      const normalized: Record<string, string[]> = {};
+      Object.entries(initialStageAssignments || {}).forEach(([sid, ids]) => {
+        if (Array.isArray(ids) && ids.length > 0) normalized[sid] = [ids[0]];
+      });
+      setLocalAssignments(normalized);
+      // Default to first group (section or ungrouped bucket)
+      setSelectedStageId(officerGroups[0]?.id || null);
     }
-  }, [open, initialStageAssignments, officerFollowUpStages]);
+  }, [open, initialStageAssignments, officerGroups]);
 
   // 3. Filtering Logic: Identify which officers are "Qualified" for which stage
   const stageQualificationMap = useMemo(() => {
@@ -95,15 +135,24 @@ export function AssignOfficersDialog({
     return map;
   }, [officerFollowUpStages, task]);
 
+  // 4. The stages belonging to the current selection. When a whole section is selected we
+  //    treat the union of its stages' qualified officers as the pool to render.
+  const selectedGroupStages = useMemo(() => {
+    const group = officerGroups.find(g => g.id === selectedStageId);
+    return group ? group.stages : [];
+  }, [officerGroups, selectedStageId]);
+
   // 4. Filter the officer list based on selected stage and search query
   const filteredOfficers = useMemo(() => {
     let list = officers || [];
 
-    // If a specific stage is selected, filter by qualification
-    if (selectedStageId) {
-      const qualifiedIds = stageQualificationMap.get(selectedStageId);
-      // If no qualified officers for this stage, return empty array
-      if (!qualifiedIds || qualifiedIds.size === 0) {
+    // If a specific group is selected, filter by the union of qualifications across its stages
+    if (selectedGroupStages.length > 0) {
+      const qualifiedIds = new Set<string>();
+      selectedGroupStages.forEach(stage => {
+        (stageQualificationMap.get(stage.id) || new Set<string>()).forEach(id => qualifiedIds.add(id));
+      });
+      if (qualifiedIds.size === 0) {
         return [];
       }
       list = list.filter(o => qualifiedIds.has(o.id.toString()));
@@ -118,20 +167,36 @@ export function AssignOfficersDialog({
     }
 
     return list;
-  }, [officers, selectedStageId, stageQualificationMap, searchQuery]);
+  }, [officers, selectedGroupStages, stageQualificationMap, searchQuery]);
 
-  const toggleOfficerInStage = (officerId: string) => {
-    // If no stage selected, we treat it as a general assignment (or prevent it)
-    // For this UI, we'll assign to the current selected stage context
-    const stageKey = selectedStageId || 'all';
+  // Stage ids the currently selected group fans assignments out to.
+  const selectedTargetStageIds = useMemo(
+    () => selectedGroupStages.map(s => s.id),
+    [selectedGroupStages],
+  );
 
+  const isOfficerSelectedInGroup = (officerId: string) =>
+    selectedTargetStageIds.some(sid => (localAssignments[sid] || []).includes(officerId));
+
+  const toggleOfficerInGroup = (officerId: string) => {
+    // Only one officer may be selected across the whole dialog at a time. Selecting a new
+    // officer clears every other stage's selection, then fans the single choice out to every
+    // officer stage in the current group (sections of consecutive officer steps).
+    const alreadySelected = isOfficerSelectedInGroup(officerId);
     setLocalAssignments(prev => {
-      const currentIds = prev[stageKey] || [];
-      const newIds = currentIds.includes(officerId)
-        ? currentIds.filter(id => id !== officerId)
-        : [...currentIds, officerId];
-
-      return { ...prev, [stageKey]: newIds };
+      const next: Record<string, string[]> = {};
+      if (!alreadySelected) {
+        // Drop any prior selection from all stages, then apply the new single officer.
+        Object.keys(prev).forEach(sid => { next[sid] = []; });
+        selectedTargetStageIds.forEach(sid => { next[sid] = [officerId]; });
+      }
+      // alreadySelected -> clear the group's stages (deselect). Other stages stay untouched.
+      if (alreadySelected) {
+        Object.keys(prev).forEach(sid => {
+          next[sid] = selectedTargetStageIds.includes(sid) ? [] : (prev[sid] || []);
+        });
+      }
+      return next;
     });
   };
 
@@ -212,18 +277,23 @@ export function AssignOfficersDialog({
           <ResizablePanel defaultSize={25} minSize={20} maxSize={40} className="border-r bg-slate-50/50 flex flex-col overflow-hidden">
             <div className="p-4 overflow-y-auto flex-1">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-4 px-2">
-                Workflow Stages
+                Officer Sections &amp; Stages
               </p>
               <div className="space-y-1">
-                {officerFollowUpStages.map((s) => {
-                  const count = (localAssignments[s.id] || []).length;
-                  const isActive = selectedStageId === s.id;
-                  const orderNum = s.order_num || s.order || '';
+                {officerGroups.map((g) => {
+                  // Distinct officers assigned across this group's stages.
+                  const groupOfficerIds = new Set<string>();
+                  g.stages.forEach(s => (localAssignments[s.id] || []).forEach(id => groupOfficerIds.add(id)));
+                  const count = groupOfficerIds.size;
+                  const isActive = selectedStageId === g.id;
+                  const rangeLabel = g.stages.length > 1
+                    ? `${g.stages[0]?.order_num}. ${g.stages[0]?.name} – ${g.stages[g.stages.length - 1]?.order_num}. ${g.stages[g.stages.length - 1]?.name}`
+                    : `${g.stages[0]?.order_num}. ${g.stages[0]?.name}`;
 
                   return (
                     <button
-                      key={s.id}
-                      onClick={() => setSelectedStageId(s.id)}
+                      key={g.id}
+                      onClick={() => setSelectedStageId(g.id)}
                       className={cn(
                         "w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all group",
                         isActive
@@ -236,8 +306,10 @@ export function AssignOfficersDialog({
                         isActive ? "bg-blue-600" : "bg-slate-300"
                       )} />
                       <span className="truncate flex-1 text-left">
-                        {orderNum && <span className="text-slate-400 mr-1">{orderNum}.</span>}
-                        {s.name}
+                        <span className="block truncate font-semibold">{g.name}</span>
+                        <span className={cn("block text-[11px] font-medium truncate", isActive ? "text-blue-500" : "text-slate-400")}>
+                          {g.stages.length} stage{g.stages.length === 1 ? "" : "s"} &bull; {rangeLabel}
+                        </span>
                       </span>
                       {count > 0 && (
                         <Badge className={cn(
@@ -258,7 +330,8 @@ export function AssignOfficersDialog({
               <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 flex gap-3">
                 <Info className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
                 <p className="text-[12px] text-blue-800 leading-snug">
-                  Select a stage to view qualified officers for that specific workflow step.
+                  Select a section to view its officer stages. Assigning an officer applies to
+                  every officer stage in that section.
                 </p>
               </div>
             </div>
@@ -278,12 +351,17 @@ export function AssignOfficersDialog({
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
-              {selectedStageId && (
-                <div className="mt-4 flex items-center gap-2">
-                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-tight">Filtering By:</span>
+              {selectedGroupStages.length > 0 && (
+                <div className="mt-4 flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-tight">Assigning to:</span>
                   <Badge variant="outline" className="bg-blue-50/50 text-blue-700 border-blue-100">
-                    {officerFollowUpStages.find(s => s.id === selectedStageId)?.name}
+                    {officerGroups.find(g => g.id === selectedStageId)?.name}
                   </Badge>
+                  {selectedGroupStages.map(s => (
+                    <Badge key={s.id} variant="secondary" className="text-[10px] bg-slate-100 text-slate-600">
+                      {s.order_num}. {s.name}
+                    </Badge>
+                  ))}
                 </div>
               )}
             </div>
@@ -293,14 +371,13 @@ export function AssignOfficersDialog({
                 {filteredOfficers.length > 0 ? (
                   filteredOfficers.map((officer) => {
                     const officerId = officer.id.toString();
-                    const stageKey = selectedStageId || 'all';
-                    const isSelected = (localAssignments[stageKey] || []).includes(officerId);
-                    const wasOriginallyHere = initialStageAssignments?.[stageKey]?.includes(officerId);
+                    const isSelected = isOfficerSelectedInGroup(officerId);
+                    const wasOriginallyHere = selectedTargetStageIds.some(sid => initialStageAssignments?.[sid]?.includes(officerId));
 
                     return (
                       <div
                         key={officer.id}
-                        onClick={() => toggleOfficerInStage(officerId)}
+                        onClick={() => toggleOfficerInGroup(officerId)}
                         className={cn(
                           "flex items-center gap-4 p-4 rounded-2xl border cursor-pointer transition-all",
                           isSelected
@@ -356,12 +433,13 @@ export function AssignOfficersDialog({
               </div>
               <ScrollArea className="h-12">
                 <div className="flex flex-wrap gap-2">
-                  {Object.entries(localAssignments).map(([sId, ids]) => {
-                    if (ids.length === 0) return null;
-                    const stageName = sId === 'all' ? 'Uncategorized' : officerFollowUpStages.find(s => s.id === sId)?.name;
+                  {officerGroups.map((g) => {
+                    const groupOfficerIds = new Set<string>();
+                    g.stages.forEach(s => (localAssignments[s.id] || []).forEach(id => groupOfficerIds.add(id)));
+                    if (groupOfficerIds.size === 0) return null;
                     return (
-                      <Badge key={sId} variant="outline" className="bg-white border-slate-200 text-[11px] font-medium py-1">
-                        {stageName}: <span className="text-blue-600 ml-1">{ids.length} Officers</span>
+                      <Badge key={g.id} variant="outline" className="bg-white border-slate-200 text-[11px] font-medium py-1">
+                        {g.name}: <span className="text-blue-600 ml-1">{groupOfficerIds.size} Officer{groupOfficerIds.size === 1 ? "" : "s"}</span>
                       </Badge>
                     );
                   })}

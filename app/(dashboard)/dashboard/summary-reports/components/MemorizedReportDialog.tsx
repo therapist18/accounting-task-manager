@@ -565,6 +565,16 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
                         <span className="font-semibold text-[11px] uppercase tracking-wide text-slate-600">
                           {stage.order_num}. {stage.name}
                         </span>
+                        {stage.follow_up && stage.follow_up.toLowerCase() !== 'none' && (
+                          <Badge variant="outline" className={cn(
+                            "text-[9px] py-0 px-1 leading-tight font-semibold uppercase",
+                            stage.follow_up.toLowerCase() === 'bcl' && "bg-blue-50 text-blue-600 border-blue-200",
+                            stage.follow_up.toLowerCase() === 'officer' && "bg-violet-50 text-violet-600 border-violet-200",
+                            stage.follow_up.toLowerCase() === 'client' && "bg-amber-50 text-amber-600 border-amber-200"
+                          )}>
+                            Follow up: {stage.follow_up}
+                          </Badge>
+                        )}
                         {isNA && <Badge variant="outline" className="text-[9px] py-0 px-1 leading-tight bg-white text-amber-600 border-amber-200">N/A</Badge>}
                       </div>
 

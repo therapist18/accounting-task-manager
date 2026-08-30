@@ -1,1 +1,19 @@
-﻿Update TemplateGenerationDialog and EditableStageCell components
+﻿perfect - now in the Summary Reports Dashboard can we add a column for officers - where we render the officers associated with a specific task \
+
+reduce the tableheader's padding or is it height - they're taking up too much vertical spaceC:\Users\user\Documents\GitHub\accounting-task-manager\app\(dashboard)\dashboard\summary-reports\page.tsx
+C:\Users\user\Documents\GitHub\accounting-task-manager\app\(dashboard)\dashboard\summary-reports\components\PageHeader.tsx
+
+no we'll have to specify the stages per group - incase we handle reordering of stages or adding new stages thus displacing the stages index - so l;et the admin select the stages for the sections in the Stages Management module - the two sections will be Processing to Approval and Approval to Write up 
+
+officers may vary per task - like the two officers handling task 1 might or not handle task b or one might handle so we use the dropdown for selection 
+
+we'll come to question 3 later , no stages don't overal , we'll confiure this in the Stages Management module 
+
+C:\Users\user\Documents\GitHub\accounting-task-manager\app\(dashboard)\dashboard\departments\stages\page.tsx
+
+
+okay - so my method of allocating officers - is according to the follow up with officer stages - we get the dropdown for officers
+
+now the admin says that the officers handling a job under immigration - are grouped in two , so stages eg  stage 12 to stage 25 , are handled by one officer - then stages 26 to 34 are handled by another officer 
+
+so now how do i do this - answer in chat firsrt

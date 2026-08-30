@@ -28,6 +28,7 @@ export interface SummaryExportParams {
   getCurrentStageNameForTask?: (task: any) => string | null;
   getCurrentStageFollowUpForTask?: (task: any) => string | null;
   getStaffName?: (userId: any) => string;
+  getOfficersForTask?: (task: any) => string[];
   getEnhancedStatusForTask?: (task: any) => { date: Date | null; documentType: string | null; daysRemaining: number | null };
   showTime: boolean;
   scopeName?: string;
@@ -50,6 +51,7 @@ const resolveExportCell = (col: SummaryColumnDef, task: any, p: SummaryExportPar
       getStaffName: p.getStaffName,
       getCurrentStageFollowUpForTask: p.getCurrentStageFollowUpForTask,
       getEnhancedStatusForTask: p.getEnhancedStatusForTask,
+      getOfficersForTask: p.getOfficersForTask,
     }) ?? '';
   } else if (col.type === 'milestone') {
     const raw = formatDateCell(resolveMilestoneDate(task, col.milestone!.stageId), p.showTime);
