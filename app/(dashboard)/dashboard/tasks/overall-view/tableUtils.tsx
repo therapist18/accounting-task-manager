@@ -64,6 +64,11 @@ export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'age', label: 'Age', default: false, width: 80 }, // was 'w-20'
   { id: 'task_manager', label: 'Task Manager', default: false, width: 128 }, // was 'w-32'
   { id: 'task_assistant', label: 'Task Assistant', default: false, width: 128 }, // was 'w-32'
+  // Every officer ever assigned across the task's officer-follow-up stages (not just the
+  // current one) — same field id/semantics as summary-reports/stageColumnConfig.ts's
+  // 'officers' SUMMARY_COLUMNS column via TASK_FIELD_TO_SUMMARY_COLUMN_ID's identity mapping.
+  // Like promised_time/planned_execution above, only resolved on the Summary Reports page.
+  { id: 'officers', label: 'Officers', default: false, width: 128 },
   { id: 'r_number', label: 'R Number', default: false, width: 112 }, // was 'w-28'
   { id: 'cancellation_reason', label: 'Cancellation Reason', default: true, width: 192 }, // was 'w-48'
   { id: 'cancellation_date', label: 'Cancellation Date', default: false, width: 160 }, // was 'w-40'

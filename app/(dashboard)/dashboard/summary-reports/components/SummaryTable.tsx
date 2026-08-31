@@ -204,13 +204,17 @@ const PromisedTimeCell = ({ display, resolution }: { display: string; resolution
   </TooltipProvider>
 );
 
-const PaginationButton = ({ children, onClick, disabled }: any) => (
+const PaginationButton = ({ children, onClick, disabled, title }: any) => (
   <Button
-    variant="ghost"
+    variant="outline"
     size="icon"
-    className={cn("h-6 w-6 rounded text-slate-600 transition-all", disabled ? "opacity-30 cursor-not-allowed" : "hover:text-slate-700 hover:bg-slate-100")}
+    className={cn(
+      "h-7 w-7 rounded-md border-slate-200 bg-white text-slate-500 shadow-sm transition-all hover:bg-custom-blue hover:text-white hover:border-custom-blue",
+      disabled && "opacity-40 cursor-not-allowed hover:bg-white hover:text-slate-500 hover:border-slate-200"
+    )}
     onClick={onClick}
     disabled={disabled}
+    title={title}
   >
     {children}
   </Button>
@@ -508,6 +512,25 @@ export function SummaryTable({
     return rows.slice(start, start + rowsPerPage);
   }, [rows, currentPage, rowsPerPage]);
 
+  // Page-number window for the pagination bar — always keeps the first/last page visible and
+  // collapses a large page count to a sliding window of ~5 around the current page, joined by
+  // ellipses. Degenerates to every page in order when totalPages is small.
+  const pageItems = (() => {
+    const items: (number | 'ellipsis')[] = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) items.push(i);
+      return items;
+    }
+    items.push(1);
+    const start = Math.max(2, currentPage - 1);
+    const end = Math.min(totalPages - 1, currentPage + 1);
+    if (start > 2) items.push('ellipsis');
+    for (let i = start; i <= end; i++) items.push(i);
+    if (end < totalPages - 1) items.push('ellipsis');
+    items.push(totalPages);
+    return items;
+  })();
+
   // Canonical section order — the same order the Sub-Department tabs (HierarchyTabs) show,
   // i.e. each department's tm_subdepartments in their stored `order`. Scoped to the active
   // department when one is selected; flattened across every department (in department order)
@@ -670,9 +693,9 @@ export function SummaryTable({
   };
 
   return (
-    <div className="flex flex-col flex-1 antialiased bg-slate-50 px-6 pb-6">
-      <div className="relative overflow-hidden rounded-xl border border-slate-200 shadow-sm mt-3">
-        <div className="overflow-auto max-h-[calc(100vh-300px)] custom-scrollbar">
+    <div className="flex flex-col flex-1 antialiased bg-slate-50 px-6">
+      <div className="relative overflow-hidden rounded-xl border border-slate-200 shadow-sm">
+        <div className="overflow-auto max-h-[calc(100vh-280px)] custom-scrollbar">
           <Table className="border-separate border-spacing-0 table-fixed" style={{ width: table.getTotalSize(), minWidth: '100%' }}>
             <colgroup>
               <col style={{ width: INDEX_COL_WIDTH }} />
@@ -708,7 +731,7 @@ export function SummaryTable({
                         style={{ backgroundColor: '#2a5486', ...(isSticky ? { left: `${left}px` } : {}) }}
                       >
                         {number ? (
-                          <span className="text-[10px] font-black text-sky-200 tabular-nums leading-none" title="Reference number — matches the ID column in Report Manager">
+                          <span className="text-[10px] font-black text-white tabular-nums leading-none" title="Reference number — matches the ID column in Report Manager">
                             {number}
                           </span>
                         ) : null}
@@ -720,14 +743,14 @@ export function SummaryTable({
               )}
 
               <TableRow ref={headerRowRef} className="hover:bg-transparent border-0">
-                <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-1.5 px-2 bg-custom-blue">
+                <TableHead className="sticky left-0 z-50 border-r border-b border-white/30 text-center py-1 px-2 bg-custom-blue">
                   <span className="text-[10px] font-semibold text-white uppercase tracking-wider">#</span>
                 </TableHead>
 
                 {interleavedColumns.map((col: any) => {
                   if (col.isDelta) {
                     return (
-                      <TableHead key={col.id} className="border-r border-b border-white/30 text-center px-1 py-1.5 bg-custom-blue" style={{ width: DELTA_COL_WIDTH }}>
+                      <TableHead key={col.id} className="border-r border-b border-white/30 text-center px-1 py-0.5 bg-custom-blue" style={{ width: DELTA_COL_WIDTH }}>
                         <TooltipProvider delayDuration={300}>
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -751,7 +774,7 @@ export function SummaryTable({
                       key={col.id}
                       onClick={() => handleSort?.(col.id)}
                       className={cn(
-                        "group relative border-r border-b border-white/30 transition-colors select-none px-4 py-1.5",
+                        "group relative border-r border-b border-white/30 transition-colors select-none px-4 py-0.5",
                         handleSort && "cursor-pointer",
                         col.highlight ? "bg-amber-500 hover:bg-amber-600" : col.type === 'computed_time' ? "bg-violet-600 hover:bg-violet-700" : "bg-custom-blue hover:bg-slate-700",
                         isSticky && "z-40 sticky shadow-[2px_0_4px_rgba(0,0,0,0.15)]",
@@ -764,7 +787,7 @@ export function SummaryTable({
                         <TooltipProvider delayDuration={500}>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <span className="text-[11px] font-semibold uppercase tracking-wider text-white whitespace-normal break-words leading-snug">
+                              <span className="text-[10px] font-semibold uppercase tracking-wider text-white whitespace-normal break-words leading-tight">
                                 {col.label}
                               </span>
                             </TooltipTrigger>
@@ -809,7 +832,7 @@ export function SummaryTable({
                 })}
 
                 <TableHead
-                  className="sticky right-0 z-50 border-l border-b border-white/30 text-center py-2.5 px-2 bg-custom-blue shadow-[-2px_0_4px_rgba(0,0,0,0.15)]"
+                  className="sticky right-0 z-50 border-l border-b border-white/30 text-center py-1.5 px-2 bg-custom-blue shadow-[-2px_0_4px_rgba(0,0,0,0.15)]"
                 >
                   <span className="text-[10px] font-semibold text-white uppercase tracking-wider">Actions</span>
                 </TableHead>
@@ -838,7 +861,7 @@ export function SummaryTable({
                         style={{ backgroundColor: '#2a5486', ...(isSticky ? { left: `${left}px` } : {}) }}
                       >
                         {minutes ? (
-                          <span className="text-[10px] font-semibold text-sky-200 tabular-nums whitespace-nowrap leading-none">
+                          <span className="text-[10px] font-semibold text-white tabular-nums whitespace-nowrap leading-none">
                             Expected: {formatEstimatedMins(minutes)}
                           </span>
                         ) : null}
@@ -1039,7 +1062,7 @@ export function SummaryTable({
                               isSticky && "sticky z-20 shadow-[2px_0_4px_rgba(0,0,0,0.02)]",
                               col.highlight ? "bg-amber-50/40 group-hover:bg-amber-50/70 text-amber-800 font-medium"
                                 : col.type === 'computed_time' ? "bg-violet-50/40 group-hover:bg-violet-50/60"
-                                : "group-hover:bg-blue-50/50",
+                                  : "group-hover:bg-blue-50/50",
                               col.primary ? "text-slate-900 font-semibold" : (!col.highlight && col.type !== 'computed_time') && "text-slate-600",
                               col.id === firstHighlightId && "border-l-[3px] border-l-amber-300",
                               // isSticky background comes last so it always wins over the
@@ -1090,33 +1113,58 @@ export function SummaryTable({
             </TableBody>
           </Table>
         </div>
-      </div>
-
-      {/* Pagination */}
-      <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
-        <div className="text-[11px] text-slate-600 font-semibold">
-          Showing <span className="text-slate-600">{rows.length === 0 ? 0 : ((currentPage - 1) * rowsPerPage) + 1}</span> to{' '}
-          <span className="font-medium text-slate-600">{Math.min(currentPage * rowsPerPage, rows.length)}</span> of{' '}
-          <span className="font-medium text-slate-600">{rows.length}</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-slate-600 font-semibold">Rows:</span>
-            <Select value={String(rowsPerPage)} onValueChange={(v) => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
-              <SelectTrigger className="w-[64px] h-8 rounded border-slate-200 text-[11px] font-medium text-slate-600">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="rounded">
-                {[10, 25, 50, 100].map(s => <SelectItem key={s} value={String(s)} className="text-[11px]">{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
+        {/* Pagination */}
+        <div className="flex items-center justify-between gap-4 border-t border-slate-200 bg-white px-4 py-2.5">
+          <div className="flex items-center gap-1.5 text-sm text-slate-500 whitespace-nowrap">
+            <span>Showing</span>
+            <span className="font-semibold text-slate-700 tabular-nums">{rows.length === 0 ? 0 : ((currentPage - 1) * rowsPerPage) + 1}</span>
+            <span>to</span>
+            <span className="font-semibold text-slate-700 tabular-nums">{Math.min(currentPage * rowsPerPage, rows.length)}</span>
+            <span>of</span>
+            <span className="font-semibold text-slate-700 tabular-nums">{rows.length}</span>
           </div>
-          <div className="flex items-center gap-0.5">
-            <PaginationButton onClick={() => setCurrentPage(1)} disabled={currentPage === 1}><ChevronsLeft size={12} /></PaginationButton>
-            <PaginationButton onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}><ChevronLeft size={12} /></PaginationButton>
-            <div className="px-2 py-1.5 text-[11px] font-medium text-slate-600 min-w-[24px] text-center">{currentPage}</div>
-            <PaginationButton onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages}><ChevronRight size={12} /></PaginationButton>
-            <PaginationButton onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}><ChevronsRight size={12} /></PaginationButton>
+
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-500 whitespace-nowrap">Rows per page</span>
+              <Select value={String(rowsPerPage)} onValueChange={(v) => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
+                <SelectTrigger className="h-7 w-[64px] rounded-md border-slate-200 text-[11px] font-medium text-slate-700 shadow-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="rounded-md">
+                  {[10, 25, 50, 100].map(s => <SelectItem key={s} value={String(s)} className="text-[11px]">{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <PaginationButton onClick={() => setCurrentPage(1)} disabled={currentPage === 1} title="First page"><ChevronsLeft size={14} /></PaginationButton>
+              <PaginationButton onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1} title="Previous page"><ChevronLeft size={14} /></PaginationButton>
+
+              {pageItems.map((item, idx) =>
+                item === 'ellipsis' ? (
+                  <span key={`ellipsis-${idx}`} className="px-0.5 text-[11px] text-slate-400 select-none">…</span>
+                ) : (
+                  <Button
+                    key={item}
+                    variant={item === currentPage ? 'default' : 'outline'}
+                    size="icon"
+                    onClick={() => setCurrentPage(item)}
+                    className={cn(
+                      "h-7 min-w-7 w-auto px-2 rounded-md text-[11px] font-semibold tabular-nums",
+                      item === currentPage
+                        ? "bg-custom-blue text-white shadow-sm hover:bg-custom-blue"
+                        : "text-slate-600 hover:bg-slate-50 hover:border-slate-300"
+                    )}
+                  >
+                    {item}
+                  </Button>
+                )
+              )}
+
+              <PaginationButton onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages} title="Next page"><ChevronRight size={14} /></PaginationButton>
+              <PaginationButton onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} title="Last page"><ChevronsRight size={14} /></PaginationButton>
+            </div>
           </div>
         </div>
       </div>

@@ -60,11 +60,11 @@ const STICKY_COLUMN_IDS = ["task_id", "applicant", "company_prefix"] as const;
 
 // Updated step badge classes to match the vibrant pill styling from the screenshot
 const STEP_BADGE_CLASSES: Record<HandlingStep, string> = {
-  mode_unset: "bg-[#fff7ed] text-[#ea580c] border-[#ffedd5]", // Exact match for the orange MODE NOT SET pill
+  mode_unset: "bg-slate-100 text-slate-600 border-slate-200",
   client_managed: "bg-violet-50 text-violet-700 border-violet-200",
-  awaiting_receipt: "bg-slate-100 text-slate-600 border-slate-200",
+  awaiting_receipt: "bg-amber-50 text-amber-700 border-amber-200",
   received: "bg-sky-50 text-sky-700 border-sky-200",
-  at_nyayo: "bg-amber-50 text-amber-700 border-amber-200",
+  at_nyayo: "bg-orange-50 text-orange-700 border-orange-200",
   stamped_back: "bg-teal-50 text-teal-700 border-teal-200",
   ready_for_dispatch: "bg-blue-50 text-blue-700 border-blue-200",
   out_for_delivery: "bg-indigo-50 text-indigo-700 border-indigo-200",
@@ -95,8 +95,8 @@ const GROUP_ACCENTS: Record<string, {
     headerBg: "bg-sky-600",
     headerHover: "hover:bg-sky-700",
     headerActive: "bg-sky-700",
-    bodyTint: "bg-sky-50/60",
-    hoverTint: "hover:bg-sky-100/60",
+    bodyTint: "bg-sky-50",
+    hoverTint: "hover:bg-sky-200",
     endBorder: "border-r-2 border-r-sky-400/70",
   },
   taken: {
@@ -104,8 +104,8 @@ const GROUP_ACCENTS: Record<string, {
     headerBg: "bg-amber-500",
     headerHover: "hover:bg-amber-600",
     headerActive: "bg-amber-600",
-    bodyTint: "bg-amber-50/70",
-    hoverTint: "hover:bg-amber-100/60",
+    bodyTint: "bg-amber-50",
+    hoverTint: "hover:bg-amber-200",
     endBorder: "border-r-2 border-r-amber-400/70",
   },
   returned: {
@@ -113,8 +113,8 @@ const GROUP_ACCENTS: Record<string, {
     headerBg: "bg-teal-600",
     headerHover: "hover:bg-teal-700",
     headerActive: "bg-teal-700",
-    bodyTint: "bg-teal-50/70",
-    hoverTint: "hover:bg-teal-100/60",
+    bodyTint: "bg-teal-50",
+    hoverTint: "hover:bg-teal-200",
     endBorder: "border-r-2 border-r-teal-400/70",
   },
   notified: {
@@ -122,8 +122,8 @@ const GROUP_ACCENTS: Record<string, {
     headerBg: "bg-violet-600",
     headerHover: "hover:bg-violet-700",
     headerActive: "bg-violet-700",
-    bodyTint: "bg-violet-50/70",
-    hoverTint: "hover:bg-violet-100/60",
+    bodyTint: "bg-violet-50",
+    hoverTint: "hover:bg-violet-200",
     endBorder: "border-r-2 border-r-violet-400/70",
   },
   dispatch: {
@@ -131,8 +131,8 @@ const GROUP_ACCENTS: Record<string, {
     headerBg: "bg-indigo-600",
     headerHover: "hover:bg-indigo-700",
     headerActive: "bg-indigo-700",
-    bodyTint: "bg-indigo-50/70",
-    hoverTint: "hover:bg-indigo-100/60",
+    bodyTint: "bg-indigo-50",
+    hoverTint: "hover:bg-indigo-200",
     endBorder: "border-r-2 border-r-indigo-400/70",
   },
   completed: {
@@ -140,8 +140,8 @@ const GROUP_ACCENTS: Record<string, {
     headerBg: "bg-emerald-600",
     headerHover: "hover:bg-emerald-700",
     headerActive: "bg-emerald-700",
-    bodyTint: "bg-emerald-50/70",
-    hoverTint: "hover:bg-emerald-100/60",
+    bodyTint: "bg-emerald-50",
+    hoverTint: "hover:bg-emerald-200",
     endBorder: "border-r-2 border-r-emerald-400/70",
   },
 };
@@ -206,13 +206,17 @@ export function fmtStageDate(dateStr: string | null | undefined): string | null 
   return dateStr;
 }
 
-const PaginationButton = ({ children, onClick, disabled }: any) => (
+const PaginationButton = ({ children, onClick, disabled, title }: any) => (
   <Button
-    variant="ghost"
+    variant="outline"
     size="icon"
-    className={cn("h-8 w-8 rounded-md text-slate-500 transition-all", disabled ? "opacity-30 cursor-not-allowed" : "hover:text-slate-800 hover:bg-slate-100")}
+    className={cn(
+      "h-7 w-7 rounded-md border-slate-200 bg-white text-slate-500 shadow-sm transition-all hover:bg-custom-blue hover:text-white hover:border-custom-blue",
+      disabled && "opacity-40 cursor-not-allowed hover:bg-white hover:text-slate-500 hover:border-slate-200"
+    )}
     onClick={onClick}
     disabled={disabled}
+    title={title}
   >
     {children}
   </Button>
@@ -388,7 +392,7 @@ export function HandlingTable({
         rowSpan={rowSpan}
         onClick={() => handleSort?.(col.id)}
         className={cn(
-          "group relative border-r border-b border-white/20 px-4 py-2 select-none transition-colors",
+          "group relative border-r border-b border-white/30 px-4 py-2 select-none transition-colors",
           accent.headerBg,
           accent.headerHover,
           handleSort && "cursor-pointer",
@@ -454,9 +458,9 @@ export function HandlingTable({
   );
 
   return (
-    <div className="flex flex-col flex-1 px-8 pt-2 pb-6 bg-[#f8fafc]">
+    <div className="flex flex-col flex-1 px-6 pb-4 bg-slate-50">
       <div className="relative overflow-hidden rounded-xl border border-slate-200 shadow-sm bg-white flex flex-col">
-        <div className="overflow-auto custom-scrollbar max-h-[calc(100vh-360px)]">
+        <div className="overflow-y-auto custom-scrollbar h-[calc(100vh-320px)]">
         <Table className="border-separate border-spacing-0 table-fixed" style={{ width: totalWidth, minWidth: '100%' }}>
           <colgroup>
             <col style={{ width: INDEX_COL_WIDTH }} />
@@ -467,7 +471,7 @@ export function HandlingTable({
           </colgroup>
           <TableHeader className="sticky top-0 z-40">
             <TableRow className="hover:bg-transparent border-0">
-              <TableHead rowSpan={2} className="sticky left-0 z-50 w-12 max-w-12 border-r border-b border-white/20 text-center px-2 bg-custom-blue">
+              <TableHead rowSpan={2} className="sticky left-0 z-50 w-12 max-w-12 border-r border-b border-white/30 text-center px-2 bg-custom-blue">
                 <span className="text-[12px] font-bold text-white tracking-wider">#</span>
               </TableHead>
               {visibleCols.filter((col) => colGroupId(col.id) === "case").map((col) => renderColHeader(col, 2))}
@@ -485,16 +489,13 @@ export function HandlingTable({
                     </TableHead>
                   );
                 })}
-              <TableHead className="sticky right-0 z-50 border-l border-b border-white/20 bg-custom-blue px-3 text-center">
+              <TableHead rowSpan={2} className="sticky right-0 z-50 w-32 max-w-32 border-l border-b border-white/30 bg-custom-blue px-3 text-center">
                 <span className="text-[12px] font-bold text-white uppercase tracking-wider">Actions</span>
               </TableHead>
             </TableRow>
 
             <TableRow className="hover:bg-transparent border-0">
               {visibleCols.filter((col) => colGroupId(col.id) !== "case").map((col) => renderColHeader(col, 1))}
-              <TableHead className="sticky right-0 z-50 w-32 max-w-32 border-l border-b border-white/20 text-center px-3 bg-custom-blue">
-                <span className="text-[12px] font-bold text-white tracking-wider uppercase">Actions</span>
-              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -541,9 +542,9 @@ export function HandlingTable({
                 return (
                   <TableRow
                     key={task.id}
-                    className={cn("group border-0 transition-colors", globalIdx % 2 === 0 ? "bg-white" : "bg-[#fcfdfd]", "hover:bg-blue-50/50")}
+                    className={cn("group border-0 transition-colors", globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50", "hover:bg-blue-50/50")}
                   >
-                    <TableCell className={cn("sticky left-0 z-20 w-12 border-r border-b border-slate-100 text-center py-4", globalIdx % 2 === 0 ? "bg-white" : "bg-[#fcfdfd]", "group-hover:bg-blue-50/50")}>
+                    <TableCell className={cn("sticky left-0 z-20 w-12 border-r border-b border-slate-100 text-center py-2.5", globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50", "group-hover:bg-blue-50/50")}>
                       <span className="text-[13px] font-semibold text-slate-500 tabular-nums">{globalIdx + 1}</span>
                     </TableCell>
                     {visibleCols.map((col) => {
@@ -556,7 +557,7 @@ export function HandlingTable({
                           content = <span className="font-mono text-[11px] font-medium text-slate-500">#{task.id}</span>;
                           break;
                         case "applicant":
-                          content = <span className="font-bold text-slate-800 uppercase text-[11px]">{task.applicant_name}</span>;
+                          content = <span className="font-bold text-slate-800 capitalize text-[11px]">{task.applicant_name}</span>;
                           break;
                         case "company":
                           content = <span className="text-[11px] text-slate-600 uppercase font-semibold">{company?.name || task.company_name || "—"}</span>;
@@ -591,12 +592,16 @@ export function HandlingTable({
                         case "mode":
                           content = mode ? (
                             <span className={cn(
-                              "inline-flex items-center px-2 py-0.5 rounded text-[12px] font-bold uppercase tracking-wider",
-                              mode === "bcl" ? "text-blue-600" : "text-slate-600"
+                              "inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider border",
+                              mode === "bcl" ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-slate-50 text-slate-700 border-slate-200"
                             )}>
                               {mode === "bcl" ? "BCL Handles" : "Client Handles"}
                             </span>
-                          ) : <span className="text-[#ea580c] font-bold text-[12px]">Not Set</span>; // Exact match to image styling
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider border bg-slate-50 text-slate-700 border-slate-200">
+                              Not Set
+                            </span>
+                          );
                           break;
                         case "current_step":
                           content = <StepBadge step={step} />;
@@ -719,12 +724,12 @@ export function HandlingTable({
                         <TableCell
                           key={col.id}
                           className={cn(
-                            "px-4 py-4 border-b border-r border-slate-100 text-sm transition-colors",
+                            "px-4 py-2.5 border-b border-r border-slate-100 text-sm transition-colors",
                             !isStickyLeft && colAccent.bodyTint,
                             !isStickyLeft && colAccent.hoverTint,
                             isChunkEnd && colAccent.endBorder,
                             isStickyLeft && "sticky z-20",
-                            isStickyLeft && (globalIdx % 2 === 0 ? "bg-white" : "bg-[#fcfdfd]"),
+                            isStickyLeft && (globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50"),
                             isStickyLeft && "group-hover:bg-blue-50/50"
                           )}
                           style={isStickyLeft ? { left: stickyColumnOffsets[col.id] } : undefined}
@@ -733,7 +738,7 @@ export function HandlingTable({
                         </TableCell>
                       );
                     })}
-                    <TableCell className={cn("sticky right-0 z-20 w-32 border-l border-b border-slate-100 py-3.5 text-center", globalIdx % 2 === 0 ? "bg-white" : "bg-[#fcfdfd]", "group-hover:bg-blue-50/50")}>
+                    <TableCell className={cn("sticky right-0 z-20 w-32 border-l border-b border-slate-100 py-2.5 text-center", globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50", "group-hover:bg-blue-50/50")}>
                       <Button
                         size="sm"
                         variant="outline"
@@ -763,28 +768,33 @@ export function HandlingTable({
         </Table>
       </div>
 
-      {/* Matching Screenshot Pagination Footer */}
-      <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 bg-white">
-        <div className="text-[13px] text-slate-600 font-medium">
-          Showing <span className="font-semibold tabular-nums">{(rows.length === 0 ? 0 : ((currentPage - 1) * rowsPerPage) + 1)}</span> to{' '}
-          <span className="font-semibold tabular-nums">{Math.min(currentPage * rowsPerPage, rows.length)}</span> of{' '}
-          <span className="font-semibold tabular-nums">{rows.length}</span> entries
+      {/* Pagination */}
+      <div className="flex items-center justify-between gap-4 border-t border-slate-200 bg-white px-4 py-2.5">
+        <div className="flex items-center gap-1.5 text-sm text-slate-500 whitespace-nowrap">
+          <span>Showing</span>
+          <span className="font-semibold text-slate-700 tabular-nums">{rows.length === 0 ? 0 : ((currentPage - 1) * rowsPerPage) + 1}</span>
+          <span>to</span>
+          <span className="font-semibold text-slate-700 tabular-nums">{Math.min(currentPage * rowsPerPage, rows.length)}</span>
+          <span>of</span>
+          <span className="font-semibold text-slate-700 tabular-nums">{rows.length}</span>
         </div>
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3">
-            <span className="text-[13px] text-slate-600 font-medium">Rows per page</span>
+
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-500 whitespace-nowrap">Rows per page</span>
             <Select value={String(rowsPerPage)} onValueChange={(v) => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
-              <SelectTrigger className="w-[70px] h-8 rounded-md border-slate-200 text-[13px] font-semibold text-slate-700 bg-white shadow-sm hover:bg-slate-50 focus:ring-0">
+              <SelectTrigger className="h-7 w-[64px] rounded-md border-slate-200 text-[11px] font-medium text-slate-700 shadow-sm">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="rounded-lg">
-                {[10, 25, 50, 100].map((s) => <SelectItem key={s} value={String(s)} className="text-[13px] font-medium">{s}</SelectItem>)}
+              <SelectContent className="rounded-md">
+                {[10, 25, 50, 100].map((s) => <SelectItem key={s} value={String(s)} className="text-[11px]">{s}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
-          <div className="flex items-center gap-2">
-            <PaginationButton onClick={() => setCurrentPage(1)} disabled={currentPage === 1}><ChevronsLeft size={16} /></PaginationButton>
-            <PaginationButton onClick={() => setCurrentPage((p) => p - 1)} disabled={currentPage === 1}><ChevronLeft size={16} /></PaginationButton>
+
+          <div className="flex items-center gap-1">
+            <PaginationButton onClick={() => setCurrentPage(1)} disabled={currentPage === 1} title="First page"><ChevronsLeft size={14} /></PaginationButton>
+            <PaginationButton onClick={() => setCurrentPage((p) => p - 1)} disabled={currentPage === 1} title="Previous page"><ChevronLeft size={14} /></PaginationButton>
 
             {(() => {
               const pages: (number | "…")[] = [];
@@ -802,25 +812,27 @@ export function HandlingTable({
               return pages;
             })().map((p, i) =>
               p === "…" ? (
-                <span key={`ellipsis-${i}`} className="h-8 w-8 flex items-center justify-center text-[13px] text-slate-400 select-none">…</span>
+                <span key={`ellipsis-${i}`} className="px-0.5 text-[11px] text-slate-400 select-none">…</span>
               ) : (
-                <button
+                <Button
                   key={p}
+                  variant={p === currentPage ? 'default' : 'outline'}
+                  size="icon"
                   onClick={() => setCurrentPage(p)}
                   className={cn(
-                    "h-8 w-8 rounded-md text-[13px] font-bold flex items-center justify-center select-none transition-all",
+                    "h-7 min-w-7 w-auto px-2 rounded-md text-[11px] font-semibold tabular-nums",
                     p === currentPage
-                      ? "bg-custom-blue text-white shadow-sm"
-                      : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                      ? "bg-custom-blue text-white shadow-sm hover:bg-custom-blue"
+                      : "text-slate-600 hover:bg-slate-50 hover:border-slate-300"
                   )}
                 >
                   {p}
-                </button>
+                </Button>
               )
             )}
 
-            <PaginationButton onClick={() => setCurrentPage((p) => p + 1)} disabled={currentPage === totalPages}><ChevronRight size={16} /></PaginationButton>
-            <PaginationButton onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}><ChevronsRight size={16} /></PaginationButton>
+            <PaginationButton onClick={() => setCurrentPage((p) => p + 1)} disabled={currentPage === totalPages} title="Next page"><ChevronRight size={14} /></PaginationButton>
+            <PaginationButton onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} title="Last page"><ChevronsRight size={14} /></PaginationButton>
           </div>
         </div>
       </div>

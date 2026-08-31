@@ -510,8 +510,8 @@ export function PersonFilterStrip({ searchQuery, setSearchQuery, activePerspecti
                 </div>
               </SelectTrigger>
               <SelectContent className="rounded-2xl">
-                <SelectItem value="current">Current Assignments</SelectItem>
-                <SelectItem value="history">Historical Activity</SelectItem>
+                <SelectItem value="current">Stage In Basket Now</SelectItem>
+                <SelectItem value="history">Stage Ever In Basket</SelectItem>
               </SelectContent>
             </Select>
           )}

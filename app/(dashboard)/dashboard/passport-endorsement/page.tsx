@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, FileDown, FileSpreadsheet, ListFilter, ChevronDown, ChevronRight, Truck } from "lucide-react";
 import { startOfDay, endOfDay } from "date-fns";
 import { parseDateSafe } from "../summary-reports/utils/reportStageLogic";
 import * as XLSX from "xlsx";
@@ -23,8 +23,11 @@ import {
   type PassportHandlingRecord,
   type Courier,
 } from "./utils/database";
-import { PageHeader, StatsRow, HierarchyTabs } from "./components/PageHeader";
+import { StatusTabs, FilterBar, HierarchyTabs, ColumnVisibilityDialog, DateRangeFilterButton } from "./components/PageHeader";
 import { HandlingTable, HANDLING_COLUMNS, DEFAULT_VISIBLE_COLUMN_IDS, fmtStageDate } from "./components/HandlingTable";
+import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 import { HandlingWizardDialog } from "./components/HandlingWizardDialog";
 import { CourierRegistryDialog } from "./components/CourierRegistryDialog";
 import { MultiSort, type SortLevel } from "@/app/generic-components/MultiSort";
@@ -174,8 +177,14 @@ export default function PassportEndorsementPage() {
   );
   const subDepartments = immigrationDept?.tm_subdepartments || [];
 
-  // Rows scoped by Sub-department only (not yet by Class/Sub-Class) — the base the Class/
-  // Sub-Class dropdowns' own counts are computed from, same as Summary Reports' HierarchyTabs.
+  const activeSubDepartment = useMemo(
+    () => immigrationDept?.tm_subdepartments?.find((s: any) => s.id.toString() === activeSubDeptId),
+    [immigrationDept, activeSubDeptId]
+  );
+
+  // Rows scoped by Sub-department (not yet by Class/Sub-Class) — the base the Class/Sub-Class
+  // dropdowns' own counts are computed from, same as Summary Reports' HierarchyTabs. The page is
+  // Immigration-scoped, so there's no department-level filter.
   const subDeptScopedRows = useMemo(() => {
     if (activeSubDeptId === "all") return rows;
     return rows.filter(({ task }) => task.subdepartment_id?.toString() === activeSubDeptId);
@@ -490,35 +499,114 @@ export default function PassportEndorsementPage() {
   }
 
   return (
-    <div className="flex flex-col flex-1 overflow-auto bg-white">
-      <PageHeader
-        dateRange={dateRange}
-        setDateRange={setDateRange}
-        onRefresh={handleRefresh}
-        onExportExcel={handleExportExcel}
-        onOpenCouriers={() => setCourierDialogOpen(true)}
-        loading={isRefreshing}
-        columns={HANDLING_COLUMNS}
-        visibleColumnIds={visibleColumnIds}
-        setVisibleColumnIds={setVisibleColumnIds}
-        onOpenMultiSort={() => setMultiSortOpen(true)}
-        sortLevelCount={sortLevels.length}
-      />
+    <div className="flex flex-col flex-1 overflow-auto bg-slate-50">
+      {/* Title Bar */}
+      <div className="border-b border-slate-200 bg-white px-8 py-4 flex items-center justify-between antialiased">
+        <div className="flex items-center gap-8">
+          <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight leading-none text-center">
+            Passport Endorsement Tracking
+          </h1>
+          <div className="flex items-center text-base font-bold gap-2">
+            <span className="text-slate-900">{immigrationDept?.name || "Immigration"}</span>
+            <ChevronRight className="h-4 w-4 text-slate-400" />
+            <span className="text-slate-600">{activeSubDepartment?.name || "All Sub-departments"}</span>
+          </div>
+        </div>
 
+        {/* Secondary controls — normal squared buttons matching the tab design above. */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <DateRangeFilterButton dateRange={dateRange} setDateRange={setDateRange} />
+          <ColumnVisibilityDialog
+            columns={HANDLING_COLUMNS}
+            visibleColumnIds={visibleColumnIds}
+            setVisibleColumnIds={setVisibleColumnIds}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setMultiSortOpen(true)}
+            className={cn(
+              "h-9 px-4 rounded-md text-sm font-bold gap-2 border-slate-200 transition-all",
+              sortLevels.length > 0 ? "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue" : "text-slate-600 hover:bg-slate-50"
+            )}
+            title="Sort by multiple columns"
+          >
+            <ListFilter className="h-3.5 w-3.5" /> Multi-level Sort
+            {sortLevels.length > 1 && (
+              <span className="min-w-[18px] h-[18px] inline-flex items-center justify-center rounded-full bg-white text-custom-blue text-[11px] font-bold px-1 leading-none">
+                {sortLevels.length}
+              </span>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCourierDialogOpen(true)}
+            className="h-9 px-4 rounded-md text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 shrink-0 transition-all"
+          >
+            <Truck className="h-3.5 w-3.5" /> Couriers
+          </Button>
+          <div className="h-6 w-px bg-slate-200 mx-1" />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                className="h-9 px-4 rounded-md text-sm font-bold gap-2 text-white hover:bg-[#2d5a94] shadow-sm disabled:opacity-70"
+                style={{ backgroundColor: '#376bae' }}
+              >
+                <FileDown className="h-3.5 w-3.5" />
+                Export
+                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={handleExportExcel} className="gap-2 cursor-pointer">
+                <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                Export as Excel
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
+      {/* Scope + Status + Filter controls — flat, stacked directly under the title bar. */}
       <HierarchyTabs
         subDepartments={subDepartments}
         activeSubDeptId={activeSubDeptId}
         setActiveSubDeptId={setActiveSubDeptId}
         subDeptTaskCounts={subDeptTaskCounts}
+        availableClasses={availableClasses}
+        activeClassIds={activeClassIds}
+        setActiveClassIds={setActiveClassIds}
+        classCounts={classCounts}
+        availableSubClasses={availableSubClasses}
+        activeSubClassIds={activeSubClassIds}
+        setActiveSubClassIds={setActiveSubClassIds}
+        subClassCounts={subClassCounts}
       />
 
-      <StatsRow activeStep={activeSteps[0] ?? "all"} setActiveStep={(v: any) => setActiveSteps(v === "all" ? [] : [v])}
-        hasStepFilter={activeSteps.length > 0}
-        activeMode={activeMode} setActiveMode={setActiveMode}
-        counts={counts} 
-        searchQuery={searchQuery} setSearchQuery={setSearchQuery}
-        availableClasses={availableClasses} activeClassIds={activeClassIds} setActiveClassIds={setActiveClassIds} classCounts={classCounts}
-        availableSubClasses={availableSubClasses} activeSubClassIds={activeSubClassIds} setActiveSubClassIds={setActiveSubClassIds} subClassCounts={subClassCounts} />
+      <StatusTabs
+        activeSteps={activeSteps}
+        setActiveSteps={setActiveSteps}
+        counts={counts}
+        activeMode={activeMode}
+        setActiveMode={setActiveMode}
+        refreshData={handleRefresh}
+        loading={isRefreshing}
+      />
+
+      <FilterBar
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        availableClasses={availableClasses}
+        activeClassIds={activeClassIds}
+        setActiveClassIds={setActiveClassIds}
+        classCounts={classCounts}
+        availableSubClasses={availableSubClasses}
+        activeSubClassIds={activeSubClassIds}
+        setActiveSubClassIds={setActiveSubClassIds}
+        subClassCounts={subClassCounts}
+      />
 
       <HandlingTable
         rows={sortedRows}

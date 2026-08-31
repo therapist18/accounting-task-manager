@@ -636,7 +636,6 @@ const ReportEditor = React.memo(({ selectedReport, reportName, setReportName, re
                                     <TableRowItem
                                       key={`field-${stage.id}-${doc.kycId}-${field.id}`}
                                       id={stageNumber}
-                                      documentName={kycDoc.display_name || kycDoc.name}
                                       docFieldName={field.fieldName}
                                       isIncluded={!!fieldConfig}
                                       isDefault={!!fieldConfig?.isDefault}

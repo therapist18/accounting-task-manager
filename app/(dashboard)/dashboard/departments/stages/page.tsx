@@ -75,9 +75,6 @@ const minutesToTimeString = (minutes: number | null): string => {
   return parts.join(" ") || "0m"
 }
 
-// Promised Time — id-based key, mirrors buildLeafEntitiesRaw's leaf identity (subdept/class/
-// subclass ids), never a filtered-array position. Kept as a pure top-level function (no
-// closure over component state) so it never needs to appear in a dependency array.
 const promisedTimeKey = (subdeptId: number, classId: number | string | null, subclassId: number | string | null) =>
   `${subdeptId}:${classId ?? "null"}:${subclassId ?? "null"}`
 
@@ -85,12 +82,6 @@ const sortByOrder = <T extends { order?: number; order_num?: number }>(items: T[
   return [...items].sort((a, b) => (a.order || a.order_num || 0) - (b.order || b.order_num || 0))
 }
 
-// Allocation edits (Applicable / Default Display, at subdept/class/subclass level) used to
-// write to Supabase on every single click, which for a bulk selection meant dozens of
-// sequential round trips and a hung UI. Every edit — single-cell or bulk — now only stages a
-// change into the pendingAllocations map (see the Stages component); nothing touches the
-// network until "Save Changes" is clicked, which batches everything by subdepartment (one
-// read-modify-write per affected tm_subdepartments row, in parallel via Promise.all).
 const allocationKey = (
   subdeptId: number,
   stageId: string,
@@ -107,17 +98,6 @@ export type PendingAllocation = {
   display?: boolean
 }
 
-// Applies ONE staged change to a working (already-cloned) subdept object — mutates it in
-// place. Faithfully replicates the exact cascade rules the old immediate-write handlers used:
-//   - Setting applicable=false at any level also forces display=false at that same level
-//     (done at stage-time in stageAllocationChange, so `updates` arriving here is already
-//     internally consistent — this function doesn't need to re-derive that).
-//   - A class/subclass-level change can only ever RAISE (never lower) its parent's own
-//     top-level allocation entry for that stage, checked against the array *after* this
-//     mutation's own ensure-default-entry step — same quirky-but-intentional-to-preserve
-//     ordering the original handleAllocationChange/handleDisplayToggle used, so a cascaded
-//     write behaves identically whether it went through immediately (before this refactor) or
-//     via the batched Save Changes path.
 const ensureStageAllocation = (list: any[], stageId: string) => {
   let allocation = list.find((s: any) => s.stage_id === stageId)
   if (!allocation) {
@@ -184,7 +164,6 @@ const applyAllocationMutation = (
 
 const filterByDefaultDisplay = <T extends { default_display?: boolean }>(items: T[], showDefaultOnly: boolean): T[] => {
   if (!showDefaultOnly) return items
-  // Ensure we only keep items where default_display is explicitly true
   return items.filter((item) => item.default_display === true)
 }
 
@@ -199,10 +178,6 @@ export default function Stages() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(false)
-  // Unsaved Applicable/Default Display edits — every toggle (single-cell or bulk) stages a
-  // change here instead of writing to Supabase immediately. Keyed by allocationKey so the
-  // same cell's applicable and display can each be edited independently before Save Changes
-  // commits everything at once. See applyAllocationMutation/handleSaveAllocationChanges.
   const [pendingAllocations, setPendingAllocations] = useState<Map<string, PendingAllocation>>(new Map())
   const [isSavingAllocations, setIsSavingAllocations] = useState(false)
   const [isTransposed, setIsTransposed] = useState(false)
@@ -220,13 +195,6 @@ export default function Stages() {
   }>({ officers: [], managers: [], assistants: [], allUsers: [] })
   const [standardPage, setStandardPage] = useState(1)
   const [standardPageSize, setStandardPageSize] = useState(25)
-  // Promised Time: manually entered per job level (subdept/class/subclass leaf), keyed by
-  // `${subdeptId}:${classId ?? 'null'}:${subclassId ?? 'null'}` — plain id-based keys, not
-  // array positions, so this stays correct regardless of entity-visibility filtering.
-  // `defaultMinutes` applies when the task's Application Type doesn't match any condition;
-  // `conditions` lets staff give a different Promised Time per Application Type value
-  // (Renewal/New/whatever they type in) — Summary Reports resolves the task's own
-  // application_type against these to pick the right Promised Time.
   const [promisedTimeByJobLevel, setPromisedTimeByJobLevel] = useState<
     Map<string, { defaultMinutes: number | null; conditions: { value: string; minutes: number }[] }>
   >(new Map())
@@ -828,12 +796,6 @@ export default function Stages() {
     return departments.find((d) => d.id === activeTab)
   }
 
-  // The single read path every Applicable/Default Display cell (both table views, both
-  // header bulk-checkboxes) goes through — pending (unsaved) edits win over the saved value,
-  // so the UI reflects staged changes instantly with no round trip. Resolves the SAVED value
-  // the same way the table bodies always did: subdept/class/subclass tiering off currentDept's
-  // live subdepartments, not getProcessedSubdepartments (a filtered view that can disagree
-  // with what's actually being edited).
   const getEffectiveAllocation = useCallback(
     (
       stageId: string,
@@ -866,8 +828,6 @@ export default function Stages() {
     [departments, activeTab, pendingAllocations],
   )
 
-  // Stages ONE cell's edit — the only thing every Applicable select / Default Display
-  // checkbox (single-cell or looped by a bulk action) calls now; no network call happens here.
   const stageAllocationChange = useCallback(
     (
       subdeptId: number,
@@ -881,9 +841,6 @@ export default function Stages() {
         const key = allocationKey(subdeptId, stageId, classId, subclassId)
         const existing = next.get(key) || { subdeptId, classId, subclassId, stageId }
         const merged: PendingAllocation = { ...existing, ...updates }
-        // Same immediate-write semantic the old handlers had: turning applicable off also
-        // turns display off at that same cell — done here (not deferred to save time) so a
-        // pending entry is always internally consistent even if display was staged earlier.
         if (updates.applicable === false) merged.display = false
         next.set(key, merged)
         return next
@@ -896,10 +853,6 @@ export default function Stages() {
     setPendingAllocations(new Map())
   }, [])
 
-  // Batches every staged edit into one read-modify-write per affected subdepartment (grouping
-  // is what makes this safe — see applyAllocationMutation's own comment on why edits can't
-  // just be looped as independent immediate writes), then fires all the subdepartment writes
-  // together via Promise.all.
   const handleSaveAllocationChanges = useCallback(async () => {
     if (pendingAllocations.size === 0) return
     setIsSavingAllocations(true)
@@ -919,9 +872,6 @@ export default function Stages() {
           if (!subdept) return null
 
           const working = JSON.parse(JSON.stringify(subdept))
-          // Insertion order == the order the user actually made the edits in (Map preserves
-          // insertion order), so applying them sequentially to one working clone reproduces
-          // exactly what N sequential immediate saves would have produced.
           changes.forEach((change) => {
             applyAllocationMutation(
               working,
@@ -1066,11 +1016,6 @@ export default function Stages() {
               type: "class",
               subdeptId: subdept.id,
               classIndex: clsIndex,
-              // Stable id, captured from the already-filtered entity itself — the
-              // fix consumers should use to locate this class in the RAW/unfiltered
-              // data instead of reusing this filtered-array position as an index
-              // into it (that mismatch is what silently mutated the wrong class
-              // whenever entity-visibility filters hid rows above it).
               classId: cls.id ?? null,
               path: `${subdept.name} → ${cls.name}`,
               default_display: cls.default_display === true, // Include default_display
@@ -1248,9 +1193,6 @@ export default function Stages() {
     return handleAllocationChange(subdeptId, stageId, shouldAllocate)
   }
 
-  // Stages an Applicable change (see stageAllocationChange) — no network call, no
-  // read-modify-write, nothing until Save Changes. Same name/signature as before so every
-  // existing onValueChange/onClick call site in the JSX keeps working unchanged.
   const handleAllocationChange = (
     subdeptId: number,
     stageId: string,
@@ -1261,9 +1203,6 @@ export default function Stages() {
     stageAllocationChange(subdeptId, stageId, { applicable: shouldAllocate }, classId, subclassId)
   }
 
-  // Stages a Default Display change (see stageAllocationChange) — no network call. Same
-  // name/signature as before so every existing onCheckedChange call site keeps working
-  // unchanged.
   const handleDisplayToggle = (
     subdeptId: number,
     stageId: string,
@@ -1274,9 +1213,6 @@ export default function Stages() {
     stageAllocationChange(subdeptId, stageId, { display: checked }, classId, subclassId)
   }
 
-  // Bulk Default Display for many stages on ONE entity — now just loops
-  // stageAllocationChange (pure local staging, no network), used by the transposed table's
-  // per-entity-column header checkbox.
   const handleBulkDisplayToggle = (
     entity: { subdeptId: number; classId?: number | string | null; subclassId?: number | string | null },
     stageIds: string[],
@@ -1287,8 +1223,6 @@ export default function Stages() {
     })
   }
 
-  // Bulk Applicable for many stages on ONE entity — same shape as handleBulkDisplayToggle,
-  // used by the transposed table's per-entity-column "Applicable" header checkbox.
   const handleBulkApplicableToggle = (
     entity: { subdeptId: number; classId?: number | string | null; subclassId?: number | string | null },
     stageIds: string[],
@@ -1299,8 +1233,6 @@ export default function Stages() {
     })
   }
 
-  // Bulk Default Display for ONE stage across MANY entities — the normal table's own
-  // orientation (stages are columns, entities are rows). Just loops stageAllocationChange now.
   const handleBulkDisplayToggleForStageAcrossEntities = (
     entities: { subdeptId: number; classId?: string | number | null; subclassId?: string | number | null }[],
     stageId: string,
@@ -1311,9 +1243,6 @@ export default function Stages() {
     })
   }
 
-  // Bulk Applicable for ONE stage across MANY entities — same shape as
-  // handleBulkDisplayToggleForStageAcrossEntities, used by the normal table's per-stage-column
-  // "Applicable" header checkbox.
   const handleBulkApplicableToggleForStageAcrossEntities = (
     entities: { subdeptId: number; classId?: string | number | null; subclassId?: string | number | null }[],
     stageId: string,
@@ -1661,11 +1590,6 @@ export default function Stages() {
     }
   }
 
-  // Raw (unfiltered) leaf-entity walk for the "Overall Expected Time" total — deliberately
-  // NOT the same as getLeafEntities/getStageAllocation, which route through
-  // getProcessedSubdepartments and apply UI-only filters (showDefaultDisplayOnly,
-  // entityVisibility). The persisted total must reflect every job level regardless of what
-  // happens to be visible in the current viewer's session.
   const buildLeafEntitiesRaw = (subdepartments: any[]): Array<{
     type: "subdepartment" | "class" | "subclass"
     subdeptId: number
@@ -1698,11 +1622,6 @@ export default function Stages() {
     return entityStages?.find((s: any) => s.stage_id === stageId)?.applicable ?? true
   }
 
-  // Shared calc+persist for the "Overall Expected Time" total. Always call with the
-  // handler's own freshly-built LOCAL data (never currentDept/getCurrentDepartment()),
-  // since React state hasn't committed yet in the same tick as the mutation that triggered
-  // this. This is a derived/cache write — it must never fail or block the caller's own
-  // success path, hence the outer try/catch that only logs.
   const recalcExpectedTimeTotals = async ({
     departmentId,
     stages,
@@ -1776,9 +1695,6 @@ export default function Stages() {
     }
   }
 
-  // Reconciles every leaf entity's stored total for the active department in one go —
-  // also doubles as the backfill for job levels that existed before this feature shipped
-  // (nothing else populates expected_total_time_minutes for those).
   const handleRecalculateExpectedTimes = async () => {
     const currentDept = getCurrentDepartment()
     if (!currentDept) return
@@ -1807,9 +1723,6 @@ export default function Stages() {
     }
   }
 
-  // Load every stored Promised Time for the active department whenever it changes —
-  // unlike Overall Expected Time, this value isn't derivable from stages, so it has to be
-  // read back from tm_class_requirements rather than recomputed client-side.
   useEffect(() => {
     if (!activeTab) return
     let cancelled = false
@@ -1850,14 +1763,6 @@ export default function Stages() {
     }
   }, [activeTab])
 
-  // Persists one leaf's Promised Time. `leaf` always carries the entity's real database
-  // ids (never a filtered-array index — see getLeafEntities/getProcessedSubdepartments),
-  // so this writes to the same job level the user is actually looking at regardless of
-  // which entity-visibility filters happen to be active.
-  //
-  // Wrapped in useCallback (stable identity as long as activeTab doesn't change) because
-  // PromisedTimeCell below depends on it and is itself memoized — see that component's
-  // comment for why an unstable identity here would matter.
   const savePromisedTime = useCallback(async (
     leaf: { subdeptId: number; classId: number | string | null; subclassId: number | string | null; level: number },
     value: { defaultMinutes: number | null; conditions: { value: string; minutes: number }[] },
@@ -1920,16 +1825,6 @@ export default function Stages() {
     }
   }, [activeTab])
 
-  // Inline-editable "Promised Time" cell for a single leaf job level (subdept/class/subclass
-  // with no children). Popover form mirrors EditStageDialog's days/hours/minutes inputs for
-  // estimated_time, so entering a promised time uses the same UX as entering a stage duration.
-  //
-  // Wrapped in useCallback so its identity stays stable across unrelated re-renders of this
-  // (very large, frequently-re-rendering) page. Without this, every row-expand, filter toggle,
-  // or search keystroke elsewhere on the page would redefine PromisedTimeCell as a "new"
-  // component type, and React would unmount+remount every instance of it — silently closing
-  // any open popover and discarding whatever days/hours/minutes the user had half-typed.
-  // (Same reasoning as DocumentDisplay above, which uses the same pattern.)
   const PromisedTimeCell = useCallback(({
     leaf,
   }: {
@@ -1939,12 +1834,9 @@ export default function Stages() {
     const stored = promisedTimeByJobLevel.get(key)
     const isSaving = savingPromisedTimeKey === key
     const [open, setOpen] = useState(false)
-    // Default (fallback) Promised Time, as day/hour/minute inputs.
     const [days, setDays] = useState(0)
     const [hours, setHours] = useState(0)
     const [mins, setMins] = useState(0)
-    // Per-Application-Type overrides — each row is its own day/hour/minute triple, so the
-    // draft state is a flat array rather than reusing storedMinutes-style totals directly.
     const [conditions, setConditions] = useState<{ value: string; days: number; hours: number; mins: number }[]>([])
 
     const handleOpenChange = (next: boolean) => {
@@ -2406,12 +2298,6 @@ export default function Stages() {
           });
         });
       } else {
-        // ==========================================
-        // STANDARD VIEW (Entities as Rows - HIERARCHICAL)
-        // ==========================================
-
-        // 1. Calculate Dynamic Columns per Stage
-        // What columns do we show for each stage?
         const stageSubCols = [];
         if (columnVisibility.duration) stageSubCols.push({ label: 'Dur.', width: 8 });
         if (columnVisibility.followUp) stageSubCols.push({ label: 'F/U', width: 8 });
@@ -2632,11 +2518,6 @@ export default function Stages() {
     }
   };
 
-  // Function to get stage allocation for an entity
-  // Delegates to getEffectiveAllocation (pending edits win over saved) so every consumer of
-  // this — both table bodies, both header bulk checkboxes, the Excel export — reflects
-  // unsaved staged changes instantly, with no round trip. Kept as a thin (stage, entity)
-  // wrapper since that's the shape every existing call site already uses.
   const getStageAllocation = (stage: Stage, entity: any) => {
     if (entity.type === "class") return getEffectiveAllocation(stage.id, entity.subdeptId, entity.classId ?? null, null);
     if (entity.type === "subclass") return getEffectiveAllocation(stage.id, entity.subdeptId, entity.classId ?? null, entity.subclassId ?? null);
@@ -2869,11 +2750,6 @@ export default function Stages() {
               {columnVisibility.controls && (
                 <TableRow className="border-b-0">
                   {leafEntities.map((entity) => {
-                    // Bulk select/deselect for this entity's "Default Display" column — scoped
-                    // to filteredStages (the same search/filter-narrowed row set the table body
-                    // is currently rendering) and further narrowed to stages actually applicable
-                    // to this entity, matching the single-row checkbox's own disabled-when-not-
-                    // applicable rule.
                     const applicableFilteredStages = filteredStages.filter(
                       (stage) => getStageAllocation(stage, entity).applicable,
                     )
@@ -2884,9 +2760,6 @@ export default function Stages() {
                       (stage) => getStageAllocation(stage, entity).display,
                     )
 
-                    // Bulk select/deselect this entity's "Applicable" column — scoped to
-                    // filteredStages same as Default Display above, but not pre-filtered by
-                    // applicable (this IS the applicable toggle itself).
                     const allApplicable =
                       filteredStages.length > 0 &&
                       filteredStages.every((stage) => getStageAllocation(stage, entity).applicable)
@@ -3183,18 +3056,9 @@ export default function Stages() {
     )
   }
 
-  // Render normal table (existing implementation)
   const renderNormalTable = () => {
     if (!currentDept) return null
 
-    // The Automation row (below) has no columnVisibility.automation gate — it always renders —
-    // so it's an unconditional +1 here, not tied to a toggle. This count feeds every leading
-    // sticky column's rowSpan (index/entity/expected-time/promised-time cells in the Stage
-    // Names row); under-counting it left those cells' span one row short of the header's real
-    // height, which is what was producing the "<th> cannot be a child of <thead>" hydration
-    // error — the browser's table layout algorithm ends up placing a later header cell at a
-    // DOM position React's SSR pass didn't expect once the row/rowSpan bookkeeping disagrees
-    // with the actual number of <tr> rows.
     const headerRowCount =
       1 +
       (columnVisibility.duration ? 1 : 0) +
@@ -3225,13 +3089,6 @@ export default function Stages() {
       standardPage * standardPageSize,
     )
 
-    // Entities that actually get their own interactive "Applicable/Default Display" cell in
-    // the body below — mirrors that rendering exactly: a subdept row is interactive only when
-    // it has no classes, a class row only when expanded (its parent subdept is expanded) and
-    // it has no subclasses, a subclass row only when both its parent subdept and class are
-    // expanded. Used to scope each stage column's bulk "Default Display" header checkbox to
-    // rows the user can actually currently see — not the whole department, and not anything
-    // collapsed or paginated out of view.
     const visibleEntities: { subdeptId: number; classId: string | number | null; subclassId: string | number | null; getAllocation: (stageId: string) => { applicable: boolean; display: boolean } }[] = []
     paginatedSubdepartments.forEach((subdept) => {
       const isSubdeptExpanded = expandedRows.has(`subdept-${subdept.id}`)
@@ -3270,9 +3127,6 @@ export default function Stages() {
       })
     })
 
-    // The "Overall Expected Time" and "Promised Time" columns sit between Entity and Stage
-    // Name (in that order), so every sticky-left offset that used to start at Stage Name
-    // shifts right by both their widths (w-32 each).
     const expectedTimeLeftClass = columnVisibility.index && columnVisibility.entity
       ? "left-80"
       : columnVisibility.index || columnVisibility.entity
@@ -3349,14 +3203,6 @@ export default function Stages() {
                           {stage.order_num}. {stage.name}
                         </span>
                       </div>
-                      {/* {stage.web_automation?.automationName && (
-                        <div className="flex items-center gap-1 bg-blue-600/50 px-2 py-0.5 rounded-full text-xs">
-                          <Zap className="h-3 w-3 text-amber-300" />
-                          <span className="truncate max-w-[180px]" title={stage.web_automation?.automationName}>
-                            {stage.web_automation?.automationName}
-                          </span>
-                        </div>
-                      )} */}
                       <div className="flex items-center gap-2 text-xs">
                         {stage.documents && stage.documents.length > 0 && (
                           <Popover>
@@ -3615,10 +3461,6 @@ export default function Stages() {
                     ></TableHead>
                   )}
                   {filteredStages.map((stage, index) => {
-                    // Bulk select/deselect this stage's "Default Display" across every
-                    // currently-visible/expanded entity row (visibleEntities, computed above) —
-                    // further narrowed to rows where the stage is actually applicable, matching
-                    // the per-row checkbox's own disabled-when-not-applicable rule.
                     const applicableVisibleEntities = visibleEntities.filter(
                       (entity) => entity.getAllocation(stage.id).applicable,
                     )
@@ -3627,8 +3469,6 @@ export default function Stages() {
                       applicableVisibleEntities.every((entity) => entity.getAllocation(stage.id).display)
                     const someDisplayed = applicableVisibleEntities.some((entity) => entity.getAllocation(stage.id).display)
 
-                    // Bulk select/deselect this stage's "Applicable" across every visible row —
-                    // not pre-filtered by applicable (this IS the applicable toggle itself).
                     const allApplicable =
                       visibleEntities.length > 0 && visibleEntities.every((entity) => entity.getAllocation(stage.id).applicable)
                     const someApplicable = visibleEntities.some((entity) => entity.getAllocation(stage.id).applicable)
@@ -4241,10 +4081,6 @@ export default function Stages() {
 
             <div className="h-6 w-px bg-slate-200 mx-1" />
 
-            {/* Save/Discard — Applicable and Default Display edits (single-cell and bulk) are
-                staged locally in pendingAllocations and never touch the network until Save
-                Changes is clicked, which batches everything into one Promise.all across
-                affected subdepartments. Only shown once there's actually something staged. */}
             {pendingAllocations.size > 0 && (
               <>
                 <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-sm font-bold">
