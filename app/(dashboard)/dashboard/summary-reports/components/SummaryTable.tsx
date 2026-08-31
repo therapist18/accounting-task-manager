@@ -898,7 +898,7 @@ export function SummaryTable({
                       <TableRow key={`section-${item.name}`} className="border-0 hover:bg-transparent">
                         <TableCell
                           colSpan={1 + stickyColCount}
-                          className="sticky left-0 z-30 bg-white border-r border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2 pl-3 pr-4"
+                          className="sticky left-0 z-40 bg-white border-r border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2 pl-3 pr-4"
                           style={{ top: groupHeaderTop }}
                         >
                           <div className="flex items-center gap-2 min-w-0">
@@ -911,6 +911,13 @@ export function SummaryTable({
                             </span>
                           </div>
                         </TableCell>
+                        {/* Sticky only vertically (top, no left/right) so the row's border/background
+                            stays continuous under the header on vertical scroll. Kept at a lower
+                            z-index than the name cell above — both are `position: sticky` siblings,
+                            and without that gap this cell (which slides normally on horizontal
+                            scroll, unlike the pinned name cell) paints over and visually erases the
+                            name cell as you scroll right, since equal z-index ties resolve in DOM
+                            order and this cell comes second. */}
                         <TableCell
                           colSpan={headerSpacerColSpan}
                           className="sticky z-30 bg-white px-4 py-2 border-t-2 border-t-custom-blue border-b border-b-slate-200"

@@ -1,14 +1,14 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog"
 import { ComboBox } from "@/components/ui/combobox"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, X, Clock, FileText, User, Info, MessageSquare, Trash2, Star, Check, Building2, FolderTree, Zap, Webhook, Link2, Settings, ArrowDownCircle } from "lucide-react"
+import { Plus, X, Clock, FileText, User, Info, MessageSquare, Trash2, Star, Check, Building2, FolderTree, Zap, Webhook, Link2, Settings, ArrowDownCircle, Search } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
@@ -382,7 +382,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogTrigger asChild><Button size="sm" className="gap-2 bg-blue-600 hover:bg-blue-700"><Plus className="h-4 w-4" />Add Stage</Button></DialogTrigger>
-            <DialogContent className="max-w-6xl max-h-[95vh] p-0 bg-slate-50 flex flex-col">
+            <DialogContent className="max-w-7xl max-h-[95vh] p-0 bg-slate-50 flex flex-col">
                 <DialogHeader className="p-6 border-b bg-white sticky top-0 z-10">
                     <DialogTitle className="text-xl font-bold text-gray-800">Add New Stage(s) ({newStages.length})</DialogTitle>
                     <p className="text-sm text-gray-500">Configure the details, timing, and required documents for the new stage(s).</p>
@@ -702,27 +702,120 @@ function DocumentsSection({ stage, entityOptions, loadingEntities, selectedDepar
     onAddDocument: (isSpecial?: boolean) => void; onUpdateDocument: (docId: string, updates: Partial<StageDocument>) => void; onRemoveDocument: (docId: string) => void;
     onAddExtraction: (docId: string) => void; onUpdateExtraction: (docId: string, extractionId: string, updates: Partial<DocumentExtraction>) => void; onRemoveExtraction: (docId: string, extractionId: string) => void;
 }) {
+    const [activeDocIndex, setActiveDocIndex] = useState(0);
+    const [docSearch, setDocSearch] = useState('');
+    const docRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+    const filteredDocs = (stage.documents || []).filter(doc =>
+        !docSearch || (doc.name || '').toLowerCase().includes(docSearch.toLowerCase())
+    );
+    const filteredDocIndices = filteredDocs.map(d => stage.documents.indexOf(d));
+
+    useEffect(() => {
+        const docs = stage.documents || [];
+        docRefs.current = docRefs.current.slice(0, docs.length);
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        const index = Number(entry.target.getAttribute("data-doc-index"));
+                        if (!isNaN(index)) setActiveDocIndex(index);
+                    }
+                });
+            },
+            { root: null, threshold: 0.5 }
+        );
+        docRefs.current.forEach((ref) => {
+            if (ref) observer.observe(ref);
+        });
+        return () => observer.disconnect();
+    }, [stage.documents?.length]);
+
     return (
-        <div className="space-y-6">
-            <div className="flex justify-between items-center">
-                <div><h4 className="font-semibold flex items-center gap-2 text-gray-800"><FileText className="h-5 w-5 text-blue-600" />Stage Documents ({stage.documents.length})</h4><p className="text-sm text-muted-foreground">Define and configure documents required for this stage.</p></div>
-                <div className="flex gap-2"><Button onClick={() => onAddDocument(false)} size="sm" variant="outline" className="text-blue-600 border-blue-300 hover:bg-blue-50"><Plus className="h-4 w-4 mr-2" />Add Regular</Button><Button onClick={() => onAddDocument(true)} size="sm" variant="outline" disabled={!entityOptions.length && !loadingEntities} title={!entityOptions.length ? "Select a department first" : ""} className="text-amber-600 border-amber-300 hover:bg-amber-50"><Star className="h-4 w-4 mr-2" />Add Special</Button></div>
-            </div>
-            {stage.documents.length > 0 ? (
-                <div className="space-y-4">
-                    {stage.documents.map((doc, docIndex) => (
-                        <DocumentCard
-                            key={doc.id} doc={doc} docIndex={docIndex} entityOptions={entityOptions} loadingEntities={loadingEntities}
-                            selectedDepartment={selectedDepartment}
-                            kycDocuments={kycDocuments} loadingKycDocs={loadingKycDocs}
-                            automationTypes={automationTypes} loadingAutomations={loadingAutomations}
-                            onUpdateDocument={(docId, updates) => onUpdateDocument(docId, updates)}
-                            onRemoveDocument={onRemoveDocument}
-                            onAddExtraction={onAddExtraction} onUpdateExtraction={onUpdateExtraction} onRemoveExtraction={onRemoveExtraction}
-                        />
-                    ))}
+        <div className="bg-white rounded-lg shadow-sm border border-slate-200/90 overflow-hidden">
+            <div className="p-4 bg-blue-50/50 border-b border-gray-200/50 flex justify-between items-center">
+                <div>
+                    <h4 className="font-semibold flex items-center gap-2 text-gray-800"><FileText className="h-5 w-5 text-blue-600" />Stage Documents ({stage.documents.length})</h4>
+                    <p className="text-sm text-muted-foreground mt-1">Define and configure documents required for this stage.</p>
                 </div>
-            ) : (<div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-white"><FileText className="h-10 w-10 mx-auto mb-3 text-gray-400" /><h4 className="font-medium text-gray-700 mb-1">No documents added yet</h4><p className="text-sm text-muted-foreground">Add documents that are required for this stage.</p></div>)}
+                <div className="flex gap-2">
+                    <Button onClick={() => onAddDocument(false)} size="sm" variant="outline" className="text-blue-600 border-blue-300 hover:bg-blue-50"><Plus className="h-4 w-4 mr-2" />Add Regular</Button>
+                    <Button onClick={() => onAddDocument(true)} size="sm" variant="outline" disabled={!entityOptions.length && !loadingEntities} title={!entityOptions.length ? "Select a department first" : ""} className="text-amber-600 border-amber-300 hover:bg-amber-50"><Star className="h-4 w-4 mr-2" />Add Special</Button>
+                </div>
+            </div>
+            <div className="flex min-h-[400px]">
+                {stage.documents.length > 0 && (
+                    <div className="w-64 flex-shrink-0 border-r border-slate-200 bg-slate-50/50 p-3 flex flex-col">
+                        <div className="relative mb-3">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                            <input
+                                type="text"
+                                placeholder="Search documents..."
+                                value={docSearch}
+                                onChange={(e) => setDocSearch(e.target.value)}
+                                className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                            />
+                        </div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2 px-2">Documents</p>
+                        <div className="space-y-1 flex-1 overflow-y-auto">
+                            {filteredDocIndices.map((origIndex) => {
+                                const doc = stage.documents[origIndex];
+                                return (
+                                    <button
+                                        key={doc.id || origIndex}
+                                        type="button"
+                                        onClick={() => {
+                                            setActiveDocIndex(origIndex);
+                                            docRefs.current[origIndex]?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                        }}
+                                        className={`w-full text-left px-3 py-2.5 rounded-lg text-sm flex items-center gap-2 transition-colors ${
+                                            activeDocIndex === origIndex
+                                                ? "bg-blue-100 text-blue-700 font-medium border border-blue-200"
+                                                : "text-slate-600 hover:bg-slate-100 hover:text-slate-800 border border-transparent"
+                                        }`}
+                                    >
+                                        <FileText className="h-3.5 w-3.5 flex-shrink-0" />
+                                        <span className="truncate">{doc.name || `Document ${origIndex + 1}`}</span>
+                                    </button>
+                                );
+                            })}
+                            {filteredDocs.length === 0 && docSearch && (
+                                <p className="text-xs text-slate-400 italic px-2 py-4 text-center">No matching documents</p>
+                            )}
+                        </div>
+                    </div>
+                )}
+                <div className="flex-1 p-4 overflow-y-auto">
+                    {stage.documents.length > 0 ? (
+                        <div className="space-y-4">
+                            {stage.documents.map((doc, docIndex) => (
+                                <div
+                                    key={doc.id}
+                                    ref={(el) => { docRefs.current[docIndex] = el; }}
+                                    data-doc-index={docIndex}
+                                    className={activeDocIndex === docIndex ? "" : "hidden"}
+                                >
+                                    <DocumentCard
+                                        doc={doc} docIndex={docIndex} entityOptions={entityOptions} loadingEntities={loadingEntities}
+                                        selectedDepartment={selectedDepartment}
+                                        kycDocuments={kycDocuments} loadingKycDocs={loadingKycDocs}
+                                        automationTypes={automationTypes} loadingAutomations={loadingAutomations}
+                                        onUpdateDocument={(docId, updates) => onUpdateDocument(docId, updates)}
+                                        onRemoveDocument={onRemoveDocument}
+                                        onAddExtraction={onAddExtraction} onUpdateExtraction={onUpdateExtraction} onRemoveExtraction={onRemoveExtraction}
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-white">
+                            <FileText className="h-10 w-10 mx-auto mb-3 text-gray-400" />
+                            <h4 className="font-medium text-gray-700 mb-1">No documents added yet</h4>
+                            <p className="text-sm text-muted-foreground">Add documents that are required for this stage.</p>
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }

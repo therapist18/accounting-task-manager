@@ -17,9 +17,10 @@ import { parseDate } from "@/app/generic-functions/dateUtils"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { calculateStageDate } from "../utils/dateUtils"
-import { STAGE_TAB_LINKS } from "../utils/taskManagerData"
+import { STAGE_TAB_LINKS, isStageDocumentApplicableToTask } from "../utils/taskManagerData"
 import { cn } from "@/lib/utils"
 import { getCanonicalCurrentStage } from "../../reports/utils/reportStageLogic"
+import { ReassignDocumentTypeDialog } from "./ReassignDocumentTypeDialog"
 
 interface EditableStageCellProps { 
   stage: any
@@ -32,6 +33,7 @@ interface EditableStageCellProps {
   getKycFields?: (documentConfig: any) => Promise<any[]>
   allDocuments?: any[]
   linkedDocuments?: any[]
+  kycDocuments?: Map<string, any>
   isDocumentRow?: boolean
   documentData?: any
   onAutomationClick?: (e: React.MouseEvent, documentData?: any) => void
@@ -49,6 +51,11 @@ interface EditableStageCellProps {
   taskName?: string
   clientName?: string
   onFetchData?: () => Promise<void>;
+  // Fires after a successful "Fix Document Type" reassignment. Distinct from onFetchData
+  // because that only reloads tasks/stages — this also invalidates and refetches allDocuments
+  // (whose document_id the fix just changed) so the mismatch indicator clears immediately.
+  // Falls back to onFetchData when not provided.
+  onDocumentTypeFixed?: () => Promise<void> | void;
   officers?: any[]
   onOfficerChange?: (taskId: string, officerId: string | null) => Promise<void>
   readOnly?: boolean
@@ -114,7 +121,7 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[] = [])
   }
 };
 
-export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, enhancedTaskData, renderMode = 'date', taskName, clientName, getKycFields, onFetchData, officers = [], onOfficerChange, readOnly = false, onOpenRequirements, showTime = true, previewOnly = false }: EditableStageCellProps) {
+export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, enhancedTaskData, renderMode = 'date', taskName, clientName, getKycFields, kycDocuments = new Map(), onFetchData, onDocumentTypeFixed, officers = [], onOfficerChange, readOnly = false, onOpenRequirements, showTime = true, previewOnly = false }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -133,6 +140,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   const [customInputValue, setCustomInputValue] = useState('');
   const [customMultiSelectValues, setCustomMultiSelectValues] = useState<string[]>([]);
   const [billPreviewOpen, setBillPreviewOpen] = useState(false);
+  const [isReassignTypeDialogOpen, setIsReassignTypeDialogOpen] = useState(false);
   const router = useRouter();
 
   // Deep-links this stage cell into the matching JobWorkspace tab (Billing/Requirements/Automation)
@@ -237,6 +245,21 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
 
     return isDocumentApplicable(linkedDocument, task);
   }, [linkedDocument, task]);
+
+  // Flags a document that was uploaded under the wrong tab of the stage's upload dialog (each
+  // tab stamps its own kycId onto the document row) — i.e. its current document_id isn't among
+  // the types this stage actually offers for this task's job level. Surfaced as a warning on the
+  // view icon so a mistagged document is visible right in the table, not just discoverable by
+  // opening "Fix Document Type" and checking manually.
+  const hasMismatchedDocumentType = useMemo(() => {
+    if (!hasLinkedDocument || !Array.isArray(stage?.documents) || stage.documents.length < 2) return false;
+    const applicableKycIds = new Set(
+      stage.documents
+        .filter((docConfig: any) => isStageDocumentApplicableToTask(docConfig, task))
+        .map((docConfig: any) => docConfig.kycId)
+    );
+    return (linkedDocuments || []).some((doc: any) => doc?.document_id && !applicableKycIds.has(doc.document_id));
+  }, [hasLinkedDocument, stage?.documents, task, linkedDocuments]);
 
   const stageDate = useMemo(() => {
     if (!task?.stages || !stage?.id) return null;
@@ -1386,11 +1409,16 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     if (readOnly) {
       const viewBtn = linkedDocument && (
         <Dialog>
-          <DialogTrigger asChild>
-            <Button variant="ghost" size="icon" className={cn("text-green-600 hover:bg-green-50", btnSizeClass)} title="View document details" onClick={handleViewDocument}>
-              <Eye className={iconSizeClass} />
-            </Button>
-          </DialogTrigger>
+          <div className="relative inline-flex">
+            <DialogTrigger asChild>
+              <Button variant="ghost" size="icon" className={cn(hasMismatchedDocumentType ? "text-red-600 hover:bg-red-50" : "text-green-600 hover:bg-green-50", btnSizeClass)} title={hasMismatchedDocumentType ? "This document's type may not match this stage — click to review" : "View document details"} onClick={handleViewDocument}>
+                <Eye className={iconSizeClass} />
+              </Button>
+            </DialogTrigger>
+            {hasMismatchedDocumentType && (
+              <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white pointer-events-none" />
+            )}
+          </div>
           <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
             <DialogHeader className="p-4 border-b">
               <DialogTitle className="text-lg">
@@ -1444,14 +1472,15 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
 
     const showAutomation = !!currentAutomationConfig && !hasLinkedDocument;
     const showSkip = !isStageCompleted;
-    const hasMoreActions = showAutomation || showSkip;
+    const showReassignType = hasMismatchedDocumentType;
+    const hasMoreActions = showAutomation || showSkip || showReassignType;
 
     let officerContent: React.ReactNode = null;
     if (onOfficerChange && officers.length > 0 && stage.follow_up?.toLowerCase() === 'officer') {
       const stageOfficerIds = new Set<string>();
       if (Array.isArray(stage.officer_ids)) stage.officer_ids.forEach((id: any) => stageOfficerIds.add(id.toString()));
       else if (stage.officer_id) stageOfficerIds.add(stage.officer_id.toString());
-      
+
       const stageOfficers = officers.filter(o => stageOfficerIds.has(o.id.toString()));
       if (stageOfficers.length > 0) {
         const taskStageData = task.stages?.[stage.id];
@@ -1473,11 +1502,16 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
 
     const viewBtn = linkedDocument && (
       <Dialog>
-        <DialogTrigger asChild>
-          <Button variant="ghost" size="icon" className={cn("text-green-600 hover:bg-green-50", btnSizeClass)} title="View document details" onClick={handleViewDocument}>
-            <Eye className={iconSizeClass} />
-          </Button>
-        </DialogTrigger>
+        <div className="relative inline-flex">
+          <DialogTrigger asChild>
+            <Button variant="ghost" size="icon" className={cn(hasMismatchedDocumentType ? "text-red-600 hover:bg-red-50" : "text-green-600 hover:bg-green-50", btnSizeClass)} title={hasMismatchedDocumentType ? "This document's type may not match this stage — click to review" : "View document details"} onClick={handleViewDocument}>
+              <Eye className={iconSizeClass} />
+            </Button>
+          </DialogTrigger>
+          {hasMismatchedDocumentType && (
+            <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white pointer-events-none" />
+          )}
+        </div>
         <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
           <DialogHeader className="p-4 border-b">
             <DialogTitle className="text-lg">
@@ -1532,6 +1566,11 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
               <div className="flex flex-col">
                 <span>Run Automation</span><span className="text-[10px] text-muted-foreground leading-tight">via {currentAutomationConfig.docName}</span>
               </div>
+            </DropdownMenuItem>
+          )}
+          {showReassignType && (
+            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setIsReassignTypeDialogOpen(true); }}>
+              <Link2 className="mr-2 h-3.5 w-3.5 text-indigo-600" />Fix Document Type
             </DropdownMenuItem>
           )}
           {showSkip && (
@@ -1748,11 +1787,16 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
 
     const viewBtn = linkedDocument && (
       <Dialog>
-        <DialogTrigger asChild>
-          <Button variant="ghost" size="icon" className={cn("text-green-600 hover:bg-green-50", btnSizeClass)} title="View document details" onClick={handleViewDocument}>
-            <Eye className={iconSizeClass} />
-          </Button>
-        </DialogTrigger>
+        <div className="relative inline-flex">
+          <DialogTrigger asChild>
+            <Button variant="ghost" size="icon" className={cn(hasMismatchedDocumentType ? "text-red-600 hover:bg-red-50" : "text-green-600 hover:bg-green-50", btnSizeClass)} title={hasMismatchedDocumentType ? "This document's type may not match this stage — click to review" : "View document details"} onClick={handleViewDocument}>
+              <Eye className={iconSizeClass} />
+            </Button>
+          </DialogTrigger>
+          {hasMismatchedDocumentType && (
+            <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white pointer-events-none" />
+          )}
+        </div>
         <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
           <DialogHeader className="p-4 border-b">
             <DialogTitle className="text-lg">
@@ -1860,6 +1904,11 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     const isCompleted = stageData?.status === 'completed' || (!stageData?.status && (!!value || stageData?.documentsUploaded === true));
     const showUndoSkip = isSkipped;
     const showClear = isCompleted && !requiresUpload;
+    // Lets staff correct a document that was uploaded into the wrong tab of the stage's upload
+    // dialog (each tab stamps the document row with its own kycId), retagging the existing file
+    // to the right type instead of deleting and re-uploading it. Only meaningful when the stage
+    // actually offers more than one document type to choose between.
+    const showReassignType = hasMismatchedDocumentType;
 
     let officerSubmenu: React.ReactNode = null;
     if (onOfficerChange && officers.length > 0 && stage.follow_up?.toLowerCase() === 'officer') {
@@ -1897,7 +1946,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       }
     }
 
-    const hasAnyItem = !!stageLinkItem || !!officerSubmenu || showAutomation || showSkip || showUndoSkip || showClear;
+    const hasAnyItem = !!stageLinkItem || !!officerSubmenu || showAutomation || showSkip || showUndoSkip || showClear || showReassignType;
     if (!hasAnyItem) return null;
 
     return (
@@ -1906,13 +1955,18 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         <DropdownMenuContent align="end">
           {stageLinkItem && <DropdownMenuItem onClick={stageLinkItem.onClick}>{stageLinkItem.icon}{stageLinkItem.label}</DropdownMenuItem>}
           {officerSubmenu}
-          {(stageLinkItem || officerSubmenu) && (showAutomation || showSkip || showUndoSkip || showClear) && <DropdownMenuSeparator />}
+          {(stageLinkItem || officerSubmenu) && (showAutomation || showSkip || showUndoSkip || showClear || showReassignType) && <DropdownMenuSeparator />}
           {showAutomation && (
             <DropdownMenuItem onClick={handleTriggerAutomation} disabled={isAutomationRunning}>
               <Zap className="mr-2 h-3.5 w-3.5 text-blue-600 fill-blue-600 shrink-0" />
               <div className="flex flex-col">
                 <span>Run Automation</span><span className="text-[10px] text-muted-foreground leading-tight">via {currentAutomationConfig.docName}</span>
               </div>
+            </DropdownMenuItem>
+          )}
+          {showReassignType && (
+            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setIsReassignTypeDialogOpen(true); }}>
+              <Link2 className="mr-2 h-3.5 w-3.5 shrink-0 text-indigo-600" />Fix Document Type
             </DropdownMenuItem>
           )}
           {showSkip && (
@@ -2054,6 +2108,20 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      )}
+      {isReassignTypeDialogOpen && (
+        <ReassignDocumentTypeDialog
+          open={isReassignTypeDialogOpen}
+          onOpenChange={setIsReassignTypeDialogOpen}
+          task={task}
+          stage={stage}
+          linkedDocuments={linkedDocuments}
+          kycDocuments={kycDocuments}
+          onSuccess={async () => {
+            if (onDocumentTypeFixed) await onDocumentTypeFixed();
+            else if (onFetchData) await onFetchData();
+          }}
+        />
       )}
     </div>
   );

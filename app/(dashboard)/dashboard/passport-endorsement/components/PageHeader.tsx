@@ -26,11 +26,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { STEP_LABELS, type HandlingStep } from "../utils/database";
 
 // ── Shared UI: Standard Tabs (matches summary-reports/PageHeader) ──
 const TAB_LIST_CLASS = "bg-slate-100 p-1 rounded-full border border-slate-200";
-const TAB_TRIGGER_CLASS = "group gap-2 rounded-2xl px-4 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-white transition-colors data-[state=active]:bg-custom-blue data-[state=active]:text-white data-[state=active]:shadow-sm";
+const TAB_TRIGGER_CLASS = "group gap-2 rounded-full px-4 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-white transition-colors data-[state=active]:bg-custom-blue data-[state=active]:text-white data-[state=active]:shadow-sm";
 const COUNT_BADGE_CLASS = "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm bg-custom-blue text-white group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white";
 
 export interface PillTrackItem {
@@ -108,7 +107,7 @@ export function MultiSelectSearchableDropdown({
         <Button
           variant="outline"
           className={cn(
-            "h-10 px-5 rounded-md border-blue-500 text-sm font-semibold text-blue-600 bg-white hover:bg-blue-50 shrink-0",
+            "h-10 px-5 rounded-full border-blue-500 text-sm font-semibold text-blue-600 bg-white hover:bg-blue-50 shrink-0",
             accentActive && "bg-custom-blue border-custom-blue text-white hover:bg-[#2d5a94] hover:text-white shadow-sm"
           )}
         >
@@ -209,41 +208,101 @@ function DateTextInput({ value, onChange, placeholder }: { value: Date | undefin
   );
 }
 
+function MiniSegmented({ options, value, onChange }: { options: { value: string; label: string }[]; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex p-0.5 bg-slate-100 rounded-lg">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={cn(
+            "flex-1 h-7 rounded-md text-xs font-bold transition-colors",
+            value === opt.value ? "bg-white text-custom-blue shadow-sm" : "text-slate-500 hover:text-slate-700"
+          )}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function DateRangeFilterButton({ dateRange, setDateRange }: any) {
   const hasRange = !!(dateRange?.from || dateRange?.to);
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"range" | "year">("range");
+
+  // A whole-calendar-year range (Jan 1 – Dec 31 of the same year) is what "Year" mode itself
+  // produces — recognizing it lets the trigger button show the year directly and lets
+  // reopening the popover default the Select back to the year that's actually active, instead
+  // of losing that context the moment the popover closes.
+  const selectedYear = dateRange?.from && dateRange?.to
+    && dateRange.from.getMonth() === 0 && dateRange.from.getDate() === 1
+    && dateRange.to.getMonth() === 11 && dateRange.to.getDate() === 31
+    && dateRange.from.getFullYear() === dateRange.to.getFullYear()
+    ? dateRange.from.getFullYear().toString()
+    : "";
+
+  const currentYear = new Date().getFullYear();
+  const years = Array.from({ length: 15 }, (_, i) => currentYear - i);
+
+  const applyYear = (yearStr: string) => {
+    const year = Number(yearStr);
+    setDateRange({ from: new Date(year, 0, 1), to: new Date(year, 11, 31) });
+  };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (o) setMode(selectedYear ? "year" : "range"); }}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
           className={cn(
-            "h-9 px-4 rounded-md text-sm font-bold gap-2 transition-all",
+            "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
             hasRange
               ? "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue"
               : "border-slate-200 text-slate-600 hover:bg-slate-50"
           )}
         >
           <Calendar className="h-3.5 w-3.5" />
-          Date Filter
+          {selectedYear || "Date Filter"}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-64 p-3 rounded-2xl shadow-2xl border-slate-200">
+      <PopoverContent className="w-72 p-3 rounded-2xl shadow-2xl border-slate-200">
         <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-slate-200 bg-white shadow-sm">
-            <Calendar className="h-4 w-4 text-slate-400 shrink-0" />
-            <DateTextInput value={dateRange?.from} onChange={(d) => setDateRange((prev: any) => ({ ...prev, from: d }))} placeholder="DD/MM/YYYY" />
-            <span className="text-slate-400 text-sm">–</span>
-            <DateTextInput value={dateRange?.to} onChange={(d) => setDateRange((prev: any) => ({ ...prev, to: d }))} placeholder="DD/MM/YYYY" />
-          </div>
+          <MiniSegmented
+            options={[{ value: "range", label: "Date Range" }, { value: "year", label: "Year" }]}
+            value={mode}
+            onChange={(v) => setMode(v as "range" | "year")}
+          />
+
+          {mode === "range" ? (
+            <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-slate-200 bg-white shadow-sm">
+              <Calendar className="h-4 w-4 text-slate-400 shrink-0" />
+              <DateTextInput value={dateRange?.from} onChange={(d) => setDateRange((prev: any) => ({ ...prev, from: d }))} placeholder="DD/MM/YYYY" />
+              <span className="text-slate-400 text-sm">–</span>
+              <DateTextInput value={dateRange?.to} onChange={(d) => setDateRange((prev: any) => ({ ...prev, to: d }))} placeholder="DD/MM/YYYY" />
+            </div>
+          ) : (
+            <Select value={selectedYear} onValueChange={applyYear}>
+              <SelectTrigger className="h-10 rounded-md border-slate-200 bg-white shadow-sm text-sm font-medium">
+                <SelectValue placeholder="Select a year..." />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl max-h-64">
+                {years.map((y) => (
+                  <SelectItem key={y} value={y.toString()} className="text-sm font-medium">{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
           {hasRange && (
             <Button
               variant="ghost"
               className="w-full h-9 rounded-md text-xs font-bold text-slate-500 hover:text-red-600 hover:bg-red-50"
               onClick={() => { setDateRange({ from: undefined, to: undefined }); setOpen(false); }}
             >
-              Clear Date Range
+              Clear Date Filter
             </Button>
           )}
         </div>
@@ -252,106 +311,55 @@ export function DateRangeFilterButton({ dateRange, setDateRange }: any) {
   );
 }
 
-// ── Status pill-track tabs (matches summary-reports StatusTabs) ──
-// Distinct semantic color per status so the tab bar reads at a glance. activeHex/badgeHex are
-// inline styles — a `data-[state=active]:bg-*` Tailwind class collides with TabsTrigger's own
-// base `data-[state=active]:bg-background` in this project's Tailwind setup, so inline style is
-// used (see summary-reports/components/PageHeader.tsx's own comment).
-export const STATUS_TAB_ORDER: HandlingStep[] = [
-  "awaiting_receipt",
-  "received",
-  "at_nyayo",
-  "stamped_back",
-  "ready_for_dispatch",
-  "out_for_delivery",
-  "awaiting_pickup",
-  "completed",
-  "client_managed",
-  "mode_unset",
-];
-
-const STATUS_TAB_ITEMS: { id: string; label: string; activeHex: string; badgeHex: string }[] = [
+// ── Base-status tabs (tm_tasks.status: write_up_completed / endorsed) ──
+// A second, orthogonal status dimension to the Handling-step cards (StatusCards) below: this
+// tabs row filters on the task's own `tm_tasks.status`, which the module is scoped to
+// (QUALIFYING_STATUSES = write_up_completed | endorsed). Uses the same inline-activeHex pattern
+// as summary-reports' StatusTabs — Tailwind's data-[state=active]:bg-* classes collide with
+// TabsTrigger's own base background and render the active tab white/gray, so a hex inline style
+// is used instead (reliable regardless of class order/specificity).
+const BASE_STATUS_ITEMS = [
   { id: "all", label: "All Tasks", activeHex: "#376bae", badgeHex: "#376bae" },
-  { id: "awaiting_receipt", label: STEP_LABELS.awaiting_receipt, activeHex: "#d97706", badgeHex: "#f59e0b" },
-  { id: "received", label: STEP_LABELS.received, activeHex: "#0284c7", badgeHex: "#0ea5e9" },
-  { id: "at_nyayo", label: STEP_LABELS.at_nyayo, activeHex: "#ea580c", badgeHex: "#f97316" },
-  { id: "stamped_back", label: STEP_LABELS.stamped_back, activeHex: "#0d9488", badgeHex: "#14b8a6" },
-  { id: "ready_for_dispatch", label: STEP_LABELS.ready_for_dispatch, activeHex: "#2563eb", badgeHex: "#3b82f6" },
-  { id: "out_for_delivery", label: STEP_LABELS.out_for_delivery, activeHex: "#4f46e5", badgeHex: "#6366f1" },
-  { id: "awaiting_pickup", label: STEP_LABELS.awaiting_pickup, activeHex: "#4f46e5", badgeHex: "#6366f1" },
-  { id: "completed", label: STEP_LABELS.completed, activeHex: "#059669", badgeHex: "#10b981" },
-  { id: "client_managed", label: STEP_LABELS.client_managed, activeHex: "#7c3aed", badgeHex: "#8b5cf6" },
-  { id: "mode_unset", label: STEP_LABELS.mode_unset, activeHex: "#475569", badgeHex: "#64748b" },
+  { id: "write_up_completed", label: "Write Up Completed", activeHex: "#0284c7", badgeHex: "#0ea5e9" },
+  { id: "endorsed", label: "Endorsed", activeHex: "#059669", badgeHex: "#10b981" },
 ];
 
 export function StatusTabs({
-  activeSteps = [], setActiveSteps,
-  counts = {},
-  activeMode, setActiveMode,
-  refreshData, loading,
+  activeBaseStatus, setActiveBaseStatus, counts = {},
 }: any) {
-  // activeSteps is a multi-select array (StatusTabs' own count badges always reflect the
-  // full counts, not just the selected step). The active step's badge should highlight.
-  const activeStep = activeSteps[0] ?? "all";
+  const badgeClass = "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm";
 
   return (
-    <div className="px-8 py-2 flex items-center justify-between gap-4 border-b border-slate-200 bg-white antialiased">
-      <div className="overflow-x-auto custom-scrollbar shrink-0 min-w-0">
-        <Tabs value={activeStep} onValueChange={(v: string) => setActiveSteps(v === "all" ? [] : [v])}>
-          <TabsList className={TAB_LIST_CLASS}>
-            {STATUS_TAB_ITEMS.map(tab => {
-              const isActive = activeStep === tab.id;
-              return (
-                <TabsTrigger
-                  key={tab.id}
-                  value={tab.id}
-                  className={cn(
-                    "group gap-2 rounded-2xl px-4 h-9 text-sm font-bold transition-colors",
-                    isActive ? "shadow-sm" : "text-slate-600 hover:text-slate-900 hover:bg-white whitespace-nowrap"
-                  )}
-                  style={isActive ? { backgroundColor: tab.activeHex, color: '#fff' } : undefined}
-                >
-                  {tab.label}
-                  {(counts[tab.id] || 0) > 0 && (
-                    <span
-                      className="inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm"
-                      style={isActive ? { backgroundColor: 'rgba(255,255,255,0.25)', color: '#fff' } : { backgroundColor: tab.badgeHex, color: '#fff' }}
-                    >
-                      {counts[tab.id] || 0}
-                    </span>
-                  )}
-                </TabsTrigger>
-              );
-            })}
-          </TabsList>
-        </Tabs>
-      </div>
-
-      <div className="flex items-center gap-2.5 shrink-0">
-        <Select value={activeMode} onValueChange={setActiveMode}>
-          <SelectTrigger className="w-40 h-9 bg-white border-slate-300 rounded-md text-sm font-bold shadow-sm shrink-0">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="rounded-2xl">
-            <SelectItem value="all">All Modes</SelectItem>
-            <SelectItem value="bcl">BCL Handles</SelectItem>
-            <SelectItem value="client">Client Handles</SelectItem>
-            <SelectItem value="not_set">Not Set</SelectItem>
-          </SelectContent>
-        </Select>
-
-        {refreshData && (
-          <Button
-            variant="outline"
-            onClick={refreshData}
-            disabled={loading}
-            className="h-9 px-5 rounded-md border-slate-200 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 shrink-0"
-          >
-            {loading ? <LoaderSpinner /> : <RotateCcw className="h-4 w-4 mr-2 text-slate-400" />}
-            {loading ? "Refreshing..." : "Refresh"}
-          </Button>
-        )}
-      </div>
+    <div className="px-8 py-2 flex items-center gap-4 border-b border-slate-200 bg-white antialiased">
+      <Tabs value={activeBaseStatus} onValueChange={setActiveBaseStatus}>
+        <TabsList className={TAB_LIST_CLASS}>
+          {BASE_STATUS_ITEMS.map((tab) => {
+            const isActive = activeBaseStatus === tab.id;
+            const count = counts[tab.id] || 0;
+            return (
+              <TabsTrigger
+                key={tab.id}
+                value={tab.id}
+                className={cn(
+                  "group gap-2 rounded-full px-4 h-9 text-sm font-bold transition-colors",
+                  isActive ? "text-white shadow-sm" : "text-slate-600 hover:text-slate-900 hover:bg-white"
+                )}
+                style={isActive ? { backgroundColor: tab.activeHex, color: "#fff" } : undefined}
+              >
+                {tab.label}
+                {count > 0 && (
+                  <span
+                    className={badgeClass}
+                    style={isActive ? { backgroundColor: "rgba(255,255,255,0.25)", color: "#fff" } : { backgroundColor: tab.badgeHex, color: "#fff" }}
+                  >
+                    {count}
+                  </span>
+                )}
+              </TabsTrigger>
+            );
+          })}
+        </TabsList>
+      </Tabs>
     </div>
   );
 }
@@ -370,6 +378,8 @@ export function FilterBar({
   searchQuery, setSearchQuery,
   availableClasses = [], activeClassIds = [], setActiveClassIds, classCounts = {},
   availableSubClasses = [], activeSubClassIds = [], setActiveSubClassIds, subClassCounts = {},
+  activeMode, setActiveMode, refreshData, loading = false,
+  showStats = true, setShowStats,
 }: any) {
   const toggleClass = (id: string) =>
     setActiveClassIds?.((prev: string[]) => prev.includes(id) ? prev.filter((x: string) => x !== id) : [...prev, id]);
@@ -386,49 +396,56 @@ export function FilterBar({
             placeholder="Search company, applicant, passport no..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full h-10 pl-11 pr-10 bg-white border-slate-300 rounded-md text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
+            className="w-full h-10 pl-11 pr-10 bg-white border-slate-300 rounded-full text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-slate-400"
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100 transition-colors">
+            <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors">
               <X className="h-4 w-4" />
             </button>
           )}
         </div>
 
-        {/* Right: Class / Sub-Class */}
-        {(availableClasses.length > 0 || availableSubClasses.length > 0) && (
-          <div className="flex items-center gap-2.5 shrink-0">
-            <div className="flex items-center gap-1.5 text-slate-400">
-              <Layers className="h-3.5 w-3.5" />
-              <span className="text-[11px] font-black uppercase tracking-widest">Categorization</span>
-            </div>
-            <div className="h-6 w-px bg-slate-200 mx-1" />
-            {availableClasses.length > 0 && (
-              <MultiSelectSearchableDropdown
-                label="Classes"
-                items={availableClasses}
-                selectedIds={activeClassIds}
-                counts={classCounts}
-                onToggle={toggleClass}
-                onClear={() => { setActiveClassIds?.([]); setActiveSubClassIds?.([]); }}
-                searchPlaceholder="Search classes..."
-                accentActive={activeClassIds.length > 0}
-              />
-            )}
-            {availableSubClasses.length > 0 && (
-              <MultiSelectSearchableDropdown
-                label="Sub-Classes"
-                items={availableSubClasses}
-                selectedIds={activeSubClassIds}
-                counts={subClassCounts}
-                onToggle={toggleSubClass}
-                onClear={() => setActiveSubClassIds?.([])}
-                searchPlaceholder="Search sub-classes..."
-                accentActive={activeSubClassIds.length > 0}
-              />
-            )}
-          </div>
-        )}
+        {/* Right: Handling mode + refresh */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <Select value={activeMode} onValueChange={setActiveMode}>
+            <SelectTrigger className="h-10 w-40 bg-white border-slate-300 rounded-full text-sm font-bold shadow-sm shrink-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="rounded-2xl">
+              <SelectItem value="all">All Modes</SelectItem>
+              <SelectItem value="bcl">BCL Handles</SelectItem>
+              <SelectItem value="client">Client Handles</SelectItem>
+              <SelectItem value="not_set">Not Set</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {setShowStats && (
+            <button
+              type="button"
+              onClick={() => setShowStats((v: boolean) => !v)}
+              className={cn(
+                "inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-bold uppercase tracking-wider transition-colors shrink-0",
+                showStats
+                  ? "border-custom-blue bg-custom-blue text-white shadow-sm"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              Stats Rows
+            </button>
+          )}
+
+          {refreshData && (
+            <Button
+              variant="outline"
+              onClick={refreshData}
+              disabled={loading}
+              className="h-10 px-5 rounded-full border-slate-200 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 shrink-0"
+            >
+              {loading ? <LoaderSpinner /> : <RotateCcw className="h-4 w-4 mr-2 text-slate-400" />}
+              {loading ? "Refreshing..." : "Refresh"}
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -471,7 +488,6 @@ export function HierarchyTabs({
             <div className="flex items-center gap-3 min-w-0 flex-1">
               {hasSubDepts && (
                 <>
-                  <CornerDownRight className="h-4 w-4 text-slate-300 shrink-0 ml-4" />
                   <div className="overflow-x-auto custom-scrollbar pb-1 -mb-1">
                     <PillTrack
                       size="sm"
@@ -542,7 +558,7 @@ export function ColumnVisibilityDialog({ columns, visibleColumnIds, setVisibleCo
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-9 px-4 rounded-md text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 shrink-0 transition-all">
+        <Button variant="outline" size="sm" className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 shrink-0 transition-all">
           <Eye className="h-3.5 w-3.5" /> Columns
         </Button>
       </DialogTrigger>

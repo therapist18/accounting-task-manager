@@ -543,7 +543,14 @@ const DocumentTabPanel = ({
 
             {useExisting && (
               <div className="ml-6 space-y-2">
-                <RadioGroup value={selectedExistingId} onValueChange={(val) => !isLocked && setSelectedExistingId(val)}>
+                <RadioGroup
+                  value={selectedExistingId}
+                  onValueChange={(val) => {
+                    if (isLocked) return;
+                    setSelectedExistingId(val);
+                    onUseExistingLink(doc.id, val, doc.kycId);
+                  }}
+                >
                   {existingDocs.filter(ed => !ed.hasNoTaskOutcome).map((ed) => {
                     const isSelected = selectedExistingId === ed.id;
                     const fileName = ed.file_path?.split('/').pop() || documentName;
@@ -614,17 +621,6 @@ const DocumentTabPanel = ({
                     )
                   })}
                 </RadioGroup>
-
-                {!isLocked && selectedExistingId && (
-                  <Button
-                    onClick={() => onUseExistingLink(doc.id, selectedExistingId, doc.kycId)}
-                    className="ml-6 mt-3 shadow-sm"
-                    size="sm"
-                  >
-                    <Check className="mr-2 h-4 w-4" />
-                    Use Selected Document
-                  </Button>
-                )}
               </div>
             )}
           </div>
@@ -810,9 +806,16 @@ export function StageUploadDialog({
 
   useEffect(() => {
     if (open && task?.source_document_id) {
+      const sourceDocsObj = typeof task.source_document_id === 'object' ? task.source_document_id : {};
+      // Some legacy tasks store a stage's ref as a single object instead of an array (same shape
+      // getLinkedDocumentsForTaskStage already normalizes for) — without this, isDocSelectedAsSource's
+      // `.some()` below throws for any stage still in that shape.
+      const normalizedSourceDocs = Object.fromEntries(
+        Object.entries(sourceDocsObj).map(([stageId, docs]) => [stageId, Array.isArray(docs) ? docs : [docs]])
+      );
       setSelectedSourceDocs(prev => ({
         ...prev,
-        ...(typeof task.source_document_id === 'object' ? task.source_document_id : {})
+        ...normalizedSourceDocs
       }));
     }
   }, [open, task?.source_document_id]);

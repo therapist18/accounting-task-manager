@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, FileDown, FileSpreadsheet, ListFilter, ChevronDown, ChevronRight, Truck } from "lucide-react";
+import { Loader2, FileDown, FileSpreadsheet, ListFilter, ChevronDown, Building2, Truck } from "lucide-react";
 import { startOfDay, endOfDay } from "date-fns";
 import { parseDateSafe } from "../summary-reports/utils/reportStageLogic";
 import * as XLSX from "xlsx";
@@ -74,7 +74,12 @@ export default function PassportEndorsementPage() {
   // (e.g. "In Dispatch" = ready_for_dispatch + out_for_delivery + awaiting_pickup).
   const [activeSteps, setActiveSteps] = useState<string[]>([]);
   const [activeMode, setActiveMode] = useState<string>("all");
+  // Base tm_tasks.status dimension — scoped to QUALIFYING_STATUSES by the module itself, this
+  // narrows further to just write_up_completed / endorsed (or all). Orthogonal to activeSteps
+  // (the handling-step filter) so the two can combine.
+  const [activeBaseStatus, setActiveBaseStatus] = useState<"all" | "write_up_completed" | "endorsed">("all");
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(DEFAULT_VISIBLE_COLUMN_IDS);
+  const [showStats, setShowStats] = useState(true);
   // Single source of truth for sorting — the MultiSort dialog manages it as an ordered list of
   // SortLevels; a plain header-click (handleSort) collapses the list to that one column. The
   // first level is what SummaryTable's active-column highlight reads (derived into sortConfig).
@@ -285,8 +290,18 @@ export default function PassportEndorsementPage() {
     return c;
   }, [searchedRows]);
 
+  // Base-status tab badges — per tm_tasks.status across the searched pool, unaffected by which
+  // base-status tab is selected (so switching tabs never zeroes out the others' counts), same
+  // convention as the handling-step `counts` above.
+  const baseStatusCounts = useMemo(() => {
+    const c: Record<string, number> = { all: searchedRows.length, write_up_completed: 0, endorsed: 0 };
+    searchedRows.forEach(({ task }) => { if (task.status === "write_up_completed" || task.status === "endorsed") c[task.status] = (c[task.status] || 0) + 1; });
+    return c;
+  }, [searchedRows]);
+
   const filteredRows = useMemo(() => {
     let result = searchedRows;
+    if (activeBaseStatus !== "all") result = result.filter((r) => r.task.status === activeBaseStatus);
     if (activeSteps.length > 0) result = result.filter((r) => activeSteps.includes(r.step));
     if (activeMode !== "all") {
       if (activeMode === "bcl") result = result.filter((r) => r.mode === "bcl");
@@ -294,7 +309,7 @@ export default function PassportEndorsementPage() {
       else if (activeMode === "not_set") result = result.filter((r) => !r.mode);
     }
     return result;
-  }, [searchedRows, activeSteps, activeMode]);
+  }, [searchedRows, activeBaseStatus, activeSteps, activeMode]);
 
   const getSortableValue = useCallback((row: any, columnId: string) => {
     const { task, record, mode, step, writeUpDate } = row;
@@ -501,20 +516,22 @@ export default function PassportEndorsementPage() {
   return (
     <div className="flex flex-col flex-1 overflow-auto bg-slate-50">
       {/* Title Bar */}
-      <div className="border-b border-slate-200 bg-white px-8 py-4 flex items-center justify-between antialiased">
-        <div className="flex items-center gap-8">
-          <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight leading-none text-center">
-            Passport Endorsement Tracking
-          </h1>
-          <div className="flex items-center text-base font-bold gap-2">
-            <span className="text-slate-900">{immigrationDept?.name || "Immigration"}</span>
-            <ChevronRight className="h-4 w-4 text-slate-400" />
-            <span className="text-slate-600">{activeSubDepartment?.name || "All Sub-departments"}</span>
+      <div className="border-b border-slate-200 bg-white px-8 py-5 antialiased flex flex-col justify-center">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 flex flex-col gap-1.5">
+            <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight truncate leading-none">
+              Passport Endorsement Tracking
+            </h1>
+            <div className="flex items-center text-sm text-slate-500 font-semibold gap-1">
+              <Building2 className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+              <span className="text-blue-600 font-bold">{immigrationDept?.name || "Immigration"}</span>
+              <span className="text-slate-300 mx-0.5">/</span>
+              <span className="truncate text-slate-500">{activeSubDepartment?.name || "All Sub-departments"}</span>
+            </div>
           </div>
-        </div>
 
-        {/* Secondary controls — normal squared buttons matching the tab design above. */}
-        <div className="flex items-center gap-2.5 shrink-0">
+          {/* Secondary controls — rounded-full pills matching the Reports header design. */}
+          <div className="flex items-center gap-3 shrink-0">
           <DateRangeFilterButton dateRange={dateRange} setDateRange={setDateRange} />
           <ColumnVisibilityDialog
             columns={HANDLING_COLUMNS}
@@ -526,8 +543,8 @@ export default function PassportEndorsementPage() {
             size="sm"
             onClick={() => setMultiSortOpen(true)}
             className={cn(
-              "h-9 px-4 rounded-md text-sm font-bold gap-2 border-slate-200 transition-all",
-              sortLevels.length > 0 ? "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue" : "text-slate-600 hover:bg-slate-50"
+              "h-9 px-4 rounded-full text-sm font-bold gap-2 transition-all",
+              sortLevels.length > 0 ? "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue" : "border-slate-200 text-slate-600 hover:bg-slate-50"
             )}
             title="Sort by multiple columns"
           >
@@ -542,7 +559,7 @@ export default function PassportEndorsementPage() {
             variant="outline"
             size="sm"
             onClick={() => setCourierDialogOpen(true)}
-            className="h-9 px-4 rounded-md text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 shrink-0 transition-all"
+            className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 shrink-0 transition-all"
           >
             <Truck className="h-3.5 w-3.5" /> Couriers
           </Button>
@@ -551,22 +568,23 @@ export default function PassportEndorsementPage() {
             <DropdownMenuTrigger asChild>
               <Button
                 size="sm"
-                className="h-9 px-4 rounded-md text-sm font-bold gap-2 text-white hover:bg-[#2d5a94] shadow-sm disabled:opacity-70"
+                className="h-10 px-6 rounded-full text-sm font-bold gap-2 text-white hover:bg-[#2d5a94] shadow-md transition-all disabled:opacity-70"
                 style={{ backgroundColor: '#376bae' }}
               >
-                <FileDown className="h-3.5 w-3.5" />
+                <FileDown className="h-4 w-4" />
                 Export
-                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                <ChevronDown className="h-3 w-3 opacity-60" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={handleExportExcel} className="gap-2 cursor-pointer">
+            <DropdownMenuContent align="end" className="w-48 rounded-2xl shadow-xl border-slate-200 p-1">
+              <DropdownMenuItem onClick={handleExportExcel} className="gap-2 cursor-pointer rounded-lg">
                 <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
                 Export as Excel
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+      </div>
       </div>
 
       {/* Scope + Status + Filter controls — flat, stacked directly under the title bar. */}
@@ -586,13 +604,9 @@ export default function PassportEndorsementPage() {
       />
 
       <StatusTabs
-        activeSteps={activeSteps}
-        setActiveSteps={setActiveSteps}
-        counts={counts}
-        activeMode={activeMode}
-        setActiveMode={setActiveMode}
-        refreshData={handleRefresh}
-        loading={isRefreshing}
+        activeBaseStatus={activeBaseStatus}
+        setActiveBaseStatus={setActiveBaseStatus}
+        counts={baseStatusCounts}
       />
 
       <FilterBar
@@ -606,6 +620,12 @@ export default function PassportEndorsementPage() {
         activeSubClassIds={activeSubClassIds}
         setActiveSubClassIds={setActiveSubClassIds}
         subClassCounts={subClassCounts}
+        activeMode={activeMode}
+        setActiveMode={setActiveMode}
+        refreshData={handleRefresh}
+        loading={isRefreshing}
+        showStats={showStats}
+        setShowStats={setShowStats}
       />
 
       <HandlingTable
@@ -620,6 +640,7 @@ export default function PassportEndorsementPage() {
         sortConfig={sortConfig}
         handleSort={handleSort}
         loading={tableLoading}
+        showStats={showStats}
       />
 
       <HandlingWizardDialog

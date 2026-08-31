@@ -1,13 +1,13 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback, useRef } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, X, Clock, User, FileText, Info, Edit, MessageSquare, Star, Trash2, Check, Zap, Webhook, Layers, LayoutGrid, Link2, Unlink, ChevronDown, ArrowDownCircle, Database, Settings } from "lucide-react"
+import { Plus, X, Clock, User, FileText, Info, Edit, MessageSquare, Star, Trash2, Check, Zap, Webhook, Layers, LayoutGrid, Link2, Unlink, ChevronDown, ArrowDownCircle, Database, Settings, Search } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
@@ -642,13 +642,42 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
     });
   };
 
+  const [activeDocIndex, setActiveDocIndex] = useState(0);
+  const [docSearch, setDocSearch] = useState('');
+  const docRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  const filteredDocs = (formData?.documents || []).filter(doc =>
+    !docSearch || (doc.name || '').toLowerCase().includes(docSearch.toLowerCase())
+  );
+  const filteredDocIndices = filteredDocs.map(d => (formData?.documents || []).indexOf(d));
+
+  useEffect(() => {
+    const docs = formData?.documents || [];
+    docRefs.current = docRefs.current.slice(0, docs.length);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const index = Number(entry.target.getAttribute("data-doc-index"));
+            if (!isNaN(index)) setActiveDocIndex(index);
+          }
+        });
+      },
+      { root: null, threshold: 0.5 }
+    );
+    docRefs.current.forEach((ref) => {
+      if (ref) observer.observe(ref);
+    });
+    return () => observer.disconnect();
+  }, [formData?.documents?.length]);
+
   if (!formData || !stage) {
     return null;
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl max-h-[95vh] p-0 bg-slate-50 flex flex-col">
+      <DialogContent className="max-w-7xl max-h-[95vh] p-0 bg-slate-50 flex flex-col">
         <DialogHeader className="p-6 border-b bg-white sticky top-0 z-10">
           <DialogTitle className="text-xl font-bold text-gray-800 flex items-center gap-3">
             <Edit className="h-6 w-6 text-blue-600" />
@@ -1054,28 +1083,87 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                 </SectionWrapper>
 
               </TabsContent>
-              <TabsContent value="documents" className="mt-6 space-y-6">
-                <SectionWrapper title="Stage Documents" icon={<FileText />} actionButton={
-                  <div className="flex gap-2">
-                    <Button type="button" onClick={() => addDocument(false)} size="sm" variant="outline" className="text-white bg-blue-600 border-blue-300 hover:bg-blue-50"><Plus className="h-4 w-4 mr-2" />Add Regular</Button>
-                    <Button type="button" onClick={() => addDocument(true)} size="sm" variant="outline" disabled={!entityOptions.length && !loadingEntities} title={!entityOptions.length ? "Loading entities..." : ""} className="text-white bg-amber-600 border-amber-300 hover:bg-amber-50"><Star className="h-4 w-4 mr-2" />Add Special</Button>
+              <TabsContent value="documents" className="mt-6">
+                <div className="bg-white rounded-lg shadow-sm border border-slate-200/90 overflow-hidden">
+                  <div className="p-4 bg-blue-50/50 border-b border-gray-200/50 flex justify-between items-center">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                        <FileText className="h-5 w-5 text-blue-600" />
+                        Stage Documents
+                      </h3>
+                      <p className="text-sm text-muted-foreground mt-1">Define documents for this stage. New documents will be added to the KYC system under the <span className="font-semibold text-blue-700">{getTargetDepartmentName()}</span> department.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button type="button" onClick={() => addDocument(false)} size="sm" variant="outline" className="text-white bg-blue-600 border-blue-300 hover:bg-blue-50"><Plus className="h-4 w-4 mr-2" />Add Regular</Button>
+                      <Button type="button" onClick={() => addDocument(true)} size="sm" variant="outline" disabled={!entityOptions.length && !loadingEntities} title={!entityOptions.length ? "Loading entities..." : ""} className="text-white bg-amber-600 border-amber-300 hover:bg-amber-50"><Star className="h-4 w-4 mr-2" />Add Special</Button>
+                    </div>
                   </div>
-                }>
-                  <p className="text-sm text-muted-foreground -mt-2">Define documents for this stage. New documents will be added to the KYC system under the <span className="font-semibold text-blue-700">{getTargetDepartmentName()}</span> department.</p>
-                  {(formData.documents || []).length > 0 ? (
-                    <div className="space-y-4 pt-4 border-t">
-                      {(formData.documents || []).map((doc, index) => (
-                        <DocumentCard key={doc.id || index} doc={doc} docIndex={index} entityOptions={entityOptions} loadingEntities={loadingEntities} kycDocuments={kycDocuments} loadingKycDocs={loadingKycDocs} automationTypes={automationTypes} loadingAutomations={loadingAutomations} onUpdateDocument={updateDocument} onRemoveDocument={removeDocument} onAddExtraction={addExtractionField} onUpdateExtraction={updateExtraction} onRemoveExtraction={removeExtraction} formData={formData} />
-                      ))}
+                  <div className="flex min-h-[400px]">
+                    {(formData.documents || []).length > 0 && (
+                      <div className="w-64 flex-shrink-0 border-r border-slate-200 bg-slate-50/50 p-3 flex flex-col">
+                        <div className="relative mb-3">
+                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                          <input
+                            type="text"
+                            placeholder="Search documents..."
+                            value={docSearch}
+                            onChange={(e) => setDocSearch(e.target.value)}
+                            className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                          />
+                        </div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2 px-2">Documents</p>
+                        <div className="space-y-1 flex-1 overflow-y-auto">
+                          {filteredDocIndices.map((origIndex) => {
+                            const doc = formData.documents[origIndex];
+                            return (
+                              <button
+                                key={doc.id || origIndex}
+                                type="button"
+                                onClick={() => {
+                                  setActiveDocIndex(origIndex);
+                                  docRefs.current[origIndex]?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                }}
+                                className={`w-full text-left px-3 py-2.5 rounded-lg text-sm flex items-center gap-2 transition-colors ${
+                                  activeDocIndex === origIndex
+                                    ? "bg-blue-100 text-blue-700 font-medium border border-blue-200"
+                                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-800 border border-transparent"
+                                }`}
+                              >
+                                <FileText className="h-3.5 w-3.5 flex-shrink-0" />
+                                <span className="truncate">{doc.name || `Document ${origIndex + 1}`}</span>
+                              </button>
+                            );
+                          })}
+                          {filteredDocs.length === 0 && docSearch && (
+                            <p className="text-xs text-slate-400 italic px-2 py-4 text-center">No matching documents</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex-1 p-4 overflow-y-auto">
+                      {(formData.documents || []).length > 0 ? (
+                        <div className="space-y-4">
+                          {(formData.documents || []).map((doc, index) => (
+                            <div
+                              key={doc.id || index}
+                              ref={(el) => { docRefs.current[index] = el; }}
+                              data-doc-index={index}
+                              className={activeDocIndex === index ? "" : "hidden"}
+                            >
+                              <DocumentCard doc={doc} docIndex={index} entityOptions={entityOptions} loadingEntities={loadingEntities} kycDocuments={kycDocuments} loadingKycDocs={loadingKycDocs} automationTypes={automationTypes} loadingAutomations={loadingAutomations} onUpdateDocument={updateDocument} onRemoveDocument={removeDocument} onAddExtraction={addExtractionField} onUpdateExtraction={updateExtraction} onRemoveExtraction={removeExtraction} formData={formData} />
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-white">
+                          <FileText className="h-10 w-10 mx-auto mb-3 text-gray-400" />
+                          <h4 className="font-medium text-gray-700 mb-1">No documents added yet</h4>
+                          <p className="text-sm text-muted-foreground">Add documents that are required for this stage.</p>
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-white">
-                      <FileText className="h-10 w-10 mx-auto mb-3 text-gray-400" />
-                      <h4 className="font-medium text-gray-700 mb-1">No documents added yet</h4>
-                      <p className="text-sm text-muted-foreground">Add documents that are required for this stage.</p>
-                    </div>
-                  )}
-                </SectionWrapper>
+                  </div>
+                </div>
               </TabsContent>
             </form>
           </Tabs>

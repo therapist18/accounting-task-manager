@@ -98,7 +98,7 @@ export default function SummaryReportsPage() {
   const [activeTaskStatus, setActiveTaskStatus] = useState<'all' | 'active' | 'enquiry' | 'wip' | 'completed' | 'overdue'>('all');
 
   const [activePerspective, setActivePerspective] = useState<'all' | 'officers' | 'managers' | 'clients'>('all');
-  const [officerFilterMode, setOfficerFilterMode] = useState<'current' | 'history'>('current');
+  const [officerFilterMode, setOfficerFilterMode] = useState<'current' | 'history'>('history');
   const [activeOfficerId, setActiveOfficerId] = useState<string>("all");
   const [activeManagerId, setActiveManagerId] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");

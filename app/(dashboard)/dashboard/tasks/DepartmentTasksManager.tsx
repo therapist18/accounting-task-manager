@@ -30,7 +30,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import * as XLSX from 'xlsx'
-import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchKycDocument, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document, fetchTasksDuplicate, fetchDocumentWorkflowLogs, REQUIREMENTS_LOCK_STAGE_IDS, STAGE_TAB_LINKS, captureRequirementsDocumentsSnapshot, fetchUploadedDocumentsForTasks, getLinkedDocumentsForTaskStage } from "./utils/taskManagerData"
+import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, invalidateAllDocumentsCache, fetchAllKycFields, fetchKycDocument, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document, fetchTasksDuplicate, fetchDocumentWorkflowLogs, REQUIREMENTS_LOCK_STAGE_IDS, STAGE_TAB_LINKS, captureRequirementsDocumentsSnapshot, fetchUploadedDocumentsForTasks, getLinkedDocumentsForTaskStage } from "./utils/taskManagerData"
 import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog';
 import { StandardTable } from './overall-view/StandardTable';
 import { EnhancedTable } from './overall-view/EnhancedTable';
@@ -573,6 +573,18 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       if (!silent) setIsLoadingTasks(false);
     }
   }, [departments, companies])
+
+  // Refetches allDocuments (bypassing fetchAllDocuments' own cache, which would otherwise still
+  // return the pre-mutation snapshot for up to 15s) alongside tasks/stages. Used after a direct
+  // write to a document's own row — e.g. ReassignDocumentTypeDialog retagging document_id — so
+  // the table's mismatch indicator and document-type labels reflect the fix immediately instead
+  // of on the next incidental refresh.
+  const refreshDocumentsAndTasks = useCallback(async () => {
+    invalidateAllDocumentsCache();
+    const documentsData = await fetchAllDocuments();
+    setAllDocuments(documentsData);
+    await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true);
+  }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData]);
 
   // Lightweight scan (job_level + status only, not the full tm_tasks row) across every
   // department at once — used purely to badge the Department/Sub-department tabs with live
@@ -2760,11 +2772,13 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         enhancedTaskData={enhancedTasksData.get(task.id?.toString())}
         onAutomationClick={isReadOnly ? undefined : (e) => handleAutomationClick(e, row.stage, task.id)}
         getKycFields={getKycFields}
+        kycDocuments={kycDocuments}
         linkedDocuments={linkedDocs}
         renderMode={renderMode}
         taskName={task.name}
         clientName={task.client_name || task.clientName}
         onFetchData={() => loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true)}
+        onDocumentTypeFixed={refreshDocumentsAndTasks}
         officers={realOfficers}
         onOfficerChange={isReadOnly ? undefined : updateTaskOfficer}
         readOnly={isReadOnly}

@@ -16,7 +16,7 @@ export const HANDLING_COLUMNS = [
   { id: "task_id", label: "Task ID" },
   { id: "applicant", label: "Applicant" },
   { id: "company", label: "Company" },
-  { id: "company_prefix", label: "Company / Place" },
+  { id: "company_prefix", label: "Company Name" },
   { id: "sub_department", label: "Sub-Department" },
   { id: "class_name", label: "Class" },
   { id: "write_up_date", label: "Write Up Date" }, // Matched screenshot label
@@ -72,6 +72,9 @@ const STEP_BADGE_CLASSES: Record<HandlingStep, string> = {
   completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
 };
 
+// Column-group config. Each phase group keeps its own accent identity — coloured header band
+// (matching the body tint + hover tint below) so the workflow reads at a glance; the Reports page
+// chrome (label styling, sort icons, resize handles, sticky shadows) is layered on top.
 const GROUP_ACCENTS: Record<string, {
   label: string;
   headerBg: string;
@@ -166,7 +169,7 @@ function StepBadge({ step }: { step: HandlingStep }) {
   // Overriding STEP_LABELS display if it's mode_unset to exactly match screenshot text
   const label = step === "mode_unset" ? "MODE NOT SET" : STEP_LABELS[step];
   return (
-    <span className={cn("inline-flex items-center px-3 py-1 rounded-full border text-[11px] font-black uppercase tracking-wider shadow-sm", STEP_BADGE_CLASSES[step])}>
+    <span className={cn("inline-flex items-center px-3 py-1 rounded-full border text-sm font-semibold uppercase tracking-wider shadow-sm", STEP_BADGE_CLASSES[step])}>
       {label}
     </span>
   );
@@ -208,11 +211,11 @@ export function fmtStageDate(dateStr: string | null | undefined): string | null 
 
 const PaginationButton = ({ children, onClick, disabled, title }: any) => (
   <Button
-    variant="outline"
+    variant="ghost"
     size="icon"
     className={cn(
-      "h-7 w-7 rounded-md border-slate-200 bg-white text-slate-500 shadow-sm transition-all hover:bg-custom-blue hover:text-white hover:border-custom-blue",
-      disabled && "opacity-40 cursor-not-allowed hover:bg-white hover:text-slate-500 hover:border-slate-200"
+      "h-6 w-6 rounded text-slate-600 transition-all",
+      disabled ? "opacity-30 cursor-not-allowed" : "hover:text-slate-700 hover:bg-slate-100"
     )}
     onClick={onClick}
     disabled={disabled}
@@ -234,6 +237,7 @@ export function HandlingTable({
   sortConfig,
   handleSort,
   loading = false,
+  showStats = true,
 }: any) {
   const visibleCols = HANDLING_COLUMNS.filter((c) => visibleColumnIds.includes(c.id));
 
@@ -265,7 +269,7 @@ export function HandlingTable({
   );
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState(10); // Defaulting to 10 matching screenshot
+  const [rowsPerPage, setRowsPerPage] = useState(25); // Defaulting to 10 matching screenshot
 
   const totalPages = Math.max(1, Math.ceil(rows.length / rowsPerPage));
   useEffect(() => { if (currentPage > totalPages) setCurrentPage(totalPages); }, [currentPage, totalPages]);
@@ -351,6 +355,62 @@ export function HandlingTable({
     return "—";
   };
 
+  // Whether a row's cell for a column shows a real value (as opposed to a blank "—"). Mirrors the
+  // per-column render logic below so the header stats (Total / Complete / Missing) match exactly
+  // what's visibly filled in for each cell.
+  const colHasValue = (colId: string, row: any): boolean => {
+    const { task, record, mode, step, writeUpDate, docIssueDate, docExpiryDate } = row;
+    switch (colId) {
+      case "task_id": return !!task.id;
+      case "applicant": return !!task.applicant_name;
+      case "company": return !!(companies.get(task.company_id)?.name || task.company_name);
+      case "company_prefix": return !!(companies.get(task.company_id)?.prefix);
+      case "sub_department": return getSubDeptName(task) !== "—";
+      case "class_name": return getClassName(task) !== "—";
+      case "write_up_date": return !!fmtStageDate(writeUpDate);
+      case "doc_issue_date": return !!fmtStageDate(docIssueDate);
+      case "doc_expiry_date": return !!fmtStageDate(docExpiryDate);
+      case "passport_number": return !!task.passport_number;
+      case "mode": return !!mode;
+      case "current_step": return !!step;
+      case "received_by": return !!(getStaffName(record?.received_by) || record?.brought_by_name);
+      case "received_date": return !!fmtDateOnly(record?.received_at);
+      case "received_time": return !!fmtTimeOnly(record?.received_at);
+      case "taken_by": return !!getStaffName(record?.taken_by);
+      case "taken_date": return !!fmtDateOnly(record?.taken_at);
+      case "taken_time": return !!fmtTimeOnly(record?.taken_at);
+      case "returned_by": return !!getStaffName(record?.returned_by);
+      case "returned_date": return !!fmtDateOnly(record?.returned_at);
+      case "returned_time": return !!fmtTimeOnly(record?.returned_at);
+      case "notified_by": return !!getStaffName(record?.client_notified_by);
+      case "notified_date": return !!fmtDateOnly(record?.client_notified_at);
+      case "notified_time": return !!fmtTimeOnly(record?.client_notified_at);
+      case "dispatch_mode": return !!record?.dispatch_method;
+      case "dispatch_handled_by": return !!getStaffName(record?.dispatch_handled_by);
+      case "dispatch_by": return !!dispatchLabelFor(record);
+      case "dispatch_date": return !!fmtDateOnly(record?.delivered_at || record?.pickup_at);
+      case "dispatch_time": return !!fmtTimeOnly(record?.delivered_at || record?.pickup_at);
+      case "completed_date": return step === "completed" && !!fmtDateOnly(record?.delivered_at || record?.pickup_at || record?.returned_at);
+      case "completed_time": return step === "completed" && !!fmtTimeOnly(record?.delivered_at || record?.pickup_at || record?.returned_at);
+      default: return false;
+    }
+  };
+
+  // Per-column header stats over the full displayed row set (all pages), so the summary row
+  // stays meaningful regardless of pagination. Complete = rows where the cell has a value;
+  // Missing = rows where it's blank.
+  const columnStats = useMemo(() => {
+    const stats: Record<string, { total: number; complete: number; missing: number }> = {};
+    const total = rows.length;
+    visibleCols.forEach((col) => {
+      let complete = 0;
+      for (const row of rows) { if (colHasValue(col.id, row)) complete++; }
+      stats[col.id] = { total, complete, missing: total - complete };
+    });
+    return stats;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, visibleCols, getStaffName, companies, departments, subDepartments]);
+
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
 
   const columnDefs = useMemo<ColumnDef<any>[]>(() => [
@@ -386,45 +446,54 @@ export function HandlingTable({
     const isActive = sortConfig?.key === col.id;
     const isStickyLeft = STICKY_COLUMN_IDS.includes(col.id as any);
     const accent = GROUP_ACCENTS[colGroupId(col.id)];
+    // Only ONE plain background class is ever emitted — the idle group color, or its active
+    // (sorted) variant. Emitting both (as before) let tailwind-merge drop/conflict the two
+    // bg-* utilities and the active header could render with a blank (white) background.
+    const activeBg = isActive ? accent.headerActive : accent.headerBg;
     return (
       <TableHead
         key={col.id}
         rowSpan={rowSpan}
         onClick={() => handleSort?.(col.id)}
         className={cn(
-          "group relative border-r border-b border-white/30 px-4 py-2 select-none transition-colors",
-          accent.headerBg,
+          "group relative border-r border-b border-white/30 px-4 py-2 select-none transition-colors cursor-pointer",
+          activeBg,
           accent.headerHover,
-          handleSort && "cursor-pointer",
-          isActive && accent.headerActive,
-          isStickyLeft && "sticky left-0 z-50"
+          isStickyLeft && "sticky left-0 z-40 shadow-[2px_0_4px_rgba(0,0,0,0.15)]"
         )}
         style={isStickyLeft ? { left: stickyColumnOffsets[col.id] } : undefined}
       >
-        <div className="flex items-center justify-between gap-2 min-w-0 pr-1">
-          <span className="text-[12px] font-bold tracking-wider text-white uppercase min-w-0">
-            {col.label}
-          </span>
-          <div className="flex items-center gap-1 shrink-0">
-            <TooltipProvider delayDuration={300}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => { e.stopPropagation(); applyWidthToAllColumns(col.id); }}
-                    className="h-4 w-4 shrink-0 hidden group-hover:flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/20 transition-all"
-                  >
-                    <ArrowLeftRight size={10} strokeWidth={2.5} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" className="bg-slate-900 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[9999]">
-                  Apply this column's width to all columns
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-            {handleSort && (
-              <ArrowUpDown className={cn("h-3.5 w-3.5 shrink-0 ml-1", isActive ? "text-white" : "text-white/40")} />
-            )}
+        <div className="flex flex-col justify-center h-full gap-1">
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-white whitespace-nowrap min-w-0">
+              {col.label}
+            </span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => { e.stopPropagation(); applyWidthToAllColumns(col.id); }}
+                      className="h-4 w-4 shrink-0 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-slate-600 opacity-0 group-hover:opacity-100 transition-all"
+                    >
+                      <ArrowLeftRight size={10} strokeWidth={2.5} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="bg-slate-900 text-white border-none shadow-xl text-xs rounded-lg px-3 py-2 z-[9999]">
+                    Apply this column's width to all columns
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              {handleSort && (
+                <ArrowUpDown
+                  className={cn(
+                    "h-3 w-3 shrink-0",
+                    isActive ? "text-white" : "text-white/60"
+                  )}
+                />
+              )}
+            </div>
           </div>
         </div>
 
@@ -458,9 +527,9 @@ export function HandlingTable({
   );
 
   return (
-    <div className="flex flex-col flex-1 px-6 pb-4 bg-slate-50">
-      <div className="relative overflow-hidden rounded-xl border border-slate-200 shadow-sm bg-white flex flex-col">
-        <div className="overflow-y-auto custom-scrollbar h-[calc(100vh-320px)]">
+    <div className="flex flex-col flex-1 antialiased bg-slate-50 px-6">
+      <div className="relative overflow-hidden rounded-xl border border-slate-200 shadow-sm">
+        <div className="overflow-auto max-h-[calc(100vh-280px)] custom-scrollbar">
         <Table className="border-separate border-spacing-0 table-fixed" style={{ width: totalWidth, minWidth: '100%' }}>
           <colgroup>
             <col style={{ width: INDEX_COL_WIDTH }} />
@@ -472,7 +541,7 @@ export function HandlingTable({
           <TableHeader className="sticky top-0 z-40">
             <TableRow className="hover:bg-transparent border-0">
               <TableHead rowSpan={2} className="sticky left-0 z-50 w-12 max-w-12 border-r border-b border-white/30 text-center px-2 bg-custom-blue">
-                <span className="text-[12px] font-bold text-white tracking-wider">#</span>
+                <span className="text-[10px] font-semibold text-white uppercase tracking-wider">#</span>
               </TableHead>
               {visibleCols.filter((col) => colGroupId(col.id) === "case").map((col) => renderColHeader(col, 2))}
               {nonStickyChunks
@@ -485,18 +554,60 @@ export function HandlingTable({
                       colSpan={chunk.cols.length}
                       className={cn("h-7 px-3 text-center border-r border-b border-white/10", accent.headerBg)}
                     >
-                      <span className="text-[11px] font-bold text-white/90 uppercase tracking-widest">{accent.label}</span>
+                      <span className="text-[10px] font-semibold text-white/90 uppercase tracking-widest">{accent.label}</span>
                     </TableHead>
                   );
                 })}
               <TableHead rowSpan={2} className="sticky right-0 z-50 w-32 max-w-32 border-l border-b border-white/30 bg-custom-blue px-3 text-center">
-                <span className="text-[12px] font-bold text-white uppercase tracking-wider">Actions</span>
+                <span className="text-[10px] font-semibold text-white uppercase tracking-wider">Actions</span>
               </TableHead>
             </TableRow>
 
             <TableRow className="hover:bg-transparent border-0">
               {visibleCols.filter((col) => colGroupId(col.id) !== "case").map((col) => renderColHeader(col, 1))}
             </TableRow>
+
+            {/* Header stats rows — one per metric (Total / Complete / Missing), each showing the
+                per-column count over every filtered row (all pages). Cells align to their column
+                via the colgroup widths. The label cell is merged across the index column + the
+                first visible column so the long labels ("Complete" / "Missing") fit on one line.
+                Toggled on/off via the toolbar "Stats" button above. */}
+            {showStats && visibleCols.length > 0 && [
+              { key: "total", label: "Total", cellCls: "bg-blue-50 text-blue-700", labelCls: "text-blue-700", dot: "bg-blue-500" },
+              { key: "complete", label: "Complete", cellCls: "bg-emerald-50 text-emerald-700", labelCls: "text-emerald-700", dot: "bg-emerald-500" },
+              { key: "missing", label: "Missing", cellCls: "bg-rose-50 text-rose-700", labelCls: "text-rose-700", dot: "bg-rose-500" },
+            ].map((metric) => (
+              <TableRow key={metric.key} className="border-0 hover:bg-transparent">
+                <TableCell
+                  colSpan={2}
+                  className={cn("sticky left-0 z-30 px-2 py-2 border-r border-b border-slate-200 text-left align-middle", metric.cellCls)}
+                >
+                  <span className={cn("inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider leading-none", metric.labelCls)}>
+                    <span className={cn("h-1 w-1 rounded-full shrink-0", metric.dot)} />
+                    {metric.label}
+                  </span>
+                </TableCell>
+                {visibleCols.slice(1).map((col) => {
+                  const s = columnStats[col.id];
+                  const isStickyLeft = STICKY_COLUMN_IDS.includes(col.id as any);
+                  const value = metric.key === "total" ? s?.total : metric.key === "complete" ? s?.complete : s?.missing;
+                  return (
+                    <TableCell
+                      key={col.id}
+                      className={cn(
+                        "px-1.5 py-0 border-b border-r border-slate-200 text-[10px] font-bold tabular-nums text-center whitespace-nowrap leading-none align-middle",
+                        metric.cellCls,
+                        isStickyLeft && "sticky z-30 shadow-[2px_0_4px_rgba(0,0,0,0.02)]"
+                      )}
+                      style={isStickyLeft ? { left: stickyColumnOffsets[col.id] } : undefined}
+                    >
+                      {value ?? 0}
+                    </TableCell>
+                  );
+                })}
+                <TableCell className={cn("sticky right-0 z-30 py-0 border-l border-b border-slate-200 align-middle", metric.cellCls)} />
+              </TableRow>
+            ))}
           </TableHeader>
           <TableBody>
             {loading ? (
@@ -517,14 +628,14 @@ export function HandlingTable({
                     <TableRow key={`section-${item.name}`} className="border-0 hover:bg-transparent">
                       <TableCell
                         colSpan={1 + stickyColCount}
-                        className="sticky left-0 z-30 bg-slate-50 border-r border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2.5 pl-4 pr-4"
+                        className="sticky left-0 z-30 bg-slate-50 border-r border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2 pl-4"
                       >
                         <div className="flex items-center gap-2 min-w-0">
-                          <Layers className="h-4 w-4 text-custom-blue shrink-0" />
-                          <span className="text-[12px] font-bold uppercase tracking-wider text-custom-blue whitespace-nowrap">
+                          <Layers className="h-3.5 w-3.5 text-custom-blue shrink-0" />
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-custom-blue whitespace-nowrap">
                             {item.name === "—" ? "Unassigned" : item.name}
                           </span>
-                          <span className="text-[12px] font-semibold text-slate-500 tabular-nums whitespace-nowrap">
+                          <span className="text-[11px] font-semibold text-slate-400 tabular-nums whitespace-nowrap">
                             · {item.count}
                           </span>
                         </div>
@@ -544,8 +655,8 @@ export function HandlingTable({
                     key={task.id}
                     className={cn("group border-0 transition-colors", globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50", "hover:bg-blue-50/50")}
                   >
-                    <TableCell className={cn("sticky left-0 z-20 w-12 border-r border-b border-slate-100 text-center py-2.5", globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50", "group-hover:bg-blue-50/50")}>
-                      <span className="text-[13px] font-semibold text-slate-500 tabular-nums">{globalIdx + 1}</span>
+                    <TableCell className={cn("sticky left-0 z-20 w-12 border-r border-b border-slate-200 text-center py-1.5", globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50", "group-hover:bg-blue-50/50")}>
+                      <span className="text-sm font-semibold text-slate-400 tabular-nums group-hover:text-slate-600 transition-colors">{globalIdx + 1}</span>
                     </TableCell>
                     {visibleCols.map((col) => {
                       let content: React.ReactNode;
@@ -554,51 +665,51 @@ export function HandlingTable({
                       const isChunkEnd = chunkEndColIds.has(col.id);
                       switch (col.id) {
                         case "task_id":
-                          content = <span className="font-mono text-[11px] font-medium text-slate-500">#{task.id}</span>;
+                          content = <span className="text-sm text-slate-600">#{task.id}</span>;
                           break;
                         case "applicant":
-                          content = <span className="font-bold text-slate-800 capitalize text-[11px]">{task.applicant_name}</span>;
+                          content = <span className="text-sm font-semibold text-slate-900 capitalize">{task.applicant_name}</span>;
                           break;
                         case "company":
-                          content = <span className="text-[11px] text-slate-600 uppercase font-semibold">{company?.name || task.company_name || "—"}</span>;
+                          content = <span className="text-sm text-slate-600 uppercase font-semibold">{company?.name || task.company_name || "—"}</span>;
                           break;
                         case "company_prefix":
-                          content = <span className="text-[11px] text-slate-600 uppercase font-semibold">{company?.prefix || "—"}</span>;
+                          content = <span className="text-sm text-slate-600 uppercase font-semibold">{company?.prefix || "—"}</span>;
                           break;
                         case "sub_department":
-                          content = <span className="text-[11px] font-semibold text-slate-600 uppercase">{getSubDeptName(task)}</span>;
+                          content = <span className="text-sm font-semibold text-slate-600 uppercase">{getSubDeptName(task)}</span>;
                           break;
                         case "class_name":
-                          content = <span className="text-[11px] font-semibold text-slate-600">{getClassName(task)}</span>;
+                          content = <span className="text-sm font-semibold text-slate-600">{getClassName(task)}</span>;
                           break;
                         case "write_up_date": {
                           const wud = fmtStageDate(writeUpDate);
-                          content = wud ? <span className="text-[11px] font-medium text-slate-600">{wud}</span> : <span className="text-slate-300">—</span>;
+                          content = wud ? <span className="text-sm text-slate-600">{wud}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "doc_issue_date": {
                           const val = fmtStageDate(docIssueDate);
-                          content = val ? <span className="text-[11px] font-medium text-slate-600">{val}</span> : <span className="text-slate-300">—</span>;
+                          content = val ? <span className="text-sm text-slate-600">{val}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "doc_expiry_date": {
                           const val = fmtStageDate(docExpiryDate);
-                          content = val ? <span className="text-[11px] font-medium text-slate-600">{val}</span> : <span className="text-slate-300">—</span>;
+                          content = val ? <span className="text-sm text-slate-600">{val}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "passport_number":
-                          content = <span className="text-[11px] font-medium text-slate-600 uppercase">{task.passport_number || "—"}</span>;
+                          content = <span className="text-sm text-slate-600 uppercase">{task.passport_number || "—"}</span>;
                           break;
                         case "mode":
                           content = mode ? (
                             <span className={cn(
-                              "inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider border",
+                              "inline-flex items-center px-2 py-0.5 rounded text-sm font-semibold uppercase tracking-wider border",
                               mode === "bcl" ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-slate-50 text-slate-700 border-slate-200"
                             )}>
                               {mode === "bcl" ? "BCL Handles" : "Client Handles"}
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider border bg-slate-50 text-slate-700 border-slate-200">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-sm font-semibold uppercase tracking-wider border bg-slate-50 text-slate-700 border-slate-200">
                               Not Set
                             </span>
                           );
@@ -608,62 +719,62 @@ export function HandlingTable({
                           break;
                         case "received_by": {
                           const by = getStaffName(record?.received_by) || record?.brought_by_name;
-                          content = by ? <span className="text-[11px] font-semibold text-slate-700">{by}</span> : <span className="text-slate-300">—</span>;
+                          content = by ? <span className="text-sm text-slate-600">{by}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "received_date": {
                           const d = fmtDateOnly(record?.received_at);
-                          content = d ? <span className="text-[11px] font-medium text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
+                          content = d ? <span className="text-sm text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "received_time": {
                           const t = fmtTimeOnly(record?.received_at);
-                          content = t ? <span className="text-[11px] font-medium text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
+                          content = t ? <span className="text-sm text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "taken_by": {
                           const by = getStaffName(record?.taken_by);
-                          content = by ? <span className="text-[11px] font-semibold text-slate-700">{by}</span> : <span className="text-slate-300">—</span>;
+                          content = by ? <span className="text-sm text-slate-600">{by}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "taken_date": {
                           const d = fmtDateOnly(record?.taken_at);
-                          content = d ? <span className="text-[11px] font-medium text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
+                          content = d ? <span className="text-sm text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "taken_time": {
                           const t = fmtTimeOnly(record?.taken_at);
-                          content = t ? <span className="text-[11px] font-medium text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
+                          content = t ? <span className="text-sm text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "returned_by": {
                           const by = getStaffName(record?.returned_by);
-                          content = by ? <span className="text-[11px] font-semibold text-slate-700">{by}</span> : <span className="text-slate-300">—</span>;
+                          content = by ? <span className="text-sm text-slate-600">{by}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "returned_date": {
                           const d = fmtDateOnly(record?.returned_at);
-                          content = d ? <span className="text-[11px] font-medium text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
+                          content = d ? <span className="text-sm text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "returned_time": {
                           const t = fmtTimeOnly(record?.returned_at);
-                          content = t ? <span className="text-[11px] font-medium text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
+                          content = t ? <span className="text-sm text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "notified_by": {
                           const by = getStaffName(record?.client_notified_by);
-                          content = by ? <span className="text-[11px] font-semibold text-slate-700">{by}</span> : <span className="text-slate-300">—</span>;
+                          content = by ? <span className="text-sm text-slate-600">{by}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "notified_date": {
                           const d = fmtDateOnly(record?.client_notified_at);
-                          content = d ? <span className="text-[11px] font-medium text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
+                          content = d ? <span className="text-sm text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "notified_time": {
                           const t = fmtTimeOnly(record?.client_notified_at);
-                          content = t ? <span className="text-[11px] font-medium text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
+                          content = t ? <span className="text-sm text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "dispatch_mode": {
@@ -675,7 +786,7 @@ export function HandlingTable({
                           const isCourier = record.delivery_type === "courier";
                           content = (
                             <span className={cn(
-                              "inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-black uppercase tracking-widest",
+                              "inline-flex items-center px-2.5 py-1 rounded-full border text-sm font-semibold uppercase tracking-widest",
                               isPickup
                                 ? "bg-slate-100 text-slate-600 border-slate-200"
                                 : isCourier
@@ -689,32 +800,32 @@ export function HandlingTable({
                         }
                         case "dispatch_handled_by": {
                           const by = getStaffName(record?.dispatch_handled_by);
-                          content = by ? <span className="text-[11px] font-semibold text-slate-700">{by}</span> : <span className="text-slate-300">—</span>;
+                          content = by ? <span className="text-sm text-slate-600">{by}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "dispatch_by": {
                           const by = dispatchLabelFor(record);
-                          content = by ? <span className="text-[11px] font-semibold text-slate-700">{by}</span> : <span className="text-slate-300">—</span>;
+                          content = by ? <span className="text-sm text-slate-600">{by}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "dispatch_date": {
                           const d = fmtDateOnly(record?.delivered_at || record?.pickup_at);
-                          content = d ? <span className="text-[11px] font-medium text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
+                          content = d ? <span className="text-sm text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "dispatch_time": {
                           const t = fmtTimeOnly(record?.delivered_at || record?.pickup_at);
-                          content = t ? <span className="text-[11px] font-medium text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
+                          content = t ? <span className="text-sm text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "completed_date": {
                           const d = step === "completed" ? fmtDateOnly(record?.delivered_at || record?.pickup_at || record?.returned_at) : null;
-                          content = d ? <span className="text-[11px] font-medium text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
+                          content = d ? <span className="text-sm text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "completed_time": {
                           const t = step === "completed" ? fmtTimeOnly(record?.delivered_at || record?.pickup_at || record?.returned_at) : null;
-                          content = t ? <span className="text-[11px] font-medium text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
+                          content = t ? <span className="text-sm text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         default:
@@ -724,11 +835,11 @@ export function HandlingTable({
                         <TableCell
                           key={col.id}
                           className={cn(
-                            "px-4 py-2.5 border-b border-r border-slate-100 text-sm transition-colors",
+                            "px-3 py-1.5 border-b border-r border-slate-200 transition-colors",
                             !isStickyLeft && colAccent.bodyTint,
                             !isStickyLeft && colAccent.hoverTint,
                             isChunkEnd && colAccent.endBorder,
-                            isStickyLeft && "sticky z-20",
+                            isStickyLeft && "sticky z-20 shadow-[2px_0_4px_rgba(0,0,0,0.02)]",
                             isStickyLeft && (globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50"),
                             isStickyLeft && "group-hover:bg-blue-50/50"
                           )}
@@ -738,12 +849,12 @@ export function HandlingTable({
                         </TableCell>
                       );
                     })}
-                    <TableCell className={cn("sticky right-0 z-20 w-32 border-l border-b border-slate-100 py-2.5 text-center", globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50", "group-hover:bg-blue-50/50")}>
+                    <TableCell className={cn("sticky right-0 z-20 w-32 border-l border-b border-slate-200 py-1.5 text-center", globalIdx % 2 === 0 ? "bg-white" : "bg-slate-50", "group-hover:bg-blue-50/50")}>
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={() => onManage(task, record)}
-                        className="h-8 px-3 rounded-md text-[11px] font-bold gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50 shadow-sm"
+                        className="h-8 px-3 rounded-full text-[11px] font-bold gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50 shadow-sm"
                       >
                         <Settings2 className="h-3.5 w-3.5" /> Manage
                       </Button>
@@ -759,7 +870,7 @@ export function HandlingTable({
                       <SearchX size={24} className="text-slate-400" />
                     </div>
                     <p className="text-[14px] font-semibold text-slate-800">No tasks found</p>
-                    <p className="text-[13px] mt-1 text-slate-500">Adjust your filters to see more results</p>
+                    <p className="text-sm mt-1 text-slate-500">Adjust your filters to see more results</p>
                   </div>
                 </TableCell>
               </TableRow>
@@ -769,7 +880,7 @@ export function HandlingTable({
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between gap-4 border-t border-slate-200 bg-white px-4 py-2.5">
+      <div className="flex items-center justify-between gap-4 border-t border-slate-100 bg-white px-4 py-3">
         <div className="flex items-center gap-1.5 text-sm text-slate-500 whitespace-nowrap">
           <span>Showing</span>
           <span className="font-semibold text-slate-700 tabular-nums">{rows.length === 0 ? 0 : ((currentPage - 1) * rowsPerPage) + 1}</span>
@@ -779,20 +890,20 @@ export function HandlingTable({
           <span className="font-semibold text-slate-700 tabular-nums">{rows.length}</span>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1.5">
             <span className="text-sm text-slate-500 whitespace-nowrap">Rows per page</span>
             <Select value={String(rowsPerPage)} onValueChange={(v) => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
-              <SelectTrigger className="h-7 w-[64px] rounded-md border-slate-200 text-[11px] font-medium text-slate-700 shadow-sm">
+              <SelectTrigger className="h-7 w-[64px] rounded border-slate-200 text-[11px] font-medium text-slate-700">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="rounded-md">
+              <SelectContent className="rounded-lg">
                 {[10, 25, 50, 100].map((s) => <SelectItem key={s} value={String(s)} className="text-[11px]">{s}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
             <PaginationButton onClick={() => setCurrentPage(1)} disabled={currentPage === 1} title="First page"><ChevronsLeft size={14} /></PaginationButton>
             <PaginationButton onClick={() => setCurrentPage((p) => p - 1)} disabled={currentPage === 1} title="Previous page"><ChevronLeft size={14} /></PaginationButton>
 
@@ -816,14 +927,14 @@ export function HandlingTable({
               ) : (
                 <Button
                   key={p}
-                  variant={p === currentPage ? 'default' : 'outline'}
+                  variant="ghost"
                   size="icon"
                   onClick={() => setCurrentPage(p)}
                   className={cn(
-                    "h-7 min-w-7 w-auto px-2 rounded-md text-[11px] font-semibold tabular-nums",
+                    "h-6 min-w-6 w-auto px-1.5 rounded text-[11px] font-semibold tabular-nums",
                     p === currentPage
-                      ? "bg-custom-blue text-white shadow-sm hover:bg-custom-blue"
-                      : "text-slate-600 hover:bg-slate-50 hover:border-slate-300"
+                      ? "bg-custom-blue text-white hover:bg-custom-blue"
+                      : "text-slate-600 hover:bg-slate-100"
                   )}
                 >
                   {p}
