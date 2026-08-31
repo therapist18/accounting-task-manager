@@ -11,7 +11,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   CheckCircle2,
-  Circle,
   Loader2,
   Inbox,
   Landmark,
@@ -54,7 +53,7 @@ function fmtDateTime(iso: string | null | undefined) {
   }
 }
 
-// 2-Column Row: Left column = Label & Hint; Right column = Input / Control
+// Solid 2-Column Row: Left = Label & Hints (38% width), Right = Value / Full-width Input (62% width)
 function FormRow({
   label,
   description,
@@ -67,29 +66,31 @@ function FormRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-6 py-3.5 border-b border-slate-100 last:border-b-0 items-center">
-      <div className="sm:col-span-1 space-y-0.5">
-        <Label className="text-xs font-bold text-slate-700">
-          {label} {required && <span className="text-red-500">*</span>}
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-6 py-4 border-b border-slate-100 last:border-b-0">
+      <div className="sm:w-[38%] shrink-0 space-y-1">
+        <Label className="text-sm font-bold text-slate-800 block">
+          {label} {required && <span className="text-red-500 font-bold">*</span>}
         </Label>
-        {description && <p className="text-[11px] text-slate-400 leading-tight">{description}</p>}
+        {description && <p className="text-xs text-slate-500 font-normal leading-relaxed">{description}</p>}
       </div>
-      <div className="sm:col-span-2">{children}</div>
+      <div className="w-full sm:w-[62%] min-w-0 flex-1">{children}</div>
     </div>
   );
 }
 
 function ToggleButtons({ options, value, onChange }: any) {
   return (
-    <div className="flex flex-wrap gap-2 p-1 bg-slate-100 rounded-lg w-fit">
+    <div className="flex flex-wrap gap-1.5 p-1.5 bg-slate-100 rounded-xl w-fit border border-slate-200/60">
       {options.map((opt: any) => (
         <button
           key={opt.value}
           type="button"
           onClick={() => onChange(opt.value)}
           className={cn(
-            "px-4 py-2 rounded-md text-xs font-bold transition-all",
-            value === opt.value ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-800"
+            "px-4 py-2 rounded-lg text-xs md:text-sm font-bold transition-all",
+            value === opt.value
+              ? "bg-white text-blue-600 shadow-xs font-black"
+              : "text-slate-600 hover:text-slate-900"
           )}
         >
           {opt.label}
@@ -99,15 +100,15 @@ function ToggleButtons({ options, value, onChange }: any) {
   );
 }
 
-const PRIMARY_BTN = "h-10 px-5 rounded-md text-sm font-bold gap-2 text-white shadow-sm hover:opacity-95";
+const PRIMARY_BTN = "h-11 px-6 rounded-lg text-sm font-bold gap-2 text-white shadow-sm hover:opacity-95 transition-opacity";
 const PRIMARY_STYLE = { backgroundColor: "#376bae" };
 
 const PIPELINE = [
-  { key: "received", label: "Received", title: "Step 1: Received from client", icon: Inbox },
+  { key: "received", label: "Received", title: "Step 1: Received from Client", icon: Inbox },
   { key: "taken", label: "At Nyayo", title: "Step 2: Taken to Nyayo House", icon: Landmark },
-  { key: "returned", label: "Returned", title: "Step 3: Returned stamped", icon: Undo2 },
-  { key: "notified", label: "Notified", title: "Step 4: Client notified", icon: BellRing },
-  { key: "dispatch", label: "Dispatched", title: "Step 5: Dispatch to client", icon: Truck },
+  { key: "returned", label: "Returned", title: "Step 3: Returned Stamped", icon: Undo2 },
+  { key: "notified", label: "Notified", title: "Step 4: Client Notified", icon: BellRing },
+  { key: "dispatch", label: "Dispatched", title: "Step 5: Dispatch to Client", icon: Truck },
 ];
 
 function Stepper({
@@ -128,7 +129,7 @@ function Stepper({
   };
 
   return (
-    <div className="flex items-center px-1">
+    <div className="flex items-center justify-between px-2 pt-2 pb-1">
       {PIPELINE.map((s, i) => {
         const done = doneMap[s.key];
         const isActive = activeKey === s.key;
@@ -136,29 +137,34 @@ function Stepper({
         return (
           <React.Fragment key={s.key}>
             {i > 0 && (
-              <div className={cn("h-0.5 flex-1 mx-1.5 transition-colors", done ? "bg-emerald-300" : "bg-slate-200")} />
+              <div
+                className={cn(
+                  "h-1 flex-1 mx-2 rounded-full transition-colors",
+                  done ? "bg-emerald-400" : "bg-slate-200"
+                )}
+              />
             )}
             <button
               type="button"
               onClick={() => onSelectStep(s.key)}
-              className="flex flex-col items-center gap-1.5 shrink-0 group focus:outline-none"
+              className="flex flex-col items-center gap-1.5 shrink-0 group focus:outline-none cursor-pointer"
             >
               <div
                 className={cn(
-                  "h-9 w-9 rounded-full flex items-center justify-center border-2 transition-all",
+                  "h-11 w-11 rounded-full flex items-center justify-center border-2 transition-all",
                   done
-                    ? "bg-emerald-500 border-emerald-500 text-white"
+                    ? "bg-emerald-500 border-emerald-500 text-white shadow-xs"
                     : isActive
-                    ? "bg-white border-blue-500 text-blue-600 shadow-sm ring-2 ring-blue-100"
-                    : "bg-white border-slate-200 text-slate-400 group-hover:border-slate-300"
+                    ? "bg-white border-blue-600 text-blue-600 shadow-md ring-4 ring-blue-50"
+                    : "bg-white border-slate-300 text-slate-400 group-hover:border-slate-400 group-hover:text-slate-600"
                 )}
               >
-                {done ? <CheckCircle2 className="h-4.5 w-4.5" /> : <Icon className="h-4 w-4" />}
+                {done ? <CheckCircle2 className="h-6 w-6 stroke-[2.5]" /> : <Icon className="h-5 w-5" />}
               </div>
               <span
                 className={cn(
-                  "text-[10px] font-black uppercase tracking-wider whitespace-nowrap",
-                  done ? "text-emerald-600" : isActive ? "text-blue-600 font-extrabold" : "text-slate-400"
+                  "text-xs font-bold uppercase tracking-wider whitespace-nowrap transition-colors",
+                  done ? "text-emerald-700" : isActive ? "text-blue-600 font-black" : "text-slate-500"
                 )}
               >
                 {s.label}
@@ -245,7 +251,6 @@ export function HandlingWizardDialog({
     });
     setClientNotes(record?.notes || "");
 
-    // Focus on first incomplete step
     const doneMap = {
       received: !!record?.received_at,
       taken: !!record?.taken_at,
@@ -410,40 +415,41 @@ export function HandlingWizardDialog({
     }
   };
 
-  // Completion summary badge for the currently selected step
   const stepCompletedAt = {
-    received: record?.received_at ? `Completed on ${fmtDateTime(record.received_at)} by ${bclUsers.find((u) => u.id === record.received_by)?.name || "Staff"}` : null,
-    taken: record?.taken_at ? `Completed on ${fmtDateTime(record.taken_at)} by ${bclUsers.find((u) => u.id === record.taken_by)?.name || "Staff"}` : null,
-    returned: record?.returned_at ? `Completed on ${fmtDateTime(record.returned_at)} by ${bclUsers.find((u) => u.id === record.returned_by)?.name || "Staff"}` : null,
-    notified: record?.client_notified_at ? `Completed on ${fmtDateTime(record.client_notified_at)} by ${bclUsers.find((u) => u.id === record.client_notified_by)?.name || "Staff"}` : null,
+    received: record?.received_at ? `Completed ${fmtDateTime(record.received_at)} · ${bclUsers.find((u) => u.id === record.received_by)?.name || "Staff"}` : null,
+    taken: record?.taken_at ? `Completed ${fmtDateTime(record.taken_at)} · ${bclUsers.find((u) => u.id === record.taken_by)?.name || "Staff"}` : null,
+    returned: record?.returned_at ? `Completed ${fmtDateTime(record.returned_at)} · ${bclUsers.find((u) => u.id === record.returned_by)?.name || "Staff"}` : null,
+    notified: record?.client_notified_at ? `Completed ${fmtDateTime(record.client_notified_at)} · ${bclUsers.find((u) => u.id === record.client_notified_by)?.name || "Staff"}` : null,
     dispatch: (record?.delivered_at || record?.pickup_at)
-      ? `Completed on ${fmtDateTime(record.delivered_at || record.pickup_at)} (${record.dispatch_method === "delivery" ? "Delivery" : "Pickup"})`
+      ? `Completed ${fmtDateTime(record.delivered_at || record.pickup_at)} · ${record.dispatch_method === "delivery" ? "Delivery" : "Pickup"}`
       : null,
   }[activeStep];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[92vh] flex flex-col p-0 gap-0 overflow-hidden">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b border-slate-100 shrink-0">
-          <DialogTitle className="text-lg font-black text-slate-900">
+      <DialogContent className="max-w-3xl w-full max-h-[92vh] flex flex-col p-0 gap-0 overflow-hidden bg-white shadow-2xl border border-slate-200">
+        {/* Header */}
+        <DialogHeader className="px-8 pt-6 pb-5 bg-white border-b border-slate-100 shrink-0 space-y-2">
+          <DialogTitle className="text-xl md:text-2xl font-black tracking-tight text-slate-900">
             {task.applicant_name}
           </DialogTitle>
-          <DialogDescription className="text-xs text-slate-500 font-medium">
-            {task.passport_number ? `Passport ${task.passport_number}` : "No passport number on file"} · Endorsement Handling
+          <DialogDescription className="text-sm font-medium text-slate-500">
+            {task.passport_number ? `Passport No: ${task.passport_number}` : "No passport number recorded"} · Stamping &amp; Handling Pipeline
           </DialogDescription>
           {mode === "bcl" && (
-            <div className="pt-4">
+            <div className="pt-4 pb-1">
               <Stepper record={record} activeKey={activeStep} onSelectStep={setActiveStep} />
             </div>
           )}
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-          {/* Mode selector */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-700">Handling Mode</p>
-              <p className="text-[11px] text-slate-400">Choose who is responsible for stamping at Nyayo House</p>
+        {/* Scrollable Body */}
+        <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6 bg-slate-50">
+          {/* Mode selector card */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <p className="text-sm font-bold text-slate-800">Handling Mode</p>
+              <p className="text-xs text-slate-500 font-normal">Choose whether BCL or the client takes the passport to Nyayo House</p>
             </div>
             <ToggleButtons
               options={[
@@ -456,29 +462,31 @@ export function HandlingWizardDialog({
           </div>
 
           {!mode && (
-            <p className="text-sm text-slate-400 text-center py-12">Select a handling mode above to continue.</p>
+            <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-slate-200">
+              <p className="text-sm text-slate-500 font-medium">Please select a handling mode above to proceed.</p>
+            </div>
           )}
 
           {/* Mode: Client */}
           {mode === "client" && (
-            <div className="rounded-xl border border-violet-200 bg-violet-50/20 p-5 space-y-4">
-              <div className="flex items-center gap-2 text-violet-800">
-                <Info className="h-4 w-4" />
-                <span className="text-xs font-bold uppercase tracking-wider">Client Self-Handling</span>
+            <div className="rounded-2xl border border-violet-200 bg-white p-6 shadow-xs space-y-5">
+              <div className="flex items-center gap-2.5 text-violet-800 pb-2 border-b border-slate-100">
+                <Info className="h-5 w-5" />
+                <span className="text-sm font-bold">Client Self-Handling Stamping</span>
               </div>
-              <FormRow label="Handling Notes" description="Any instructions or communication with the client">
+              <FormRow label="Handling Notes" description="Any instructions, dates, or communication notes with the client">
                 <Textarea
                   value={clientNotes}
                   onChange={(e) => setClientNotes(e.target.value)}
-                  placeholder="Optional notes..."
+                  placeholder="Enter details about client handling..."
                   disabled={isClientConfirmed}
-                  className="text-sm bg-white border-slate-200 min-h-[90px]"
+                  className="w-full text-sm bg-white border-slate-200 min-h-[110px] p-3 leading-relaxed rounded-lg"
                 />
               </FormRow>
 
               {isClientConfirmed ? (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-800 flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold text-emerald-800 flex items-center gap-2.5">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
                   Endorsement confirmed on {fmtDateTime(record!.returned_at!)}
                 </div>
               ) : (
@@ -497,83 +505,83 @@ export function HandlingWizardDialog({
             </div>
           )}
 
-          {/* Mode: BCL - Selected Section Only */}
+          {/* Mode: BCL - Active Section Only */}
           {mode === "bcl" && (
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-4">
-              {/* Active Step Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-2.5">
-                  <div className="h-7 w-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs">
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-7 shadow-xs space-y-3">
+              {/* Section Title & Status Badge */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-black text-sm">
                     {currentStepIdx + 1}
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-slate-900">{currentStepMeta.title}</h3>
+                    <h3 className="text-base font-bold text-slate-900">{currentStepMeta.title}</h3>
                   </div>
                 </div>
 
                 {stepCompletedAt && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 self-start sm:self-auto">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                     {stepCompletedAt}
                   </span>
                 )}
               </div>
 
-              {/* Section 1: Received */}
+              {/* Step 1: Received */}
               {activeStep === "received" && (
                 <div className="divide-y divide-slate-100">
-                  <FormRow label="Received At" description="Date & time passport was handed to BCL" required>
+                  <FormRow label="Received Date & Time" description="Exact timestamp when passport was received by BCL" required>
                     <Input
                       type="datetime-local"
                       value={received.at}
                       onChange={(e) => setReceived((p) => ({ ...p, at: e.target.value }))}
-                      className="h-10 border-slate-200 bg-white text-sm max-w-sm"
+                      className="h-12 w-full border-slate-200 bg-white text-sm rounded-lg px-3.5"
                     />
                   </FormRow>
-                  <FormRow label="Received By" description="BCL staff member who took receipt" required>
+                  <FormRow label="Received By (Staff)" description="BCL staff member responsible for taking receipt" required>
                     <Select value={received.by} onValueChange={(v) => setReceived((p) => ({ ...p, by: v }))}>
-                      <SelectTrigger className="h-10 text-sm border-slate-200 bg-white max-w-sm">
-                        <SelectValue placeholder="Select staff..." />
+                      <SelectTrigger className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5">
+                        <SelectValue placeholder="Select staff member..." />
                       </SelectTrigger>
                       <SelectContent className="z-[200]">
                         {bclUsers.map((u) => (
-                          <SelectItem key={u.id} value={u.id} className="text-sm">
+                          <SelectItem key={u.id} value={u.id} className="text-sm py-2">
                             {u.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </FormRow>
-                  <FormRow label="Brought In By" description="Client or representative name">
+                  <FormRow label="Brought In By" description="Full name of client or messenger who delivered the passport">
                     <Input
                       value={received.broughtBy}
                       onChange={(e) => setReceived((p) => ({ ...p, broughtBy: e.target.value }))}
-                      placeholder="Name of person who brought it"
-                      className="h-10 text-sm border-slate-200 bg-white max-w-sm"
+                      placeholder="e.g. John Doe / Courier rider"
+                      className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5"
                     />
                   </FormRow>
                 </div>
               )}
 
-              {/* Section 2: Taken to Nyayo */}
+              {/* Step 2: Taken to Nyayo */}
               {activeStep === "taken" && (
                 <div className="divide-y divide-slate-100">
-                  <FormRow label="Taken At" description="Date & time passport was submitted to Nyayo" required>
+                  <FormRow label="Submission Date & Time" description="When the passport was handed over at Nyayo House" required>
                     <Input
                       type="datetime-local"
                       value={taken.at}
                       onChange={(e) => setTaken((p) => ({ ...p, at: e.target.value }))}
-                      className="h-10 border-slate-200 bg-white text-sm max-w-sm"
+                      className="h-12 w-full border-slate-200 bg-white text-sm rounded-lg px-3.5"
                     />
                   </FormRow>
-                  <FormRow label="Taken By" description="BCL staff member who went to Nyayo" required>
+                  <FormRow label="Taken By (Staff)" description="BCL staff member who went to Nyayo House" required>
                     <Select value={taken.by} onValueChange={(v) => setTaken((p) => ({ ...p, by: v }))}>
-                      <SelectTrigger className="h-10 text-sm border-slate-200 bg-white max-w-sm">
-                        <SelectValue placeholder="Select staff..." />
+                      <SelectTrigger className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5">
+                        <SelectValue placeholder="Select staff member..." />
                       </SelectTrigger>
                       <SelectContent className="z-[200]">
                         {bclUsers.map((u) => (
-                          <SelectItem key={u.id} value={u.id} className="text-sm">
+                          <SelectItem key={u.id} value={u.id} className="text-sm py-2">
                             {u.name}
                           </SelectItem>
                         ))}
@@ -583,25 +591,25 @@ export function HandlingWizardDialog({
                 </div>
               )}
 
-              {/* Section 3: Returned Stamped */}
+              {/* Step 3: Returned Stamped */}
               {activeStep === "returned" && (
                 <div className="divide-y divide-slate-100">
-                  <FormRow label="Returned At" description="Date & time passport returned with endorsement stamp" required>
+                  <FormRow label="Return Date & Time" description="When passport arrived back at BCL office with endorsement stamp" required>
                     <Input
                       type="datetime-local"
                       value={returned.at}
                       onChange={(e) => setReturned((p) => ({ ...p, at: e.target.value }))}
-                      className="h-10 border-slate-200 bg-white text-sm max-w-sm"
+                      className="h-12 w-full border-slate-200 bg-white text-sm rounded-lg px-3.5"
                     />
                   </FormRow>
-                  <FormRow label="Brought Back By" description="BCL staff member who collected it" required>
+                  <FormRow label="Brought Back By" description="BCL staff member who retrieved the stamped passport" required>
                     <Select value={returned.by} onValueChange={(v) => setReturned((p) => ({ ...p, by: v }))}>
-                      <SelectTrigger className="h-10 text-sm border-slate-200 bg-white max-w-sm">
-                        <SelectValue placeholder="Select staff..." />
+                      <SelectTrigger className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5">
+                        <SelectValue placeholder="Select staff member..." />
                       </SelectTrigger>
                       <SelectContent className="z-[200]">
                         {bclUsers.map((u) => (
-                          <SelectItem key={u.id} value={u.id} className="text-sm">
+                          <SelectItem key={u.id} value={u.id} className="text-sm py-2">
                             {u.name}
                           </SelectItem>
                         ))}
@@ -611,25 +619,25 @@ export function HandlingWizardDialog({
                 </div>
               )}
 
-              {/* Section 4: Client Notified */}
+              {/* Step 4: Client Notified */}
               {activeStep === "notified" && (
                 <div className="divide-y divide-slate-100">
-                  <FormRow label="Notified At" description="Date & time client was notified ready" required>
+                  <FormRow label="Notification Date & Time" description="When client was notified that their stamped passport is ready" required>
                     <Input
                       type="datetime-local"
                       value={notified.at}
                       onChange={(e) => setNotified((p) => ({ ...p, at: e.target.value }))}
-                      className="h-10 border-slate-200 bg-white text-sm max-w-sm"
+                      className="h-12 w-full border-slate-200 bg-white text-sm rounded-lg px-3.5"
                     />
                   </FormRow>
-                  <FormRow label="Notified By" description="BCL staff member who communicated with client" required>
+                  <FormRow label="Notified By (Staff)" description="BCL staff member who contacted the client" required>
                     <Select value={notified.by} onValueChange={(v) => setNotified((p) => ({ ...p, by: v }))}>
-                      <SelectTrigger className="h-10 text-sm border-slate-200 bg-white max-w-sm">
-                        <SelectValue placeholder="Select staff..." />
+                      <SelectTrigger className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5">
+                        <SelectValue placeholder="Select staff member..." />
                       </SelectTrigger>
                       <SelectContent className="z-[200]">
                         {bclUsers.map((u) => (
-                          <SelectItem key={u.id} value={u.id} className="text-sm">
+                          <SelectItem key={u.id} value={u.id} className="text-sm py-2">
                             {u.name}
                           </SelectItem>
                         ))}
@@ -639,7 +647,7 @@ export function HandlingWizardDialog({
                 </div>
               )}
 
-              {/* Section 5: Dispatch to Client */}
+              {/* Step 5: Dispatch */}
               {activeStep === "dispatch" && (
                 <div className="divide-y divide-slate-100">
                   <FormRow label="Dispatch Method" description="How the passport is returned to the client" required>
@@ -655,11 +663,11 @@ export function HandlingWizardDialog({
 
                   {dispatchMethod === "delivery" && (
                     <>
-                      <FormRow label="Delivery Method" description="Delivered by staff or third-party courier" required>
+                      <FormRow label="Delivery Option" description="Delivered by BCL staff or courier service" required>
                         <ToggleButtons
                           options={[
                             { value: "staff", label: "BCL Staff" },
-                            { value: "courier", label: "Courier" },
+                            { value: "courier", label: "Courier Service" },
                           ]}
                           value={deliveryType}
                           onChange={setDeliveryType}
@@ -667,14 +675,14 @@ export function HandlingWizardDialog({
                       </FormRow>
 
                       {deliveryType === "staff" && (
-                        <FormRow label="Delivered By" description="BCL staff carrying out delivery" required>
+                        <FormRow label="Delivered By (Staff)" description="Staff member who carried out delivery" required>
                           <Select value={delivery.staffBy} onValueChange={(v) => setDelivery((p) => ({ ...p, staffBy: v }))}>
-                            <SelectTrigger className="h-10 text-sm border-slate-200 bg-white max-w-sm">
-                              <SelectValue placeholder="Select staff..." />
+                            <SelectTrigger className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5">
+                              <SelectValue placeholder="Select staff member..." />
                             </SelectTrigger>
                             <SelectContent className="z-[200]">
                               {bclUsers.map((u) => (
-                                <SelectItem key={u.id} value={u.id} className="text-sm">
+                                <SelectItem key={u.id} value={u.id} className="text-sm py-2">
                                   {u.name}
                                 </SelectItem>
                               ))}
@@ -685,57 +693,57 @@ export function HandlingWizardDialog({
 
                       {deliveryType === "courier" && (
                         <>
-                          <FormRow label="Courier Provider" description="Selected courier service" required>
+                          <FormRow label="Courier Company" description="Selected courier provider" required>
                             <Select value={delivery.courierId} onValueChange={(v) => setDelivery((p) => ({ ...p, courierId: v }))}>
-                              <SelectTrigger className="h-10 text-sm border-slate-200 bg-white max-w-sm">
-                                <SelectValue placeholder="Select courier..." />
+                              <SelectTrigger className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5">
+                                <SelectValue placeholder="Select courier company..." />
                               </SelectTrigger>
                               <SelectContent className="z-[200]">
                                 {couriers.map((c) => (
-                                  <SelectItem key={c.id} value={c.id} className="text-sm">
+                                  <SelectItem key={c.id} value={c.id} className="text-sm py-2">
                                     {c.name}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           </FormRow>
-                          <FormRow label="Tracking Reference" description="Waybill / tracking number">
+                          <FormRow label="Tracking Reference" description="Waybill or tracking number">
                             <Input
                               value={delivery.trackingRef}
                               onChange={(e) => setDelivery((p) => ({ ...p, trackingRef: e.target.value }))}
                               placeholder="e.g. WB-92841"
-                              className="h-10 text-sm border-slate-200 bg-white max-w-sm"
+                              className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5"
                             />
                           </FormRow>
                           <FormRow
                             label="Rider Name"
-                            description="Name of the courier rider"
+                            description="Name of the courier rider / driver"
                             required={selectedCourier?.courier_type === "on_demand"}
                           >
                             <Input
                               value={delivery.riderName}
                               onChange={(e) => setDelivery((p) => ({ ...p, riderName: e.target.value }))}
-                              placeholder="Rider's full name"
-                              className="h-10 text-sm border-slate-200 bg-white max-w-sm"
+                              placeholder="Full name of rider"
+                              className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5"
                             />
                           </FormRow>
-                          <FormRow label="Rider Phone" description="Contact number for the rider">
+                          <FormRow label="Rider Phone" description="Contact phone number of the rider">
                             <Input
                               value={delivery.riderPhone}
                               onChange={(e) => setDelivery((p) => ({ ...p, riderPhone: e.target.value }))}
-                              placeholder="e.g. +254 7..."
-                              className="h-10 text-sm border-slate-200 bg-white max-w-sm"
+                              placeholder="e.g. +254 712 345 678"
+                              className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5"
                             />
                           </FormRow>
                         </>
                       )}
 
-                      <FormRow label="Delivered At" description="Date & time dispatch took place" required>
+                      <FormRow label="Delivered Date & Time" description="Exact time delivery was finalized" required>
                         <Input
                           type="datetime-local"
                           value={delivery.at}
                           onChange={(e) => setDelivery((p) => ({ ...p, at: e.target.value }))}
-                          className="h-10 border-slate-200 bg-white text-sm max-w-sm"
+                          className="h-12 w-full border-slate-200 bg-white text-sm rounded-lg px-3.5"
                         />
                       </FormRow>
                     </>
@@ -743,15 +751,15 @@ export function HandlingWizardDialog({
 
                   {dispatchMethod === "pickup" && (
                     <>
-                      <FormRow label="Collected By" description="Name of person picking up the passport" required>
+                      <FormRow label="Collected By" description="Full name of person who picked up the passport" required>
                         <Input
                           value={pickup.personName}
                           onChange={(e) => setPickup((p) => ({ ...p, personName: e.target.value }))}
-                          placeholder="Name of person collecting"
-                          className="h-10 text-sm border-slate-200 bg-white max-w-sm"
+                          placeholder="Name of collector"
+                          className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5"
                         />
                       </FormRow>
-                      <FormRow label="Collector Relation" description="Self or authorized representative" required>
+                      <FormRow label="Collector Relationship" description="Self or authorized representative" required>
                         <ToggleButtons
                           options={[
                             { value: "self", label: "Client Themselves" },
@@ -761,12 +769,12 @@ export function HandlingWizardDialog({
                           onChange={(v: any) => setPickup((p) => ({ ...p, relation: v }))}
                         />
                       </FormRow>
-                      <FormRow label="Picked Up At" description="Date & time of pickup" required>
+                      <FormRow label="Pickup Date & Time" description="Exact time the passport was collected" required>
                         <Input
                           type="datetime-local"
                           value={pickup.at}
                           onChange={(e) => setPickup((p) => ({ ...p, at: e.target.value }))}
-                          className="h-10 border-slate-200 bg-white text-sm max-w-sm"
+                          className="h-12 w-full border-slate-200 bg-white text-sm rounded-lg px-3.5"
                         />
                       </FormRow>
                     </>
@@ -777,21 +785,20 @@ export function HandlingWizardDialog({
           )}
         </div>
 
-        {/* Footer with Previous / Next / Save Buttons */}
+        {/* Footer */}
         {mode === "bcl" && (
-          <DialogFooter className="px-6 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between sm:justify-between">
+          <DialogFooter className="px-8 py-4 bg-white border-t border-slate-200 flex items-center justify-between sm:justify-between shrink-0">
             <Button
               type="button"
               variant="outline"
-              size="sm"
               onClick={handlePrev}
               disabled={currentStepIdx === 0}
-              className="text-xs font-bold gap-1 text-slate-700"
+              className="h-11 px-5 text-sm font-bold gap-2 text-slate-700 hover:bg-slate-50 border-slate-300"
             >
               <ChevronLeft className="h-4 w-4" /> Previous
             </Button>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <Button
                 type="button"
                 onClick={handleCurrentStepSave}
@@ -804,16 +811,15 @@ export function HandlingWizardDialog({
                 ) : (
                   <Save className="h-4 w-4" />
                 )}
-                {currentStepIdx === PIPELINE.length - 1 ? "Save Dispatch" : "Save & Continue"}
+                {currentStepIdx === PIPELINE.length - 1 ? "Save & Finalize" : "Save & Continue"}
               </Button>
 
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
                 onClick={handleNext}
                 disabled={currentStepIdx === PIPELINE.length - 1}
-                className="text-xs font-bold gap-1 text-slate-700"
+                className="h-11 px-5 text-sm font-bold gap-2 text-slate-700 hover:bg-slate-50 border-slate-300"
               >
                 Next <ChevronRight className="h-4 w-4" />
               </Button>

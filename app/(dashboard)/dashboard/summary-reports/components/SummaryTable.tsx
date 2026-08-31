@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, ArrowLeftRight, Layers, AlertTriangle, Edit, X, RefreshCw, Trash2, ExternalLink, Loader2 } from "lucide-react";
+import { SearchX, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, ArrowLeftRight, Layers, User, AlertTriangle, Edit, X, RefreshCw, Trash2, ExternalLink, Loader2 } from "lucide-react";
 import { differenceInDays } from "date-fns";
 import { cn } from "@/lib/utils";
 import { formatDateCell, formatEstimatedMins } from "./reportCellRenderers";
@@ -294,6 +294,7 @@ export function SummaryTable({
   dynamicStageColumns = [],
   getKycFields,
   loading = false,
+  personGroupBy,
 }: {
   tasks: any[];
   companies: Map<number, { name: string; prefix: string }>;
@@ -331,6 +332,19 @@ export function SummaryTable({
   dynamicStageColumns?: any[];
   getKycFields?: (doc: any) => Promise<any[]>;
   loading?: boolean;
+  // Overrides sub-department section grouping with a person-based grouping (Officers/Managers
+  // "All" sub-tabs) — one section per person a task's `getGroupIdsForTask` names, plus an
+  // "Unallocated" section for tasks that name none. `groups` gives the canonical section order
+  // (same list the perspective's own sub-tabs use); a task can land in more than one section at
+  // once (e.g. two officers on the same current stage) since `getGroupIdsForTask` returns an
+  // array, mirroring how the perspective tab's own counts already double-count that case.
+  personGroupBy?: {
+    // "Officer" / "Manager" — names the group kind so the catch-all bucket can read "No Officer
+    // Assigned" / "No Manager Assigned" instead of a bare, ambiguous "Unallocated".
+    label: string;
+    groups: { id: string; name: string }[];
+    getGroupIdsForTask: (task: any) => string[];
+  };
 }) {
   // dynamicStageColumns (built by page.tsx from the applied report's non-milestone stage
   // selections, see stageColumnConfig.ts's 'report_stage' column type) are appended after the
@@ -596,7 +610,69 @@ export function SummaryTable({
     return ordered;
   }, [paginatedRows, departments, orderedSubDeptNames, subDeptTotalCounts, showEmptyGroups]);
 
+  type SectionedItem =
+    | { type: 'section'; name: string; count: number }
+    | { type: 'subsection'; name: string; count: number }
+    | { type: 'empty'; name: string }
+    | { type: 'row'; row: any; globalIdx: number };
+
   const sectionedRows = useMemo(() => {
+    // Splits `rowsForGroup` into person (Officer/Manager) sub-sections nested WITHIN a
+    // sub-department section — never instead of it (see personGroupBy's own prop comment: it
+    // adds a second grouping level, it doesn't replace the first). A group with zero rows here
+    // is simply omitted rather than shown as an empty placeholder — the officer/manager list
+    // can be much longer than the sub-department list, and an empty section for every
+    // uninvolved person would be mostly noise. `startIdx` threads the same running row-number/
+    // striping counter across every section boundary, same as the flat case below.
+    const buildPersonSubsections = (rowsForGroup: typeof paginatedRows, startIdx: number): { items: SectionedItem[]; nextIdx: number } => {
+      const UNALLOCATED = '__unallocated__';
+      const map = new Map<string, typeof paginatedRows>();
+      rowsForGroup.forEach(row => {
+        const ids = personGroupBy!.getGroupIdsForTask(row.task);
+        const keys = ids.length > 0 ? ids : [UNALLOCATED];
+        keys.forEach(id => { if (!map.has(id)) map.set(id, []); map.get(id)!.push(row); });
+      });
+      const items: SectionedItem[] = [];
+      let idx = startIdx;
+      const pushGroup = (name: string, groupRows: typeof paginatedRows) => {
+        items.push({ type: 'subsection', name, count: groupRows.length });
+        groupRows.forEach(row => { items.push({ type: 'row', row, globalIdx: idx }); idx++; });
+      };
+      personGroupBy!.groups.forEach(g => {
+        const groupRows = map.get(g.id);
+        if (groupRows && groupRows.length > 0) pushGroup(g.name, groupRows);
+      });
+      const unallocated = map.get(UNALLOCATED);
+      if (unallocated && unallocated.length > 0) pushGroup(`No ${personGroupBy!.label} Assigned`, unallocated);
+      return { items, nextIdx: idx };
+    };
+
+    if (personGroupBy && activeSubDeptId && activeSubDeptId !== 'all') {
+      // A specific sub-department is already selected — its own header would be redundant
+      // (same reasoning as the no-person-grouping case below), so nest person sub-sections
+      // directly under a flat top-level list instead of a further sub-department header.
+      return buildPersonSubsections(paginatedRows, 0).items;
+    }
+
+    if (personGroupBy) {
+      // "All" sub-departments — outer sections stay sub-department (identical order/empty-
+      // placeholder rules to the plain case below), each one's rows further split into person
+      // sub-sections.
+      const result: SectionedItem[] = [];
+      let globalIdx = 0;
+      for (const group of subDeptGroups) {
+        result.push({ type: 'section', name: group.name, count: group.rows.length });
+        if (group.rows.length === 0) {
+          result.push({ type: 'empty', name: group.name });
+        } else {
+          const { items, nextIdx } = buildPersonSubsections(group.rows, globalIdx);
+          result.push(...items);
+          globalIdx = nextIdx;
+        }
+      }
+      return result;
+    }
+
     // When a specific sub-department is selected, skip section grouping entirely — just
     // render a flat list of rows. The user already filtered to this sub-department via the
     // tab, so showing a section header for it is redundant.
@@ -604,7 +680,7 @@ export function SummaryTable({
       return paginatedRows.map((row, i) => ({ type: 'row' as const, row, globalIdx: i }));
     }
 
-    const result: ({ type: 'section'; name: string; count: number } | { type: 'empty'; name: string } | { type: 'row'; row: any; globalIdx: number })[] = [];
+    const result: SectionedItem[] = [];
     let globalIdx = 0;
     for (const group of subDeptGroups) {
       result.push({ type: 'section', name: group.name, count: group.rows.length });
@@ -615,7 +691,7 @@ export function SummaryTable({
       }
     }
     return result;
-  }, [subDeptGroups, activeSubDeptId, paginatedRows]);
+  }, [personGroupBy, subDeptGroups, activeSubDeptId, paginatedRows]);
 
   // Renders a 'report_stage_info' cell — always through EditableStageCell, same as every other
   // stage cell in this table, regardless of whether the report selected this stage's own
@@ -884,7 +960,7 @@ export function SummaryTable({
                   </TableCell>
                 </TableRow>
               ) : sectionedRows.length > 0 ? (
-                sectionedRows.map((item) => {
+                sectionedRows.map((item, itemIdx) => {
                   if (item.type === 'section') {
                     // The name/count cell must NOT span every column if it's going to stay
                     // pinned on horizontal scroll — a full-width sticky cell would cover the
@@ -895,10 +971,10 @@ export function SummaryTable({
                     const stickyColCount = columns.filter((c: any) => c.sticky).length;
                     const headerSpacerColSpan = Math.max(1, interleavedColumns.length - stickyColCount);
                     return (
-                      <TableRow key={`section-${item.name}`} className="border-0 hover:bg-transparent">
+                      <TableRow key={`section-${itemIdx}-${item.name}`} className="border-0 hover:bg-transparent">
                         <TableCell
                           colSpan={1 + stickyColCount}
-                          className="sticky left-0 z-40 bg-white border-r border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2 pl-3 pr-4"
+                          className="sticky left-0 z-40 bg-blue-50 border-r border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2 pl-3 pr-4"
                           style={{ top: groupHeaderTop }}
                         >
                           <div className="flex items-center gap-2 min-w-0">
@@ -920,11 +996,52 @@ export function SummaryTable({
                             order and this cell comes second. */}
                         <TableCell
                           colSpan={headerSpacerColSpan}
-                          className="sticky z-30 bg-white px-4 py-2 border-t-2 border-t-custom-blue border-b border-b-slate-200"
+                          className="sticky z-30 bg-blue-50 px-4 py-2 border-t-2 border-t-custom-blue border-b border-b-slate-200"
                           style={{ top: groupHeaderTop }}
                         />
                         <TableCell
-                          className="sticky right-0 z-30 bg-white border-l border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2 px-2"
+                          className="sticky right-0 z-30 bg-blue-50 border-l border-t-2 border-t-custom-blue border-b border-b-slate-200 py-2 px-2"
+                          style={{ top: groupHeaderTop }}
+                        />
+                      </TableRow>
+                    );
+                  }
+
+                  if (item.type === 'subsection') {
+                    // Same sticky-span mechanics as the sub-department section header above,
+                    // just visually one level down (indented, indigo instead of blue, a person
+                    // icon instead of Layers) — this always sits nested inside a sub-department
+                    // section, never as a top-level header on its own. Indigo is deliberately a
+                    // third, distinct tone: blue is already the sub-department header and
+                    // white/slate-50 is already the zebra-striped task rows, so re-using either
+                    // here would make this level blend into one of those instead of reading as
+                    // its own thing.
+                    const stickyColCount = columns.filter((c: any) => c.sticky).length;
+                    const headerSpacerColSpan = Math.max(1, interleavedColumns.length - stickyColCount);
+                    return (
+                      <TableRow key={`subsection-${itemIdx}-${item.name}`} className="border-0 hover:bg-transparent">
+                        <TableCell
+                          colSpan={1 + stickyColCount}
+                          className="sticky left-0 z-40 bg-indigo-50 border-r border-t border-t-indigo-300 border-b border-b-slate-200 py-1.5 pl-8 pr-4"
+                          style={{ top: groupHeaderTop }}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <User className="h-3 w-3 text-indigo-400 shrink-0" />
+                            <span className="text-[10.5px] font-bold uppercase tracking-wider text-indigo-700 whitespace-nowrap">
+                              {item.name}
+                            </span>
+                            <span className="text-[10.5px] font-semibold text-indigo-400 tabular-nums whitespace-nowrap">
+                              · {item.count}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell
+                          colSpan={headerSpacerColSpan}
+                          className="sticky z-30 bg-indigo-50 px-4 py-1.5 border-t border-t-indigo-300 border-b border-b-slate-200"
+                          style={{ top: groupHeaderTop }}
+                        />
+                        <TableCell
+                          className="sticky right-0 z-30 bg-indigo-50 border-l border-t border-t-indigo-300 border-b border-b-slate-200 py-1.5 px-2"
                           style={{ top: groupHeaderTop }}
                         />
                       </TableRow>
@@ -938,7 +1055,7 @@ export function SummaryTable({
                     const stickyColCount = columns.filter((c: any) => c.sticky).length;
                     const spacerColSpan = Math.max(1, interleavedColumns.length - stickyColCount);
                     return (
-                      <TableRow key={`empty-${item.name}`} className="border-0 hover:bg-transparent">
+                      <TableRow key={`empty-${itemIdx}-${item.name}`} className="border-0 hover:bg-transparent">
                         <TableCell
                           colSpan={1 + stickyColCount}
                           className="sticky left-0 z-20 bg-slate-50 border-r border-b border-slate-200 py-3 px-4"

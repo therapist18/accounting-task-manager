@@ -95,7 +95,7 @@ export default function SummaryReportsPage() {
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
   const [activeClassIds, setActiveClassIds] = useState<string[]>([]);
   const [activeSubClassIds, setActiveSubClassIds] = useState<string[]>([]);
-  const [activeTaskStatus, setActiveTaskStatus] = useState<'all' | 'active' | 'enquiry' | 'wip' | 'completed' | 'overdue'>('all');
+  const [activeTaskStatus, setActiveTaskStatus] = useState<'all' | 'active' | 'enquiry' | 'wip' | 'completed' | 'overdue'>('active');
 
   const [activePerspective, setActivePerspective] = useState<'all' | 'officers' | 'managers' | 'clients'>('all');
   const [officerFilterMode, setOfficerFilterMode] = useState<'current' | 'history'>('history');
@@ -687,6 +687,36 @@ export default function SummaryReportsPage() {
     return counts;
   }, [statusScopedTasks, availableTaskManagers, getCanonicalCurrentStageForTask]);
 
+  // Feeds SummaryTable's personGroupBy — only while the perspective's own "All" sub-tab is
+  // selected, since picking one specific officer/manager already filters the table down to
+  // their tasks alone (a section header for a single group would be redundant there). Officer
+  // grouping uses the same officerFilterMode (current/history) as the perspective tabs and
+  // getOfficersForTask, so the sections agree with whatever mode is showing everywhere else on
+  // the page; a task can land in more than one officer's section at once (multiple officer_ids
+  // on the same stage), same double-counting officerCounts above already does.
+  const officerPersonGroupBy = useMemo(() => {
+    if (activePerspective !== 'officers' || activeOfficerId !== 'all') return null;
+    return {
+      label: 'Officer',
+      groups: availableOfficers.map((o: any) => ({ id: o.id.toString(), name: getStaffName(o.id) })),
+      getGroupIdsForTask: (task: any) => getStageOfficerIdsForTask(task, officerFilterMode),
+    };
+  }, [activePerspective, activeOfficerId, availableOfficers, getStaffName, getStageOfficerIdsForTask, officerFilterMode]);
+
+  const managerPersonGroupBy = useMemo(() => {
+    if (activePerspective !== 'managers' || activeManagerId !== 'all') return null;
+    return {
+      label: 'Manager',
+      groups: availableTaskManagers.map((m: any) => ({ id: m.id.toString(), name: getStaffName(m.id) })),
+      getGroupIdsForTask: (task: any) => {
+        const id = task.task_manager?.id ?? task.task_manager_id;
+        return id ? [id.toString()] : [];
+      },
+    };
+  }, [activePerspective, activeManagerId, availableTaskManagers, getStaffName]);
+
+  const personGroupBy = officerPersonGroupBy || managerPersonGroupBy || undefined;
+
   const perspectiveScopedTasks = useMemo(() => statusScopedTasks.filter(task => {
     if (activePerspective === 'officers') {
       if (officerFilterMode === 'current') {
@@ -1029,6 +1059,7 @@ export default function SummaryReportsPage() {
         dynamicStageColumns={dynamicStageColumns}
         getKycFields={getKycFields}
         loading={tableLoading}
+        personGroupBy={personGroupBy}
       />
 
       {/* Edit dialog — the exact EnquiryDialog DepartmentTasksManager reuses for editing,
