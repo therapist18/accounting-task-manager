@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import {
   CheckCircle2,
   Loader2,
@@ -21,9 +23,13 @@ import {
   ChevronRight,
   Save,
   Info,
+  Check,
+  ChevronsUpDown,
+  CalendarDays,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/hooks/use-toast";
+import { DateTextInput } from "./PageHeader";
 import {
   upsertHandlingRecord,
   updateTaskHandlingMode,
@@ -44,34 +50,35 @@ function nowLocalInputValue() {
   return toLocalInputValue(new Date().toISOString());
 }
 
+function todayDatePart() {
+  return nowLocalInputValue().split("T")[0];
+}
+
 function fmtDateTime(iso: string | null | undefined) {
   if (!iso) return "";
   try {
-    return format(new Date(iso), "dd MMM yyyy, HH:mm");
+    return format(new Date(iso), "dd/MM/yyyy, HH:mm");
   } catch {
     return "";
   }
 }
 
-// Solid 2-Column Row: Left = Label & Hints (38% width), Right = Value / Full-width Input (62% width)
+// Solid 2-Column Row: Left = Label (38% width), Right = Value / Full-width Input (62% width)
 function FormRow({
   label,
-  description,
   required,
   children,
 }: {
   label: string;
-  description?: string;
   required?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-6 py-4 border-b border-slate-100 last:border-b-0">
-      <div className="sm:w-[38%] shrink-0 space-y-1">
-        <Label className="text-sm font-bold text-slate-800 block">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-6 py-5 border-b border-slate-100 last:border-b-0">
+      <div className="sm:w-[38%] shrink-0">
+        <Label className="text-base font-bold text-slate-800 block">
           {label} {required && <span className="text-red-500 font-bold">*</span>}
         </Label>
-        {description && <p className="text-xs text-slate-500 font-normal leading-relaxed">{description}</p>}
       </div>
       <div className="w-full sm:w-[62%] min-w-0 flex-1">{children}</div>
     </div>
@@ -87,7 +94,7 @@ function ToggleButtons({ options, value, onChange }: any) {
           type="button"
           onClick={() => onChange(opt.value)}
           className={cn(
-            "px-4 py-2 rounded-lg text-xs md:text-sm font-bold transition-all",
+            "px-4 py-2 rounded-lg text-sm md:text-base font-bold transition-all",
             value === opt.value
               ? "bg-white text-blue-600 shadow-xs font-black"
               : "text-slate-600 hover:text-slate-900"
@@ -100,7 +107,99 @@ function ToggleButtons({ options, value, onChange }: any) {
   );
 }
 
-const PRIMARY_BTN = "h-11 px-6 rounded-lg text-sm font-bold gap-2 text-white shadow-sm hover:opacity-95 transition-opacity";
+// Searchable staff picker — swaps the plain <Select> the "who did this" fields used to use for
+// a filterable combobox, since bclUsers can run long enough that scrolling a plain dropdown to
+// find one name is slower than just typing it.
+function StaffCombobox({ users, value, onChange, placeholder = "Select staff member..." }: any) {
+  const [open, setOpen] = useState(false);
+  const selected = (users || []).find((u: any) => u.id === value);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="h-12 w-full justify-between text-base font-normal border-slate-200 bg-white rounded-lg px-3.5 hover:bg-white"
+        >
+          <span className={cn("truncate", !selected && "text-slate-400")}>{selected?.name || placeholder}</span>
+          <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0 z-[200]" align="start">
+        <Command>
+          <CommandInput placeholder="Search staff..." className="text-base" />
+          <CommandList className="max-h-[260px] overflow-y-auto">
+            <CommandEmpty>No staff found.</CommandEmpty>
+            <CommandGroup>
+              {(users || []).map((u: any) => (
+                <CommandItem key={u.id} value={u.name} onSelect={() => { onChange(u.id); setOpen(false); }} className="text-base py-2">
+                  <Check className={cn("mr-2 h-4 w-4 shrink-0", value === u.id ? "opacity-100" : "opacity-0")} />
+                  {u.name}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// Date and Time are each their own labeled FormRow (not one shared "Date & Time" row) — both
+// read from and write to the same "YYYY-MM-DDTHH:mm" value string (the shape every save
+// function already converts via `new Date(x.at).toISOString()`), so DateOnlyField and
+// TimeOnlyField below only ever touch their own half of it.
+function DateOnlyField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [datePart, timePart] = value ? value.split("T") : ["", ""];
+
+  const dateObj = useMemo(() => {
+    if (!datePart) return undefined;
+    const [y, m, d] = datePart.split("-").map(Number);
+    const dt = new Date(y, (m || 1) - 1, d || 1);
+    return isNaN(dt.getTime()) ? undefined : dt;
+  }, [datePart]);
+
+  const handleDateChange = (d: Date | undefined) => {
+    if (!d) {
+      onChange(timePart ? `${todayDatePart()}T${timePart}` : "");
+      return;
+    }
+    const pad = (n: number) => String(n).padStart(2, "0");
+    onChange(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${timePart || "00:00"}`);
+  };
+
+  return (
+    <div className="flex items-center gap-2 h-12 px-3.5 rounded-lg border border-slate-200 bg-white w-full">
+      <CalendarDays className="h-4 w-4 text-slate-400 shrink-0" />
+      {/* PageHeader's own DateTextInput (dd/mm/yyyy, typed) rather than a native
+          <input type="date">, whose displayed format follows the browser/OS locale and can't
+          be forced to dd/mm/yyyy. */}
+      <DateTextInput value={dateObj} onChange={handleDateChange} placeholder="DD/MM/YYYY" inputClassName="text-base w-full" />
+    </div>
+  );
+}
+
+function TimeOnlyField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [datePart, timePart] = value ? value.split("T") : ["", ""];
+
+  const handleTimeChange = (t: string) => {
+    onChange(`${datePart || todayDatePart()}T${t}`);
+  };
+
+  return (
+    <Input
+      type="time"
+      value={timePart || ""}
+      onChange={(e) => handleTimeChange(e.target.value)}
+      className="h-12 w-full border-slate-200 bg-white text-base rounded-lg px-3.5"
+    />
+  );
+}
+
+const PRIMARY_BTN = "h-11 px-6 rounded-lg text-base font-bold gap-2 text-white shadow-sm hover:opacity-95 transition-opacity";
 const PRIMARY_STYLE = { backgroundColor: "#376bae" };
 
 const PIPELINE = [
@@ -433,7 +532,7 @@ export function HandlingWizardDialog({
           <DialogTitle className="text-xl md:text-2xl font-black tracking-tight text-slate-900">
             {task.applicant_name}
           </DialogTitle>
-          <DialogDescription className="text-sm font-medium text-slate-500">
+          <DialogDescription className="text-base font-medium text-slate-500">
             {task.passport_number ? `Passport No: ${task.passport_number}` : "No passport number recorded"} · Stamping &amp; Handling Pipeline
           </DialogDescription>
           {mode === "bcl" && (
@@ -447,23 +546,23 @@ export function HandlingWizardDialog({
         <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6 bg-slate-50">
           {/* Mode selector card */}
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <p className="text-sm font-bold text-slate-800">Handling Mode</p>
-              <p className="text-xs text-slate-500 font-normal">Choose whether BCL or the client takes the passport to Nyayo House</p>
+            <p className="text-base font-bold text-slate-800 shrink-0">Handling Mode</p>
+            <div className="w-full sm:w-72">
+              <Select value={mode || ""} onValueChange={(v) => saveMode(v as "bcl" | "client")} disabled={savingMode}>
+                <SelectTrigger className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5">
+                  <SelectValue placeholder="Select handling mode..." />
+                </SelectTrigger>
+                <SelectContent className="z-[200]">
+                  <SelectItem value="bcl" className="text-base py-2">BCL Handles Stamping</SelectItem>
+                  <SelectItem value="client" className="text-base py-2">Client Handles It</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <ToggleButtons
-              options={[
-                { value: "bcl", label: "BCL Handles Stamping" },
-                { value: "client", label: "Client Handles It" },
-              ]}
-              value={mode}
-              onChange={saveMode}
-            />
           </div>
 
           {!mode && (
             <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-slate-200">
-              <p className="text-sm text-slate-500 font-medium">Please select a handling mode above to proceed.</p>
+              <p className="text-base text-slate-500 font-medium">Please select a handling mode above to proceed.</p>
             </div>
           )}
 
@@ -472,20 +571,20 @@ export function HandlingWizardDialog({
             <div className="rounded-2xl border border-violet-200 bg-white p-6 shadow-xs space-y-5">
               <div className="flex items-center gap-2.5 text-violet-800 pb-2 border-b border-slate-100">
                 <Info className="h-5 w-5" />
-                <span className="text-sm font-bold">Client Self-Handling Stamping</span>
+                <span className="text-base font-bold">Client Self-Handling Stamping</span>
               </div>
-              <FormRow label="Handling Notes" description="Any instructions, dates, or communication notes with the client">
+              <FormRow label="Handling Notes">
                 <Textarea
                   value={clientNotes}
                   onChange={(e) => setClientNotes(e.target.value)}
                   placeholder="Enter details about client handling..."
                   disabled={isClientConfirmed}
-                  className="w-full text-sm bg-white border-slate-200 min-h-[110px] p-3 leading-relaxed rounded-lg"
+                  className="w-full text-base bg-white border-slate-200 min-h-[110px] p-3 leading-relaxed rounded-lg"
                 />
               </FormRow>
 
               {isClientConfirmed ? (
-                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold text-emerald-800 flex items-center gap-2.5">
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-base font-bold text-emerald-800 flex items-center gap-2.5">
                   <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
                   Endorsement confirmed on {fmtDateTime(record!.returned_at!)}
                 </div>
@@ -511,16 +610,16 @@ export function HandlingWizardDialog({
               {/* Section Title & Status Badge */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-black text-sm">
+                  <div className="h-9 w-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-black text-base">
                     {currentStepIdx + 1}
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-slate-900">{currentStepMeta.title}</h3>
+                    <h3 className="text-lg font-bold text-slate-900">{currentStepMeta.title}</h3>
                   </div>
                 </div>
 
                 {stepCompletedAt && (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 self-start sm:self-auto">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 self-start sm:self-auto">
                     <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                     {stepCompletedAt}
                   </span>
@@ -530,34 +629,21 @@ export function HandlingWizardDialog({
               {/* Step 1: Received */}
               {activeStep === "received" && (
                 <div className="divide-y divide-slate-100">
-                  <FormRow label="Received Date & Time" description="Exact timestamp when passport was received by BCL" required>
-                    <Input
-                      type="datetime-local"
-                      value={received.at}
-                      onChange={(e) => setReceived((p) => ({ ...p, at: e.target.value }))}
-                      className="h-12 w-full border-slate-200 bg-white text-sm rounded-lg px-3.5"
-                    />
+                  <FormRow label="Received Date" required>
+                    <DateOnlyField value={received.at} onChange={(v) => setReceived((p) => ({ ...p, at: v }))} />
                   </FormRow>
-                  <FormRow label="Received By (Staff)" description="BCL staff member responsible for taking receipt" required>
-                    <Select value={received.by} onValueChange={(v) => setReceived((p) => ({ ...p, by: v }))}>
-                      <SelectTrigger className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5">
-                        <SelectValue placeholder="Select staff member..." />
-                      </SelectTrigger>
-                      <SelectContent className="z-[200]">
-                        {bclUsers.map((u) => (
-                          <SelectItem key={u.id} value={u.id} className="text-sm py-2">
-                            {u.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <FormRow label="Received Time" required>
+                    <TimeOnlyField value={received.at} onChange={(v) => setReceived((p) => ({ ...p, at: v }))} />
                   </FormRow>
-                  <FormRow label="Brought In By" description="Full name of client or messenger who delivered the passport">
+                  <FormRow label="Received By (Staff)" required>
+                    <StaffCombobox users={bclUsers} value={received.by} onChange={(v) => setReceived((p) => ({ ...p, by: v }))} />
+                  </FormRow>
+                  <FormRow label="Brought In By">
                     <Input
                       value={received.broughtBy}
                       onChange={(e) => setReceived((p) => ({ ...p, broughtBy: e.target.value }))}
                       placeholder="e.g. John Doe / Courier rider"
-                      className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5"
+                      className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
                     />
                   </FormRow>
                 </div>
@@ -566,27 +652,14 @@ export function HandlingWizardDialog({
               {/* Step 2: Taken to Nyayo */}
               {activeStep === "taken" && (
                 <div className="divide-y divide-slate-100">
-                  <FormRow label="Submission Date & Time" description="When the passport was handed over at Nyayo House" required>
-                    <Input
-                      type="datetime-local"
-                      value={taken.at}
-                      onChange={(e) => setTaken((p) => ({ ...p, at: e.target.value }))}
-                      className="h-12 w-full border-slate-200 bg-white text-sm rounded-lg px-3.5"
-                    />
+                  <FormRow label="Submission Date" required>
+                    <DateOnlyField value={taken.at} onChange={(v) => setTaken((p) => ({ ...p, at: v }))} />
                   </FormRow>
-                  <FormRow label="Taken By (Staff)" description="BCL staff member who went to Nyayo House" required>
-                    <Select value={taken.by} onValueChange={(v) => setTaken((p) => ({ ...p, by: v }))}>
-                      <SelectTrigger className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5">
-                        <SelectValue placeholder="Select staff member..." />
-                      </SelectTrigger>
-                      <SelectContent className="z-[200]">
-                        {bclUsers.map((u) => (
-                          <SelectItem key={u.id} value={u.id} className="text-sm py-2">
-                            {u.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <FormRow label="Submission Time" required>
+                    <TimeOnlyField value={taken.at} onChange={(v) => setTaken((p) => ({ ...p, at: v }))} />
+                  </FormRow>
+                  <FormRow label="Taken By (Staff)" required>
+                    <StaffCombobox users={bclUsers} value={taken.by} onChange={(v) => setTaken((p) => ({ ...p, by: v }))} />
                   </FormRow>
                 </div>
               )}
@@ -594,27 +667,14 @@ export function HandlingWizardDialog({
               {/* Step 3: Returned Stamped */}
               {activeStep === "returned" && (
                 <div className="divide-y divide-slate-100">
-                  <FormRow label="Return Date & Time" description="When passport arrived back at BCL office with endorsement stamp" required>
-                    <Input
-                      type="datetime-local"
-                      value={returned.at}
-                      onChange={(e) => setReturned((p) => ({ ...p, at: e.target.value }))}
-                      className="h-12 w-full border-slate-200 bg-white text-sm rounded-lg px-3.5"
-                    />
+                  <FormRow label="Return Date" required>
+                    <DateOnlyField value={returned.at} onChange={(v) => setReturned((p) => ({ ...p, at: v }))} />
                   </FormRow>
-                  <FormRow label="Brought Back By" description="BCL staff member who retrieved the stamped passport" required>
-                    <Select value={returned.by} onValueChange={(v) => setReturned((p) => ({ ...p, by: v }))}>
-                      <SelectTrigger className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5">
-                        <SelectValue placeholder="Select staff member..." />
-                      </SelectTrigger>
-                      <SelectContent className="z-[200]">
-                        {bclUsers.map((u) => (
-                          <SelectItem key={u.id} value={u.id} className="text-sm py-2">
-                            {u.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <FormRow label="Return Time" required>
+                    <TimeOnlyField value={returned.at} onChange={(v) => setReturned((p) => ({ ...p, at: v }))} />
+                  </FormRow>
+                  <FormRow label="Brought Back By" required>
+                    <StaffCombobox users={bclUsers} value={returned.by} onChange={(v) => setReturned((p) => ({ ...p, by: v }))} />
                   </FormRow>
                 </div>
               )}
@@ -622,27 +682,14 @@ export function HandlingWizardDialog({
               {/* Step 4: Client Notified */}
               {activeStep === "notified" && (
                 <div className="divide-y divide-slate-100">
-                  <FormRow label="Notification Date & Time" description="When client was notified that their stamped passport is ready" required>
-                    <Input
-                      type="datetime-local"
-                      value={notified.at}
-                      onChange={(e) => setNotified((p) => ({ ...p, at: e.target.value }))}
-                      className="h-12 w-full border-slate-200 bg-white text-sm rounded-lg px-3.5"
-                    />
+                  <FormRow label="Notification Date" required>
+                    <DateOnlyField value={notified.at} onChange={(v) => setNotified((p) => ({ ...p, at: v }))} />
                   </FormRow>
-                  <FormRow label="Notified By (Staff)" description="BCL staff member who contacted the client" required>
-                    <Select value={notified.by} onValueChange={(v) => setNotified((p) => ({ ...p, by: v }))}>
-                      <SelectTrigger className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5">
-                        <SelectValue placeholder="Select staff member..." />
-                      </SelectTrigger>
-                      <SelectContent className="z-[200]">
-                        {bclUsers.map((u) => (
-                          <SelectItem key={u.id} value={u.id} className="text-sm py-2">
-                            {u.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <FormRow label="Notification Time" required>
+                    <TimeOnlyField value={notified.at} onChange={(v) => setNotified((p) => ({ ...p, at: v }))} />
+                  </FormRow>
+                  <FormRow label="Notified By (Staff)" required>
+                    <StaffCombobox users={bclUsers} value={notified.by} onChange={(v) => setNotified((p) => ({ ...p, by: v }))} />
                   </FormRow>
                 </div>
               )}
@@ -650,20 +697,21 @@ export function HandlingWizardDialog({
               {/* Step 5: Dispatch */}
               {activeStep === "dispatch" && (
                 <div className="divide-y divide-slate-100">
-                  <FormRow label="Dispatch Method" description="How the passport is returned to the client" required>
-                    <ToggleButtons
-                      options={[
-                        { value: "delivery", label: "Delivery" },
-                        { value: "pickup", label: "Client Pickup" },
-                      ]}
-                      value={dispatchMethod}
-                      onChange={setDispatchMethod}
-                    />
+                  <FormRow label="Dispatch Method" required>
+                    <Select value={dispatchMethod} onValueChange={(v) => setDispatchMethod(v as "delivery" | "pickup")}>
+                      <SelectTrigger className="h-12 w-full sm:w-72 text-base border-slate-200 bg-white rounded-lg px-3.5">
+                        <SelectValue placeholder="Select dispatch method..." />
+                      </SelectTrigger>
+                      <SelectContent className="z-[200]">
+                        <SelectItem value="delivery" className="text-base py-2">Delivery</SelectItem>
+                        <SelectItem value="pickup" className="text-base py-2">Client Pickup</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </FormRow>
 
                   {dispatchMethod === "delivery" && (
                     <>
-                      <FormRow label="Delivery Option" description="Delivered by BCL staff or courier service" required>
+                      <FormRow label="Delivery Option" required>
                         <ToggleButtons
                           options={[
                             { value: "staff", label: "BCL Staff" },
@@ -675,107 +723,92 @@ export function HandlingWizardDialog({
                       </FormRow>
 
                       {deliveryType === "staff" && (
-                        <FormRow label="Delivered By (Staff)" description="Staff member who carried out delivery" required>
-                          <Select value={delivery.staffBy} onValueChange={(v) => setDelivery((p) => ({ ...p, staffBy: v }))}>
-                            <SelectTrigger className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5">
-                              <SelectValue placeholder="Select staff member..." />
-                            </SelectTrigger>
-                            <SelectContent className="z-[200]">
-                              {bclUsers.map((u) => (
-                                <SelectItem key={u.id} value={u.id} className="text-sm py-2">
-                                  {u.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                        <FormRow label="Delivered By (Staff)" required>
+                          <StaffCombobox users={bclUsers} value={delivery.staffBy} onChange={(v) => setDelivery((p) => ({ ...p, staffBy: v }))} />
                         </FormRow>
                       )}
 
                       {deliveryType === "courier" && (
                         <>
-                          <FormRow label="Courier Company" description="Selected courier provider" required>
+                          <FormRow label="Courier Company" required>
                             <Select value={delivery.courierId} onValueChange={(v) => setDelivery((p) => ({ ...p, courierId: v }))}>
-                              <SelectTrigger className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5">
+                              <SelectTrigger className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5">
                                 <SelectValue placeholder="Select courier company..." />
                               </SelectTrigger>
                               <SelectContent className="z-[200]">
                                 {couriers.map((c) => (
-                                  <SelectItem key={c.id} value={c.id} className="text-sm py-2">
+                                  <SelectItem key={c.id} value={c.id} className="text-base py-2">
                                     {c.name}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           </FormRow>
-                          <FormRow label="Tracking Reference" description="Waybill or tracking number">
+                          <FormRow label="Tracking Reference">
                             <Input
                               value={delivery.trackingRef}
                               onChange={(e) => setDelivery((p) => ({ ...p, trackingRef: e.target.value }))}
                               placeholder="e.g. WB-92841"
-                              className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5"
+                              className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
                             />
                           </FormRow>
                           <FormRow
                             label="Rider Name"
-                            description="Name of the courier rider / driver"
                             required={selectedCourier?.courier_type === "on_demand"}
                           >
                             <Input
                               value={delivery.riderName}
                               onChange={(e) => setDelivery((p) => ({ ...p, riderName: e.target.value }))}
                               placeholder="Full name of rider"
-                              className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5"
+                              className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
                             />
                           </FormRow>
-                          <FormRow label="Rider Phone" description="Contact phone number of the rider">
+                          <FormRow label="Rider Phone">
                             <Input
                               value={delivery.riderPhone}
                               onChange={(e) => setDelivery((p) => ({ ...p, riderPhone: e.target.value }))}
                               placeholder="e.g. +254 712 345 678"
-                              className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5"
+                              className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
                             />
                           </FormRow>
                         </>
                       )}
 
-                      <FormRow label="Delivered Date & Time" description="Exact time delivery was finalized" required>
-                        <Input
-                          type="datetime-local"
-                          value={delivery.at}
-                          onChange={(e) => setDelivery((p) => ({ ...p, at: e.target.value }))}
-                          className="h-12 w-full border-slate-200 bg-white text-sm rounded-lg px-3.5"
-                        />
+                      <FormRow label="Delivered Date" required>
+                        <DateOnlyField value={delivery.at} onChange={(v) => setDelivery((p) => ({ ...p, at: v }))} />
+                      </FormRow>
+                      <FormRow label="Delivered Time" required>
+                        <TimeOnlyField value={delivery.at} onChange={(v) => setDelivery((p) => ({ ...p, at: v }))} />
                       </FormRow>
                     </>
                   )}
 
                   {dispatchMethod === "pickup" && (
                     <>
-                      <FormRow label="Collected By" description="Full name of person who picked up the passport" required>
+                      <FormRow label="Collected By" required>
                         <Input
                           value={pickup.personName}
                           onChange={(e) => setPickup((p) => ({ ...p, personName: e.target.value }))}
                           placeholder="Name of collector"
-                          className="h-12 w-full text-sm border-slate-200 bg-white rounded-lg px-3.5"
+                          className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
                         />
                       </FormRow>
-                      <FormRow label="Collector Relationship" description="Self or authorized representative" required>
-                        <ToggleButtons
-                          options={[
-                            { value: "self", label: "Client Themselves" },
-                            { value: "representative", label: "Representative" },
-                          ]}
-                          value={pickup.relation}
-                          onChange={(v: any) => setPickup((p) => ({ ...p, relation: v }))}
-                        />
+                      <FormRow label="Collector Relationship" required>
+                        <Select value={pickup.relation} onValueChange={(v: any) => setPickup((p) => ({ ...p, relation: v }))}>
+                          <SelectTrigger className="h-12 w-full sm:w-72 text-base border-slate-200 bg-white rounded-lg px-3.5">
+                            <SelectValue placeholder="Select relationship..." />
+                          </SelectTrigger>
+                          <SelectContent className="z-[200]">
+                            <SelectItem value="self" className="text-base py-2">Client Themselves</SelectItem>
+                            <SelectItem value="representative" className="text-base py-2">Representative</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </FormRow>
-                      <FormRow label="Pickup Date & Time" description="Exact time the passport was collected" required>
-                        <Input
-                          type="datetime-local"
-                          value={pickup.at}
-                          onChange={(e) => setPickup((p) => ({ ...p, at: e.target.value }))}
-                          className="h-12 w-full border-slate-200 bg-white text-sm rounded-lg px-3.5"
-                        />
+                      <FormRow label="Pickup Date" required>
+                        <DateOnlyField value={pickup.at} onChange={(v) => setPickup((p) => ({ ...p, at: v }))} />
+                      </FormRow>
+                      <FormRow label="Pickup Time" required>
+                        <TimeOnlyField value={pickup.at} onChange={(v) => setPickup((p) => ({ ...p, at: v }))} />
                       </FormRow>
                     </>
                   )}
@@ -793,7 +826,7 @@ export function HandlingWizardDialog({
               variant="outline"
               onClick={handlePrev}
               disabled={currentStepIdx === 0}
-              className="h-11 px-5 text-sm font-bold gap-2 text-slate-700 hover:bg-slate-50 border-slate-300"
+              className="h-11 px-5 text-base font-bold gap-2 text-slate-700 hover:bg-slate-50 border-slate-300"
             >
               <ChevronLeft className="h-4 w-4" /> Previous
             </Button>
@@ -819,7 +852,7 @@ export function HandlingWizardDialog({
                 variant="outline"
                 onClick={handleNext}
                 disabled={currentStepIdx === PIPELINE.length - 1}
-                className="h-11 px-5 text-sm font-bold gap-2 text-slate-700 hover:bg-slate-50 border-slate-300"
+                className="h-11 px-5 text-base font-bold gap-2 text-slate-700 hover:bg-slate-50 border-slate-300"
               >
                 Next <ChevronRight className="h-4 w-4" />
               </Button>

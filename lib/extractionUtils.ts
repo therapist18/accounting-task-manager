@@ -126,6 +126,28 @@ interface Document {
   fields?: Field[];
 }
 
+// Some KYC document rows (an older/legacy shape) store their field definitions as
+// { fieldName, fieldType, isRequired } instead of the { name, type, required } shape every
+// function below reads — the same two conventions transformKycFields
+// (departments/stages/page.tsx) already reconciles for its own callers. Normalized once here,
+// at the sole entry point every real caller of this module actually uses (performExtraction),
+// so every `field.name`/`field.type` read further down works regardless of which shape the
+// source KYC row happens to be in. Without this, a legacy-shaped field's name comes through as
+// undefined, the prompt/example-output built from it literally says "undefined", and the module
+// crashes on the first `field.name.trim()` call once a response comes back.
+const normalizeField = (field: any): Field => ({
+  ...field,
+  name: field.name ?? field.fieldName,
+  type: field.type ?? field.fieldType,
+  required: field.required ?? field.isRequired,
+  arrayConfig: field.arrayConfig ? {
+    ...field.arrayConfig,
+    fields: Array.isArray(field.arrayConfig.fields) ? field.arrayConfig.fields.map(normalizeField) : field.arrayConfig.fields,
+  } : field.arrayConfig,
+});
+
+const normalizeFields = (fields: Field[]): Field[] => (fields || []).map(normalizeField);
+
 interface ExtractionResult {
   [key: string]: any;
 }
@@ -345,6 +367,8 @@ export const performExtraction = async (
   failedImage?: string;
   failedFields?: Field[];
 }> => {
+  fields = normalizeFields(fields);
+
   let attempts = 0;
   const MAX_ATTEMPTS = 3;
 

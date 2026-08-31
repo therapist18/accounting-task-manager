@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { SearchableSelect } from "@/components/ui/searchable-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Check, ChevronsUpDown, Loader2, User, Users, Building2, FileText, UserPlus, UserCheck, Shield, HelpCircle, Calendar, MessageSquare, ListTodo, Phone, Database, Folder, Search, HeartHandshake, Split, X, AlertCircle, Link2, PlusCircle } from "lucide-react"
+import { Check, ChevronsUpDown, Loader2, User, Users, Building2, FileText, UserPlus, UserCheck, Shield, HelpCircle, Calendar, MessageSquare, ListTodo, Phone, Database, Folder, Search, HeartHandshake, Split, X, AlertCircle, Link2, PlusCircle, Upload } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Textarea } from "@/components/ui/textarea"
@@ -26,6 +26,8 @@ import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, ev
 import { getInheritedOfficer, getDepartmentOfficerIds, getSubdepartmentOfficerIds } from "../../departments/departments/database"
 import { fetchOfficers, fetchTaskManagers, fetchTaskAssistants, fetchAllUsers, hasJobLevelAccess, buildSelectOptions, FilteredUserData, userService, DisplayUser } from "@/lib/shared-user-assignment-service"
 import { parseDateWithMonthName } from "@/app/generic-functions/dateUtils"
+import { fetchAllKycFields } from "../utils/taskManagerData"
+import { UploadModal } from "@/app/generic-components/UploadModal"
 
 const CLASS_D_ID = '1750687058159';
 const SPONSOR_SUBDEPT_ID = '26';
@@ -152,25 +154,36 @@ const resolveEnquiryDateForEdit = (task: any): string => {
 // toggles that always have a value) — when passed, it renders a small filled/empty dot next to
 // the label plus a tinted row background, so the user can tell at a glance which fields still
 // need attention versus which are already set, instead of having to read every value.
-const TableRow = ({ label, children, required = false, hasValue }: { label: string; children: React.ReactNode; required?: boolean; hasValue?: boolean }) => (
+// `error` is only ever passed once the user has tried to save (see `submitAttempted` in the
+// main component) — it overrides the amber "not set yet" styling with a red one and renders the
+// message under the field, so validation only becomes visible after a real save attempt instead
+// of greeting the user with a wall of red the moment the dialog opens.
+const TableRow = ({ label, children, required = false, hasValue, error }: { label: string; children: React.ReactNode; required?: boolean; hasValue?: boolean; error?: string }) => (
     <div className={cn(
         "grid grid-cols-12 gap-4 py-3 border-b transition-colors",
-        hasValue === false ? "border-amber-100 bg-amber-50/40 hover:bg-amber-50/60" : "border-slate-100 hover:bg-slate-50/50"
+        error ? "border-red-200 bg-red-50/40 hover:bg-red-50/60"
+            : hasValue === false ? "border-amber-100 bg-amber-50/40 hover:bg-amber-50/60" : "border-slate-100 hover:bg-slate-50/50"
     )}>
         <div className="col-span-4 flex items-center gap-2">
             {hasValue !== undefined && (
                 <span
-                    className={cn("h-1.5 w-1.5 rounded-full shrink-0", hasValue ? "bg-emerald-500" : "bg-amber-400")}
-                    title={hasValue ? "Filled" : "Not set yet"}
+                    className={cn("h-1.5 w-1.5 rounded-full shrink-0", error ? "bg-red-500" : hasValue ? "bg-emerald-500" : "bg-amber-400")}
+                    title={error ? error : hasValue ? "Filled" : "Not set yet"}
                 />
             )}
-            <Label className={cn("text-xs font-semibold", hasValue === false ? "text-amber-700" : "text-slate-700")}>
+            <Label className={cn("text-xs font-semibold", error ? "text-red-700" : hasValue === false ? "text-amber-700" : "text-slate-700")}>
                 {label}
                 {required && <span className="text-red-500 ml-1">*</span>}
             </Label>
         </div>
         <div className="col-span-8">
             {children}
+            {error && (
+                <p className="mt-1.5 flex items-center gap-1 text-xs font-medium text-red-600">
+                    <AlertCircle className="h-3 w-3 shrink-0" />
+                    {error}
+                </p>
+            )}
         </div>
     </div>
 );
@@ -192,6 +205,21 @@ export function EnquiryDialog({
     const [loadingPhoto, setLoadingPhoto] = useState(false)
     const [checkingWorkflow, setCheckingWorkflow] = useState(false)
     const [editableRNumber, setEditableRNumber] = useState('')
+    // Whether the R Number is explicitly marked "Unallocated" rather than just left blank —
+    // mirrors the Officer/Manager/Assistant "Unallocated" option so an empty field always reads
+    // as "not looked at yet" and Unallocated always reads as "looked at, deliberately none".
+    const [rNumberUnallocated, setRNumberUnallocated] = useState(false)
+    // Only render validation errors once the user has actually tried to save — see TableRow's
+    // own `error` prop comment.
+    const [submitAttempted, setSubmitAttempted] = useState(false)
+    const [isDependantsPopoverOpen, setIsDependantsPopoverOpen] = useState(false)
+    // Passport upload — lets the user attach the passport document inline instead of hitting a
+    // dead disabled field with no way forward. `passportKycDoc` is the KYC document-type
+    // definition (extraction fields + display name) for PASSPORT_DOCUMENT_ID, fetched once via
+    // fetchAllKycFields() (same cached helper summary-reports/RequirementsTab already use) so
+    // UploadModal gets the same field spec the rest of the app extracts against.
+    const [showPassportUpload, setShowPassportUpload] = useState(false)
+    const [passportKycDoc, setPassportKycDoc] = useState<any>(null)
 
     // Data lists
     const [individuals, setIndividuals] = useState<Individual[]>([])
@@ -313,14 +341,14 @@ export function EnquiryDialog({
 
     const officerOptions = useMemo(() => {
         if (availableOfficers.length === 0) {
-            return [{ value: 'none', label: 'No Officer' }];
+            return [{ value: 'none', label: 'Unallocated' }];
         }
         // Filter officers by job level access
         const filteredOfficers = availableOfficers.filter(officer =>
             hasJobLevelAccess(officer, formData.department_id, formData.subdepartment_id, formData.class_id)
         );
         return [
-            { value: 'none', label: 'No Officer' },
+            { value: 'none', label: 'Unallocated' },
             ...filteredOfficers.map(o => ({ value: o.id.toString(), label: o.displayName || o.full_name || o.name || 'Unknown' }))
         ];
     }, [availableOfficers, formData.department_id, formData.subdepartment_id, formData.class_id]);
@@ -408,13 +436,13 @@ export function EnquiryDialog({
 
     const managerOpts = useMemo(() => {
         if (!managersData || !Array.isArray(managersData)) {
-            return [{ value: 'none', label: 'No Manager' }];
+            return [{ value: 'none', label: 'Unallocated' }];
         }
         const filteredManagers = managersData.filter(manager =>
             hasJobLevelAccess(manager, formData.department_id, formData.subdepartment_id, formData.class_id)
         );
         return [
-            { value: 'none', label: 'No Manager' },
+            { value: 'none', label: 'Unallocated' },
             ...buildSelectOptions(filteredManagers, "displayName")
         ];
     }, [managersData, formData.department_id, formData.subdepartment_id, formData.class_id]);
@@ -422,13 +450,13 @@ export function EnquiryDialog({
     const assistantOpts = useMemo(() => {
         // Add null check to prevent runtime errors
         if (!assistantsData || !Array.isArray(assistantsData)) {
-            return [{ value: 'none', label: 'No Assistant' }];
+            return [{ value: 'none', label: 'Unallocated' }];
         }
         const filteredAssistants = assistantsData.filter(assistant =>
             hasJobLevelAccess(assistant, formData.department_id, formData.subdepartment_id, formData.class_id)
         );
         return [
-            { value: 'none', label: 'No Assistant' },
+            { value: 'none', label: 'Unallocated' },
             ...buildSelectOptions(filteredAssistants, 'displayName')
         ];
     }, [assistantsData, formData.department_id, formData.subdepartment_id, formData.class_id]);
@@ -568,6 +596,7 @@ export function EnquiryDialog({
         })
         setSelectedIndividual(null)
         setEditableRNumber('')
+        setRNumberUnallocated(false)
         setSelectedCompany('')
         setSelectedUnderstudy('')
         setUnderstudies([])
@@ -586,6 +615,32 @@ export function EnquiryDialog({
         setThirdPartySelections({})
         setCompanyIndividuals([])
     }, [])
+
+    // Fresh validation state per dialog open, and the Passport KYC document-type definition
+    // (extraction fields + display name) UploadModal needs — fetched once via the shared cached
+    // helper rather than re-querying every time the upload button is clicked.
+    useEffect(() => {
+        if (!open) return;
+        setSubmitAttempted(false);
+        fetchAllKycFields().then(({ kycDocsMap }) => {
+            const doc = kycDocsMap.get(PASSPORT_DOCUMENT_ID) || null;
+            // The Passport KYC row stores its fields in an older shape — { fieldName, fieldType,
+            // isRequired } — than the { name, type, required } shape UploadModal/ExtractionPreview
+            // are written against everywhere (both silently no-op on any field missing `.name`,
+            // which is exactly why the extraction succeeded but "Extracted Details" rendered
+            // empty). Normalize here, once, the same way transformKycFields (departments/stages/
+            // page.tsx) already reconciles this same two-shape split for its own callers.
+            setPassportKycDoc(doc ? {
+                ...doc,
+                fields: (doc.fields || []).map((f: any) => ({
+                    ...f,
+                    name: f.name ?? f.fieldName,
+                    type: f.type ?? f.fieldType,
+                    required: f.required ?? f.isRequired,
+                })),
+            } : null);
+        }).catch(err => console.error('Error loading passport document type:', err));
+    }, [open]);
 
     useEffect(() => {
         // Reset ref when dialog closes or task changes
@@ -1061,7 +1116,8 @@ export function EnquiryDialog({
     const handleIndividualSelect = useCallback(async (ind: Individual) => {
         setLoadingRelations(true)
         setSelectedIndividual(ind)
-        setEditableRNumber(ind?.r_number || '')
+        setRNumberUnallocated(ind?.r_number === 'Unallocated')
+        setEditableRNumber(ind?.r_number === 'Unallocated' ? '' : (ind?.r_number || ''))
         setCompanies([]); setSelectedCompany('')
         setUnderstudies([]); setSelectedUnderstudy('')
         setAvailableDependants([]); setSelectedDependants([]); setIncludeDependants(false)
@@ -1446,7 +1502,31 @@ export function EnquiryDialog({
         }
     }
 
+    // Every mandatory Client Identification field EXCEPT Include Dependants (explicitly left
+    // optional — see the section's own TableRow). Recomputed live off current state rather than
+    // stored separately, so an error clears itself the instant the user fixes it with no manual
+    // clearing logic needed; TableRow only actually renders these once submitAttempted is true.
+    const clientIdentificationErrors = useMemo(() => {
+        const errors: Record<string, string> = {};
+        if (!selectedIndividual) errors.primary_applicant = "Select the primary applicant.";
+        if (!selectedCompany) errors.company = 'Select a company, or choose "No Company Associated".';
+        if (applicantType === 'dependant' && !principalForDependant) errors.linked_principal = "Select the linked principal for this dependant.";
+        if (formData.class_id === CLASS_D_ID && !selectedUnderstudy) errors.understudy = "Select the related understudy.";
+        if (formData.subdepartment_id === SPONSOR_SUBDEPT_ID && !selectedSponsor) errors.sponsor = "Select a designated sponsor.";
+        return errors;
+    }, [selectedIndividual, selectedCompany, applicantType, principalForDependant, formData.class_id, selectedUnderstudy, formData.subdepartment_id, selectedSponsor]);
+
     const handleSubmit = async () => {
+        setSubmitAttempted(true);
+        if (Object.keys(clientIdentificationErrors).length > 0) {
+            toast({
+                title: "Missing required fields",
+                description: "Complete every required field in Client Identification before saving.",
+                variant: "destructive"
+            });
+            return;
+        }
+
         if (!selectedIndividual || !formData.department_id) return
 
         if (!taskToEdit && duplicateTaskConflicts.length > 0) {
@@ -1561,14 +1641,22 @@ export function EnquiryDialog({
                 }
             });
 
+            // 'none' is the explicit "Unallocated" choice for each of these three — same as an
+            // actually-empty selection, both mean "no one assigned", so both collapse to null
+            // rather than the literal string 'none' or (for company) NaN from Number('no_company').
+            const toAssignedId = (v: string) => (v && v !== 'none') ? Number(v) : null;
+
             const payload: any = {
                 job_description: formData.job_description,
                 individual_id: selectedIndividual.id,
-                company_id: selectedCompany ? Number(selectedCompany) : null,
+                company_id: (selectedCompany && selectedCompany !== 'no_company') ? Number(selectedCompany) : null,
                 passport_number: formData.passport_number,
                 duration: syncedDuration,
                 renewal_status: syncedRenewalStatus,
                 passport_handling_mode: formData.passport_handling_mode || null,
+                officer_id: toAssignedId(formData.officer_id),
+                task_manager_id: toAssignedId(formData.task_manager_id),
+                task_assistant_id: toAssignedId(formData.task_assistant_id),
                 applicant_details: {
                     id: selectedIndividual.id,
                     name: selectedIndividual.full_name,
@@ -1628,9 +1716,10 @@ export function EnquiryDialog({
                 ? supabase.from('tm_tasks').update(payload).eq('id', taskToEdit.id).select().single()
                 : supabase.from('tm_tasks').insert([insertPayload]).select().single();
 
-            const rNumberChanged = editableRNumber !== (selectedIndividual?.r_number || '');
+            const resolvedRNumber = rNumberUnallocated ? 'Unallocated' : editableRNumber;
+            const rNumberChanged = resolvedRNumber !== (selectedIndividual?.r_number || '');
             const rNumberPromise = (rNumberChanged && selectedIndividual?.id)
-                ? supabase.from('registry_individuals').update({ r_number: editableRNumber }).eq('id', selectedIndividual.id)
+                ? supabase.from('registry_individuals').update({ r_number: resolvedRNumber }).eq('id', selectedIndividual.id)
                 : Promise.resolve({ error: null });
 
             const [{ data: taskData, error: taskError }] = await Promise.all([taskPromise, rNumberPromise]);
@@ -1739,7 +1828,7 @@ export function EnquiryDialog({
                                             </RadioGroup>
                                         </TableRow>
 
-                                        <TableRow label="Primary Applicant" required hasValue={!!selectedIndividual}>
+                                        <TableRow label="Primary Applicant" required hasValue={!!selectedIndividual} error={submitAttempted ? clientIdentificationErrors.primary_applicant : undefined}>
                                             <div className="flex items-center gap-4">
                                                 {/* Photo Preview - UPDATED FOR PDF */}
                                                 <div className="shrink-0">
@@ -1806,7 +1895,7 @@ export function EnquiryDialog({
                                             </div>
                                         </TableRow>
 
-                                        <TableRow label="Company Associated" hasValue={!!selectedCompany}>
+                                        <TableRow label="Company Associated" required hasValue={!!selectedCompany} error={submitAttempted ? clientIdentificationErrors.company : undefined}>
                                             <div className="flex items-center gap-2 w-full">
                                                 <div className="flex-1">
                                                     <SearchableSelect
@@ -1862,23 +1951,62 @@ export function EnquiryDialog({
                                                 {loadingRelations ? (
                                                     <div className="flex items-center gap-2 text-slate-400 text-xs italic"><Loader2 className="h-3 w-3 animate-spin" /> Loading dependants...</div>
                                                 ) : availableDependants.length > 0 ? (
-                                                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-2">
-                                                        {availableDependants.map(dep => (
-                                                            <div key={dep.id} className="flex items-center space-x-2">
-                                                                <Checkbox
-                                                                    id={`dep-${dep.id}`}
-                                                                    checked={selectedDependants.includes(dep.id.toString())}
-                                                                    onCheckedChange={(checked) => {
-                                                                        setSelectedDependants(prev =>
-                                                                            checked ? [...prev, dep.id.toString()] : prev.filter(id => id !== dep.id.toString())
-                                                                        )
-                                                                    }}
-                                                                />
-                                                                <Label htmlFor={`dep-${dep.id}`} className="text-xs font-medium cursor-pointer">
-                                                                    {dep.full_name} <span className="text-[10px] text-slate-400 uppercase ml-1">({dep.relationship_type})</span>
-                                                                </Label>
+                                                    <div className="space-y-2">
+                                                        <Popover open={isDependantsPopoverOpen} onOpenChange={setIsDependantsPopoverOpen}>
+                                                            <PopoverTrigger asChild>
+                                                                <Button variant="outline" className="w-full justify-between h-11 border-slate-200 bg-white" type="button">
+                                                                    <span className="truncate">
+                                                                        {selectedDependants.length > 0
+                                                                            ? `${selectedDependants.length} dependant${selectedDependants.length === 1 ? '' : 's'} selected`
+                                                                            : "Choose dependants to include..."}
+                                                                    </span>
+                                                                    <ChevronsUpDown className="h-4 w-4 opacity-30" />
+                                                                </Button>
+                                                            </PopoverTrigger>
+                                                            <PopoverContent className="w-[400px] p-0" align="start">
+                                                                <Command>
+                                                                    <CommandInput placeholder="Search dependants..." />
+                                                                    <CommandList className="max-h-[250px] overflow-y-auto">
+                                                                        <CommandEmpty>No dependants found.</CommandEmpty>
+                                                                        <CommandGroup>
+                                                                            {availableDependants.map(dep => {
+                                                                                const depId = dep.id.toString();
+                                                                                const isSelected = selectedDependants.includes(depId);
+                                                                                return (
+                                                                                    <CommandItem
+                                                                                        key={dep.id}
+                                                                                        onSelect={() => setSelectedDependants(prev =>
+                                                                                            isSelected ? prev.filter(id => id !== depId) : [...prev, depId]
+                                                                                        )}
+                                                                                    >
+                                                                                        <Check className={cn("mr-2 h-4 w-4 text-blue-600", isSelected ? "opacity-100" : "opacity-0")} />
+                                                                                        {dep.full_name}
+                                                                                        <span className="text-[10px] text-slate-400 uppercase ml-1.5">({dep.relationship_type})</span>
+                                                                                    </CommandItem>
+                                                                                );
+                                                                            })}
+                                                                        </CommandGroup>
+                                                                    </CommandList>
+                                                                </Command>
+                                                            </PopoverContent>
+                                                        </Popover>
+                                                        {selectedDependants.length > 0 && (
+                                                            <div className="flex flex-wrap gap-1.5">
+                                                                {selectedDependants.map(depId => {
+                                                                    const dep = availableDependants.find(d => d.id.toString() === depId);
+                                                                    if (!dep) return null;
+                                                                    return (
+                                                                        <Badge key={depId} variant="secondary" className="text-xs py-1 px-2 bg-blue-50 text-blue-600 border-blue-100 flex items-center gap-1">
+                                                                            {dep.full_name}
+                                                                            <X
+                                                                                className="h-3 w-3 cursor-pointer hover:text-blue-800"
+                                                                                onClick={() => setSelectedDependants(prev => prev.filter(id => id !== depId))}
+                                                                            />
+                                                                        </Badge>
+                                                                    );
+                                                                })}
                                                             </div>
-                                                        ))}
+                                                        )}
                                                     </div>
                                                 ) : (
                                                     <div className="text-xs text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100 italic">
@@ -1889,7 +2017,7 @@ export function EnquiryDialog({
                                         )}
 
                                         {selectedIndividual && applicantType === 'dependant' && (
-                                            <TableRow label="Linked Principal" hasValue={!!principalForDependant}>
+                                            <TableRow label="Linked Principal" required hasValue={!!principalForDependant} error={submitAttempted ? clientIdentificationErrors.linked_principal : undefined}>
                                                 {loadingRelations ? (
                                                     <div className="flex items-center gap-2 text-slate-400 text-xs italic"><Loader2 className="h-3 w-3 animate-spin" /> Loading principal...</div>
                                                 ) : principalForDependant ? (
@@ -1963,7 +2091,7 @@ export function EnquiryDialog({
                                         )}
 
                                         {formData.class_id === CLASS_D_ID && (
-                                            <TableRow label="Related Understudy" required hasValue={!!selectedUnderstudy}>
+                                            <TableRow label="Related Understudy" required hasValue={!!selectedUnderstudy} error={submitAttempted ? clientIdentificationErrors.understudy : undefined}>
                                                 {loadingRelations ? (
                                                     <div className="flex items-center gap-2 text-slate-400 text-xs italic"><Loader2 className="h-3 w-3 animate-spin" /> Loading available understudies...</div>
                                                 ) : understudies.length > 0 ? (
@@ -1988,7 +2116,7 @@ export function EnquiryDialog({
                                         )}
 
                                         {formData.subdepartment_id === SPONSOR_SUBDEPT_ID && (
-                                            <TableRow label="Designated Sponsor" hasValue={!!selectedSponsor}>
+                                            <TableRow label="Designated Sponsor" required hasValue={!!selectedSponsor} error={submitAttempted ? clientIdentificationErrors.sponsor : undefined}>
                                                 <Popover open={isSponsorPopoverOpen} onOpenChange={setIsSponsorPopoverOpen}>
                                                     <PopoverTrigger asChild>
                                                         <Button variant="outline" className="w-full justify-between h-11 border-emerald-100 bg-emerald-50/30 hover:bg-emerald-50">
@@ -2181,58 +2309,82 @@ export function EnquiryDialog({
                                         </TableRow>
 
                                         <TableRow label="Passport Number" hasValue={!!formData.passport_number}>
-                                            <Input
-                                                type="text"
-                                                value={formData.passport_number}
-                                                disabled={!taskToEdit}
-                                                onChange={e => setFormData(prev => ({ ...prev, passport_number: e.target.value }))}
-                                                placeholder="Enter passport number"
-                                                className="h-11 border-slate-200 bg-white"
-                                            />
+                                            <div className="flex items-center gap-2">
+                                                <Input
+                                                    type="text"
+                                                    value={formData.passport_number}
+                                                    disabled={!taskToEdit}
+                                                    onChange={e => setFormData(prev => ({ ...prev, passport_number: e.target.value }))}
+                                                    placeholder="Enter passport number"
+                                                    className="h-11 border-slate-200 bg-white"
+                                                />
+                                                {/* No number yet, and the field is disabled until one exists (see above) — the
+                                                    only way forward is uploading the passport document itself, so surface that
+                                                    inline rather than leaving a dead, disabled input with just a warning. */}
+                                                {!formData.passport_number && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="icon"
+                                                        onClick={() => setShowPassportUpload(true)}
+                                                        disabled={!selectedIndividual}
+                                                        className="h-11 w-11 shrink-0 border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-40"
+                                                        title="Upload passport document"
+                                                    >
+                                                        <Upload className="h-4 w-4" />
+                                                        <span className="sr-only">Upload passport document</span>
+                                                    </Button>
+                                                )}
+                                            </div>
                                             {!taskToEdit && selectedIndividual && !formData.passport_number && (
                                                 <div className="mt-2 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-md">
                                                     <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                                                    No passport found. Please upload the passport document for this individual first.
+                                                    No passport found. Upload the passport document using the button above — the number will populate once it's processed.
                                                 </div>
                                             )}
                                         </TableRow>
 
-                                        <TableRow label="R Number" hasValue={!!editableRNumber}>
-                                            <Input
-                                                type="text"
-                                                value={editableRNumber}
-                                                onChange={e => setEditableRNumber(e.target.value)}
-                                                disabled={!selectedIndividual}
-                                                placeholder={selectedIndividual ? "Enter R number" : "—"}
-                                                className="h-11 border-slate-200 bg-white"
-                                            />
+                                        <TableRow label="R Number" hasValue={!!editableRNumber || rNumberUnallocated}>
+                                            <div className="flex items-center gap-3">
+                                                <Input
+                                                    type="text"
+                                                    value={editableRNumber}
+                                                    onChange={e => setEditableRNumber(e.target.value)}
+                                                    disabled={!selectedIndividual || rNumberUnallocated}
+                                                    placeholder={rNumberUnallocated ? "Unallocated" : selectedIndividual ? "Enter R number" : "—"}
+                                                    className="h-11 border-slate-200 bg-white"
+                                                />
+                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                    <Checkbox
+                                                        id="r-number-unallocated"
+                                                        checked={rNumberUnallocated}
+                                                        disabled={!selectedIndividual}
+                                                        onCheckedChange={(checked) => {
+                                                            setRNumberUnallocated(checked === true);
+                                                            if (checked) setEditableRNumber('');
+                                                        }}
+                                                    />
+                                                    <Label htmlFor="r-number-unallocated" className="text-xs font-medium text-slate-500 cursor-pointer whitespace-nowrap">
+                                                        Unallocated
+                                                    </Label>
+                                                </div>
+                                            </div>
                                         </TableRow>
 
                                         {formData.department_id === '1' && (
                                             <TableRow label="Passport Endorsement" hasValue={!!formData.passport_handling_mode}>
-                                                <RadioGroup
+                                                <Select
                                                     value={formData.passport_handling_mode || ''}
                                                     onValueChange={(v: any) => setFormData(prev => ({ ...prev, passport_handling_mode: v }))}
-                                                    className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-lg max-w-sm"
                                                 >
-                                                    {[
-                                                        { value: 'bcl', label: 'BCL Handles Stamping' },
-                                                        { value: 'client', label: 'Client Handles It' },
-                                                    ].map(opt => (
-                                                        <div key={opt.value} className="relative">
-                                                            <RadioGroupItem value={opt.value} id={`phm-${opt.value}`} className="sr-only" />
-                                                            <Label
-                                                                htmlFor={`phm-${opt.value}`}
-                                                                className={cn(
-                                                                    "flex items-center justify-center text-center py-2 px-2 rounded-md cursor-pointer text-xs font-bold transition-all",
-                                                                    formData.passport_handling_mode === opt.value ? "bg-white text-blue-600 shadow-sm" : "text-slate-500"
-                                                                )}
-                                                            >
-                                                                {opt.label}
-                                                            </Label>
-                                                        </div>
-                                                    ))}
-                                                </RadioGroup>
+                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
+                                                        <SelectValue placeholder="Select who handles endorsement..." />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="bcl">BCL Handles Stamping</SelectItem>
+                                                        <SelectItem value="client">Client Handles It</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
                                                 <p className="text-xs text-slate-400 mt-1.5">
                                                     Whether BCL staff will carry the passport to Nyayo House for stamping, or the client handles that themselves. Tracked in Passport Endorsement Tracking once this job reaches Write-up Completed.
                                                 </p>
@@ -2467,6 +2619,33 @@ export function EnquiryDialog({
                     </DialogFooter>
                 </DialogContent >
             </Dialog >
+
+            {/* Passport Upload — same UploadModal (storage upload + extraction) RequirementsTab
+                uses for every other document, pointed at this individual's passport row
+                directly (acc_portal_directors_documents, keyed by director_id/document_id)
+                rather than a task/stage, since this dialog can run before a task exists. */}
+            {showPassportUpload && selectedIndividual && (
+                <UploadModal
+                    isOpen={showPassportUpload}
+                    onClose={() => setShowPassportUpload(false)}
+                    onSuccess={() => {
+                        setShowPassportUpload(false);
+                        fetchPassportNumber(selectedIndividual.id);
+                        fetchApplicantPhoto(selectedIndividual.id);
+                        toast({ title: "Passport Uploaded", description: "The passport number will populate automatically once it's processed." });
+                    }}
+                    documentName={passportKycDoc?.display_name || passportKycDoc?.name || "Passport"}
+                    documentFields={passportKycDoc?.fields || []}
+                    entityName={selectedIndividual.full_name}
+                    entityId={String(selectedIndividual.id)}
+                    selectedDoc={passportKycDoc ? { ...passportKycDoc, id: PASSPORT_DOCUMENT_ID } : undefined}
+                    selectedMember={{ id: selectedIndividual.id, full_name: selectedIndividual.full_name, type: 'individual', name: selectedIndividual.full_name }}
+                    selectedDocumentId={PASSPORT_DOCUMENT_ID}
+                    targetTable="acc_portal_directors_documents"
+                    idFieldName="director_id"
+                    documentIdFieldName="document_id"
+                />
+            )}
 
             {/* Company Association Dialog */}
             < Dialog open={showCompanyAssociationDialog} onOpenChange={setShowCompanyAssociationDialog} >

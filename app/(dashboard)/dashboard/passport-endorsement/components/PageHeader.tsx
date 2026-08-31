@@ -26,6 +26,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { COLUMN_GROUP_BY_ID, GROUP_ACCENTS, GROUP_ORDER } from "./HandlingTable";
 
 // ── Shared UI: Standard Tabs (matches summary-reports/PageHeader) ──
 const TAB_LIST_CLASS = "bg-slate-100 p-1 rounded-full border border-slate-200";
@@ -176,7 +177,7 @@ function parseDateText(text: string): Date | undefined {
   return isNaN(d.getTime()) ? undefined : d;
 }
 
-function DateTextInput({ value, onChange, placeholder }: { value: Date | undefined; onChange: (d: Date | undefined) => void; placeholder: string }) {
+export function DateTextInput({ value, onChange, placeholder, inputClassName }: { value: Date | undefined; onChange: (d: Date | undefined) => void; placeholder: string; inputClassName?: string }) {
   const [text, setText] = useState(() => (value ? format(value, "dd/MM/yyyy") : ""));
 
   React.useEffect(() => {
@@ -202,7 +203,8 @@ function DateTextInput({ value, onChange, placeholder }: { value: Date | undefin
       placeholder={placeholder}
       className={cn(
         "w-[85px] bg-transparent text-sm font-medium text-slate-700 outline-none placeholder:text-slate-400 placeholder:font-normal",
-        text && !DATE_TEXT_RE.test(text) && "text-red-500"
+        text && !DATE_TEXT_RE.test(text) && "text-red-500",
+        inputClassName
       )}
     />
   );
@@ -543,7 +545,11 @@ export function HierarchyTabs({
   );
 }
 
-// ── Column Visibility Helper (matches summary-reports ColumnVisibilityDialog) ──
+// ── Column Visibility Helper ──
+// Grouped into the same sections HandlingTable itself uses to color-code its column bands
+// (COLUMN_GROUP_BY_ID/GROUP_ACCENTS/GROUP_ORDER, imported from there) — so toggling columns
+// reads as "which phases of the workflow do I want to see" instead of one undifferentiated list
+// of 29 checkboxes, and each section can be bulk-toggled on its own.
 export function ColumnVisibilityDialog({ columns, visibleColumnIds, setVisibleColumnIds }: any) {
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -551,9 +557,24 @@ export function ColumnVisibilityDialog({ columns, visibleColumnIds, setVisibleCo
   const toggle = (id: string, checked: boolean) =>
     setVisibleColumnIds((prev: string[]) => (checked ? [...prev, id] : prev.filter((x: string) => x !== id)));
 
+  const setColumnsVisible = (ids: string[], checked: boolean) =>
+    setVisibleColumnIds((prev: string[]) =>
+      checked ? Array.from(new Set([...prev, ...ids])) : prev.filter((x: string) => !ids.includes(x))
+    );
+
   const filteredColumns = searchQuery
     ? columns.filter((c: any) => c.label.toLowerCase().includes(searchQuery.toLowerCase()))
     : columns;
+
+  const sections = GROUP_ORDER
+    .map((groupId: string) => ({
+      groupId,
+      accent: GROUP_ACCENTS[groupId],
+      cols: filteredColumns.filter((c: any) => (COLUMN_GROUP_BY_ID[c.id] || "case") === groupId),
+    }))
+    .filter((s: any) => s.cols.length > 0);
+
+  const visibleCount = columns.filter((c: any) => visibleColumnIds.includes(c.id)).length;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -562,27 +583,76 @@ export function ColumnVisibilityDialog({ columns, visibleColumnIds, setVisibleCo
           <Eye className="h-3.5 w-3.5" /> Columns
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md max-h-[80vh] flex flex-col rounded-2xl">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col rounded-2xl p-0 gap-0 overflow-hidden">
+        <DialogHeader className="px-5 pt-5 pb-4">
           <DialogTitle className="text-lg font-black text-slate-900">Manage Columns</DialogTitle>
           <div className="relative mt-2">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <Input placeholder="Search columns..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 h-10 rounded-md border-slate-300 text-sm font-medium focus:ring-1 focus:ring-blue-500" />
           </div>
         </DialogHeader>
-        <div className="flex-grow overflow-y-auto pr-2 mt-3 custom-scrollbar">
-          <div className="space-y-2 py-1">
-            {filteredColumns.map((col: any) => (
-              <label key={col.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
-                <Checkbox
-                  id={`summary-col-${col.id}`}
-                  checked={visibleColumnIds.includes(col.id)}
-                  onCheckedChange={(checked) => toggle(col.id, checked === true)}
-                />
-                <span className="text-sm font-bold text-slate-800 flex-1 truncate">{col.label}</span>
-              </label>
-            ))}
+
+        <div className="flex items-center justify-between px-5 py-2.5 border-y border-slate-100 bg-slate-50/70">
+          <span className="text-xs font-semibold text-slate-500">
+            <span className="text-slate-800 tabular-nums">{visibleCount}</span> of {columns.length} visible
+          </span>
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={() => setColumnsVisible(columns.map((c: any) => c.id), true)} className="text-xs font-bold text-blue-600 hover:text-blue-700">
+              Select All
+            </button>
+            <span className="text-slate-300">|</span>
+            <button type="button" onClick={() => setColumnsVisible(columns.map((c: any) => c.id), false)} className="text-xs font-bold text-slate-400 hover:text-slate-600">
+              Clear
+            </button>
           </div>
+        </div>
+
+        <div className="flex-grow overflow-y-auto px-5 custom-scrollbar">
+          <div className="py-1 divide-y divide-slate-100">
+            {sections.map(({ groupId, accent, cols }: any) => {
+              const sectionVisibleCount = cols.filter((c: any) => visibleColumnIds.includes(c.id)).length;
+              const allSelected = sectionVisibleCount === cols.length;
+              return (
+                <div key={groupId} className="py-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={cn("h-2 w-2 rounded-full shrink-0", accent?.headerBg || "bg-slate-400")} />
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 truncate">{accent?.label || groupId}</span>
+                      <span className="text-[11px] text-slate-400 tabular-nums shrink-0">{sectionVisibleCount}/{cols.length}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setColumnsVisible(cols.map((c: any) => c.id), !allSelected)}
+                      className="text-[11px] font-semibold text-slate-400 hover:text-blue-600 shrink-0"
+                    >
+                      {allSelected ? "Clear" : "All"}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                    {cols.map((col: any) => (
+                      <label key={col.id} className="flex items-center gap-3 px-2 py-1.5 rounded-md cursor-pointer hover:bg-slate-50 transition-colors min-w-0">
+                        <Checkbox
+                          id={`col-${col.id}`}
+                          checked={visibleColumnIds.includes(col.id)}
+                          onCheckedChange={(checked) => toggle(col.id, checked === true)}
+                        />
+                        <span className="text-sm font-medium text-slate-700 flex-1 truncate">{col.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            {sections.length === 0 && (
+              <p className="text-sm text-slate-400 italic text-center py-8">No columns match "{searchQuery}"</p>
+            )}
+          </div>
+        </div>
+
+        <div className="px-5 py-3 border-t border-slate-100 bg-white">
+          <Button size="sm" className="w-full h-9 rounded-lg font-bold" onClick={() => setOpen(false)}>
+            Done
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

@@ -95,7 +95,7 @@ export default function SummaryReportsPage() {
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
   const [activeClassIds, setActiveClassIds] = useState<string[]>([]);
   const [activeSubClassIds, setActiveSubClassIds] = useState<string[]>([]);
-  const [activeTaskStatus, setActiveTaskStatus] = useState<'all' | 'active' | 'enquiry' | 'wip' | 'completed' | 'overdue'>('active');
+  const [activeTaskStatus, setActiveTaskStatus] = useState<'all' | 'active' | 'enquiry' | 'wip' | 'completed' | 'overdue'>('all');
 
   const [activePerspective, setActivePerspective] = useState<'all' | 'officers' | 'managers' | 'clients'>('all');
   const [officerFilterMode, setOfficerFilterMode] = useState<'current' | 'history'>('history');

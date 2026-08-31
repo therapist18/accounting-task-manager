@@ -75,7 +75,7 @@ const STEP_BADGE_CLASSES: Record<HandlingStep, string> = {
 // Column-group config. Each phase group keeps its own accent identity — coloured header band
 // (matching the body tint + hover tint below) so the workflow reads at a glance; the Reports page
 // chrome (label styling, sort icons, resize handles, sticky shadows) is layered on top.
-const GROUP_ACCENTS: Record<string, {
+export const GROUP_ACCENTS: Record<string, {
   label: string;
   headerBg: string;
   headerHover: string;
@@ -149,7 +149,7 @@ const GROUP_ACCENTS: Record<string, {
   },
 };
 
-const COLUMN_GROUP_BY_ID: Record<string, string> = {
+export const COLUMN_GROUP_BY_ID: Record<string, string> = {
   task_id: "case", applicant: "case", company: "case", company_prefix: "case",
   sub_department: "case", class_name: "case", write_up_date: "case",
   doc_issue_date: "case", doc_expiry_date: "case", passport_number: "case",
@@ -165,7 +165,19 @@ const COLUMN_GROUP_BY_ID: Record<string, string> = {
 
 const colGroupId = (colId: string) => COLUMN_GROUP_BY_ID[colId] || "case";
 
+// Canonical left-to-right section order, matching HANDLING_COLUMNS' own ordering — shared with
+// ColumnVisibilityDialog (PageHeader.tsx) so its section list reads in the same order the table
+// itself groups columns into.
+export const GROUP_ORDER = ["case", "received", "taken", "returned", "notified", "dispatch", "completed"];
+
 function StepBadge({ step }: { step: HandlingStep }) {
+  if (!step || !STEP_LABELS[step]) {
+    return (
+      <span className="inline-flex items-center px-3 py-1 rounded-full border text-sm font-semibold uppercase tracking-wider shadow-sm bg-red-50 text-red-500 border-red-200 italic">
+        Missing
+      </span>
+    );
+  }
   // Overriding STEP_LABELS display if it's mode_unset to exactly match screenshot text
   const label = step === "mode_unset" ? "MODE NOT SET" : STEP_LABELS[step];
   return (
@@ -174,6 +186,11 @@ function StepBadge({ step }: { step: HandlingStep }) {
     </span>
   );
 }
+
+// Shared empty-cell placeholder for the columns that show a plain data value (no badge) — used
+// wherever a cell's underlying value is genuinely absent, so "no data yet" reads consistently
+// as "Missing" instead of a bare dash across the table.
+const MissingCell = () => <span className="text-sm italic text-red-500">Missing</span>;
 
 function fmtDateOnly(iso: string | null | undefined): string | null {
   if (!iso) return null;
@@ -268,19 +285,65 @@ export function HandlingTable({
     [allGroupChunks]
   );
 
+  const isSubDeptScoped = activeSubDeptId != null && activeSubDeptId !== "all";
+
+  const getSubDeptName = (task: any) => {
+    const sdId = task.subdepartment_id?.toString();
+    if (!sdId) return "—";
+    const dept = (departments || []).find((d: any) => (d.tm_subdepartments || []).some((s: any) => s.id.toString() === sdId));
+    return dept?.tm_subdepartments?.find((s: any) => s.id.toString() === sdId)?.name || "—";
+  };
+
+  // Canonical section order across the FULL (unpaginated) row set — subDepartments' own order
+  // first, then any names that only show up via tasks (e.g. no matching subdepartment record)
+  // alphabetically with "—" last. Computed once over all of `rows` so it's stable across pages,
+  // rather than being re-derived per-page (which would let a name's relative position drift
+  // depending on which names happen to appear on any given page).
+  const orderedSectionNames = useMemo(() => {
+    if (isSubDeptScoped) return [];
+    const names: string[] = [];
+    const seen = new Set<string>();
+    (subDepartments || []).forEach((s: any) => {
+      const name = s?.name || "N/A";
+      if (!seen.has(name)) { seen.add(name); names.push(name); }
+    });
+    const leftover = new Set<string>();
+    rows.forEach((row: any) => leftover.add(getSubDeptName(row.task)));
+    Array.from(leftover)
+      .filter((n) => !seen.has(n))
+      .sort((a, b) => (a === "—" ? 1 : b === "—" ? -1 : a.localeCompare(b)))
+      .forEach((n) => { seen.add(n); names.push(n); });
+    return names;
+  }, [rows, departments, subDepartments, isSubDeptScoped]);
+
+  // Grouped by sub-department (in orderedSectionNames order) BEFORE pagination, so a
+  // sub-department's tasks stay contiguous in the underlying list — e.g. 20 ETA tasks fill all
+  // of page 1 plus spill the first 5 rows of the next sub-department onto it, rather than each
+  // page's fixed-size slice cutting through the middle of the un-grouped list and scattering one
+  // sub-department's rows across many pages in small, disconnected fragments. Array.sort is
+  // stable, so rows within the same sub-department keep whatever order `rows` already had
+  // (the user's active column sort).
+  const groupedRows = useMemo(() => {
+    if (isSubDeptScoped) return rows;
+    const orderIndex = new Map(orderedSectionNames.map((name, i) => [name, i]));
+    return [...rows].sort((a: any, b: any) => {
+      const ai = orderIndex.get(getSubDeptName(a.task)) ?? orderedSectionNames.length;
+      const bi = orderIndex.get(getSubDeptName(b.task)) ?? orderedSectionNames.length;
+      return ai - bi;
+    });
+  }, [rows, orderedSectionNames, isSubDeptScoped]);
+
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25); // Defaulting to 10 matching screenshot
 
-  const totalPages = Math.max(1, Math.ceil(rows.length / rowsPerPage));
+  const totalPages = Math.max(1, Math.ceil(groupedRows.length / rowsPerPage));
   useEffect(() => { if (currentPage > totalPages) setCurrentPage(totalPages); }, [currentPage, totalPages]);
-  useEffect(() => { setCurrentPage(1); }, [rows.length]);
+  useEffect(() => { setCurrentPage(1); }, [groupedRows.length]);
 
   const paginatedRows = useMemo(() => {
     const start = (currentPage - 1) * rowsPerPage;
-    return rows.slice(start, start + rowsPerPage);
-  }, [rows, currentPage, rowsPerPage]);
-
-  const isSubDeptScoped = activeSubDeptId != null && activeSubDeptId !== "all";
+    return groupedRows.slice(start, start + rowsPerPage);
+  }, [groupedRows, currentPage, rowsPerPage]);
 
   const sectionedRows = useMemo(() => {
     const stack: ({ type: "section"; name: string; count: number } | { type: "row"; row: any; idx: number })[] = [];
@@ -290,40 +353,22 @@ export function HandlingTable({
       return stack;
     }
 
-    const subDeptNameFor = (task: any) => {
-      const sdId = task.subdepartment_id?.toString();
-      if (!sdId) return "—";
-      const dept = (departments || []).find((d: any) => (d.tm_subdepartments || []).some((s: any) => s.id.toString() === sdId));
-      return dept?.tm_subdepartments?.find((s: any) => s.id.toString() === sdId)?.name || "—";
-    };
-
     const map = new Map<string, typeof paginatedRows>();
     paginatedRows.forEach((row: any) => {
-      const name = subDeptNameFor(row.task);
+      const name = getSubDeptName(row.task);
       if (!map.has(name)) map.set(name, []);
       map.get(name)!.push(row);
     });
 
-    const orderedNames: string[] = [];
-    const seen = new Set<string>();
-    (subDepartments || []).forEach((s: any) => {
-      const name = s?.name || "N/A";
-      if (!seen.has(name)) { seen.add(name); orderedNames.push(name); }
-    });
-    Array.from(map.keys())
-      .filter((n) => !seen.has(n))
-      .sort((a, b) => (a === "—" ? 1 : b === "—" ? -1 : a.localeCompare(b)))
-      .forEach((n) => { seen.add(n); orderedNames.push(n); });
-
     let pageIdx = 0;
-    orderedNames.forEach((name) => {
+    orderedSectionNames.forEach((name) => {
       const group = map.get(name);
       if (!group || group.length === 0) return;
       stack.push({ type: "section", name, count: group.length });
       group.forEach((row: any) => { stack.push({ type: "row", row, idx: pageIdx }); pageIdx++; });
     });
     return stack;
-  }, [paginatedRows, departments, subDepartments, isSubDeptScoped]);
+  }, [paginatedRows, orderedSectionNames, isSubDeptScoped]);
 
   const dispatchLabelFor = (record: any) => {
     if (record?.dispatch_method === "delivery") {
@@ -334,13 +379,6 @@ export function HandlingTable({
       return record.pickup_person_name ? `Pickup — ${record.pickup_person_name}` : "Client Pickup";
     }
     return null;
-  };
-
-  const getSubDeptName = (task: any) => {
-    const sdId = task.subdepartment_id?.toString();
-    if (!sdId) return "—";
-    const dept = (departments || []).find((d: any) => (d.tm_subdepartments || []).some((s: any) => s.id.toString() === sdId));
-    return dept?.tm_subdepartments?.find((s: any) => s.id.toString() === sdId)?.name || "—";
   };
 
   const getClassName = (task: any) => {
@@ -668,37 +706,49 @@ export function HandlingTable({
                           content = <span className="text-sm text-slate-600">#{task.id}</span>;
                           break;
                         case "applicant":
-                          content = <span className="text-sm font-semibold text-slate-900 capitalize">{task.applicant_name}</span>;
+                          content = task.applicant_name
+                            ? <span className="text-sm font-semibold text-slate-900 capitalize">{task.applicant_name}</span>
+                            : <MissingCell />;
                           break;
                         case "company":
-                          content = <span className="text-sm text-slate-600 uppercase font-semibold">{company?.name || task.company_name || "—"}</span>;
+                          content = (company?.name || task.company_name)
+                            ? <span className="text-sm text-slate-600 uppercase font-semibold">{company?.name || task.company_name}</span>
+                            : <MissingCell />;
                           break;
                         case "company_prefix":
-                          content = <span className="text-sm text-slate-600 uppercase font-semibold">{company?.prefix || "—"}</span>;
+                          content = company?.prefix
+                            ? <span className="text-sm text-slate-600 uppercase font-semibold">{company.prefix}</span>
+                            : <MissingCell />;
                           break;
-                        case "sub_department":
-                          content = <span className="text-sm font-semibold text-slate-600 uppercase">{getSubDeptName(task)}</span>;
+                        case "sub_department": {
+                          const sdName = getSubDeptName(task);
+                          content = sdName !== "—" ? <span className="text-sm font-semibold text-slate-600 uppercase">{sdName}</span> : <MissingCell />;
                           break;
-                        case "class_name":
-                          content = <span className="text-sm font-semibold text-slate-600">{getClassName(task)}</span>;
+                        }
+                        case "class_name": {
+                          const cName = getClassName(task);
+                          content = cName !== "—" ? <span className="text-sm font-semibold text-slate-600">{cName}</span> : <MissingCell />;
                           break;
+                        }
                         case "write_up_date": {
                           const wud = fmtStageDate(writeUpDate);
-                          content = wud ? <span className="text-sm text-slate-600">{wud}</span> : <span className="text-slate-300">—</span>;
+                          content = wud ? <span className="text-sm text-slate-600">{wud}</span> : <MissingCell />;
                           break;
                         }
                         case "doc_issue_date": {
                           const val = fmtStageDate(docIssueDate);
-                          content = val ? <span className="text-sm text-slate-600">{val}</span> : <span className="text-slate-300">—</span>;
+                          content = val ? <span className="text-sm text-slate-600">{val}</span> : <MissingCell />;
                           break;
                         }
                         case "doc_expiry_date": {
                           const val = fmtStageDate(docExpiryDate);
-                          content = val ? <span className="text-sm text-slate-600">{val}</span> : <span className="text-slate-300">—</span>;
+                          content = val ? <span className="text-sm text-slate-600">{val}</span> : <MissingCell />;
                           break;
                         }
                         case "passport_number":
-                          content = <span className="text-sm text-slate-600 uppercase">{task.passport_number || "—"}</span>;
+                          content = task.passport_number
+                            ? <span className="text-sm text-slate-600 uppercase">{task.passport_number}</span>
+                            : <MissingCell />;
                           break;
                         case "mode":
                           content = mode ? (
@@ -708,11 +758,7 @@ export function HandlingTable({
                             )}>
                               {mode === "bcl" ? "BCL Handles" : "Client Handles"}
                             </span>
-                          ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-sm font-semibold uppercase tracking-wider border bg-slate-50 text-slate-700 border-slate-200">
-                              Not Set
-                            </span>
-                          );
+                          ) : <MissingCell />;
                           break;
                         case "current_step":
                           content = <StepBadge step={step} />;
