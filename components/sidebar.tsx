@@ -13,18 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useSidebar } from "./ui/sidebar";
-
-type AuthUser = {
-    isSuperAdmin?: boolean;
-    permissions?: string[];
-    name?: string;
-    displayName?: string;
-    firstName?: string;
-    lastName?: string;
-    email?: string;
-    role?: string;
-    [key: string]: any;
-};
+import { useCurrentUser as useSharedCurrentUser, hasPermission, type AuthUser } from "@/lib/hooks/use-current-user";
 
 const navItems = [
     { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permission: "dashboard.view" },
@@ -118,11 +107,8 @@ const navItems = [
 ];
 
 // --- Access & Permission Functions ---
-function hasPermission(user: AuthUser | null, permission: string) {
-    if (!permission) return true;
-    if (user?.isSuperAdmin) return true;
-    return Array.isArray(user?.permissions) && user.permissions.includes(permission);
-}
+// hasPermission is now shared via lib/hooks/use-current-user.ts (so page-level components can
+// gate an action by the same Access Control Matrix check, not just nav-item visibility).
 
 function filterNavItems(items: any[], user: AuthUser | null) {
     return items
@@ -136,28 +122,17 @@ function filterNavItems(items: any[], user: AuthUser | null) {
         .filter(Boolean);
 }
 
+// Thin wrapper over the shared hook that adds the sidebar's own "kick to login if session
+// invalid" behavior — kept local rather than in the shared hook so other consumers (e.g. a page
+// checking one permission) don't also force-navigate on a transient/failed session fetch.
 function useCurrentUser() {
-    const [user, setUser] = useState<AuthUser | null>(null);
-    const [loading, setLoading] = useState(true);
+    const { user, loading } = useSharedCurrentUser();
 
     useEffect(() => {
-        const fetchUser = async () => {
-            try {
-                const response = await fetch("/api/auth/session");
-                const json = await response.json();
-                if (json?.authenticated && json?.user) {
-                    setUser(json.user);
-                } else {
-                    window.location.replace("/login");
-                }
-            } catch (error) {
-                console.error(error);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchUser();
-    }, []);
+        if (!loading && !user) {
+            window.location.replace("/login");
+        }
+    }, [loading, user]);
 
     return { user, loading };
 }

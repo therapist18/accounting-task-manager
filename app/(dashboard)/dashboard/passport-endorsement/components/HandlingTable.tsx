@@ -10,10 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Settings2, ArrowUpDown, ArrowLeftRight, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, SearchX, Layers, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { STEP_LABELS, type HandlingStep } from "../utils/database";
+import { STEP_LABELS, resolveHandlingParty, getHandlingMethodOption, type HandlingStep } from "../utils/database";
 
 export const HANDLING_COLUMNS = [
   { id: "task_id", label: "Task ID" },
+  { id: "created_at", label: "Created At" }, // task.date_initiated || task.created_at — same date the page's default date filter uses
   { id: "applicant", label: "Applicant" },
   { id: "company", label: "Company" },
   { id: "company_prefix", label: "Company Name" },
@@ -25,6 +26,7 @@ export const HANDLING_COLUMNS = [
   { id: "passport_number", label: "Passport No." },
   { id: "mode", label: "Mode" },
   { id: "current_step", label: "Current Step" },
+  { id: "received_method", label: "Received Method" },
   { id: "received_by", label: "Received By" },
   { id: "received_date", label: "Received Date" },
   { id: "received_time", label: "Received Time" },
@@ -67,9 +69,17 @@ const STEP_BADGE_CLASSES: Record<HandlingStep, string> = {
   at_nyayo: "bg-orange-50 text-orange-700 border-orange-200",
   stamped_back: "bg-teal-50 text-teal-700 border-teal-200",
   ready_for_dispatch: "bg-blue-50 text-blue-700 border-blue-200",
-  out_for_delivery: "bg-indigo-50 text-indigo-700 border-indigo-200",
-  awaiting_pickup: "bg-indigo-50 text-indigo-700 border-indigo-200",
   completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
+};
+
+// Shared badge colors for the unified 5-way handling method, used identically for both the
+// Received Method and Dispatch Mode columns.
+const HANDLING_METHOD_BADGE_CLASSES: Record<string, string> = {
+  client_self: "bg-slate-100 text-slate-600 border-slate-200",
+  client_representative: "bg-violet-50 text-violet-700 border-violet-200",
+  client_rider: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  bcl_rider: "bg-blue-50 text-blue-700 border-blue-200",
+  bcl_staff: "bg-emerald-50 text-emerald-700 border-emerald-200",
 };
 
 // Column-group config. Each phase group keeps its own accent identity — coloured header band
@@ -150,11 +160,11 @@ export const GROUP_ACCENTS: Record<string, {
 };
 
 export const COLUMN_GROUP_BY_ID: Record<string, string> = {
-  task_id: "case", applicant: "case", company: "case", company_prefix: "case",
+  task_id: "case", created_at: "case", applicant: "case", company: "case", company_prefix: "case",
   sub_department: "case", class_name: "case", write_up_date: "case",
   doc_issue_date: "case", doc_expiry_date: "case", passport_number: "case",
   mode: "case", current_step: "case",
-  received_by: "received", received_date: "received", received_time: "received",
+  received_method: "received", received_by: "received", received_date: "received", received_time: "received",
   taken_by: "taken", taken_date: "taken", taken_time: "taken",
   returned_by: "returned", returned_date: "returned", returned_time: "returned",
   notified_by: "notified", notified_date: "notified", notified_time: "notified",
@@ -250,6 +260,7 @@ export function HandlingTable({
   departments,
   subDepartments,
   activeSubDeptId,
+  couriers = [],
   onManage,
   sortConfig,
   handleSort,
@@ -370,16 +381,21 @@ export function HandlingTable({
     return stack;
   }, [paginatedRows, orderedSectionNames, isSubDeptScoped]);
 
-  const dispatchLabelFor = (record: any) => {
-    if (record?.dispatch_method === "delivery") {
-      if (record.delivery_type === "courier") return record.courier_rider_name ? `Courier — ${record.courier_rider_name}` : "Courier";
-      if (record.delivery_type === "staff") return `Staff — ${getStaffName(record.delivered_by) || ""}`;
-    }
-    if (record?.dispatch_method === "pickup") {
-      return record.pickup_person_name ? `Pickup — ${record.pickup_person_name}` : "Client Pickup";
-    }
-    return null;
-  };
+  const receivedLabelFor = (record: any, task: any) => resolveHandlingParty(record?.received_method, {
+    staffName: getStaffName(record?.received_by),
+    personName: record?.received_person_name,
+    courier: couriers.find((c: any) => c.id === record?.received_courier_id) || null,
+    riderName: record?.received_rider_name,
+    clientName: task?.applicant_name,
+  }) || null;
+
+  const dispatchLabelFor = (record: any, task: any) => resolveHandlingParty(record?.dispatch_method, {
+    staffName: getStaffName(record?.dispatch_handled_by),
+    personName: record?.dispatch_person_name,
+    courier: couriers.find((c: any) => c.id === record?.dispatch_courier_id) || null,
+    riderName: record?.dispatch_rider_name,
+    clientName: task?.applicant_name,
+  }) || null;
 
   const getClassName = (task: any) => {
     const cid = task.class_id?.toString();
@@ -400,6 +416,7 @@ export function HandlingTable({
     const { task, record, mode, step, writeUpDate, docIssueDate, docExpiryDate } = row;
     switch (colId) {
       case "task_id": return !!task.id;
+      case "created_at": return !!fmtDateOnly(task.date_initiated || task.created_at);
       case "applicant": return !!task.applicant_name;
       case "company": return !!(companies.get(task.company_id)?.name || task.company_name);
       case "company_prefix": return !!(companies.get(task.company_id)?.prefix);
@@ -411,7 +428,7 @@ export function HandlingTable({
       case "passport_number": return !!task.passport_number;
       case "mode": return !!mode;
       case "current_step": return !!step;
-      case "received_by": return !!(getStaffName(record?.received_by) || record?.brought_by_name);
+      case "received_by": return !!receivedLabelFor(record, task);
       case "received_date": return !!fmtDateOnly(record?.received_at);
       case "received_time": return !!fmtTimeOnly(record?.received_at);
       case "taken_by": return !!getStaffName(record?.taken_by);
@@ -425,11 +442,11 @@ export function HandlingTable({
       case "notified_time": return !!fmtTimeOnly(record?.client_notified_at);
       case "dispatch_mode": return !!record?.dispatch_method;
       case "dispatch_handled_by": return !!getStaffName(record?.dispatch_handled_by);
-      case "dispatch_by": return !!dispatchLabelFor(record);
-      case "dispatch_date": return !!fmtDateOnly(record?.delivered_at || record?.pickup_at);
-      case "dispatch_time": return !!fmtTimeOnly(record?.delivered_at || record?.pickup_at);
-      case "completed_date": return step === "completed" && !!fmtDateOnly(record?.delivered_at || record?.pickup_at || record?.returned_at);
-      case "completed_time": return step === "completed" && !!fmtTimeOnly(record?.delivered_at || record?.pickup_at || record?.returned_at);
+      case "dispatch_by": return !!dispatchLabelFor(record, task);
+      case "dispatch_date": return !!fmtDateOnly(record?.dispatched_at);
+      case "dispatch_time": return !!fmtTimeOnly(record?.dispatched_at);
+      case "completed_date": return step === "completed" && !!fmtDateOnly(record?.dispatched_at || record?.returned_at);
+      case "completed_time": return step === "completed" && !!fmtTimeOnly(record?.dispatched_at || record?.returned_at);
       default: return false;
     }
   };
@@ -705,6 +722,11 @@ export function HandlingTable({
                         case "task_id":
                           content = <span className="text-sm text-slate-600">#{task.id}</span>;
                           break;
+                        case "created_at": {
+                          const d = fmtDateOnly(task.date_initiated || task.created_at);
+                          content = d ? <span className="text-sm text-slate-600">{d}</span> : <MissingCell />;
+                          break;
+                        }
                         case "applicant":
                           content = task.applicant_name
                             ? <span className="text-sm font-semibold text-slate-900 capitalize">{task.applicant_name}</span>
@@ -763,8 +785,16 @@ export function HandlingTable({
                         case "current_step":
                           content = <StepBadge step={step} />;
                           break;
+                        case "received_method": {
+                          content = record?.received_method
+                            ? <span className={cn("inline-flex items-center px-2.5 py-1 rounded-full border text-sm font-semibold uppercase tracking-widest", HANDLING_METHOD_BADGE_CLASSES[record.received_method])}>
+                                {getHandlingMethodOption(record.received_method)?.receivedLabel || record.received_method}
+                              </span>
+                            : <span className="text-slate-300">—</span>;
+                          break;
+                        }
                         case "received_by": {
-                          const by = getStaffName(record?.received_by) || record?.brought_by_name;
+                          const by = receivedLabelFor(record, task);
                           content = by ? <span className="text-sm text-slate-600">{by}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
@@ -824,24 +854,11 @@ export function HandlingTable({
                           break;
                         }
                         case "dispatch_mode": {
-                          if (!record?.dispatch_method) {
-                            content = <span className="text-slate-300">—</span>;
-                            break;
-                          }
-                          const isPickup = record.dispatch_method === "pickup";
-                          const isCourier = record.delivery_type === "courier";
-                          content = (
-                            <span className={cn(
-                              "inline-flex items-center px-2.5 py-1 rounded-full border text-sm font-semibold uppercase tracking-widest",
-                              isPickup
-                                ? "bg-slate-100 text-slate-600 border-slate-200"
-                                : isCourier
-                                ? "bg-indigo-50 text-indigo-700 border-indigo-200"
-                                : "bg-blue-50 text-blue-700 border-blue-200"
-                            )}>
-                              {isPickup ? "Client Pickup" : isCourier ? "Delivery · Courier" : "Delivery · Staff"}
-                            </span>
-                          );
+                          content = record?.dispatch_method
+                            ? <span className={cn("inline-flex items-center px-2.5 py-1 rounded-full border text-sm font-semibold uppercase tracking-widest", HANDLING_METHOD_BADGE_CLASSES[record.dispatch_method])}>
+                                {getHandlingMethodOption(record.dispatch_method)?.dispatchLabel || record.dispatch_method}
+                              </span>
+                            : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "dispatch_handled_by": {
@@ -850,27 +867,27 @@ export function HandlingTable({
                           break;
                         }
                         case "dispatch_by": {
-                          const by = dispatchLabelFor(record);
+                          const by = dispatchLabelFor(record, task);
                           content = by ? <span className="text-sm text-slate-600">{by}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "dispatch_date": {
-                          const d = fmtDateOnly(record?.delivered_at || record?.pickup_at);
+                          const d = fmtDateOnly(record?.dispatched_at);
                           content = d ? <span className="text-sm text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "dispatch_time": {
-                          const t = fmtTimeOnly(record?.delivered_at || record?.pickup_at);
+                          const t = fmtTimeOnly(record?.dispatched_at);
                           content = t ? <span className="text-sm text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "completed_date": {
-                          const d = step === "completed" ? fmtDateOnly(record?.delivered_at || record?.pickup_at || record?.returned_at) : null;
+                          const d = step === "completed" ? fmtDateOnly(record?.dispatched_at || record?.returned_at) : null;
                           content = d ? <span className="text-sm text-slate-600">{d}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "completed_time": {
-                          const t = step === "completed" ? fmtTimeOnly(record?.delivered_at || record?.pickup_at || record?.returned_at) : null;
+                          const t = step === "completed" ? fmtTimeOnly(record?.dispatched_at || record?.returned_at) : null;
                           content = t ? <span className="text-sm text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
                           break;
                         }

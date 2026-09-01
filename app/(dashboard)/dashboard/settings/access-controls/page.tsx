@@ -2,9 +2,9 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  Save, Info, Lock, Check, X, ShieldCheck,
-  AlertCircle, RefreshCw, ChevronRight, Search,
-  ChevronLeft, ChevronsLeft, ChevronsRight
+  Save, Info, Lock, Check,
+  RefreshCw, ChevronDown, ChevronRight, Search,
+  CornerDownRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -23,10 +23,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-import { PERMISSIONS } from "@/lib/auth/permissions";
+import { PERMISSIONS, type PermissionDefinition } from "@/lib/auth/permissions";
 import type { PermissionKey } from "@/lib/auth/permissions";
 import type { ScannerUserRole } from "@/lib/auth/types";
 
@@ -39,7 +38,40 @@ const ROLES: { key: ScannerUserRole; label: string }[] = [
   { key: "petty_cash_user", label: "Petty Cash User" },
 ];
 
-const ITEMS_PER_PAGE = 10;
+// Category (group) -> Page/Component (a permission with no parentKey) -> Action (a permission
+// whose parentKey points at that page) — a real tree instead of one flat list per group, so
+// "Manage Couriers" reads as nested inside "Passport Endorsement Tracking" rather than sitting
+// beside it as an unrelated row.
+interface PageNode {
+  permission: PermissionDefinition;
+  children: PermissionDefinition[];
+}
+interface GroupNode {
+  group: string;
+  pages: PageNode[];
+}
+
+function buildTree(permissions: PermissionDefinition[]): GroupNode[] {
+  const byKey = new Map(permissions.map((p) => [p.key, p]));
+  const topLevel = permissions.filter((p) => !p.parentKey || !byKey.has(p.parentKey));
+  const childrenByParent = new Map<string, PermissionDefinition[]>();
+  permissions.forEach((p) => {
+    if (p.parentKey && byKey.has(p.parentKey)) {
+      const list = childrenByParent.get(p.parentKey) || [];
+      list.push(p);
+      childrenByParent.set(p.parentKey, list);
+    }
+  });
+
+  const groups = new Map<string, PageNode[]>();
+  topLevel.forEach((p) => {
+    const list = groups.get(p.group) || [];
+    list.push({ permission: p, children: childrenByParent.get(p.key) || [] });
+    groups.set(p.group, list);
+  });
+
+  return Array.from(groups.entries()).map(([group, pages]) => ({ group, pages }));
+}
 
 export default function AccessControlsPage() {
   const [initialData, setInitialData] = useState<Record<string, PermissionKey[]>>({});
@@ -49,9 +81,8 @@ export default function AccessControlsPage() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Pagination & Filtering State
   const [searchQuery, setSearchQuery] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadPermissions();
@@ -75,30 +106,38 @@ export default function AccessControlsPage() {
     }
   }
 
-  // Filter Logic
-  const filteredPermissions = useMemo(() => {
-    return PERMISSIONS.filter(p =>
-      p.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.group.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.key.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [searchQuery]);
+  const tree = useMemo(() => buildTree(PERMISSIONS), []);
 
-  // Pagination Logic
-  const totalPages = Math.ceil(filteredPermissions.length / ITEMS_PER_PAGE);
-  const paginatedPermissions = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredPermissions.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredPermissions, currentPage]);
+  // A page or action matches on its own label/key/description; a page also counts as a match
+  // if any of its actions match, so searching "courier" still surfaces the Passport Endorsement
+  // Tracking page (with only the matching action shown under it) rather than nothing at all.
+  const filteredTree = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return tree;
 
-  // Grouping paginated results
-  const groupedPermissions = useMemo(() => {
-    return paginatedPermissions.reduce<Record<string, typeof PERMISSIONS>>((groups, p) => {
-      groups[p.group] = groups[p.group] ?? [];
-      groups[p.group].push(p);
-      return groups;
-    }, {});
-  }, [paginatedPermissions]);
+    const matches = (p: PermissionDefinition) =>
+      p.label.toLowerCase().includes(q) || p.key.toLowerCase().includes(q) || p.description.toLowerCase().includes(q);
+
+    return tree
+      .map((g) => {
+        const pages = g.pages
+          .map((page) => {
+            const childMatches = page.children.filter(matches);
+            const pageMatches = matches(page.permission);
+            if (!pageMatches && childMatches.length === 0) return null;
+            return { permission: page.permission, children: pageMatches ? page.children : childMatches };
+          })
+          .filter((p): p is PageNode => p !== null);
+        return pages.length > 0 ? { group: g.group, pages } : null;
+      })
+      .filter((g): g is GroupNode => g !== null);
+  }, [tree, searchQuery]);
+
+  const totalRules = useMemo(() => PERMISSIONS.length, []);
+  const visibleRules = useMemo(
+    () => filteredTree.reduce((sum, g) => sum + g.pages.reduce((s, p) => s + 1 + p.children.length, 0), 0),
+    [filteredTree]
+  );
 
   const hasChanges = useMemo(() => JSON.stringify(initialData) !== JSON.stringify(drafts), [initialData, drafts]);
 
@@ -108,6 +147,15 @@ export default function AccessControlsPage() {
       if (existing.has(permission)) existing.delete(permission);
       else existing.add(permission);
       return { ...current, [roleKey]: Array.from(existing) };
+    });
+  }
+
+  function toggleGroupCollapsed(group: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
     });
   }
 
@@ -146,7 +194,7 @@ export default function AccessControlsPage() {
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-xs font-medium text-slate-500">Security Management</span>
               <div className="h-1 w-1 rounded-full bg-slate-300" />
-              <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">{filteredPermissions.length} Total Rules</span>
+              <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">{totalRules} Total Rules</span>
             </div>
           </div>
         </div>
@@ -158,7 +206,7 @@ export default function AccessControlsPage() {
               placeholder="Search permissions..."
               className="pl-9 bg-white border-slate-200"
               value={searchQuery}
-              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+              onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
           <Button
@@ -172,14 +220,17 @@ export default function AccessControlsPage() {
         </div>
       </div>
 
-      {/* TABLE CONTAINER - STICKY MAGIC STARTS HERE */}
+      {/* TABLE CONTAINER */}
       <div className="relative flex-1 min-h-0 rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col overflow-hidden">
         <div className="overflow-auto flex-1 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
           <TooltipProvider delayDuration={0}>
             <Table className="border-separate border-spacing-0">
               <TableHeader className="sticky top-0 z-30">
                 <TableRow className="bg-slate-50/95 backdrop-blur-sm hover:bg-slate-50/95">
-                  <TableHead className="sticky left-0 z-40 w-[300px] min-w-[300px] bg-slate-50 border-r border-b font-bold text-slate-900 py-6 px-8 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                  <TableHead className="sticky left-0 z-40 w-14 min-w-14 bg-slate-50 border-r border-b font-bold text-slate-500 py-6 text-center shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                    #
+                  </TableHead>
+                  <TableHead className="sticky left-14 z-40 w-[320px] min-w-[320px] bg-slate-50 border-r border-b font-bold text-slate-900 py-6 px-6 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
                     System Permissions
                   </TableHead>
                   {ROLES.map((role) => (
@@ -192,88 +243,118 @@ export default function AccessControlsPage() {
 
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={ROLES.length + 1} className="h-64 text-center">Loading...</TableCell></TableRow>
-                ) : Object.entries(groupedPermissions).map(([group, permissions]) => (
-                  <React.Fragment key={group}>
-                    <TableRow className="bg-slate-50/30">
-                      <TableCell colSpan={ROLES.length + 1} className="py-2 px-8 border-b sticky left-0 z-10">
-                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-600">{group}</span>
-                      </TableCell>
-                    </TableRow>
-                    {permissions.map((p) => (
-                      <TableRow key={p.key} className="group hover:bg-indigo-50/20 transition-colors">
-                        <TableCell className="sticky left-0 z-20 bg-white group-hover:bg-indigo-50/10 py-5 px-8 border-r border-b shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
-                          <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-bold text-slate-800">{p.label}</span>
-                              <Tooltip>
-                                <TooltipTrigger><Info className="h-3 w-3 text-slate-300" /></TooltipTrigger>
-                                <TooltipContent className="bg-slate-900 text-[10px]">{p.key}</TooltipContent>
-                              </Tooltip>
-                            </div>
-                            <span className="text-[11px] text-slate-500 line-clamp-1">{p.description}</span>
-                          </div>
+                  <TableRow><TableCell colSpan={ROLES.length + 2} className="h-64 text-center">Loading...</TableCell></TableRow>
+                ) : filteredTree.length === 0 ? (
+                  <TableRow><TableCell colSpan={ROLES.length + 2} className="h-40 text-center text-sm text-slate-400">No permissions match "{searchQuery}".</TableCell></TableRow>
+                ) : filteredTree.map((g, groupIdx) => {
+                  const groupIndex = groupIdx + 1;
+                  const isCollapsed = collapsedGroups.has(g.group);
+                  return (
+                    <React.Fragment key={g.group}>
+                      <TableRow className="bg-slate-100/70 hover:bg-slate-100/70">
+                        <TableCell className="sticky left-0 z-20 bg-slate-100/70 border-r border-b py-2.5 text-center">
+                          <span className="text-[10px] font-black text-slate-400">{groupIndex}</span>
                         </TableCell>
-                        {ROLES.map((role) => (
-                          <TableCell key={`${role.key}-${p.key}`} className="text-center border-b p-0 group-hover:bg-indigo-50/5">
-                            <div className="flex items-center justify-center">
-                              <Switch
-                                checked={(drafts[role.key] ?? []).includes(p.key)}
-                                onCheckedChange={() => togglePermission(role.key, p.key)}
-                                className="data-[state=checked]:bg-indigo-600"
-                              />
-                            </div>
-                          </TableCell>
-                        ))}
+                        <TableCell colSpan={ROLES.length + 1} className="py-2.5 px-6 border-b sticky left-14 z-10">
+                          <button
+                            type="button"
+                            onClick={() => toggleGroupCollapsed(g.group)}
+                            className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-[0.15em] text-indigo-600 hover:text-indigo-700"
+                          >
+                            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                            {g.group}
+                            <span className="font-semibold text-slate-400 normal-case tracking-normal">
+                              ({g.pages.reduce((s, p) => s + 1 + p.children.length, 0)})
+                            </span>
+                          </button>
+                        </TableCell>
                       </TableRow>
-                    ))}
-                  </React.Fragment>
-                ))}
+
+                      {!isCollapsed && g.pages.map((page, pageIdx) => {
+                        const pageIndex = `${groupIndex}.${pageIdx + 1}`;
+                        return (
+                          <React.Fragment key={page.permission.key}>
+                            <TableRow className="group hover:bg-indigo-50/20 transition-colors">
+                              <TableCell className="sticky left-0 z-20 bg-white group-hover:bg-indigo-50/10 border-r border-b text-center">
+                                <span className="text-[11px] font-bold text-slate-400 tabular-nums">{pageIndex}</span>
+                              </TableCell>
+                              <TableCell className="sticky left-14 z-20 bg-white group-hover:bg-indigo-50/10 py-5 px-6 border-r border-b shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
+                                <div className="flex flex-col gap-0.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-bold text-slate-800">{page.permission.label}</span>
+                                    <Tooltip>
+                                      <TooltipTrigger><Info className="h-3 w-3 text-slate-300" /></TooltipTrigger>
+                                      <TooltipContent className="bg-slate-900 text-[10px]">{page.permission.key}</TooltipContent>
+                                    </Tooltip>
+                                  </div>
+                                  <span className="text-[11px] text-slate-500 line-clamp-1">{page.permission.description}</span>
+                                </div>
+                              </TableCell>
+                              {ROLES.map((role) => (
+                                <TableCell key={`${role.key}-${page.permission.key}`} className="text-center border-b p-0 group-hover:bg-indigo-50/5">
+                                  <div className="flex items-center justify-center">
+                                    <Switch
+                                      checked={(drafts[role.key] ?? []).includes(page.permission.key)}
+                                      onCheckedChange={() => togglePermission(role.key, page.permission.key)}
+                                      className="data-[state=checked]:bg-indigo-600"
+                                    />
+                                  </div>
+                                </TableCell>
+                              ))}
+                            </TableRow>
+
+                            {page.children.map((action, actionIdx) => {
+                              const actionIndex = `${pageIndex}.${actionIdx + 1}`;
+                              return (
+                                <TableRow key={action.key} className="group hover:bg-indigo-50/20 transition-colors">
+                                  <TableCell className="sticky left-0 z-20 bg-white group-hover:bg-indigo-50/10 border-r border-b text-center">
+                                    <span className="text-[11px] font-medium text-slate-300 tabular-nums">{actionIndex}</span>
+                                  </TableCell>
+                                  <TableCell className="sticky left-14 z-20 bg-white group-hover:bg-indigo-50/10 py-4 pl-10 pr-6 border-r border-b shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
+                                    <div className="flex items-start gap-2">
+                                      <CornerDownRight className="h-3.5 w-3.5 text-slate-300 shrink-0 mt-0.5" />
+                                      <div className="flex flex-col gap-0.5 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-sm font-semibold text-slate-700">{action.label}</span>
+                                          <Tooltip>
+                                            <TooltipTrigger><Info className="h-3 w-3 text-slate-300" /></TooltipTrigger>
+                                            <TooltipContent className="bg-slate-900 text-[10px]">{action.key}</TooltipContent>
+                                          </Tooltip>
+                                        </div>
+                                        <span className="text-[11px] text-slate-500 line-clamp-1">{action.description}</span>
+                                      </div>
+                                    </div>
+                                  </TableCell>
+                                  {ROLES.map((role) => (
+                                    <TableCell key={`${role.key}-${action.key}`} className="text-center border-b p-0 group-hover:bg-indigo-50/5">
+                                      <div className="flex items-center justify-center">
+                                        <Switch
+                                          checked={(drafts[role.key] ?? []).includes(action.key)}
+                                          onCheckedChange={() => togglePermission(role.key, action.key)}
+                                          className="data-[state=checked]:bg-indigo-600"
+                                        />
+                                      </div>
+                                    </TableCell>
+                                  ))}
+                                </TableRow>
+                              );
+                            })}
+                          </React.Fragment>
+                        );
+                      })}
+                    </React.Fragment>
+                  );
+                })}
               </TableBody>
             </Table>
           </TooltipProvider>
         </div>
 
-        {/* PAGINATION FOOTER */}
-        <div className="shrink-0 border-t bg-slate-50/50 px-6 py-4 flex items-center justify-between">
+        {/* FOOTER */}
+        <div className="shrink-0 border-t bg-slate-50/50 px-6 py-3 flex items-center justify-between">
           <p className="text-xs font-medium text-slate-500">
-            Showing <span className="text-slate-900">{Math.min(filteredPermissions.length, (currentPage - 1) * ITEMS_PER_PAGE + 1)}</span> to <span className="text-slate-900">{Math.min(filteredPermissions.length, currentPage * ITEMS_PER_PAGE)}</span> of <span className="text-slate-900">{filteredPermissions.length}</span> results
+            Showing <span className="text-slate-900">{visibleRules}</span> of <span className="text-slate-900">{totalRules}</span> permissions across <span className="text-slate-900">{filteredTree.length}</span> categories
           </p>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline" size="icon" className="h-8 w-8"
-              onClick={() => setCurrentPage(1)} disabled={currentPage === 1}
-            >
-              <ChevronsLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline" size="icon" className="h-8 w-8"
-              onClick={() => setCurrentPage(prev => prev - 1)} disabled={currentPage === 1}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-
-            <div className="flex items-center gap-1 mx-2">
-              <span className="text-xs font-bold px-3 py-1 bg-white border rounded shadow-sm text-indigo-600">{currentPage}</span>
-              <span className="text-xs text-slate-400">of</span>
-              <span className="text-xs font-bold px-3 py-1 text-slate-600">{totalPages}</span>
-            </div>
-
-            <Button
-              variant="outline" size="icon" className="h-8 w-8"
-              onClick={() => setCurrentPage(prev => prev + 1)} disabled={currentPage === totalPages}
-            >
-              <ChevronsRight className="h-4 w-4 rotate-180" /> {/* Reusing icon for next */}
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline" size="icon" className="h-8 w-8"
-              onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}
-            >
-              <ChevronsRight className="h-4 w-4" />
-            </Button>
-          </div>
         </div>
       </div>
 

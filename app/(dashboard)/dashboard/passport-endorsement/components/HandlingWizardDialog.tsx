@@ -26,14 +26,20 @@ import {
   Check,
   ChevronsUpDown,
   CalendarDays,
+  Eraser,
+  Copy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/hooks/use-toast";
+import { supabase } from "@/lib/supabase/client";
 import { DateTextInput } from "./PageHeader";
 import {
   upsertHandlingRecord,
   updateTaskHandlingMode,
   markTaskEndorsedIfPending,
+  HANDLING_METHOD_OPTIONS,
+  getHandlingMethodOption,
+  composeDispatchMessage,
   type PassportHandlingRecord,
   type Courier,
 } from "../utils/database";
@@ -81,28 +87,6 @@ function FormRow({
         </Label>
       </div>
       <div className="w-full sm:w-[62%] min-w-0 flex-1">{children}</div>
-    </div>
-  );
-}
-
-function ToggleButtons({ options, value, onChange }: any) {
-  return (
-    <div className="flex flex-wrap gap-1.5 p-1.5 bg-slate-100 rounded-xl w-fit border border-slate-200/60">
-      {options.map((opt: any) => (
-        <button
-          key={opt.value}
-          type="button"
-          onClick={() => onChange(opt.value)}
-          className={cn(
-            "px-4 py-2 rounded-lg text-sm md:text-base font-bold transition-all",
-            value === opt.value
-              ? "bg-white text-blue-600 shadow-xs font-black"
-              : "text-slate-600 hover:text-slate-900"
-          )}
-        >
-          {opt.label}
-        </button>
-      ))}
     </div>
   );
 }
@@ -199,6 +183,123 @@ function TimeOnlyField({ value, onChange }: { value: string; onChange: (v: strin
   );
 }
 
+// The one unified 5-way "how did it move" picker, shared by the Received step ("how did it
+// arrive") and the Dispatch step ("how is it getting back") — same options, direction-specific
+// wording (HANDLING_METHOD_OPTIONS' receivedLabel/dispatchLabel), and the same conditional
+// extra fields: a plain name for "someone the client knows", or a courier/rider service pick
+// (+ rider name/phone for an on_demand one, + a tracking ref for a company one) for either
+// "sent a rider/courier" method. bcl_staff needs nothing extra — the step's own staff-by picker
+// already names which BCL staff member handled it.
+function HandlingMethodFields({ direction, state, setState, couriers, task, existingClientPhone }: any) {
+  const courier = (couriers || []).find((c: any) => c.id === state.courierId) || null;
+  const opt = getHandlingMethodOption(state.method);
+  const isSelf = state.method === "client_self";
+  const isRepresentative = state.method === "client_representative";
+  const showPersonFields = !!opt?.needsPersonName;
+  const isRiderMethod = !!opt?.needsCourier;
+  const isOnDemand = courier?.courier_type === "on_demand";
+  const isCompanyCourier = courier?.courier_type === "company";
+
+  // "Client brought/picked it up themselves" pre-fills from the task's own applicant name and
+  // whatever phone number is already on file for them (see the individualContact fetch in the
+  // dialog) — still just a default shown in the field, not baked into state, so typing over it
+  // works exactly like any other field and the save functions apply the same fallback.
+  const effectiveName = state.personName || (isSelf ? (task?.applicant_name || "") : "");
+  const effectivePhone = state.personPhone || (isSelf ? (existingClientPhone || "") : "");
+
+  return (
+    <>
+      <FormRow label={direction === "received" ? "Received Method" : "Dispatch Method"} required>
+        <Select value={state.method} onValueChange={(v) => setState((p: any) => ({ ...p, method: v }))}>
+          <SelectTrigger className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5">
+            <SelectValue placeholder={direction === "received" ? "Select how it arrived..." : "Select how it's getting back..."} />
+          </SelectTrigger>
+          <SelectContent className="z-[200]">
+            {HANDLING_METHOD_OPTIONS.map((opt: any) => (
+              <SelectItem key={opt.value} value={opt.value} className="text-base py-2">
+                {direction === "received" ? opt.receivedLabel : opt.dispatchLabel}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FormRow>
+
+      {showPersonFields && (
+        <>
+          <FormRow label={isSelf ? "Client's Name" : "Representative's Name"} required={isRepresentative}>
+            <Input
+              value={effectiveName}
+              onChange={(e) => setState((p: any) => ({ ...p, personName: e.target.value }))}
+              placeholder="Full name"
+              className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
+            />
+          </FormRow>
+          <FormRow label={isSelf ? "Client's Phone" : "Representative's Phone"}>
+            <Input
+              value={effectivePhone}
+              onChange={(e) => setState((p: any) => ({ ...p, personPhone: e.target.value }))}
+              placeholder="e.g. +254 712 345 678"
+              className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
+            />
+          </FormRow>
+        </>
+      )}
+
+      {isRiderMethod && (
+        <>
+          <FormRow label="Courier / Rider Service" required>
+            <Select
+              value={state.courierId}
+              onValueChange={(v) => setState((p: any) => ({ ...p, courierId: v, riderName: "", riderPhone: "", trackingRef: "" }))}
+            >
+              <SelectTrigger className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5">
+                <SelectValue placeholder="Select courier/rider service..." />
+              </SelectTrigger>
+              <SelectContent className="z-[200]">
+                {(couriers || []).map((c: any) => (
+                  <SelectItem key={c.id} value={c.id} className="text-base py-2">{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FormRow>
+
+          {isOnDemand && (
+            <>
+              <FormRow label="Rider Name" required>
+                <Input
+                  value={state.riderName}
+                  onChange={(e) => setState((p: any) => ({ ...p, riderName: e.target.value }))}
+                  placeholder="Full name of rider"
+                  className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
+                />
+              </FormRow>
+              <FormRow label="Rider Phone">
+                <Input
+                  value={state.riderPhone}
+                  onChange={(e) => setState((p: any) => ({ ...p, riderPhone: e.target.value }))}
+                  placeholder="e.g. +254 712 345 678"
+                  className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
+                />
+              </FormRow>
+            </>
+          )}
+
+          {isCompanyCourier && (
+            <FormRow label="Tracking Reference">
+              <Input
+                value={state.trackingRef}
+                onChange={(e) => setState((p: any) => ({ ...p, trackingRef: e.target.value }))}
+                placeholder="e.g. WB-92841"
+                className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
+              />
+            </FormRow>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
 const PRIMARY_BTN = "h-11 px-6 rounded-lg text-base font-bold gap-2 text-white shadow-sm hover:opacity-95 transition-opacity";
 const PRIMARY_STYLE = { backgroundColor: "#376bae" };
 
@@ -224,7 +325,7 @@ function Stepper({
     taken: !!record?.taken_at,
     returned: !!record?.returned_at,
     notified: !!record?.client_notified_at,
-    dispatch: !!record?.dispatch_method && (!!record?.delivered_at || !!record?.pickup_at),
+    dispatch: !!record?.dispatch_method && !!record?.dispatched_at,
   };
 
   return (
@@ -302,24 +403,54 @@ export function HandlingWizardDialog({
   const [savingStep, setSavingStep] = useState<string | null>(null);
   const [activeStep, setActiveStep] = useState<string>("received");
 
-  // Local field state
-  const [received, setReceived] = useState({ at: "", by: "", broughtBy: "" });
+  // Local field state — received/dispatch share the same shape (method + its associated
+  // courier/rider/person details) since both sides of the chain of custody now use the same
+  // unified 5-way method.
+  const [received, setReceived] = useState({ at: "", by: "", method: "", personName: "", personPhone: "", courierId: "", riderName: "", riderPhone: "", trackingRef: "" });
   const [taken, setTaken] = useState({ at: "", by: "" });
   const [returned, setReturned] = useState({ at: "", by: "" });
   const [notified, setNotified] = useState({ at: "", by: "" });
-  const [dispatchMethod, setDispatchMethod] = useState<"delivery" | "pickup" | "">("");
-  const [deliveryType, setDeliveryType] = useState<"staff" | "courier" | "">("");
-  const [delivery, setDelivery] = useState({ at: "", staffBy: "", courierId: "", riderName: "", riderPhone: "", trackingRef: "" });
-  const [pickup, setPickup] = useState({ at: "", personName: "", relation: "" as "" | "self" | "representative" });
+  const [dispatch, setDispatch] = useState({ at: "", handledBy: "", method: "", personName: "", personPhone: "", courierId: "", riderName: "", riderPhone: "", trackingRef: "" });
   const [clientNotes, setClientNotes] = useState("");
+
+  // The client's own phone on file (registry_individuals.contact_details), fetched fresh per
+  // task so "client brought/picked it up themselves" can pre-fill it — same nested
+  // contact_details.phone.kenyan.primary shape (and defensive array-or-plain-object handling)
+  // the birthday-tracker module's clients page already reads/writes.
+  const [existingClientPhone, setExistingClientPhone] = useState<string>("");
+  const [phoneSavePrompt, setPhoneSavePrompt] = useState<{ step: "received" | "dispatch"; phone: string } | null>(null);
+
+  useEffect(() => {
+    if (!open || !task?.individual_id) { setExistingClientPhone(""); return; }
+    let cancelled = false;
+    supabase
+      .from("registry_individuals")
+      .select("contact_details")
+      .eq("id", task.individual_id)
+      .single()
+      .then(({ data }) => {
+        if (cancelled) return;
+        const raw = data?.contact_details;
+        const contactObj = Array.isArray(raw) ? raw[0] : raw;
+        setExistingClientPhone(contactObj?.phone?.kenyan?.primary || contactObj?.phone?.whatsapp || "");
+      });
+    return () => { cancelled = true; };
+  }, [open, task?.individual_id]);
 
   useEffect(() => {
     if (!open) return;
+    setPhoneSavePrompt(null);
     setMode(task?.passport_handling_mode || null);
     setReceived({
       at: toLocalInputValue(record?.received_at) || nowLocalInputValue(),
       by: record?.received_by || currentUserId || "",
-      broughtBy: record?.brought_by_name || "",
+      method: record?.received_method || "",
+      personName: record?.received_person_name || "",
+      personPhone: record?.received_person_phone || "",
+      courierId: record?.received_courier_id || "",
+      riderName: record?.received_rider_name || "",
+      riderPhone: record?.received_rider_phone || "",
+      trackingRef: record?.received_tracking_ref || "",
     });
     setTaken({
       at: toLocalInputValue(record?.taken_at) || nowLocalInputValue(),
@@ -333,20 +464,16 @@ export function HandlingWizardDialog({
       at: toLocalInputValue(record?.client_notified_at) || nowLocalInputValue(),
       by: record?.client_notified_by || currentUserId || "",
     });
-    setDispatchMethod(record?.dispatch_method || "");
-    setDeliveryType(record?.delivery_type || "");
-    setDelivery({
-      at: toLocalInputValue(record?.delivered_at) || nowLocalInputValue(),
-      staffBy: record?.delivered_by || "",
-      courierId: record?.courier_id || "",
-      riderName: record?.courier_rider_name || "",
-      riderPhone: record?.courier_rider_phone || "",
-      trackingRef: record?.courier_tracking_ref || "",
-    });
-    setPickup({
-      at: toLocalInputValue(record?.pickup_at) || nowLocalInputValue(),
-      personName: record?.pickup_person_name || "",
-      relation: record?.pickup_relation || "",
+    setDispatch({
+      at: toLocalInputValue(record?.dispatched_at) || nowLocalInputValue(),
+      handledBy: record?.dispatch_handled_by || currentUserId || "",
+      method: record?.dispatch_method || "",
+      personName: record?.dispatch_person_name || "",
+      personPhone: record?.dispatch_person_phone || "",
+      courierId: record?.dispatch_courier_id || "",
+      riderName: record?.dispatch_rider_name || "",
+      riderPhone: record?.dispatch_rider_phone || "",
+      trackingRef: record?.dispatch_tracking_ref || "",
     });
     setClientNotes(record?.notes || "");
 
@@ -355,17 +482,26 @@ export function HandlingWizardDialog({
       taken: !!record?.taken_at,
       returned: !!record?.returned_at,
       notified: !!record?.client_notified_at,
-      dispatch: !!record?.dispatch_method && (!!record?.delivered_at || !!record?.pickup_at),
+      dispatch: !!record?.dispatch_method && !!record?.dispatched_at,
     };
     const firstOpen = PIPELINE.find((s) => !doneMap[s.key])?.key || "received";
     setActiveStep(firstOpen);
   }, [open, task?.id, record, currentUserId]);
 
   const isClientConfirmed = mode === "client" && !!record?.returned_at;
-  const selectedCourier = useMemo(() => couriers.find((c) => c.id === delivery.courierId), [couriers, delivery.courierId]);
 
   const currentStepIdx = PIPELINE.findIndex((s) => s.key === activeStep);
   const currentStepMeta = PIPELINE[currentStepIdx] || PIPELINE[0];
+
+  // Client-facing message for a courier/rider dispatch — only meaningful once dispatch is
+  // actually saved (there's no send integration anywhere in this codebase; this is purely
+  // composed text for staff to copy into WhatsApp/SMS themselves, same convention
+  // SendRequirementsDialog already uses elsewhere).
+  const dispatchMessage = useMemo(() => {
+    if (record?.dispatch_method !== "bcl_rider" || !record?.dispatched_at) return null;
+    const courier = couriers.find((c) => c.id === record.dispatch_courier_id) || null;
+    return composeDispatchMessage(courier, record.dispatch_rider_name);
+  }, [record, couriers]);
 
   if (!task) return null;
 
@@ -384,12 +520,13 @@ export function HandlingWizardDialog({
     }
   };
 
-  const runStep = async (stepKey: string, patch: Partial<PassportHandlingRecord>, opts?: { markEndorsed?: boolean; nextStep?: string }) => {
+  const runStep = async (stepKey: string, patch: Partial<PassportHandlingRecord>, opts?: { markEndorsed?: boolean; nextStep?: string; onSuccess?: () => void }) => {
     setSavingStep(stepKey);
     try {
       const saved = await upsertHandlingRecord(task.id, task.company_id ?? null, patch, currentUserId);
       if (opts?.markEndorsed) await markTaskEndorsedIfPending(task);
       onSaved(saved);
+      opts?.onSuccess?.();
       if (opts?.nextStep) {
         setActiveStep(opts.nextStep);
       }
@@ -402,6 +539,23 @@ export function HandlingWizardDialog({
     }
   };
 
+  // Guards every save path against the "Clear" button's blank state (and any other way `at`
+  // could end up empty) — `new Date("").toISOString()` throws a raw "Invalid time value" crash
+  // rather than failing gracefully, so this turns that into a normal validation toast.
+  const isValidLocalDateTime = (v: string) => !!v && !isNaN(new Date(v).getTime());
+
+  const requireDateTime = (v: string, label: string) => {
+    if (isValidLocalDateTime(v)) return true;
+    toast({ title: "Missing date/time", description: `Please set the ${label} before saving.`, variant: "destructive" });
+    return false;
+  };
+
+  const requireMethod = (method: string, description: string) => {
+    if (method) return true;
+    toast({ title: "Missing method", description, variant: "destructive" });
+    return false;
+  };
+
   const confirmClientEndorsement = () =>
     runStep("client_confirm", {
       returned_at: new Date().toISOString(),
@@ -409,19 +563,42 @@ export function HandlingWizardDialog({
       notes: clientNotes,
     }, { markEndorsed: true });
 
-  const saveReceived = (advance = true) =>
-    runStep(
+  const saveReceived = (advance = true) => {
+    if (!requireDateTime(received.at, "received date and time")) return;
+    if (!requireMethod(received.method, "Please select how the passport was received.")) return;
+    const courier = couriers.find((c) => c.id === received.courierId) || null;
+    const isRider = received.method === "client_rider" || received.method === "bcl_rider";
+    const isSelf = received.method === "client_self";
+    const isRepresentative = received.method === "client_representative";
+    const effectiveName = received.personName || (isSelf ? task.applicant_name || "" : "");
+    const effectivePhone = received.personPhone || (isSelf ? existingClientPhone : "");
+    return runStep(
       "received",
       {
         received_at: new Date(received.at).toISOString(),
         received_by: received.by || null,
-        brought_by_name: received.broughtBy || null,
+        received_method: received.method || null,
+        received_person_name: (isSelf || isRepresentative) ? effectiveName || null : null,
+        received_person_phone: (isSelf || isRepresentative) ? effectivePhone || null : null,
+        received_courier_id: isRider ? received.courierId || null : null,
+        received_rider_name: isRider && courier?.courier_type === "on_demand" ? received.riderName || null : null,
+        received_rider_phone: isRider && courier?.courier_type === "on_demand" ? received.riderPhone || null : null,
+        received_tracking_ref: isRider && courier?.courier_type === "company" ? received.trackingRef || null : null,
       },
-      advance ? { nextStep: "taken" } : undefined
+      {
+        ...(advance ? { nextStep: "taken" } : {}),
+        onSuccess: () => {
+          if (isSelf && !existingClientPhone && effectivePhone.trim()) {
+            setPhoneSavePrompt({ step: "received", phone: effectivePhone.trim() });
+          }
+        },
+      }
     );
+  };
 
-  const saveTaken = (advance = true) =>
-    runStep(
+  const saveTaken = (advance = true) => {
+    if (!requireDateTime(taken.at, "submission date and time")) return;
+    return runStep(
       "taken",
       {
         taken_at: new Date(taken.at).toISOString(),
@@ -429,9 +606,11 @@ export function HandlingWizardDialog({
       },
       advance ? { nextStep: "returned" } : undefined
     );
+  };
 
-  const saveReturned = (advance = true) =>
-    runStep(
+  const saveReturned = (advance = true) => {
+    if (!requireDateTime(returned.at, "return date and time")) return;
+    return runStep(
       "returned",
       {
         returned_at: new Date(returned.at).toISOString(),
@@ -439,9 +618,11 @@ export function HandlingWizardDialog({
       },
       { markEndorsed: true, ...(advance ? { nextStep: "notified" } : {}) }
     );
+  };
 
-  const saveNotified = (advance = true) =>
-    runStep(
+  const saveNotified = (advance = true) => {
+    if (!requireDateTime(notified.at, "notification date and time")) return;
+    return runStep(
       "notified",
       {
         client_notified_at: new Date(notified.at).toISOString(),
@@ -449,37 +630,38 @@ export function HandlingWizardDialog({
       },
       advance ? { nextStep: "dispatch" } : undefined
     );
+  };
 
   const saveDispatch = () => {
-    if (dispatchMethod === "delivery") {
-      runStep("dispatch", {
-        dispatch_method: "delivery",
-        delivery_type: deliveryType || null,
-        delivered_by: deliveryType === "staff" ? delivery.staffBy || null : null,
-        courier_id: deliveryType === "courier" ? delivery.courierId || null : null,
-        courier_rider_name: deliveryType === "courier" ? delivery.riderName || null : null,
-        courier_rider_phone: deliveryType === "courier" ? delivery.riderPhone || null : null,
-        courier_tracking_ref: deliveryType === "courier" ? delivery.trackingRef || null : null,
-        delivered_at: new Date(delivery.at).toISOString(),
-        pickup_person_name: null,
-        pickup_relation: null,
-        pickup_at: null,
-      });
-    } else if (dispatchMethod === "pickup") {
-      runStep("dispatch", {
-        dispatch_method: "pickup",
-        pickup_person_name: pickup.personName || null,
-        pickup_relation: pickup.relation || null,
-        pickup_at: new Date(pickup.at).toISOString(),
-        delivery_type: null,
-        delivered_by: null,
-        courier_id: null,
-        courier_rider_name: null,
-        courier_rider_phone: null,
-        courier_tracking_ref: null,
-        delivered_at: null,
-      });
-    }
+    if (!requireDateTime(dispatch.at, "dispatch date and time")) return;
+    if (!requireMethod(dispatch.method, "Please select how the passport is getting back to the client.")) return;
+    const courier = couriers.find((c) => c.id === dispatch.courierId) || null;
+    const isRider = dispatch.method === "client_rider" || dispatch.method === "bcl_rider";
+    const isSelf = dispatch.method === "client_self";
+    const isRepresentative = dispatch.method === "client_representative";
+    const effectiveName = dispatch.personName || (isSelf ? task.applicant_name || "" : "");
+    const effectivePhone = dispatch.personPhone || (isSelf ? existingClientPhone : "");
+    runStep(
+      "dispatch",
+      {
+        dispatched_at: new Date(dispatch.at).toISOString(),
+        dispatch_handled_by: dispatch.handledBy || null,
+        dispatch_method: dispatch.method || null,
+        dispatch_person_name: (isSelf || isRepresentative) ? effectiveName || null : null,
+        dispatch_person_phone: (isSelf || isRepresentative) ? effectivePhone || null : null,
+        dispatch_courier_id: isRider ? dispatch.courierId || null : null,
+        dispatch_rider_name: isRider && courier?.courier_type === "on_demand" ? dispatch.riderName || null : null,
+        dispatch_rider_phone: isRider && courier?.courier_type === "on_demand" ? dispatch.riderPhone || null : null,
+        dispatch_tracking_ref: isRider && courier?.courier_type === "company" ? dispatch.trackingRef || null : null,
+      },
+      {
+        onSuccess: () => {
+          if (isSelf && !existingClientPhone && effectivePhone.trim()) {
+            setPhoneSavePrompt({ step: "dispatch", phone: effectivePhone.trim() });
+          }
+        },
+      }
+    );
   };
 
   const handleCurrentStepSave = () => {
@@ -514,13 +696,85 @@ export function HandlingWizardDialog({
     }
   };
 
+  // Wipes the *unsaved* local form state for whichever step is currently open, back to a blank
+  // slate — it never touches the persisted record, so a saved step's data comes right back the
+  // next time this dialog opens (the `useEffect` above reloads from `record`). Nothing to
+  // confirm: the only thing at risk is input not yet saved.
+  const clearCurrentStep = () => {
+    switch (activeStep) {
+      case "received":
+        setReceived({ at: "", by: "", method: "", personName: "", personPhone: "", courierId: "", riderName: "", riderPhone: "", trackingRef: "" });
+        break;
+      case "taken":
+        setTaken({ at: "", by: "" });
+        break;
+      case "returned":
+        setReturned({ at: "", by: "" });
+        break;
+      case "notified":
+        setNotified({ at: "", by: "" });
+        break;
+      case "dispatch":
+        setDispatch({ at: "", handledBy: "", method: "", personName: "", personPhone: "", courierId: "", riderName: "", riderPhone: "", trackingRef: "" });
+        break;
+    }
+  };
+
+  const handleCopyDispatchMessage = () => {
+    if (!dispatchMessage) return;
+    navigator.clipboard.writeText(dispatchMessage);
+    toast({ title: "Copied", description: "Message copied — paste it into WhatsApp/SMS to the client." });
+  };
+
+  // Offered only once, right after a "client brought/picked it up themselves" step is saved
+  // with a phone number that wasn't already on file — writes it back onto the client's own
+  // registry_individuals row using the exact nested contact_details shape (and defensive
+  // array-or-plain-object read) the birthday-tracker module's clients page already uses, so the
+  // number becomes available everywhere else that reads a client's contact details too.
+  const [savingPhoneToRegistry, setSavingPhoneToRegistry] = useState(false);
+  const saveClientPhoneToRegistry = async () => {
+    if (!phoneSavePrompt || !task?.individual_id) return;
+    setSavingPhoneToRegistry(true);
+    try {
+      const { data: individual, error: fetchError } = await supabase
+        .from("registry_individuals")
+        .select("contact_details")
+        .eq("id", task.individual_id)
+        .single();
+      if (fetchError) throw fetchError;
+
+      const raw = individual?.contact_details;
+      const contactObj = raw
+        ? JSON.parse(JSON.stringify(Array.isArray(raw) ? (raw[0] || {}) : raw))
+        : {};
+      if (!contactObj.phone) contactObj.phone = {};
+      if (!contactObj.phone.kenyan) contactObj.phone.kenyan = {};
+      contactObj.phone.kenyan.primary = phoneSavePrompt.phone;
+
+      const { error: updateError } = await supabase
+        .from("registry_individuals")
+        .update({ contact_details: [contactObj] })
+        .eq("id", task.individual_id);
+      if (updateError) throw updateError;
+
+      setExistingClientPhone(phoneSavePrompt.phone);
+      setPhoneSavePrompt(null);
+      toast({ title: "Saved", description: "Phone number added to the client's profile." });
+    } catch (err) {
+      console.error(err);
+      toast({ title: "Error", description: "Failed to save the phone number to the client's profile.", variant: "destructive" });
+    } finally {
+      setSavingPhoneToRegistry(false);
+    }
+  };
+
   const stepCompletedAt = {
     received: record?.received_at ? `Completed ${fmtDateTime(record.received_at)} · ${bclUsers.find((u) => u.id === record.received_by)?.name || "Staff"}` : null,
     taken: record?.taken_at ? `Completed ${fmtDateTime(record.taken_at)} · ${bclUsers.find((u) => u.id === record.taken_by)?.name || "Staff"}` : null,
     returned: record?.returned_at ? `Completed ${fmtDateTime(record.returned_at)} · ${bclUsers.find((u) => u.id === record.returned_by)?.name || "Staff"}` : null,
     notified: record?.client_notified_at ? `Completed ${fmtDateTime(record.client_notified_at)} · ${bclUsers.find((u) => u.id === record.client_notified_by)?.name || "Staff"}` : null,
-    dispatch: (record?.delivered_at || record?.pickup_at)
-      ? `Completed ${fmtDateTime(record.delivered_at || record.pickup_at)} · ${record.dispatch_method === "delivery" ? "Delivery" : "Pickup"}`
+    dispatch: record?.dispatched_at
+      ? `Completed ${fmtDateTime(record.dispatched_at)} · ${getHandlingMethodOption(record.dispatch_method)?.dispatchLabel || ""}`
       : null,
   }[activeStep];
 
@@ -618,13 +872,52 @@ export function HandlingWizardDialog({
                   </div>
                 </div>
 
-                {stepCompletedAt && (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 self-start sm:self-auto">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                    {stepCompletedAt}
-                  </span>
-                )}
+                <div className="flex items-center gap-3 self-start sm:self-auto">
+                  {stepCompletedAt && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      {stepCompletedAt}
+                    </span>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={clearCurrentStep}
+                    className="h-9 px-3.5 text-sm font-bold gap-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 border-slate-200 hover:border-red-200"
+                  >
+                    <Eraser className="h-3.5 w-3.5" /> Clear
+                  </Button>
+                </div>
               </div>
+
+              {phoneSavePrompt && phoneSavePrompt.step === activeStep && (
+                <div className="flex items-center justify-between gap-3 p-4 rounded-xl border border-amber-200 bg-amber-50">
+                  <p className="text-sm font-bold text-amber-900">
+                    Save {phoneSavePrompt.phone} to this client's profile for next time?
+                  </p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setPhoneSavePrompt(null)} className="text-amber-700 hover:bg-amber-100">
+                      Not now
+                    </Button>
+                    <Button type="button" size="sm" onClick={saveClientPhoneToRegistry} disabled={savingPhoneToRegistry} className="gap-1.5 bg-amber-600 hover:bg-amber-700 text-white">
+                      {savingPhoneToRegistry && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Save to Profile
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {activeStep === "dispatch" && dispatchMessage && (
+                <div className="flex items-start justify-between gap-3 p-4 rounded-xl border border-blue-200 bg-blue-50">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-blue-900 mb-1">Client Message</p>
+                    <p className="text-sm text-blue-800">{dispatchMessage}</p>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={handleCopyDispatchMessage} className="shrink-0 gap-1.5 bg-white">
+                    <Copy className="h-3.5 w-3.5" /> Copy
+                  </Button>
+                </div>
+              )}
 
               {/* Step 1: Received */}
               {activeStep === "received" && (
@@ -638,14 +931,7 @@ export function HandlingWizardDialog({
                   <FormRow label="Received By (Staff)" required>
                     <StaffCombobox users={bclUsers} value={received.by} onChange={(v) => setReceived((p) => ({ ...p, by: v }))} />
                   </FormRow>
-                  <FormRow label="Brought In By">
-                    <Input
-                      value={received.broughtBy}
-                      onChange={(e) => setReceived((p) => ({ ...p, broughtBy: e.target.value }))}
-                      placeholder="e.g. John Doe / Courier rider"
-                      className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
-                    />
-                  </FormRow>
+                  <HandlingMethodFields direction="received" state={received} setState={setReceived} couriers={couriers} task={task} existingClientPhone={existingClientPhone} />
                 </div>
               )}
 
@@ -697,121 +983,16 @@ export function HandlingWizardDialog({
               {/* Step 5: Dispatch */}
               {activeStep === "dispatch" && (
                 <div className="divide-y divide-slate-100">
-                  <FormRow label="Dispatch Method" required>
-                    <Select value={dispatchMethod} onValueChange={(v) => setDispatchMethod(v as "delivery" | "pickup")}>
-                      <SelectTrigger className="h-12 w-full sm:w-72 text-base border-slate-200 bg-white rounded-lg px-3.5">
-                        <SelectValue placeholder="Select dispatch method..." />
-                      </SelectTrigger>
-                      <SelectContent className="z-[200]">
-                        <SelectItem value="delivery" className="text-base py-2">Delivery</SelectItem>
-                        <SelectItem value="pickup" className="text-base py-2">Client Pickup</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  <FormRow label="Dispatch Date" required>
+                    <DateOnlyField value={dispatch.at} onChange={(v) => setDispatch((p) => ({ ...p, at: v }))} />
                   </FormRow>
-
-                  {dispatchMethod === "delivery" && (
-                    <>
-                      <FormRow label="Delivery Option" required>
-                        <ToggleButtons
-                          options={[
-                            { value: "staff", label: "BCL Staff" },
-                            { value: "courier", label: "Courier Service" },
-                          ]}
-                          value={deliveryType}
-                          onChange={setDeliveryType}
-                        />
-                      </FormRow>
-
-                      {deliveryType === "staff" && (
-                        <FormRow label="Delivered By (Staff)" required>
-                          <StaffCombobox users={bclUsers} value={delivery.staffBy} onChange={(v) => setDelivery((p) => ({ ...p, staffBy: v }))} />
-                        </FormRow>
-                      )}
-
-                      {deliveryType === "courier" && (
-                        <>
-                          <FormRow label="Courier Company" required>
-                            <Select value={delivery.courierId} onValueChange={(v) => setDelivery((p) => ({ ...p, courierId: v }))}>
-                              <SelectTrigger className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5">
-                                <SelectValue placeholder="Select courier company..." />
-                              </SelectTrigger>
-                              <SelectContent className="z-[200]">
-                                {couriers.map((c) => (
-                                  <SelectItem key={c.id} value={c.id} className="text-base py-2">
-                                    {c.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </FormRow>
-                          <FormRow label="Tracking Reference">
-                            <Input
-                              value={delivery.trackingRef}
-                              onChange={(e) => setDelivery((p) => ({ ...p, trackingRef: e.target.value }))}
-                              placeholder="e.g. WB-92841"
-                              className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
-                            />
-                          </FormRow>
-                          <FormRow
-                            label="Rider Name"
-                            required={selectedCourier?.courier_type === "on_demand"}
-                          >
-                            <Input
-                              value={delivery.riderName}
-                              onChange={(e) => setDelivery((p) => ({ ...p, riderName: e.target.value }))}
-                              placeholder="Full name of rider"
-                              className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
-                            />
-                          </FormRow>
-                          <FormRow label="Rider Phone">
-                            <Input
-                              value={delivery.riderPhone}
-                              onChange={(e) => setDelivery((p) => ({ ...p, riderPhone: e.target.value }))}
-                              placeholder="e.g. +254 712 345 678"
-                              className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
-                            />
-                          </FormRow>
-                        </>
-                      )}
-
-                      <FormRow label="Delivered Date" required>
-                        <DateOnlyField value={delivery.at} onChange={(v) => setDelivery((p) => ({ ...p, at: v }))} />
-                      </FormRow>
-                      <FormRow label="Delivered Time" required>
-                        <TimeOnlyField value={delivery.at} onChange={(v) => setDelivery((p) => ({ ...p, at: v }))} />
-                      </FormRow>
-                    </>
-                  )}
-
-                  {dispatchMethod === "pickup" && (
-                    <>
-                      <FormRow label="Collected By" required>
-                        <Input
-                          value={pickup.personName}
-                          onChange={(e) => setPickup((p) => ({ ...p, personName: e.target.value }))}
-                          placeholder="Name of collector"
-                          className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
-                        />
-                      </FormRow>
-                      <FormRow label="Collector Relationship" required>
-                        <Select value={pickup.relation} onValueChange={(v: any) => setPickup((p) => ({ ...p, relation: v }))}>
-                          <SelectTrigger className="h-12 w-full sm:w-72 text-base border-slate-200 bg-white rounded-lg px-3.5">
-                            <SelectValue placeholder="Select relationship..." />
-                          </SelectTrigger>
-                          <SelectContent className="z-[200]">
-                            <SelectItem value="self" className="text-base py-2">Client Themselves</SelectItem>
-                            <SelectItem value="representative" className="text-base py-2">Representative</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </FormRow>
-                      <FormRow label="Pickup Date" required>
-                        <DateOnlyField value={pickup.at} onChange={(v) => setPickup((p) => ({ ...p, at: v }))} />
-                      </FormRow>
-                      <FormRow label="Pickup Time" required>
-                        <TimeOnlyField value={pickup.at} onChange={(v) => setPickup((p) => ({ ...p, at: v }))} />
-                      </FormRow>
-                    </>
-                  )}
+                  <FormRow label="Dispatch Time" required>
+                    <TimeOnlyField value={dispatch.at} onChange={(v) => setDispatch((p) => ({ ...p, at: v }))} />
+                  </FormRow>
+                  <FormRow label="Handled By (Staff)" required>
+                    <StaffCombobox users={bclUsers} value={dispatch.handledBy} onChange={(v) => setDispatch((p) => ({ ...p, handledBy: v }))} />
+                  </FormRow>
+                  <HandlingMethodFields direction="dispatch" state={dispatch} setState={setDispatch} couriers={couriers} task={task} existingClientPhone={existingClientPhone} />
                 </div>
               )}
             </div>

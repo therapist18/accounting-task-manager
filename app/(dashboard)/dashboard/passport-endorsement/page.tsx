@@ -2,8 +2,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, FileDown, FileSpreadsheet, ListFilter, ChevronDown, Building2, Truck } from "lucide-react";
-import { startOfDay, endOfDay } from "date-fns";
+import { Loader2, FileDown, FileSpreadsheet, ListFilter, ChevronDown, Building2, Truck, CalendarClock } from "lucide-react";
+import { startOfDay, endOfDay, format } from "date-fns";
 import { parseDateSafe } from "../summary-reports/utils/reportStageLogic";
 import * as XLSX from "xlsx";
 import { toast } from "@/lib/hooks/use-toast";
@@ -15,6 +15,8 @@ import {
   fetchCouriers,
   fetchHandlingRecords,
   getHandlingStep,
+  resolveHandlingParty,
+  getHandlingMethodOption,
   resolveWriteUpDate,
   resolveEffectiveDate,
   WRITE_UP_STAGE_ID,
@@ -31,11 +33,12 @@ import { cn } from "@/lib/utils";
 import { HandlingWizardDialog } from "./components/HandlingWizardDialog";
 import { CourierRegistryDialog } from "./components/CourierRegistryDialog";
 import { MultiSort, type SortLevel } from "@/app/generic-components/MultiSort";
+import { useCurrentUser, hasPermission } from "@/lib/hooks/use-current-user";
 
 // Column ids whose sort values are timestamps (numeric sort, not alphabetic) — used only to
 // tag MultiSort's column options with a type so the dialog can present them sensibly.
 const MULTISORT_DATE_COLUMN_IDS = new Set([
-  "write_up_date", "doc_issue_date", "doc_expiry_date",
+  "created_at", "write_up_date", "doc_issue_date", "doc_expiry_date",
   "received_date", "received_time", "taken_date", "taken_time",
   "returned_date", "returned_time", "notified_date", "notified_time",
   "dispatch_date", "dispatch_time", "completed_date", "completed_time",
@@ -65,7 +68,22 @@ export default function PassportEndorsementPage() {
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map());
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({ from: undefined, to: undefined });
+  // Defaults to "created on/after 1 Aug 2026" (open-ended — see applyDateAndSearchFilters)
+  // rather than an unfiltered "all time" list, so very old stale cases don't clutter the table —
+  // still fully overridable (or clearable) via DateRangeFilterButton. Filters on the task's own
+  // created_at/date_initiated, not on any document date.
+  const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({ from: new Date(2026, 7, 1), to: undefined });
+  // Surfaced in the title bar so an empty table reads as "filtered to a date range with no
+  // matches" rather than leaving staff to guess why nothing shows up — DateRangeFilterButton's
+  // own trigger only ever says the generic "Date Filter" once the range isn't a clean whole year.
+  const activeDateFilterLabel = useMemo(() => {
+    const { from, to } = dateRange;
+    if (!from && !to) return null;
+    const fmt = (d: Date) => format(d, "dd MMM yyyy");
+    if (from && to) return `${fmt(from)} – ${fmt(to)}`;
+    if (from) return `From ${fmt(from)}`;
+    return `Until ${fmt(to!)}`;
+  }, [dateRange]);
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
   const [activeClassIds, setActiveClassIds] = useState<string[]>([]);
   const [activeSubClassIds, setActiveSubClassIds] = useState<string[]>([]);
@@ -89,6 +107,13 @@ export default function PassportEndorsementPage() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardTask, setWizardTask] = useState<any>(null);
   const [courierDialogOpen, setCourierDialogOpen] = useState(false);
+
+  // Courier/rider records feed real dispatch instructions to clients (see composeDispatchMessage
+  // in utils/database.ts), so editing the registry is gated behind the Access Control Matrix
+  // (permission key "passport_endorsement.couriers.manage") rather than open to anyone who can
+  // view this page — same client-side hasPermission check the sidebar itself uses.
+  const { user: currentAuthUser } = useCurrentUser();
+  const canManageCouriers = hasPermission(currentAuthUser, "passport_endorsement.couriers.manage");
 
   const loadAll = useCallback(async (silent = false) => {
     if (!silent) { setShellLoading(true); setTableLoading(true); }
@@ -176,6 +201,63 @@ export default function PassportEndorsementPage() {
     return { task, record, mode, step, writeUpDate, docIssueDate, docExpiryDate };
   }), [tasks, handlingRecords, writeUpStage, allDocuments, kycDocuments]);
 
+  // Date range + search — split out from the hierarchy-scoped pipeline below so it can also run
+  // directly against the full `rows` (bypassing sub-department/class scoping) to compute
+  // hierarchy tab badge counts that reflect the *other* active filters. Without this, a tab's
+  // badge showed an all-time, unfiltered total while the table itself (scoped by the very same
+  // date range) could legitimately show zero rows — a confusing "the count says 330 but there's
+  // nothing here" mismatch.
+  const applyDateAndSearchFilters = useCallback((rowsInput: typeof rows) => {
+    let result = rowsInput;
+    if (dateRange.from || dateRange.to) {
+      const from = dateRange.from ? startOfDay(dateRange.from) : null;
+      // A "from" with no "to" means open-ended (that date onwards) — to filter a single day,
+      // set both boxes to the same date.
+      const to = dateRange.to ? endOfDay(dateRange.to) : null;
+      result = result.filter(({ task }) => {
+        const raw = task.date_initiated || task.created_at;
+        if (!raw) return false;
+        const d = new Date(raw);
+        if (isNaN(d.getTime())) return false;
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+        return true;
+      });
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(({ task }) =>
+        task.applicant_name?.toLowerCase().includes(q) ||
+        task.passport_number?.toLowerCase().includes(q) ||
+        companies.get(task.company_id)?.name?.toLowerCase().includes(q)
+      );
+    }
+    return result;
+  }, [dateRange, searchQuery, companies]);
+
+  // Base status / handling-step / mode — the remaining filters between the hierarchy+date+search
+  // pool and what actually lands in the table.
+  const applyStatusModeFilters = useCallback((rowsInput: typeof rows) => {
+    let result = rowsInput;
+    if (activeBaseStatus !== "all") result = result.filter((r) => r.task.status === activeBaseStatus);
+    if (activeSteps.length > 0) result = result.filter((r) => activeSteps.includes(r.step));
+    if (activeMode !== "all") {
+      if (activeMode === "bcl") result = result.filter((r) => r.mode === "bcl");
+      else if (activeMode === "client") result = result.filter((r) => r.mode === "client");
+      else if (activeMode === "not_set") result = result.filter((r) => !r.mode);
+    }
+    return result;
+  }, [activeBaseStatus, activeSteps, activeMode]);
+
+  // Every filter except hierarchy (sub-department/class/sub-class) — the pool the Sub-department
+  // tab badges are counted from, so a badge always reflects "how many would actually show up if
+  // I switched to this tab" given the current date range/search/status/mode, not an unfiltered
+  // all-time total.
+  const nonHierarchyFilteredRows = useMemo(
+    () => applyStatusModeFilters(applyDateAndSearchFilters(rows)),
+    [rows, applyDateAndSearchFilters, applyStatusModeFilters]
+  );
+
   const immigrationDept = useMemo(
     () => departments.find((d: any) => d.id.toString() === IMMIGRATION_DEPT_ID),
     [departments]
@@ -202,12 +284,21 @@ export default function PassportEndorsementPage() {
   }), [subDeptScopedRows, activeClassIds, activeSubClassIds]);
 
   const subDeptTaskCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: rows.length };
+    const counts: Record<string, number> = { all: nonHierarchyFilteredRows.length };
     subDepartments.forEach((s: any) => {
-      counts[s.id.toString()] = rows.filter(({ task }) => task.subdepartment_id?.toString() === s.id.toString()).length;
+      counts[s.id.toString()] = nonHierarchyFilteredRows.filter(({ task }) => task.subdepartment_id?.toString() === s.id.toString()).length;
     });
     return counts;
-  }, [rows, subDepartments]);
+  }, [nonHierarchyFilteredRows, subDepartments]);
+
+  // Same "every filter except this dimension" idea as nonHierarchyFilteredRows above, but scoped
+  // to the active sub-department (mirroring subDeptScopedRows) — the pool Class/Sub-Class badge
+  // counts are computed from, so those also reflect date/search/status/mode rather than an
+  // unfiltered total.
+  const subDeptScopedNonHierarchyRows = useMemo(() => {
+    if (activeSubDeptId === "all") return nonHierarchyFilteredRows;
+    return nonHierarchyFilteredRows.filter(({ task }) => task.subdepartment_id?.toString() === activeSubDeptId);
+  }, [nonHierarchyFilteredRows, activeSubDeptId]);
 
   // Classes/Sub-Classes available under the active Sub-department (or every class across all
   // sub-departments when "All Sub-departments" is selected) — same shape as Summary Reports'
@@ -239,50 +330,30 @@ export default function PassportEndorsementPage() {
 
   const classCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    subDeptScopedRows.forEach(({ task }) => {
+    subDeptScopedNonHierarchyRows.forEach(({ task }) => {
       const cid = task.class_id?.toString();
       if (cid) counts[cid] = (counts[cid] || 0) + 1;
     });
     return counts;
-  }, [subDeptScopedRows]);
+  }, [subDeptScopedNonHierarchyRows]);
 
   const subClassCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    subDeptScopedRows.forEach(({ task }) => {
+    subDeptScopedNonHierarchyRows.forEach(({ task }) => {
       const sid = task.subclass_id?.toString();
       if (sid) counts[sid] = (counts[sid] || 0) + 1;
     });
     return counts;
-  }, [subDeptScopedRows]);
+  }, [subDeptScopedNonHierarchyRows]);
 
-  // Filters by the task's own initiation date (date_initiated, falling back to created_at) —
-  // the one date every row has regardless of how far along its passport handling is, so the
-  // filter always narrows the list rather than hiding rows that haven't reached a given step
-  // (e.g. a task still "Awaiting Receipt" has no received_at yet, but always has a start date).
-  const dateFilteredRows = useMemo(() => {
-    if (!dateRange.from && !dateRange.to) return hierarchyScopedRows;
-    const from = dateRange.from ? startOfDay(dateRange.from) : null;
-    const to = dateRange.to ? endOfDay(dateRange.to) : (dateRange.from ? endOfDay(dateRange.from) : null);
-    return hierarchyScopedRows.filter(({ task }) => {
-      const raw = task.date_initiated || task.created_at;
-      if (!raw) return false;
-      const d = new Date(raw);
-      if (isNaN(d.getTime())) return false;
-      if (from && d < from) return false;
-      if (to && d > to) return false;
-      return true;
-    });
-  }, [hierarchyScopedRows, dateRange]);
-
-  const searchedRows = useMemo(() => {
-    if (!searchQuery.trim()) return dateFilteredRows;
-    const q = searchQuery.toLowerCase();
-    return dateFilteredRows.filter(({ task }) =>
-      task.applicant_name?.toLowerCase().includes(q) ||
-      task.passport_number?.toLowerCase().includes(q) ||
-      companies.get(task.company_id)?.name?.toLowerCase().includes(q)
-    );
-  }, [dateFilteredRows, searchQuery, companies]);
+  // Date range + search, applied on top of hierarchy scoping — the one date every row has
+  // regardless of how far along its passport handling is, so the filter always narrows the list
+  // rather than hiding rows that haven't reached a given step (e.g. a task still "Awaiting
+  // Receipt" has no received_at yet, but always has a start date).
+  const searchedRows = useMemo(
+    () => applyDateAndSearchFilters(hierarchyScopedRows),
+    [hierarchyScopedRows, applyDateAndSearchFilters]
+  );
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: searchedRows.length };
@@ -299,22 +370,19 @@ export default function PassportEndorsementPage() {
     return c;
   }, [searchedRows]);
 
-  const filteredRows = useMemo(() => {
-    let result = searchedRows;
-    if (activeBaseStatus !== "all") result = result.filter((r) => r.task.status === activeBaseStatus);
-    if (activeSteps.length > 0) result = result.filter((r) => activeSteps.includes(r.step));
-    if (activeMode !== "all") {
-      if (activeMode === "bcl") result = result.filter((r) => r.mode === "bcl");
-      else if (activeMode === "client") result = result.filter((r) => r.mode === "client");
-      else if (activeMode === "not_set") result = result.filter((r) => !r.mode);
-    }
-    return result;
-  }, [searchedRows, activeBaseStatus, activeSteps, activeMode]);
+  const filteredRows = useMemo(
+    () => applyStatusModeFilters(searchedRows),
+    [searchedRows, applyStatusModeFilters]
+  );
 
   const getSortableValue = useCallback((row: any, columnId: string) => {
     const { task, record, mode, step, writeUpDate } = row;
     switch (columnId) {
       case "task_id": return task.id;
+      case "created_at": {
+        const raw = task.date_initiated || task.created_at;
+        return raw ? new Date(raw).getTime() : 0;
+      }
       case "applicant": return (task.applicant_name || "").toLowerCase();
       case "company": return (companies.get(task.company_id)?.name || task.company_name || "").toLowerCase();
       case "company_prefix": return (companies.get(task.company_id)?.prefix || "").toLowerCase();
@@ -335,7 +403,18 @@ export default function PassportEndorsementPage() {
       case "passport_number": return (task.passport_number || "").toLowerCase();
       case "mode": return mode || "";
       case "current_step": return STEP_LABELS[step] || "";
-      case "received_by": return (getStaffName(record?.received_by) || record?.brought_by_name || "").toLowerCase();
+      case "received_method": return (getHandlingMethodOption(record?.received_method)?.receivedLabel || "").toLowerCase();
+      case "received_by": {
+        const courier = couriers.find((c) => c.id === record?.received_courier_id) || null;
+        const party = resolveHandlingParty(record?.received_method, {
+          staffName: getStaffName(record?.received_by),
+          personName: record?.received_person_name,
+          courier,
+          riderName: record?.received_rider_name,
+          clientName: task.applicant_name,
+        });
+        return (party || getStaffName(record?.received_by) || "").toLowerCase();
+      }
       case "received_date":
       case "received_time":
         return record?.received_at ? new Date(record.received_at).getTime() : 0;
@@ -353,31 +432,31 @@ export default function PassportEndorsementPage() {
         return record?.client_notified_at ? new Date(record.client_notified_at).getTime() : 0;
       case "dispatch_handled_by":
         return (getStaffName(record?.dispatch_handled_by) || "").toLowerCase();
-      case "dispatch_mode": {
-        if (!record?.dispatch_method) return "";
-        if (record.dispatch_method === "pickup") return "pickup";
-        return record.delivery_type === "courier" ? "delivery_courier" : "delivery_staff";
-      }
+      case "dispatch_mode": return record?.dispatch_method || "";
       case "dispatch_by": {
-        const by = record?.dispatch_method === "delivery"
-          ? (record.delivery_type === "courier" ? record.courier_rider_name : getStaffName(record.delivered_by))
-          : record?.pickup_person_name;
-        return (by || "").toLowerCase();
+        const courier = couriers.find((c) => c.id === record?.dispatch_courier_id) || null;
+        const party = resolveHandlingParty(record?.dispatch_method, {
+          staffName: getStaffName(record?.dispatch_handled_by),
+          personName: record?.dispatch_person_name,
+          courier,
+          riderName: record?.dispatch_rider_name,
+          clientName: task.applicant_name,
+        });
+        return (party || "").toLowerCase();
       }
       case "dispatch_date":
       case "dispatch_time": {
-        const iso = record?.delivered_at || record?.pickup_at;
-        return iso ? new Date(iso).getTime() : 0;
+        return record?.dispatched_at ? new Date(record.dispatched_at).getTime() : 0;
       }
       case "completed_date":
       case "completed_time": {
         if (step !== "completed") return 0;
-        const iso = record?.delivered_at || record?.pickup_at || record?.returned_at;
+        const iso = record?.dispatched_at || record?.returned_at;
         return iso ? new Date(iso).getTime() : 0;
       }
       default: return "";
     }
-  }, [companies, getSubDeptName, getClassName, getStaffName]);
+  }, [companies, getSubDeptName, getClassName, getStaffName, couriers]);
 
   // First sort level shapes the table's active-column highlight — same shape SummaryTable's
   // sortConfig prop always received, so nothing downstream needs to change.
@@ -452,6 +531,7 @@ export default function PassportEndorsementPage() {
     try {
       const exportRows = sortedRows.map(({ task, record, mode, step, writeUpDate, docIssueDate, docExpiryDate }) => ({
         "Task ID": task.id,
+        "Created At": fmtStageDate(task.date_initiated || task.created_at) || "",
         "Applicant": task.applicant_name || "",
         "Write Up Stage Date": fmtStageDate(writeUpDate) || "",
         "Document Date of Issue": fmtStageDate(docIssueDate) || "",
@@ -463,7 +543,14 @@ export default function PassportEndorsementPage() {
         "Passport No.": task.passport_number || "",
         "Mode": mode === "bcl" ? "BCL Handles" : mode === "client" ? "Client Handles" : "Not Set",
         "Current Step": STEP_LABELS[step],
-        "Received By": getStaffName(record?.received_by) || record?.brought_by_name || "",
+        "Received Method": getHandlingMethodOption(record?.received_method)?.receivedLabel || "",
+        "Received By": resolveHandlingParty(record?.received_method, {
+          staffName: getStaffName(record?.received_by),
+          personName: record?.received_person_name,
+          courier: couriers.find((c) => c.id === record?.received_courier_id) || null,
+          riderName: record?.received_rider_name,
+          clientName: task.applicant_name,
+        }) || getStaffName(record?.received_by) || "",
         "Received Date": fmtStageDate(record?.received_at) || "",
         "Received Time": record?.received_at ? new Date(record.received_at).toTimeString().slice(0, 5) : "",
         "Taken By": getStaffName(record?.taken_by) || "",
@@ -475,20 +562,20 @@ export default function PassportEndorsementPage() {
         "Notified By": getStaffName(record?.client_notified_by) || "",
         "Notified Date": fmtStageDate(record?.client_notified_at) || "",
         "Notified Time": record?.client_notified_at ? new Date(record.client_notified_at).toTimeString().slice(0, 5) : "",
-        "Dispatch Mode": record?.dispatch_method === "pickup"
-          ? "Client Pickup"
-          : record?.dispatch_method === "delivery"
-          ? (record.delivery_type === "courier" ? "Delivery - Courier" : "Delivery - Staff")
-          : "",
+        "Dispatch Mode": getHandlingMethodOption(record?.dispatch_method)?.dispatchLabel || "",
         "Dispatch Handled By": getStaffName(record?.dispatch_handled_by) || "",
-        "Dispatch By": record?.dispatch_method === "delivery"
-          ? (record.delivery_type === "courier" ? record.courier_rider_name : getStaffName(record.delivered_by))
-          : record?.pickup_person_name || "",
-        "Dispatch Date": fmtStageDate(record?.delivered_at || record?.pickup_at) || "",
-        "Dispatch Time": (record?.delivered_at || record?.pickup_at) ? new Date(record.delivered_at || record.pickup_at).toTimeString().slice(0, 5) : "",
-        "Completed Date": step === "completed" ? (fmtStageDate(record?.delivered_at || record?.pickup_at || record?.returned_at) || "") : "",
-        "Completed Time": step === "completed" && (record?.delivered_at || record?.pickup_at || record?.returned_at)
-          ? new Date(record.delivered_at || record.pickup_at || record.returned_at).toTimeString().slice(0, 5)
+        "Dispatch By": resolveHandlingParty(record?.dispatch_method, {
+          staffName: getStaffName(record?.dispatch_handled_by),
+          personName: record?.dispatch_person_name,
+          courier: couriers.find((c) => c.id === record?.dispatch_courier_id) || null,
+          riderName: record?.dispatch_rider_name,
+          clientName: task.applicant_name,
+        }) || "",
+        "Dispatch Date": fmtStageDate(record?.dispatched_at) || "",
+        "Dispatch Time": record?.dispatched_at ? new Date(record.dispatched_at).toTimeString().slice(0, 5) : "",
+        "Completed Date": step === "completed" ? (fmtStageDate(record?.dispatched_at || record?.returned_at) || "") : "",
+        "Completed Time": step === "completed" && (record?.dispatched_at || record?.returned_at)
+          ? new Date(record.dispatched_at || record.returned_at).toTimeString().slice(0, 5)
           : "",
       }));
       const ws = XLSX.utils.json_to_sheet(exportRows);
@@ -500,7 +587,7 @@ export default function PassportEndorsementPage() {
       console.error("Export error:", err);
       toast({ title: "Export Failed", description: "Could not export data.", variant: "destructive" });
     }
-  }, [sortedRows, companies, getStaffName, getSubDeptName, getClassName]);
+  }, [sortedRows, companies, getStaffName, getSubDeptName, getClassName, couriers]);
 
   if (shellLoading) {
     return (
@@ -527,6 +614,15 @@ export default function PassportEndorsementPage() {
               <span className="text-blue-600 font-bold">{immigrationDept?.name || "Immigration"}</span>
               <span className="text-slate-300 mx-0.5">/</span>
               <span className="truncate text-slate-500">{activeSubDepartment?.name || "All Sub-departments"}</span>
+              {activeDateFilterLabel && (
+                <>
+                  <span className="text-slate-300 mx-0.5">/</span>
+                  <span className="inline-flex items-center gap-1 text-amber-700 shrink-0" title="Tasks are filtered to this creation-date range">
+                    <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+                    {activeDateFilterLabel}
+                  </span>
+                </>
+              )}
             </div>
           </div>
 
@@ -555,14 +651,16 @@ export default function PassportEndorsementPage() {
               </span>
             )}
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCourierDialogOpen(true)}
-            className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 shrink-0 transition-all"
-          >
-            <Truck className="h-3.5 w-3.5" /> Couriers
-          </Button>
+          {canManageCouriers && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCourierDialogOpen(true)}
+              className="h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 shrink-0 transition-all"
+            >
+              <Truck className="h-3.5 w-3.5" /> Couriers
+            </Button>
+          )}
           <div className="h-6 w-px bg-slate-200 mx-1" />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -636,6 +734,7 @@ export default function PassportEndorsementPage() {
         departments={departments}
         subDepartments={subDepartments}
         activeSubDeptId={activeSubDeptId}
+        couriers={couriers}
         onManage={handleManage}
         sortConfig={sortConfig}
         handleSort={handleSort}

@@ -82,31 +82,116 @@ export interface Courier {
   is_active: boolean;
 }
 
+// One unified 5-way method for how a passport crosses the office threshold in either
+// direction — replaces the old dispatch_method/delivery_type/pickup_relation combo (dispatch
+// only) and the received side's plain brought_by_name free-text field.
+export type HandlingMethod =
+  | "client_self"
+  | "client_representative"
+  | "client_rider"
+  | "bcl_rider"
+  | "bcl_staff";
+
+export interface HandlingMethodOption {
+  value: HandlingMethod;
+  receivedLabel: string;
+  dispatchLabel: string;
+  needsCourier: boolean;
+  needsPersonName: boolean;
+}
+
+// Single source of truth for both the "how did it arrive" and "how is it getting back" pickers
+// — same five options, direction-specific wording, and the flags each FormRow set needs to
+// decide which extra fields to show (courier+rider fields, a plain person-name field, or
+// neither — bcl_staff needs nothing extra since the existing staff-by picker already names
+// which BCL staff member handled it).
+export const HANDLING_METHOD_OPTIONS: HandlingMethodOption[] = [
+  { value: "client_self", receivedLabel: "Client brought it in themselves", dispatchLabel: "Client picks it up themselves", needsCourier: false, needsPersonName: true },
+  { value: "client_representative", receivedLabel: "Client sent someone they know", dispatchLabel: "Client sends someone they know", needsCourier: false, needsPersonName: true },
+  { value: "client_rider", receivedLabel: "Client sent a rider/courier", dispatchLabel: "Client sends a rider/courier", needsCourier: true, needsPersonName: false },
+  { value: "bcl_rider", receivedLabel: "BCL sent a rider/courier to fetch it", dispatchLabel: "BCL sends a rider/courier to deliver", needsCourier: true, needsPersonName: false },
+  { value: "bcl_staff", receivedLabel: "BCL sent staff to fetch it", dispatchLabel: "BCL sends staff to deliver it", needsCourier: false, needsPersonName: false },
+];
+
+export function getHandlingMethodOption(method: HandlingMethod | null | undefined): HandlingMethodOption | undefined {
+  return HANDLING_METHOD_OPTIONS.find((m) => m.value === method);
+}
+
+// Single "who actually did it" resolution for a method + its associated details — shared by
+// page.tsx's sort values/export rows and HandlingTable's cells so all three always agree.
+// For a rider/courier method, a 'company' courier (fixed office, e.g. G4S) shows by its own
+// name (there's no specific person); an 'on_demand' one (Bolt/Uber-style) shows the individual
+// rider's name since that's a different person each time.
+export function resolveHandlingParty(
+  method: HandlingMethod | null | undefined,
+  opts: { staffName?: string | null; personName?: string | null; courier?: Courier | null | undefined; riderName?: string | null; clientName?: string | null }
+): string {
+  switch (method) {
+    case "client_self":
+      return opts.personName || opts.clientName || "Client";
+    case "client_representative":
+      return opts.personName || "Representative";
+    case "client_rider":
+    case "bcl_rider":
+      if (opts.courier?.courier_type === "company") return opts.courier.name;
+      return opts.riderName || opts.courier?.name || "Rider/Courier";
+    case "bcl_staff":
+      return opts.staffName || "BCL Staff";
+    default:
+      return "";
+  }
+}
+
+// Composes the client-facing text for a "bcl_rider" dispatch — a company courier (fixed office,
+// e.g. G4S/NTL) is a pickup notice; an on_demand one (Bolt/Uber-style, a different individual
+// each time) is a delivery notice naming that rider. There's no send integration anywhere in
+// this codebase (see SendRequirementsDialog's own clipboard-copy convention) — this only
+// produces the text for staff to copy and paste into WhatsApp/SMS themselves.
+export function composeDispatchMessage(courier: Courier | null | undefined, riderName: string | null | undefined): string | null {
+  if (!courier) return null;
+  if (courier.courier_type === "company") {
+    return `We've dispatched your passport(s) — kindly pick them up from your nearest ${courier.name} office. Please ensure to carry the recipient's ID.`;
+  }
+  if (riderName) {
+    return `${riderName} is delivering your passport(s) to you.`;
+  }
+  return null;
+}
+
 export interface PassportHandlingRecord {
   id: string;
   task_id: number;
   company_id: number | null;
+
   received_at: string | null;
-  received_by: string | null;
-  brought_by_name: string | null;
+  received_by: string | null; // BCL staff who logged the receipt
+  received_method: HandlingMethod | null;
+  received_person_name: string | null; // client_self / client_representative's name
+  received_person_phone: string | null;
+  received_courier_id: string | null; // client_rider / bcl_rider
+  received_rider_name: string | null; // only when that courier is 'on_demand'
+  received_rider_phone: string | null;
+  received_tracking_ref: string | null;
+
   taken_at: string | null;
   taken_by: string | null;
+
   returned_at: string | null;
   returned_by: string | null;
+
   client_notified_at: string | null;
   client_notified_by: string | null;
-  dispatch_method: "delivery" | "pickup" | null;
-  delivery_type: "staff" | "courier" | null;
-  dispatch_handled_by: string | null;
-  delivered_by: string | null;
-  courier_id: string | null;
-  courier_rider_name: string | null;
-  courier_rider_phone: string | null;
-  courier_tracking_ref: string | null;
-  delivered_at: string | null;
-  pickup_person_name: string | null;
-  pickup_relation: "self" | "representative" | null;
-  pickup_at: string | null;
+
+  dispatched_at: string | null;
+  dispatch_handled_by: string | null; // BCL staff point of contact for the dispatch
+  dispatch_method: HandlingMethod | null;
+  dispatch_person_name: string | null;
+  dispatch_person_phone: string | null;
+  dispatch_courier_id: string | null;
+  dispatch_rider_name: string | null;
+  dispatch_rider_phone: string | null;
+  dispatch_tracking_ref: string | null;
+
   notes: string | null;
   created_by: string | null;
 }
@@ -124,8 +209,6 @@ export type HandlingStep =
   | "at_nyayo"
   | "stamped_back"
   | "ready_for_dispatch"
-  | "out_for_delivery"
-  | "awaiting_pickup"
   | "completed";
 
 export const STEP_LABELS: Record<HandlingStep, string> = {
@@ -136,8 +219,6 @@ export const STEP_LABELS: Record<HandlingStep, string> = {
   at_nyayo: "At Nyayo House",
   stamped_back: "Stamped — Back In Office",
   ready_for_dispatch: "Ready For Dispatch",
-  out_for_delivery: "Out For Delivery",
-  awaiting_pickup: "Awaiting Pickup",
   completed: "Completed",
 };
 
@@ -151,9 +232,9 @@ export function getHandlingStep(
   if (!record.taken_at) return "received";
   if (!record.returned_at) return "at_nyayo";
   if (!record.client_notified_at) return "stamped_back";
-  if (!record.dispatch_method) return "ready_for_dispatch";
-  if (record.dispatch_method === "delivery" && !record.delivered_at) return "out_for_delivery";
-  if (record.dispatch_method === "pickup" && !record.pickup_at) return "awaiting_pickup";
+  // dispatch_method and dispatched_at are always saved together in one step (see
+  // HandlingWizardDialog's saveDispatch) — there's no real intermediate state between them.
+  if (!record.dispatch_method || !record.dispatched_at) return "ready_for_dispatch";
   return "completed";
 }
 

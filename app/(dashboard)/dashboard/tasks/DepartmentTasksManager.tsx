@@ -957,6 +957,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     );
   }, [globalSearchTerm, enhancedTasksData, taskDependants, companies, getTaskHierarchy, getUserDisplayName]);
 
+  const allTasksInScope = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks()), [getFilteredTasks, filterTasksBySearchWrapper])
   const enquiryTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('enquiry')), [getFilteredTasks, filterTasksBySearchWrapper])
   const wipTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('in_progress')), [getFilteredTasks, filterTasksBySearchWrapper])
   const completedTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('write_up_completed')), [getFilteredTasks, filterTasksBySearchWrapper])
@@ -971,6 +972,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   )
   const activeTabConfig = useMemo(() => {
     switch (activeSubTab) {
+      case 'all':
+        return { tasks: allTasksInScope, title: 'All Tasks' }
       case 'enquiries':
         return { tasks: enquiryTasks, title: 'Enquiries' }
       case 'active':
@@ -985,12 +988,14 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       default:
         return { tasks: wipTasks, title: 'WIP Stages' }
     }
-  }, [activeSubTab, enquiryTasks, wipTasks, activeEnquiryWipTasks, completedTasks, endorsedTasks, cancelledTasks])
+  }, [activeSubTab, allTasksInScope, enquiryTasks, wipTasks, activeEnquiryWipTasks, completedTasks, endorsedTasks, cancelledTasks])
 
-  // Layered on top of the status tab's task list, exactly like reports/page.tsx's
-  // tasksByFilters — 'overview' passes everything through untouched.
-  const tasksByPerspective = useMemo(() => {
-    return activeTabConfig.tasks.filter((task: any) => {
+  // Layered on top of a status tab's task list, exactly like reports/page.tsx's
+  // tasksByFilters — 'overview' passes everything through untouched. Extracted as a reusable
+  // callback (rather than inlined only for the active tab) so the status-pill counts below can
+  // apply the same officers/managers/clients narrowing to every tab, not just the selected one.
+  const applyPerspectiveFilter = useCallback((tasksToFilter: any[]) => {
+    return tasksToFilter.filter((task: any) => {
       if (activePerspective === 'officers') {
         if (officerFilterMode === 'current') {
           if (!getCurrentOfficerStage(task, stages, departments)) return false
@@ -1012,10 +1017,50 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       if (activePerspective === 'clients' && !isTaskWithClient(task, stages, departments)) return false
       return true
     })
-  }, [activeTabConfig.tasks, activePerspective, activeOfficerTab, officerFilterMode, activeTaskManagerTab, stages, departments])
+  }, [activePerspective, activeOfficerTab, officerFilterMode, activeTaskManagerTab, stages, departments])
+
+  const tasksByPerspective = useMemo(
+    () => applyPerspectiveFilter(activeTabConfig.tasks),
+    [activeTabConfig.tasks, applyPerspectiveFilter]
+  )
 
   const displayedTasks = tasksByPerspective
   const activeTabTitle = activeTabConfig.title
+
+  // Status-pill counts — each tab's own task pool run through the same perspective filter as
+  // the active tab, so the pills reflect every active filter (search bar included, since each
+  // pool below is already search-filtered) and not just the one currently selected.
+  const statusTabCounts = useMemo(() => ({
+    all: applyPerspectiveFilter(allTasksInScope).length,
+    enquiries: applyPerspectiveFilter(enquiryTasks).length,
+    active: applyPerspectiveFilter(activeEnquiryWipTasks).length,
+    wipStages: applyPerspectiveFilter(wipTasks).length,
+    writeUpCompleted: applyPerspectiveFilter(completedTasks).length,
+    endorsed: applyPerspectiveFilter(endorsedTasks).length,
+    cancelled: applyPerspectiveFilter(cancelledTasks).length,
+  }), [applyPerspectiveFilter, allTasksInScope, enquiryTasks, activeEnquiryWipTasks, wipTasks, completedTasks, endorsedTasks, cancelledTasks])
+
+  // Subdepartment/All-Subdepartments pill badges: when a search term is active, recompute counts
+  // client-side from the already-loaded active department's tasks instead of the lightweight
+  // liveTaskCountsBySubdept DB scan, which only knows job_level/status and has no applicant/
+  // company data to match the search term against. Deliberately NOT restricted to non-terminal
+  // statuses here (unlike liveTaskCountsBySubdept) — while searching, the badge answers "how many
+  // matches live under this subdepartment", not "how many are still in the live pipeline", so a
+  // match sitting in a terminal status (e.g. write_up_completed) must still count. No search term
+  // -> keep using the DB-wide live counts (accurate across every department without a full load).
+  const searchAwareSubdeptCounts = useMemo(() => {
+    if (!globalSearchTerm.trim() || !activeDepartmentTab) return null
+    const matchPool = filterTasksBySearchWrapper(
+      tasks.filter((t: any) => t.department_id?.toString() === activeDepartmentTab)
+    )
+    const bySubdept: Record<string, number> = {}
+    matchPool.forEach((t: any) => {
+      const id = t.subdepartment_id?.toString()
+      if (!id) return
+      bySubdept[id] = (bySubdept[id] || 0) + 1
+    })
+    return { total: matchPool.length, bySubdept }
+  }, [globalSearchTerm, activeDepartmentTab, tasks, filterTasksBySearchWrapper])
 
   // Officers/managers actually relevant to the active department/subdepartment scope — same
   // userService.getDepartmentUsers narrowing reports/page.tsx uses for its person pill lists.
@@ -2851,6 +2896,34 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
           <LinkIcon className="h-4 w-4" />
         </Button>
 
+        {availableBundles.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-emerald-600 hover:bg-emerald-100"
+                title="Push case to another department"
+                disabled={isPushingCase}
+              >
+                {isPushingCase ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {availableBundles.map((bundle) => (
+                <DropdownMenuItem
+                  key={bundle.id}
+                  onClick={() => handlePushCase(task, bundle)}
+                  disabled={isPushingCase}
+                >
+                  <Send className="mr-2 h-4 w-4" />
+                  Push to {bundle.displayName}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
         <Button
           variant="ghost"
           size="icon"
@@ -3789,18 +3862,20 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                 )}
               >
                 All Subdepartments
-                {(liveTaskCountsByDept[activeDepartmentTab] ?? 0) > 0 && (
+                {(searchAwareSubdeptCounts ? searchAwareSubdeptCounts.total : (liveTaskCountsByDept[activeDepartmentTab] ?? 0)) > 0 && (
                   <span className={cn(
                     "inline-flex items-center justify-center font-bold tabular-nums px-3 py-1 rounded-full text-sm min-w-[2rem] leading-none shadow-sm",
                     activeSubdepartmentTab === "" ? "bg-custom-blue text-white" : "bg-slate-400 text-white"
                   )}>
-                    {liveTaskCountsByDept[activeDepartmentTab] ?? 0}
+                    {searchAwareSubdeptCounts ? searchAwareSubdeptCounts.total : (liveTaskCountsByDept[activeDepartmentTab] ?? 0)}
                   </span>
                 )}
               </button>
               {visibleSubdepts.map(subdept => {
                 const isActive = activeSubdepartmentTab === subdept.id.toString();
-                const count = liveTaskCountsBySubdept[subdept.id.toString()] ?? liveTaskCountsBySubdept[subdept.id] ?? 0;
+                const count = searchAwareSubdeptCounts
+                  ? (searchAwareSubdeptCounts.bySubdept[subdept.id.toString()] ?? 0)
+                  : (liveTaskCountsBySubdept[subdept.id.toString()] ?? liveTaskCountsBySubdept[subdept.id] ?? 0);
                 return (
                   <button
                     key={subdept.id}
@@ -3835,7 +3910,9 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
                   <DropdownMenuContent align="start" className="w-56 max-h-[40vh] overflow-y-auto">
                     {overflowSubdepts.map(subdept => {
                       const isActive = activeSubdepartmentTab === subdept.id.toString();
-                      const count = liveTaskCountsBySubdept[subdept.id.toString()] ?? liveTaskCountsBySubdept[subdept.id] ?? 0;
+                      const count = searchAwareSubdeptCounts
+                        ? (searchAwareSubdeptCounts.bySubdept[subdept.id.toString()] ?? 0)
+                        : (liveTaskCountsBySubdept[subdept.id.toString()] ?? liveTaskCountsBySubdept[subdept.id] ?? 0);
                       return (
                         <DropdownMenuItem
                           key={subdept.id}
@@ -3902,12 +3979,13 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         <div className="px-8 py-2.5 flex items-center bg-white">
           <div className="flex gap-1.5">
             {[
-              { id: 'enquiries', label: 'Enquiries', count: enquiryTasks.length, activeHex: '#0284c7', badgeHex: '#0ea5e9' },
-              { id: 'active', label: 'All Enquiry + WIP', count: activeEnquiryWipTasks.length, activeHex: '#0d9488', badgeHex: '#14b8a6' },
-              { id: 'wip-stages', label: 'WIP Stages', count: wipTasks.length, activeHex: '#f59e0b', badgeHex: '#f59e0b' },
-              { id: 'write_up_completed', label: 'Write Up Completed', count: completedTasks.length, activeHex: '#059669', badgeHex: '#10b981' },
-              { id: 'endorsed', label: 'Endorsed', count: endorsedTasks.length, activeHex: '#7c3aed', badgeHex: '#8b5cf6' },
-              { id: 'cancelled', label: 'Cancelled', count: cancelledTasks.length, activeHex: '#dc2626', badgeHex: '#ef4444' },
+              { id: 'all', label: 'All Tasks', count: statusTabCounts.all, activeHex: '#475569', badgeHex: '#64748b' },
+              { id: 'enquiries', label: 'Enquiries', count: statusTabCounts.enquiries, activeHex: '#0284c7', badgeHex: '#0ea5e9' },
+              { id: 'active', label: 'All Enquiry + WIP', count: statusTabCounts.active, activeHex: '#0d9488', badgeHex: '#14b8a6' },
+              { id: 'wip-stages', label: 'WIP Stages', count: statusTabCounts.wipStages, activeHex: '#f59e0b', badgeHex: '#f59e0b' },
+              { id: 'write_up_completed', label: 'Write Up Completed', count: statusTabCounts.writeUpCompleted, activeHex: '#059669', badgeHex: '#10b981' },
+              { id: 'endorsed', label: 'Endorsed', count: statusTabCounts.endorsed, activeHex: '#7c3aed', badgeHex: '#8b5cf6' },
+              { id: 'cancelled', label: 'Cancelled', count: statusTabCounts.cancelled, activeHex: '#dc2626', badgeHex: '#ef4444' },
             ].map(tab => {
               const isActive = activeSubTab === tab.id;
               return (

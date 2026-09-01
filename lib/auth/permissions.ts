@@ -8,6 +8,7 @@ export type PermissionKey =
   | "reports.view"
   | "summary_reports.view"
   | "passport_endorsement.view"
+  | "passport_endorsement.couriers.manage"
   | "company_profiles.view"
   | "users.view"
   | "users.manage"
@@ -36,6 +37,11 @@ export interface PermissionDefinition {
   group: string;
   description: string;
   paths?: string[];
+  // Nests this permission under another one that represents the actual page/component it acts
+  // on — e.g. "Manage Couriers" has no page of its own, it's an action inside the Passport
+  // Endorsement Tracking page. Lets the Access Control Matrix render a real
+  // category -> page/component -> action tree instead of one flat list per group.
+  parentKey?: PermissionKey;
 }
 
 export const PERMISSIONS: PermissionDefinition[] = [
@@ -46,9 +52,10 @@ export const PERMISSIONS: PermissionDefinition[] = [
   { key: "reports.view", label: "Reports", group: "Task Management", description: "View reports dashboards.", paths: ["/dashboard/reports"] },
   { key: "summary_reports.view", label: "Summary Reports Dashboard", group: "Task Management", description: "View the admin summary reports dashboard.", paths: ["/dashboard/summary-reports"] },
   { key: "passport_endorsement.view", label: "Passport Endorsement Tracking", group: "Task Management", description: "Track passport handling and Nyayo House endorsement for immigration tasks.", paths: ["/dashboard/passport-endorsement"] },
+  { key: "passport_endorsement.couriers.manage", label: "Manage Couriers", group: "Task Management", description: "Add and edit courier/rider service records used for passport receipt and dispatch.", parentKey: "passport_endorsement.view" },
   { key: "company_profiles.view", label: "Company Profiles", group: "Task Management", description: "View company profiles: their people and tasks.", paths: ["/dashboard/company-profiles"] },
   { key: "users.view", label: "View Users", group: "Administration", description: "Open user management screens.", paths: ["/dashboard/users-management"] },
-  { key: "users.manage", label: "Manage Users", group: "Administration", description: "Create, update, and delete user accounts." },
+  { key: "users.manage", label: "Manage Users", group: "Administration", description: "Create, update, and delete user accounts.", parentKey: "users.view" },
   { key: "settings.departments.view", label: "Departments", group: "Settings", description: "Manage department structures.", paths: ["/dashboard/departments/departments", "/dashboard/departments"] },
   { key: "settings.stages.view", label: "Stages", group: "Settings", description: "Manage stage definitions.", paths: ["/dashboard/departments/stages"] },
   { key: "settings.rates.view", label: "Rates", group: "Settings", description: "Manage rates and charges.", paths: ["/dashboard/departments/rates"] },
@@ -57,7 +64,7 @@ export const PERMISSIONS: PermissionDefinition[] = [
   { key: "settings.documents_fields.view", label: "Documents + Fields", group: "Settings", description: "Manage documents and field mappings.", paths: ["/dashboard/departments/documents+fields"] },
   { key: "settings.automations.view", label: "Automations", group: "Settings", description: "Manage automation rules.", paths: ["/dashboard/departments/automation"] },
   { key: "settings.access_controls.view", label: "View Access Controls", group: "Settings", description: "View user access settings.", paths: ["/dashboard/settings/access-controls"] },
-  { key: "settings.access_controls.manage", label: "Manage Access Controls", group: "Settings", description: "Update user page and action permissions." },
+  { key: "settings.access_controls.manage", label: "Manage Access Controls", group: "Settings", description: "Update user page and action permissions.", parentKey: "settings.access_controls.view" },
   { key: "templates.view", label: "Templates", group: "Documents", description: "View document templates.", paths: ["/dashboard/templates"] },
   { key: "master_fields.view", label: "Master Fields", group: "Documents", description: "View master fields.", paths: ["/dashboard/master-fields"] },
   { key: "letters.view", label: "Letter Generation", group: "Letters", description: "Generate letters.", paths: ["/dashboard/letters", "/dashboard/letters-james"] },
