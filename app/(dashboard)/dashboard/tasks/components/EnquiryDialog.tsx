@@ -312,7 +312,7 @@ export function EnquiryDialog({
 
     // Create options arrays for SearchableSelect
     const companyOptions = useMemo(() => {
-        return companies.map(c => ({ value: c.id.toString(), label: c.company_name }));
+        return (companies || []).map(c => ({ value: c.id.toString(), label: c.company_name }));
     }, [companies]);
 
     const filteredAssociationCompanies = useMemo(() => {
@@ -324,19 +324,19 @@ export function EnquiryDialog({
     }, [allCompanies, companySearchTerm]);
 
     const understudyOptions = useMemo(() => {
-        return understudies.map(u => ({ value: u.id.toString(), label: u.full_name }));
+        return (understudies || []).map(u => ({ value: u.id.toString(), label: u.full_name }));
     }, [understudies]);
 
     const departmentOptions = useMemo(() => {
-        return departments.map(d => ({ value: d.id.toString(), label: d.name }));
+        return (departments || []).map(d => ({ value: d.id.toString(), label: d.name }));
     }, [departments]);
 
     const subdepartmentOptions = useMemo(() => {
-        return availableSubdepartments.map(s => ({ value: s.id.toString(), label: s.name }));
+        return (availableSubdepartments || []).map(s => ({ value: s.id.toString(), label: s.name }));
     }, [availableSubdepartments]);
 
     const classOptions = useMemo(() => {
-        return availableClasses.map(c => ({ value: c.id.toString(), label: c.name }));
+        return (availableClasses || []).map(c => ({ value: c.id.toString(), label: c.name }));
     }, [availableClasses]);
 
     const officerOptions = useMemo(() => {
@@ -500,7 +500,7 @@ export function EnquiryDialog({
     }, []);
 
     const fetchUnderstudies = useCallback(async (companyId: string) => {
-        if (!companyId) { setUnderstudies([]); return }
+        if (!companyId || companyId === 'unallocated') { setUnderstudies([]); return }
         const { data: companyData } = await supabase.from('acc_portal_company_duplicate').select('understudy').eq('id', companyId).single()
         const understudyList = companyData?.understudy || []
         if (understudyList.length) {
@@ -1136,10 +1136,18 @@ export function EnquiryDialog({
                 })
         )
 
-        const getCompaniesForInd = (target: Individual) => {
+        const getCompaniesForInd = async (target: Individual) => {
             const associations = target.employment_data?.associations || []
             const validIds = associations.filter(a => a.individual_type === 'Principal' && a.company_id).map(a => a.company_id)
-            return validIds.length ? supabase.from('acc_portal_company_duplicate').select('id, company_name, understudy').in('id', validIds) : Promise.resolve({ data: [] })
+            const hasUnallocated = validIds.some(id => String(id) === 'unallocated')
+            const realIds = validIds.filter(id => String(id) !== 'unallocated')
+            
+            const { data: realCompanies } = realIds.length 
+                ? await supabase.from('acc_portal_company_duplicate').select('id, company_name, understudy').in('id', realIds)
+                : { data: [] }
+            
+            const unallocatedEntry = hasUnallocated ? [{ id: 'unallocated', company_name: 'Unallocated', understudy: [] }] : []
+            return { data: [...unallocatedEntry, ...(realCompanies || [])] }
         }
 
         if (isPrincipalIndividual(ind)) {
@@ -1149,7 +1157,7 @@ export function EnquiryDialog({
                 promises.push(supabase.from('registry_individuals').select('id, full_name').in('id', familyIds).then(res => ({ type: 'family', data: res.data })))
             }
         } else {
-            const principalRel = ind.relationships?.find(r => r.isPrincipal === 'Yes' || ['principal', 'husband', 'wife', 'father', 'mother'].includes(r.relationship?.toLowerCase()))
+            const principalRel = ind.relationships?.find(r => r.is_principal === true || r.isPrincipal === 'Yes' || ['principal', 'husband', 'wife', 'father', 'mother'].includes(r.relationship?.toLowerCase()))
             if (principalRel) {
                 promises.push(
                     supabase.from('registry_individuals').select('id, full_name, employment_data').eq('id', principalRel.individual_id).single()
@@ -1168,8 +1176,12 @@ export function EnquiryDialog({
             const results = await Promise.all(promises)
             if (results[0]?.data) setAvailableReferences(results[0].data)
 
+            let fetchedCompanies: any[] = []
             results.forEach(res => {
-                if (res?.type === 'companies') setCompanies(res.data)
+                if (res?.type === 'companies') {
+                    fetchedCompanies = res.data || []
+                    setCompanies(fetchedCompanies)
+                }
                 if (res?.type === 'family') {
                     setAvailableDependants(res.data.map(f => {
                         const rel = ind.relationships?.find(r => r.individual_id === f.id)
@@ -1178,12 +1190,19 @@ export function EnquiryDialog({
                 }
                 if (res?.type === 'principal_member') {
                     setPrincipalForDependant(res.data)
-                    setCompanies(res.companies)
+                    fetchedCompanies = res.companies || []
+                    setCompanies(fetchedCompanies)
                     setAvailableDependants([{ ...res.data, relationship_type: 'Principal Member' }])
                     setIncludeDependants(true)
                     setSelectedDependants([res.data.id.toString()])
                 }
             })
+
+            // Auto-select company if only one option or if unallocated
+            if (fetchedCompanies.length === 1) {
+                setSelectedCompany(fetchedCompanies[0].id.toString())
+                fetchUnderstudies(fetchedCompanies[0].id.toString())
+            }
         } finally {
             setLoadingRelations(false)
             setIsIndividualPopoverOpen(false)
@@ -1509,7 +1528,7 @@ export function EnquiryDialog({
     const clientIdentificationErrors = useMemo(() => {
         const errors: Record<string, string> = {};
         if (!selectedIndividual) errors.primary_applicant = "Select the primary applicant.";
-        if (!selectedCompany) errors.company = 'Select a company, or choose "No Company Associated".';
+        if (!selectedCompany) errors.company = 'Select a company, or choose "Unallocated".';
         if (applicantType === 'dependant' && !principalForDependant) errors.linked_principal = "Select the linked principal for this dependant.";
         if (formData.class_id === CLASS_D_ID && !selectedUnderstudy) errors.understudy = "Select the related understudy.";
         if (formData.subdepartment_id === SPONSOR_SUBDEPT_ID && !selectedSponsor) errors.sponsor = "Select a designated sponsor.";
@@ -1643,13 +1662,18 @@ export function EnquiryDialog({
 
             // 'none' is the explicit "Unallocated" choice for each of these three — same as an
             // actually-empty selection, both mean "no one assigned", so both collapse to null
-            // rather than the literal string 'none' or (for company) NaN from Number('no_company').
+            // rather than the literal string 'none' or (for company) NaN from Number('unallocated').
             const toAssignedId = (v: string) => (v && v !== 'none') ? Number(v) : null;
+
+            const isUnallocated = selectedCompany === 'unallocated';
+            const resolvedCompanyId = isUnallocated ? 'unallocated' : (selectedCompany ? Number(selectedCompany) : null);
+            const resolvedCompanyName = isUnallocated ? 'Unallocated' : (companies.find(c => c.id.toString() === selectedCompany)?.company_name || null);
 
             const payload: any = {
                 job_description: formData.job_description,
                 individual_id: selectedIndividual.id,
-                company_id: (selectedCompany && selectedCompany !== 'no_company') ? Number(selectedCompany) : null,
+                company_id: resolvedCompanyId,
+                company_name: resolvedCompanyName,
                 passport_number: formData.passport_number,
                 duration: syncedDuration,
                 renewal_status: syncedRenewalStatus,
@@ -1901,7 +1925,7 @@ export function EnquiryDialog({
                                                     <SearchableSelect
                                                         value={selectedCompany}
                                                         onValueChange={handleCompanyChange}
-                                                        options={[{ value: 'no_company', label: 'No Company Associated' }, ...companyOptions]}
+                                                        options={[{ value: 'unallocated', label: 'Unallocated' }, ...companyOptions]}
                                                         placeholder="Select Company..."
                                                         disabled={companyOptions.length === 0}
                                                         emptyMessage="No companies found."
@@ -1911,7 +1935,7 @@ export function EnquiryDialog({
                                                     />
                                                 </div>
                                                 {/* CLEAR BUTTON FOR COMPANY */}
-                                                {selectedCompany && selectedCompany !== 'no_company' && (
+                                                {selectedCompany && selectedCompany !== 'unallocated' && (
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
@@ -1924,7 +1948,7 @@ export function EnquiryDialog({
                                                     </Button>
                                                 )}
                                                 {/* ASSOCIATE TO COMPANY BUTTON */}
-                                                {selectedIndividual && (selectedCompany === 'no_company' || !selectedCompany) && (
+                                                {selectedIndividual && (selectedCompany === 'unallocated' || !selectedCompany) && (
                                                     <Button
                                                         variant="outline"
                                                         size="sm"
@@ -1938,9 +1962,9 @@ export function EnquiryDialog({
                                                 )}
                                             </div>
                                             {/* Show no company message */}
-                                            {selectedCompany === 'no_company' && (
+                                            {selectedCompany === 'unallocated' && (
                                                 <div className="mt-2 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">
-                                                    This individual has no company association. Click "Associate" to link them to a company.
+                                                    This individual is unallocated. Click "Associate" to link them to a company.
                                                 </div>
                                             )}
                                         </TableRow>

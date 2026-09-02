@@ -29,6 +29,10 @@ import {
   Clock,
   Eraser,
   Copy,
+  Phone,
+  MessageSquare,
+  SendHorizonal,
+  SkipForward,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/hooks/use-toast";
@@ -41,6 +45,8 @@ import {
   HANDLING_METHOD_OPTIONS,
   getHandlingMethodOption,
   composeDispatchMessage,
+  composeReadyForPickupMessage,
+  NOTIFIED_METHOD_LABELS,
   type PassportHandlingRecord,
   type Courier,
 } from "../utils/database";
@@ -118,10 +124,10 @@ function StaffCombobox({ users, value, onChange, placeholder = "Select staff mem
           <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[--radix-popover-trigger-width] p-0 z-[200]" align="start">
+      <PopoverContent className="w-[--radix-popover-trigger-width] max-h-[300px] p-0 z-[200] overflow-hidden" align="start">
         <Command>
           <CommandInput placeholder="Search staff..." className="text-base" />
-          <CommandList className="max-h-[260px] overflow-y-auto">
+          <CommandList className="max-h-[240px] overflow-y-auto">
             <CommandEmpty>No staff found.</CommandEmpty>
             <CommandGroup>
               {(users || []).map((u: any) => (
@@ -199,7 +205,11 @@ function HandlingMethodFields({ direction, state, setState, couriers, task, exis
   const isRepresentative = state.method === "client_representative";
   const showPersonFields = !!opt?.needsPersonName;
   const isRiderMethod = !!opt?.needsCourier;
-  const isOnDemand = courier?.courier_type === "on_demand";
+  // "Other" covers a rider/courier that isn't in the registry at all (a one-off, not one of
+  // our regular NTL/G4S/Bolt/Uber options) — treated the same as an on_demand courier since
+  // either way there's a specific individual to name, not a fixed office to route through.
+  const isOther = state.courierId === "__other__";
+  const isOnDemand = courier?.courier_type === "on_demand" || isOther;
   const isCompanyCourier = courier?.courier_type === "company";
 
   const effectiveName = state.personName || (isSelf ? (task?.applicant_name || "") : "");
@@ -257,13 +267,14 @@ function HandlingMethodFields({ direction, state, setState, couriers, task, exis
                 {(couriers || []).map((c: any) => (
                   <SelectItem key={c.id} value={c.id} className="text-base py-2">{c.name}</SelectItem>
                 ))}
+                <SelectItem value="__other__" className="text-base py-2">Other (not listed)</SelectItem>
               </SelectContent>
             </Select>
           </FormRow>
 
           {isOnDemand && (
             <>
-              <FormRow label="Rider Name" required>
+              <FormRow label={isOther ? "Name" : "Rider Name"} required>
                 <Input
                   value={state.riderName}
                   onChange={(e) => setState((p: any) => ({ ...p, riderName: e.target.value }))}
@@ -271,7 +282,7 @@ function HandlingMethodFields({ direction, state, setState, couriers, task, exis
                   className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5"
                 />
               </FormRow>
-              <FormRow label="Rider Phone">
+              <FormRow label={isOther ? "Phone" : "Rider Phone"}>
                 <Input
                   value={state.riderPhone}
                   onChange={(e) => setState((p: any) => ({ ...p, riderPhone: e.target.value }))}
@@ -383,6 +394,7 @@ export function HandlingWizardDialog({
   bclUsers,
   couriers,
   currentUserId,
+  isSuperAdmin = false,
   onSaved,
   onModeSaved,
 }: {
@@ -393,9 +405,18 @@ export function HandlingWizardDialog({
   bclUsers: { id: string; name: string }[];
   couriers: Courier[];
   currentUserId: string | null;
+  isSuperAdmin?: boolean;
   onSaved: (record: PassportHandlingRecord) => void;
   onModeSaved: (taskId: number, mode: "bcl" | "client") => void;
 }) {
+  // Only SuperAdmin picks who did a step from the full staff list — everyone else can only
+  // attribute a step to themselves, so the picker just shows their own name (still searchable
+  // by others' names does nothing useful for them, and hides who else is on the roster).
+  const visibleStaffUsers = useMemo(
+    () => (isSuperAdmin ? bclUsers : bclUsers.filter((u) => u.id === currentUserId)),
+    [bclUsers, isSuperAdmin, currentUserId]
+  );
+
   const [mode, setMode] = useState<"bcl" | "client" | null>(null);
   const [savingMode, setSavingMode] = useState(false);
   const [savingStep, setSavingStep] = useState<string | null>(null);
@@ -404,13 +425,15 @@ export function HandlingWizardDialog({
   const [received, setReceived] = useState({ at: "", by: "", method: "", personName: "", personPhone: "", courierId: "", riderName: "", riderPhone: "", trackingRef: "" });
   const [taken, setTaken] = useState({ at: "", by: "" });
   const [returned, setReturned] = useState({ at: "", by: "" });
-  const [notified, setNotified] = useState({ at: "", by: "" });
+  const [notified, setNotified] = useState({ at: "", by: "", method: "", message: "" });
   const [dispatch, setDispatch] = useState({ at: "", handledBy: "", method: "", personName: "", personPhone: "", courierId: "", riderName: "", riderPhone: "", trackingRef: "" });
   const [clientNotes, setClientNotes] = useState("");
 
   const [existingClientPhone, setExistingClientPhone] = useState<string>("");
   const [phoneSavePrompt, setPhoneSavePrompt] = useState<{ step: "received" | "dispatch"; phone: string } | null>(null);
   const [savingPhoneToRegistry, setSavingPhoneToRegistry] = useState(false);
+  const [confirmClearStep, setConfirmClearStep] = useState<string | null>(null);
+  const [clearingStep, setClearingStep] = useState(false);
 
   useEffect(() => {
     if (!open || !task?.individual_id) { setExistingClientPhone(""); return; }
@@ -432,6 +455,7 @@ export function HandlingWizardDialog({
   useEffect(() => {
     if (!open) return;
     setPhoneSavePrompt(null);
+    setConfirmClearStep(null);
     setMode(task?.passport_handling_mode || null);
     setReceived({
       at: toLocalInputValue(record?.received_at) || nowLocalInputValue(),
@@ -455,6 +479,8 @@ export function HandlingWizardDialog({
     setNotified({
       at: toLocalInputValue(record?.client_notified_at) || nowLocalInputValue(),
       by: record?.client_notified_by || currentUserId || "",
+      method: record?.client_notified_method || "",
+      message: "",
     });
     setDispatch({
       at: toLocalInputValue(record?.dispatched_at) || nowLocalInputValue(),
@@ -563,9 +589,11 @@ export function HandlingWizardDialog({
         received_method: received.method || null,
         received_person_name: (isSelf || isRepresentative) ? effectiveName || null : null,
         received_person_phone: (isSelf || isRepresentative) ? effectivePhone || null : null,
-        received_courier_id: isRider ? received.courierId || null : null,
-        received_rider_name: isRider && courier?.courier_type === "on_demand" ? received.riderName || null : null,
-        received_rider_phone: isRider && courier?.courier_type === "on_demand" ? received.riderPhone || null : null,
+        // "__other__" is a UI-only sentinel for "not in our courier registry" — it isn't a
+        // real tm_couriers row, so it must never be written to the courier_id FK.
+        received_courier_id: isRider && received.courierId !== "__other__" ? received.courierId || null : null,
+        received_rider_name: isRider && (courier?.courier_type === "on_demand" || received.courierId === "__other__") ? received.riderName || null : null,
+        received_rider_phone: isRider && (courier?.courier_type === "on_demand" || received.courierId === "__other__") ? received.riderPhone || null : null,
         received_tracking_ref: isRider && courier?.courier_type === "company" ? received.trackingRef || null : null,
       },
       {
@@ -602,13 +630,31 @@ export function HandlingWizardDialog({
   };
 
   const saveNotified = (advance = true) => {
+    if (!requireMethod(notified.method, "Please select how the client was notified, or use Skip Notification.")) return;
     return runStep(
       "notified",
       {
         client_notified_at: new Date(resolveDateTime(notified.at)).toISOString(),
         client_notified_by: notified.by || null,
+        client_notified_method: notified.method || null,
       },
       advance ? { nextStep: "dispatch" } : undefined
+    );
+  };
+
+  // "Skip Notification" is a distinct, immediate action (not just leaving the method blank) —
+  // some clients genuinely don't need telling (e.g. their dispatch method, like a standing
+  // courier arrangement, already communicates it), and this records that as a deliberate
+  // decision (its own at/by, method: 'skipped') rather than the step just sitting undone.
+  const skipNotification = () => {
+    runStep(
+      "notified",
+      {
+        client_notified_at: new Date(resolveDateTime(notified.at)).toISOString(),
+        client_notified_by: notified.by || currentUserId || null,
+        client_notified_method: "skipped",
+      },
+      { nextStep: "dispatch" }
     );
   };
 
@@ -628,9 +674,11 @@ export function HandlingWizardDialog({
         dispatch_method: dispatch.method || null,
         dispatch_person_name: (isSelf || isRepresentative) ? effectiveName || null : null,
         dispatch_person_phone: (isSelf || isRepresentative) ? effectivePhone || null : null,
-        dispatch_courier_id: isRider ? dispatch.courierId || null : null,
-        dispatch_rider_name: isRider && courier?.courier_type === "on_demand" ? dispatch.riderName || null : null,
-        dispatch_rider_phone: isRider && courier?.courier_type === "on_demand" ? dispatch.riderPhone || null : null,
+        // "__other__" is a UI-only sentinel for "not in our courier registry" — it isn't a
+        // real tm_couriers row, so it must never be written to the courier_id FK.
+        dispatch_courier_id: isRider && dispatch.courierId !== "__other__" ? dispatch.courierId || null : null,
+        dispatch_rider_name: isRider && (courier?.courier_type === "on_demand" || dispatch.courierId === "__other__") ? dispatch.riderName || null : null,
+        dispatch_rider_phone: isRider && (courier?.courier_type === "on_demand" || dispatch.courierId === "__other__") ? dispatch.riderPhone || null : null,
         dispatch_tracking_ref: isRider && courier?.courier_type === "company" ? dispatch.trackingRef || null : null,
       },
       {
@@ -675,23 +723,78 @@ export function HandlingWizardDialog({
     }
   };
 
-  const clearCurrentStep = () => {
-    switch (activeStep) {
+  // "Clear" deletes this step's *saved* data outright — not just the local unsaved form, which
+  // left the real record (and its green "Completed" checkmark) untouched while the form looked
+  // blank, so re-saving still demanded a method with nothing to actually redo. A real delete
+  // against tm_passport_handling, so it's gated behind an explicit confirm banner rather than
+  // firing immediately.
+  const getStepClearPatch = (stepKey: string): Partial<PassportHandlingRecord> | null => {
+    switch (stepKey) {
       case "received":
-        setReceived({ at: "", by: "", method: "", personName: "", personPhone: "", courierId: "", riderName: "", riderPhone: "", trackingRef: "" });
+        return {
+          received_at: null, received_by: null, received_method: null,
+          received_person_name: null, received_person_phone: null,
+          received_courier_id: null, received_rider_name: null, received_rider_phone: null,
+          received_tracking_ref: null,
+        };
+      case "taken":
+        return { taken_at: null, taken_by: null };
+      case "returned":
+        return { returned_at: null, returned_by: null };
+      case "notified":
+        return { client_notified_at: null, client_notified_by: null, client_notified_method: null };
+      case "dispatch":
+        return {
+          dispatched_at: null, dispatch_handled_by: null, dispatch_method: null,
+          dispatch_person_name: null, dispatch_person_phone: null,
+          dispatch_courier_id: null, dispatch_rider_name: null, dispatch_rider_phone: null,
+          dispatch_tracking_ref: null,
+        };
+      default:
+        return null;
+    }
+  };
+
+  // Resets this step's local form back to fresh "not started yet" defaults (today/current
+  // staff) — the same shape a step shows the very first time it's opened — so it's immediately
+  // ready for re-entry right after its saved data is deleted.
+  const resetStepFormToFresh = (stepKey: string) => {
+    switch (stepKey) {
+      case "received":
+        setReceived({ at: nowLocalInputValue(), by: currentUserId || "", method: "", personName: "", personPhone: "", courierId: "", riderName: "", riderPhone: "", trackingRef: "" });
         break;
       case "taken":
-        setTaken({ at: "", by: "" });
+        setTaken({ at: nowLocalInputValue(), by: currentUserId || "" });
         break;
       case "returned":
-        setReturned({ at: "", by: "" });
+        setReturned({ at: nowLocalInputValue(), by: currentUserId || "" });
         break;
       case "notified":
-        setNotified({ at: "", by: "" });
+        setNotified({ at: nowLocalInputValue(), by: currentUserId || "", method: "", message: "" });
         break;
       case "dispatch":
-        setDispatch({ at: "", handledBy: "", method: "", personName: "", personPhone: "", courierId: "", riderName: "", riderPhone: "", trackingRef: "" });
+        setDispatch({ at: nowLocalInputValue(), handledBy: currentUserId || "", method: "", personName: "", personPhone: "", courierId: "", riderName: "", riderPhone: "", trackingRef: "" });
         break;
+    }
+  };
+
+  const executeClearStep = async () => {
+    const stepKey = confirmClearStep;
+    if (!stepKey) return;
+    const patch = getStepClearPatch(stepKey);
+    if (!patch) { setConfirmClearStep(null); return; }
+    setClearingStep(true);
+    try {
+      const saved = await upsertHandlingRecord(task.id, task.company_id ?? null, patch, currentUserId);
+      onSaved(saved);
+      resetStepFormToFresh(stepKey);
+      toast({ title: "Cleared", description: "Saved data for this step has been deleted." });
+    } catch (err) {
+      console.error(err);
+      toast({ title: "Error", description: "Failed to clear this step.", variant: "destructive" });
+    } finally {
+      setClearingStep(false);
+      setConfirmClearStep(null);
     }
   };
 
@@ -741,7 +844,9 @@ export function HandlingWizardDialog({
     received: record?.received_at ? `Completed ${fmtDateTime(record.received_at)} · ${bclUsers.find((u) => u.id === record.received_by)?.name || "Staff"}` : null,
     taken: record?.taken_at ? `Completed ${fmtDateTime(record.taken_at)} · ${bclUsers.find((u) => u.id === record.taken_by)?.name || "Staff"}` : null,
     returned: record?.returned_at ? `Completed ${fmtDateTime(record.returned_at)} · ${bclUsers.find((u) => u.id === record.returned_by)?.name || "Staff"}` : null,
-    notified: record?.client_notified_at ? `Completed ${fmtDateTime(record.client_notified_at)} · ${bclUsers.find((u) => u.id === record.client_notified_by)?.name || "Staff"}` : null,
+    notified: record?.client_notified_at
+      ? `${NOTIFIED_METHOD_LABELS[record.client_notified_method || ""] || "Completed"} ${fmtDateTime(record.client_notified_at)} · ${bclUsers.find((u) => u.id === record.client_notified_by)?.name || "Staff"}`
+      : null,
     dispatch: record?.dispatched_at
       ? `Completed ${fmtDateTime(record.dispatched_at)} · ${getHandlingMethodOption(record.dispatch_method)?.dispatchLabel || ""}`
       : null,
@@ -850,17 +955,35 @@ export function HandlingWizardDialog({
                       {stepCompletedAt}
                     </span>
                   )}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={clearCurrentStep}
-                    className="h-9 px-3.5 text-sm font-bold gap-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 border-slate-200 hover:border-red-200"
-                  >
-                    <Eraser className="h-3.5 w-3.5" /> Clear
-                  </Button>
+                  {stepCompletedAt && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setConfirmClearStep(activeStep)}
+                      className="h-9 px-3.5 text-sm font-bold gap-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 border-slate-200 hover:border-red-200"
+                    >
+                      <Eraser className="h-3.5 w-3.5" /> Clear
+                    </Button>
+                  )}
                 </div>
               </div>
+
+              {confirmClearStep === activeStep && (
+                <div className="flex items-center justify-between gap-3 p-4 rounded-xl border border-red-200 bg-red-50">
+                  <p className="text-sm font-bold text-red-900">
+                    Delete the saved data for this step? This can't be undone.
+                  </p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmClearStep(null)} disabled={clearingStep} className="text-red-700 hover:bg-red-100">
+                      Cancel
+                    </Button>
+                    <Button type="button" size="sm" onClick={executeClearStep} disabled={clearingStep} className="gap-1.5 bg-red-600 hover:bg-red-700 text-white">
+                      {clearingStep && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Delete
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {phoneSavePrompt && phoneSavePrompt.step === activeStep && (
                 <div className="flex items-center justify-between gap-3 p-4 rounded-xl border border-amber-200 bg-amber-50">
@@ -900,7 +1023,7 @@ export function HandlingWizardDialog({
                     <TimeOnlyField value={received.at} onChange={(v) => setReceived((p) => ({ ...p, at: v }))} />
                   </FormRow>
                   <FormRow label="Received By (Staff)" required>
-                    <StaffCombobox users={bclUsers} value={received.by} onChange={(v) => setReceived((p) => ({ ...p, by: v }))} />
+                    <StaffCombobox users={visibleStaffUsers} value={received.by} onChange={(v) => setReceived((p) => ({ ...p, by: v }))} />
                   </FormRow>
                   <HandlingMethodFields direction="received" state={received} setState={setReceived} couriers={couriers} task={task} existingClientPhone={existingClientPhone} />
                 </div>
@@ -916,7 +1039,7 @@ export function HandlingWizardDialog({
                     <TimeOnlyField value={taken.at} onChange={(v) => setTaken((p) => ({ ...p, at: v }))} />
                   </FormRow>
                   <FormRow label="Taken By (Staff)" required>
-                    <StaffCombobox users={bclUsers} value={taken.by} onChange={(v) => setTaken((p) => ({ ...p, by: v }))} />
+                    <StaffCombobox users={visibleStaffUsers} value={taken.by} onChange={(v) => setTaken((p) => ({ ...p, by: v }))} />
                   </FormRow>
                 </div>
               )}
@@ -931,7 +1054,7 @@ export function HandlingWizardDialog({
                     <TimeOnlyField value={returned.at} onChange={(v) => setReturned((p) => ({ ...p, at: v }))} />
                   </FormRow>
                   <FormRow label="Brought Back By" required>
-                    <StaffCombobox users={bclUsers} value={returned.by} onChange={(v) => setReturned((p) => ({ ...p, by: v }))} />
+                    <StaffCombobox users={visibleStaffUsers} value={returned.by} onChange={(v) => setReturned((p) => ({ ...p, by: v }))} />
                   </FormRow>
                 </div>
               )}
@@ -939,15 +1062,96 @@ export function HandlingWizardDialog({
               {/* Step 4: Client Notified */}
               {activeStep === "notified" && (
                 <div className="divide-y divide-slate-100">
-                  <FormRow label="Notification Date" required>
+                  <FormRow label="Notification Date">
                     <DateOnlyField value={notified.at} onChange={(v) => setNotified((p) => ({ ...p, at: v }))} />
                   </FormRow>
-                  <FormRow label="Notification Time" required>
+                  <FormRow label="Notification Time">
                     <TimeOnlyField value={notified.at} onChange={(v) => setNotified((p) => ({ ...p, at: v }))} />
                   </FormRow>
-                  <FormRow label="Notified By (Staff)" required>
-                    <StaffCombobox users={bclUsers} value={notified.by} onChange={(v) => setNotified((p) => ({ ...p, by: v }))} />
+                  <FormRow label="Notified By (Staff)">
+                    <StaffCombobox users={visibleStaffUsers} value={notified.by} onChange={(v) => setNotified((p) => ({ ...p, by: v }))} />
                   </FormRow>
+                  <FormRow label="Notified Via" alignTop>
+                    <div className="space-y-3 w-full">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        {[
+                          { value: "call", label: "Call", icon: Phone },
+                          { value: "text", label: "Text", icon: MessageSquare },
+                          { value: "auto_message", label: "Auto Message", icon: SendHorizonal },
+                        ].map(({ value, label, icon: Icon }) => {
+                          const active = notified.method === value;
+                          return (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() =>
+                                setNotified((p) => ({
+                                  ...p,
+                                  method: value,
+                                  message:
+                                    value === "auto_message" && !p.message
+                                      ? composeReadyForPickupMessage(task.applicant_name)
+                                      : p.message,
+                                }))
+                              }
+                              className={cn(
+                                "flex items-center justify-center gap-2 h-11 rounded-lg border text-sm font-bold transition-colors",
+                                active
+                                  ? "border-blue-600 bg-blue-50 text-blue-700"
+                                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                              )}
+                            >
+                              <Icon className="h-4 w-4" /> {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {notified.method === "auto_message" && (
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2.5">
+                          <Label className="text-sm font-bold text-slate-700">Message to Send</Label>
+                          <Textarea
+                            value={notified.message}
+                            onChange={(e) => setNotified((p) => ({ ...p, message: e.target.value }))}
+                            rows={4}
+                            className="text-sm bg-white"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              navigator.clipboard.writeText(notified.message);
+                              toast({ title: "Copied", description: "Message copied to clipboard." });
+                            }}
+                            className="gap-1.5 text-sm font-bold"
+                          >
+                            <Copy className="h-3.5 w-3.5" /> Copy Message
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </FormRow>
+
+                  <div className="pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <p className="text-xs text-slate-500 max-w-sm">
+                      Skip if this client doesn't need a separate notification — e.g. their dispatch method (like a standing courier pickup) already tells them.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={skipNotification}
+                      disabled={savingStep === "notified"}
+                      className="h-10 px-4 text-sm font-bold gap-1.5 text-slate-600 hover:bg-slate-50 border-slate-300 shrink-0"
+                    >
+                      {savingStep === "notified" ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <SkipForward className="h-3.5 w-3.5" />
+                      )}
+                      Skip Notification
+                    </Button>
+                  </div>
                 </div>
               )}
 
@@ -961,7 +1165,7 @@ export function HandlingWizardDialog({
                     <TimeOnlyField value={dispatch.at} onChange={(v) => setDispatch((p) => ({ ...p, at: v }))} />
                   </FormRow>
                   <FormRow label="Handled By (Staff)" required>
-                    <StaffCombobox users={bclUsers} value={dispatch.handledBy} onChange={(v) => setDispatch((p) => ({ ...p, handledBy: v }))} />
+                    <StaffCombobox users={visibleStaffUsers} value={dispatch.handledBy} onChange={(v) => setDispatch((p) => ({ ...p, handledBy: v }))} />
                   </FormRow>
                   <HandlingMethodFields direction="dispatch" state={dispatch} setState={setDispatch} couriers={couriers} task={task} existingClientPhone={existingClientPhone} />
                 </div>

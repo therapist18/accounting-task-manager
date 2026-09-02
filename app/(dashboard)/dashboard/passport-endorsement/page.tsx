@@ -21,6 +21,7 @@ import {
   resolveEffectiveDate,
   WRITE_UP_STAGE_ID,
   STEP_LABELS,
+  NOTIFIED_METHOD_LABELS,
   IMMIGRATION_DEPT_ID,
   type PassportHandlingRecord,
   type Courier,
@@ -559,6 +560,7 @@ export default function PassportEndorsementPage() {
         "Returned By": getStaffName(record?.returned_by) || "",
         "Returned Date": fmtStageDate(record?.returned_at) || "",
         "Returned Time": record?.returned_at ? new Date(record.returned_at).toTimeString().slice(0, 5) : "",
+        "Notified Via": NOTIFIED_METHOD_LABELS[record?.client_notified_method || ""] || "",
         "Notified By": getStaffName(record?.client_notified_by) || "",
         "Notified Date": fmtStageDate(record?.client_notified_at) || "",
         "Notified Time": record?.client_notified_at ? new Date(record.client_notified_at).toTimeString().slice(0, 5) : "",
@@ -750,6 +752,7 @@ export default function PassportEndorsementPage() {
         bclUsers={bclUsers}
         couriers={couriers.filter((c) => c.is_active)}
         currentUserId={currentUserId}
+        isSuperAdmin={!!currentAuthUser?.isSuperAdmin}
         onSaved={handleSaved}
         onModeSaved={handleModeSaved}
       />

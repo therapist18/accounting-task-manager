@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Settings2, ArrowUpDown, ArrowLeftRight, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, SearchX, Layers, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { STEP_LABELS, resolveHandlingParty, getHandlingMethodOption, type HandlingStep } from "../utils/database";
+import { STEP_LABELS, resolveHandlingParty, getHandlingMethodOption, NOTIFIED_METHOD_LABELS, type HandlingStep } from "../utils/database";
 
 export const HANDLING_COLUMNS = [
   { id: "task_id", label: "Task ID" },
@@ -36,6 +36,7 @@ export const HANDLING_COLUMNS = [
   { id: "returned_by", label: "Returned By" },
   { id: "returned_date", label: "Returned Date" },
   { id: "returned_time", label: "Returned Time" },
+  { id: "notified_method", label: "Notified Via" },
   { id: "notified_by", label: "Notified By" },
   { id: "notified_date", label: "Notified Date" },
   { id: "notified_time", label: "Notified Time" },
@@ -167,7 +168,7 @@ export const COLUMN_GROUP_BY_ID: Record<string, string> = {
   received_method: "received", received_by: "received", received_date: "received", received_time: "received",
   taken_by: "taken", taken_date: "taken", taken_time: "taken",
   returned_by: "returned", returned_date: "returned", returned_time: "returned",
-  notified_by: "notified", notified_date: "notified", notified_time: "notified",
+  notified_method: "notified", notified_by: "notified", notified_date: "notified", notified_time: "notified",
   dispatch_mode: "dispatch", dispatch_handled_by: "dispatch", dispatch_by: "dispatch",
   dispatch_date: "dispatch", dispatch_time: "dispatch",
   completed_date: "completed", completed_time: "completed",
@@ -437,6 +438,7 @@ export function HandlingTable({
       case "returned_by": return !!getStaffName(record?.returned_by);
       case "returned_date": return !!fmtDateOnly(record?.returned_at);
       case "returned_time": return !!fmtTimeOnly(record?.returned_at);
+      case "notified_method": return !!record?.client_notified_method;
       case "notified_by": return !!getStaffName(record?.client_notified_by);
       case "notified_date": return !!fmtDateOnly(record?.client_notified_at);
       case "notified_time": return !!fmtTimeOnly(record?.client_notified_at);
@@ -836,6 +838,14 @@ export function HandlingTable({
                         case "returned_time": {
                           const t = fmtTimeOnly(record?.returned_at);
                           content = t ? <span className="text-sm text-slate-600 tabular-nums">{t}</span> : <span className="text-slate-300">—</span>;
+                          break;
+                        }
+                        case "notified_method": {
+                          content = record?.client_notified_method
+                            ? <span className={cn("inline-flex items-center px-2.5 py-1 rounded-full border text-sm font-semibold", record.client_notified_method === "skipped" ? "border-slate-200 bg-slate-50 text-slate-500" : "border-blue-200 bg-blue-50 text-blue-700")}>
+                                {NOTIFIED_METHOD_LABELS[record.client_notified_method] || record.client_notified_method}
+                              </span>
+                            : <span className="text-slate-300">—</span>;
                           break;
                         }
                         case "notified_by": {

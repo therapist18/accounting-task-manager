@@ -143,13 +143,13 @@ export function resolveHandlingParty(
 }
 
 // Composes the client-facing text for a "bcl_rider" dispatch — a company courier (fixed office,
-// e.g. G4S/NTL) is a pickup notice; an on_demand one (Bolt/Uber-style, a different individual
-// each time) is a delivery notice naming that rider. There's no send integration anywhere in
-// this codebase (see SendRequirementsDialog's own clipboard-copy convention) — this only
-// produces the text for staff to copy and paste into WhatsApp/SMS themselves.
+// e.g. G4S/NTL) is a pickup notice; anyone else with a name (an on_demand courier like
+// Bolt/Uber, or a rider not in the registry at all — the wizard's "Other" option, which never
+// has a `courier` row) is a delivery notice naming that person. There's no send integration
+// anywhere in this codebase (see SendRequirementsDialog's own clipboard-copy convention) — this
+// only produces the text for staff to copy and paste into WhatsApp/SMS themselves.
 export function composeDispatchMessage(courier: Courier | null | undefined, riderName: string | null | undefined): string | null {
-  if (!courier) return null;
-  if (courier.courier_type === "company") {
+  if (courier?.courier_type === "company") {
     return `We've dispatched your passport(s) — kindly pick them up from your nearest ${courier.name} office. Please ensure to carry the recipient's ID.`;
   }
   if (riderName) {
@@ -157,6 +157,21 @@ export function composeDispatchMessage(courier: Courier | null | undefined, ride
   }
   return null;
 }
+
+// Default starting text for the "Auto Message" notification option — editable by staff before
+// they copy it (same copy-to-clipboard convention as composeDispatchMessage; no send
+// integration exists anywhere in this codebase).
+export function composeReadyForPickupMessage(applicantName: string | null | undefined): string {
+  const name = applicantName?.trim() || "there";
+  return `Hi ${name}, your passport(s) have been stamped and are ready for collection at our office. Kindly let us know when you'll be picking them up.`;
+}
+
+export const NOTIFIED_METHOD_LABELS: Record<string, string> = {
+  call: "Notified by Call",
+  text: "Notified by Text",
+  auto_message: "Sent Message",
+  skipped: "Notification Skipped",
+};
 
 export interface PassportHandlingRecord {
   id: string;
@@ -181,6 +196,7 @@ export interface PassportHandlingRecord {
 
   client_notified_at: string | null;
   client_notified_by: string | null;
+  client_notified_method: "call" | "text" | "auto_message" | "skipped" | null;
 
   dispatched_at: string | null;
   dispatch_handled_by: string | null; // BCL staff point of contact for the dispatch
