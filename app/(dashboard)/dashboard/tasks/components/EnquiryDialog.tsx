@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { SearchableSelect } from "@/components/ui/searchable-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Check, ChevronsUpDown, Loader2, User, Users, Building2, FileText, UserPlus, UserCheck, Shield, HelpCircle, Calendar, MessageSquare, ListTodo, Phone, Database, Folder, Search, HeartHandshake, Split, X, AlertCircle, Link2, PlusCircle, Upload } from "lucide-react"
+import { Check, ChevronsUpDown, ChevronRight, Loader2, User, Users, Building2, FileText, UserPlus, UserCheck, Shield, HelpCircle, Calendar, MessageSquare, ListTodo, Phone, Database, Folder, Search, HeartHandshake, Split, X, AlertCircle, Link2, PlusCircle, Upload } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Textarea } from "@/components/ui/textarea"
@@ -22,7 +22,7 @@ import { toast } from "@/lib/hooks/use-toast"
 import { format, isValid } from "date-fns"
 import { Calendar as CalendarPicker } from "@/components/ui/calendar"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "../utils/workflowBundleHelpers"
+import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService, fetchIndividualDocumentsForLinking, linkTaskToDocumentWorkflow, type LinkableDocument } from "../utils/workflowBundleHelpers"
 import { getInheritedOfficer, getDepartmentOfficerIds, getSubdepartmentOfficerIds } from "../../departments/departments/database"
 import { fetchOfficers, fetchTaskManagers, fetchTaskAssistants, fetchAllUsers, hasJobLevelAccess, buildSelectOptions, FilteredUserData, userService, DisplayUser } from "@/lib/shared-user-assignment-service"
 import { parseDateWithMonthName } from "@/app/generic-functions/dateUtils"
@@ -249,6 +249,14 @@ export function EnquiryDialog({
     const [selectedCompany, setSelectedCompany] = useState<string>('')
     const [understudies, setUnderstudies] = useState<any[]>([])
     const [selectedUnderstudy, setSelectedUnderstudy] = useState<string>('')
+
+    // Related Document — lets this task be tagged with the specific document it's meant to
+    // resolve (e.g. an expired permit), so bcl-registry's document workflow status picks it up
+    // automatically instead of showing "no workflow" forever because nobody went back to flag
+    // it there separately. Optional — most tasks aren't about a specific document.
+    const [availableRelatedDocuments, setAvailableRelatedDocuments] = useState<LinkableDocument[]>([])
+    const [selectedRelatedDocumentId, setSelectedRelatedDocumentId] = useState<string>('')
+    const [loadingRelatedDocuments, setLoadingRelatedDocuments] = useState(false)
 
     // Multi-select relations
     const [includeDependants, setIncludeDependants] = useState(false)
@@ -1111,6 +1119,8 @@ export function EnquiryDialog({
             setPrincipalForDependant(null)
             setApplicantPhoto(null)
             setSelectedSponsor(null)
+            setSelectedRelatedDocumentId('')
+            setAvailableRelatedDocuments([])
         }
     }, [applicantType, open])
 
@@ -1124,8 +1134,14 @@ export function EnquiryDialog({
         setAvailableDependants([]); setSelectedDependants([]); setIncludeDependants(false)
         setAvailableReferences([]); setSelectedReferences([]); setIncludeReferences(false)
         setPrincipalForDependant(null)
+        setSelectedRelatedDocumentId(''); setAvailableRelatedDocuments([])
         fetchApplicantPhoto(ind.id);
         fetchPassportNumber(ind.id);
+
+        setLoadingRelatedDocuments(true)
+        fetchIndividualDocumentsForLinking(ind.id)
+            .then(setAvailableRelatedDocuments)
+            .finally(() => setLoadingRelatedDocuments(false))
 
         const promises = []
         promises.push(
@@ -1746,6 +1762,28 @@ export function EnquiryDialog({
             const [{ data: taskData, error: taskError }] = await Promise.all([taskPromise, rNumberPromise]);
             if (taskError) throw taskError;
 
+            // Flag this document's workflow as "Task Created" over on the Document Manager side
+            // instead of leaving it at "no workflow" until someone remembers to go do it there
+            // separately. Best-effort — the task itself is already saved at this point, so a
+            // failure here surfaces as a warning rather than rolling back the task creation.
+            if (!taskToEdit && selectedRelatedDocumentId) {
+                const linkedDoc = availableRelatedDocuments.find((doc) => doc.uploadedDocId === selectedRelatedDocumentId);
+                if (linkedDoc) {
+                    const linkResult = await linkTaskToDocumentWorkflow({
+                        individualId: selectedIndividual.id,
+                        individualName: selectedIndividual.full_name,
+                        documentTypeId: linkedDoc.documentTypeId,
+                        documentTypeName: linkedDoc.documentTypeName,
+                        uploadedDocId: linkedDoc.uploadedDocId,
+                        taskId: taskData.id,
+                        createdBy: taskData.created_by ?? null,
+                    });
+                    if (!linkResult.success) {
+                        toast({ title: "Task created, but document link failed", description: "The task was saved — you may need to link it to the document manually.", variant: "destructive" });
+                    }
+                }
+            }
+
             toast({
                 title: "Success",
                 description: taskToEdit ? "Enquiry updated successfully." : "Enquiry created successfully.",
@@ -1913,6 +1951,98 @@ export function EnquiryDialog({
                                                         </PopoverContent>
                                                     </Popover>
                                                 </div>
+                                            </div>
+                                        </TableRow>
+
+                                        <TableRow label="Related Document" hasValue={!!selectedRelatedDocumentId}>
+                                            <div className="flex-1 space-y-2">
+                                                {(() => {
+                                                    const suggested = availableRelatedDocuments.find((doc) => doc.isCurrentImmigrationStatus);
+                                                    const isSuggestedLinked = !!suggested && selectedRelatedDocumentId === suggested.uploadedDocId;
+                                                    if (!suggested || isSuggestedLinked) return null;
+                                                    // Deliberately loud — this is the one document most tasks actually need linked
+                                                    // (the person's current immigration status), so it shouldn't be just another
+                                                    // row in a dropdown the user can skim past.
+                                                    return (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setSelectedRelatedDocumentId(suggested.uploadedDocId)}
+                                                            className={cn(
+                                                                "w-full flex items-center justify-between gap-3 rounded-lg border-2 px-3 py-2.5 text-left transition-all animate-pulse hover:animate-none",
+                                                                suggested.status === 'expired'
+                                                                    ? "border-red-300 bg-red-50 hover:border-red-400 hover:bg-red-100"
+                                                                    : "border-amber-300 bg-amber-50 hover:border-amber-400 hover:bg-amber-100"
+                                                            )}
+                                                        >
+                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                <AlertCircle className={cn("h-4 w-4 shrink-0", suggested.status === 'expired' ? "text-red-600" : "text-amber-600")} />
+                                                                <div className="min-w-0">
+                                                                    <div className="text-xs font-bold text-slate-800 truncate">
+                                                                        Current Immigration Status: {suggested.documentTypeName}
+                                                                        {suggested.status === 'expired' && <span className="ml-1.5 text-red-600">(Expired)</span>}
+                                                                    </div>
+                                                                    <div className="text-xs text-slate-500">
+                                                                        {suggested.expiryDate ? `Expires ${format(new Date(suggested.expiryDate), 'dd/MM/yyyy')}` : 'No expiry on file'} — tap to link this task to it
+                                                                    </div>
+                                                                    {suggested.existingWorkflowLabel && (
+                                                                        <div className="text-xs text-orange-600 font-medium mt-0.5">
+                                                                            ⚠ {suggested.existingWorkflowLabel} — check before adding another task
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                            <span className="shrink-0 flex items-center gap-1 text-xs font-semibold text-blue-600">
+                                                                <Link2 className="h-3.5 w-3.5" /> Link
+                                                            </span>
+                                                        </button>
+                                                    );
+                                                })()}
+
+                                                {selectedRelatedDocumentId && (() => {
+                                                    const linked = availableRelatedDocuments.find((doc) => doc.uploadedDocId === selectedRelatedDocumentId);
+                                                    if (!linked) return null;
+                                                    return (
+                                                        <div className={cn("rounded-lg border px-3 py-2", linked.existingWorkflowLabel ? "border-orange-200 bg-orange-50" : "border-emerald-200 bg-emerald-50")}>
+                                                            <div className="flex items-center justify-between">
+                                                                <span className={cn("text-xs font-medium flex items-center gap-1.5 truncate", linked.existingWorkflowLabel ? "text-orange-700" : "text-emerald-700")}>
+                                                                    <Check className="h-3.5 w-3.5 shrink-0" />
+                                                                    Linked: {linked.documentTypeName}{linked.isCurrentImmigrationStatus ? ' (current status)' : ''}
+                                                                </span>
+                                                                <button type="button" className="shrink-0 text-xs text-slate-400 hover:text-red-600" onClick={() => setSelectedRelatedDocumentId('')}>Unlink</button>
+                                                            </div>
+                                                            {linked.existingWorkflowLabel && (
+                                                                <p className="text-xs text-orange-600 mt-1">
+                                                                    ⚠ {linked.existingWorkflowLabel} — this task will be added alongside it, not replace it.
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })()}
+
+                                                <details className="group">
+                                                    <summary className="text-xs text-slate-400 hover:text-slate-600 cursor-pointer list-none flex items-center gap-1 select-none">
+                                                        <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
+                                                        {selectedRelatedDocumentId ? 'Link a different document instead' : 'Link a different document'}
+                                                    </summary>
+                                                    <div className="mt-2">
+                                                        <SearchableSelect
+                                                            value={selectedRelatedDocumentId}
+                                                            onValueChange={setSelectedRelatedDocumentId}
+                                                            options={availableRelatedDocuments.map((doc) => ({
+                                                                value: doc.uploadedDocId,
+                                                                label: `${doc.isCurrentImmigrationStatus ? '⭐ ' : ''}${doc.documentTypeName}${doc.expiryDate ? ` — exp. ${format(new Date(doc.expiryDate), 'dd/MM/yyyy')}` : ''}${doc.status === 'expired' ? ' (Expired)' : ''}${doc.existingWorkflowLabel ? ` ⚠ ${doc.existingWorkflowLabel}` : ''}`,
+                                                            }))}
+                                                            placeholder={!selectedIndividual ? "Select applicant first" : loadingRelatedDocuments ? "Loading documents..." : "Not linked to a specific document"}
+                                                            disabled={!selectedIndividual || loadingRelatedDocuments || availableRelatedDocuments.length === 0}
+                                                            emptyMessage="No documents on file for this individual."
+                                                            searchPlaceholder="Search documents..."
+                                                        />
+                                                    </div>
+                                                </details>
+
+                                                <p className="text-xs text-slate-400">
+                                                    Optional — link this task to a specific document so its status updates automatically in the Document Manager.
+                                                </p>
                                             </div>
                                         </TableRow>
 

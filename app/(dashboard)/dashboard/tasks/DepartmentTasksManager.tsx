@@ -1752,7 +1752,11 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         'endorsed': 3
       };
 
-      // 2. Map Stage IDs to Target Statuses
+      // 2. Map Stage IDs to Target Statuses — fallback for stages predating the
+      // per-stage triggers_task_status config (see stagesdb.ts's Stage.triggers_task_status,
+      // set via add-stage-dialog.tsx / edit-stage-dialog.tsx's "Task Status Transition" picker).
+      // Kept so existing stages using these exact IDs keep working even if never explicitly
+      // configured with the field.
       const STAGE_STATUS_MAPPING: Record<string, string> = {
         'a19b270e-6d1e-4e6d-b2bc-f21db72cde08': 'in_progress',       // Start / In Progress
         '072b9710-45df-4a05-ba65-01b4ef29d61d': 'write_up_completed', // Write Up Completed
@@ -1780,7 +1784,41 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
 
       const currentStatusRaw = task.status;
       const currentStatusKey = normalizeStatus(currentStatusRaw);
-      const potentialNewStatus = STAGE_STATUS_MAPPING[stageId.toLowerCase()];
+      // Resolve the status this stage completion should trigger, most-specific first:
+      // class-level allocation override -> subdept-level allocation override -> the stage's
+      // own default (triggers_task_status) -> the hardcoded ID map (legacy fallback). This lets
+      // the SAME shared stage (e.g. a department-wide "Endorsement" stage) trigger different
+      // statuses for different classes — e.g. jump straight to 'endorsed' for classes with a
+      // real Write Up step, but only to 'write_up_completed' for a class (like Extension of
+      // Visitor's Pass) whose pipeline skips Write Up entirely, so it still surfaces in the
+      // Passport Endorsement Tracker before being marked fully endorsed.
+      // '' at any level is an explicit "never trigger a status here" override, distinct from
+      // undefined/absent which means "inherit from the next level down".
+      const resolveConfiguredTrigger = (): string | undefined => {
+        try {
+          const dept = departments.find((d: any) => d?.id === (task.department?.id || task.department_id));
+          const subdept = dept?.tm_subdepartments?.find((s: any) => s?.id === (task.subdepartment?.id || task.subdepartment_id));
+          if (subdept) {
+            if (task.class_id) {
+              const cls = subdept.classes?.find((c: any) => c?.id?.toString() === task.class_id?.toString());
+              const classAlloc = cls?.stages?.find((s: any) => s.stage_id === stageId);
+              if (classAlloc && classAlloc.triggers_task_status !== undefined) return classAlloc.triggers_task_status;
+            }
+            const subdeptAlloc = subdept.stages?.find((s: any) => s.stage_id === stageId);
+            if (subdeptAlloc && subdeptAlloc.triggers_task_status !== undefined) return subdeptAlloc.triggers_task_status;
+          }
+        } catch (error) {
+          console.error('Error resolving stage status trigger override:', error);
+        }
+        const stageDef = stages?.find((s: any) => s.id === stageId);
+        return stageDef?.triggers_task_status;
+      };
+      // undefined means "nothing configured at any level" -> fall back to the hardcoded map.
+      // Any resolved string (including '') is used as-is: '' correctly falls through the
+      // `if (potentialNewStatus && ...)` check below and triggers no status change at all,
+      // rather than being mistaken for "not configured" and silently falling back to the map.
+      const resolvedTrigger = resolveConfiguredTrigger();
+      const potentialNewStatus = resolvedTrigger !== undefined ? resolvedTrigger.trim() : STAGE_STATUS_MAPPING[stageId.toLowerCase()];
       const isSkipped = updatedExtractedDetails?.status === 'skipped';
       const isCleared = updatedExtractedDetails?.isCleared === true;
 
@@ -1896,7 +1934,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         variant: "destructive"
       });
     }
-  }, [tasks, stages, determineCurrentStage, activeDepartmentTab, activeSubdepartmentTab, clearTasksCache]);
+  }, [tasks, stages, departments, determineCurrentStage, activeDepartmentTab, activeSubdepartmentTab, clearTasksCache]);
 
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
     if (!tasks.length) return [];

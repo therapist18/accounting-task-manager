@@ -142,6 +142,9 @@ export interface NewStage {
     dependencies?: StageDependency[]
     // New: Attribute-based applicability conditions (renewal status / nationality / age)
     applicabilityConditions?: StageApplicabilityCondition[]
+    // When this stage is completed, transition the task to this status.
+    // Valid values: 'in_progress' | 'write_up_completed' | 'endorsed' | '' (none)
+    triggers_task_status?: string
 }
 
 // Update Stage interface if needed
@@ -166,6 +169,9 @@ export interface Stage {
     dependencies?: StageDependency[]
     // New: Attribute-based applicability conditions (renewal status / nationality / age)
     applicabilityConditions?: StageApplicabilityCondition[]
+    // When this stage is completed, transition the task to this status.
+    // Valid values: 'in_progress' | 'write_up_completed' | 'endorsed' | '' (none)
+    triggers_task_status?: string
     allocations?: {
         [key: string]: {
             applicable: boolean
@@ -220,6 +226,12 @@ export type StageAllocation = {
     stage_id: string
     applicable: boolean
     display: boolean
+    // Per-job-level override of Stage.triggers_task_status — lets the same shared stage
+    // trigger a different task status for this specific subdept/class/subclass (e.g. a shared
+    // "Endorsement" stage that should jump straight to 'endorsed' for most classes but only to
+    // 'write_up_completed' for a class whose pipeline has no separate Write Up step).
+    // Undefined/absent = inherit the stage's own default; '' = explicit "no trigger" override.
+    triggers_task_status?: string
 }
 
 export type Subdepartment = {

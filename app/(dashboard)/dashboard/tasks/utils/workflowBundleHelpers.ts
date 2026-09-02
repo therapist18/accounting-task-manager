@@ -160,6 +160,61 @@ function getActiveTaskIds(taskEntry: any) {
   return allTaskIds.filter((taskId: number) => !cancelledTaskIds.has(taskId) && !revertedTaskIds.has(taskId));
 }
 
+const RESOLUTION_OUTCOME_LABELS: Record<string, string> = {
+  task_initiated: "Resolved: task initiated",
+  renewed_by_client: "Resolved: client renewed directly",
+  superseded: "Resolved: superseded",
+  updated: "Resolved: updated",
+  status_changed: "Resolved: status changed",
+  deactivated: "Resolved: deactivated",
+  no_action_required: "Resolved: no action required",
+};
+
+// document_workflow_logs.action_type is NOT a reliable "what is this row" flag — it only
+// records the *latest* stage a row was mutated through, and bcl-registry's own write path
+// (getPersistedActionType) silently downgrades a fresh 'resolution' to 'comment' unless a
+// fallback type is explicitly passed on write, so plenty of real rows sit at action_type:
+// 'comment' despite actually holding resolution/hold/task data. Trusting action_type directly
+// (as an earlier version of this file did) made almost everything read as "Has a comment".
+// This instead inspects the actual holds/tasks/resolutions/reminders arrays with the same
+// priority order bcl-registry's own getWorkflowStatusInfo uses: task > resolution > hold >
+// reminder > comment.
+function summarizeWorkflowLogForDocument(log: any): string | null {
+  const tasks = getWorkflowPayloadEntries(log, "tasks");
+  const latestTask = tasks[tasks.length - 1];
+  if (latestTask && !latestTask.dismissed) {
+    const activeTaskIds = getActiveTaskIds(latestTask);
+    if (activeTaskIds.length > 0) return activeTaskIds.length === 1 ? "Task already created" : "Tasks already created";
+    if (log.action_type === "task_pushed" && (!latestTask.taskIds || latestTask.taskIds.length === 0)) return "Task already pushed";
+  }
+
+  const resolutions = getWorkflowPayloadEntries(log, "resolutions");
+  const latestResolution = resolutions[resolutions.length - 1];
+  if (latestResolution && !latestResolution.dismissed && !latestResolution.corrected) {
+    return RESOLUTION_OUTCOME_LABELS[String(latestResolution.outcome || "").toLowerCase()] || "Already resolved";
+  }
+
+  const holds = getWorkflowPayloadEntries(log, "holds");
+  const latestHold = holds[holds.length - 1];
+  if (latestHold && !latestHold.dismissed && latestHold.holdUntil && new Date(latestHold.holdUntil) > new Date()) {
+    return "On hold";
+  }
+
+  const reminders = getWorkflowPayloadEntries(log, "reminders");
+  const latestReminder = reminders[reminders.length - 1];
+  if (latestReminder && !latestReminder.dismissed) {
+    return latestReminder.response ? `Reminder response: ${latestReminder.response}` : "Reminder sent, awaiting response";
+  }
+
+  const comments = getWorkflowPayloadEntries(log, "comments");
+  const latestComment = comments[comments.length - 1];
+  if (latestComment && !latestComment.dismissed) return "Has a comment";
+
+  if (log.action_type === "deactivation") return "Deactivated";
+
+  return null;
+}
+
 export function getBundleRelatedDocumentTypeIds(bundle?: TaskBundleTemplate | null) {
   if (!bundle) return [];
   return Array.from(new Set([
@@ -323,6 +378,208 @@ export async function detectExistingWorkflowForIndividual(individualId: number) 
     hasExistingWorkflow: workflowLogs.length > 0,
     documentTypeSummary,
   };
+}
+
+export interface LinkableDocument {
+  uploadedDocId: string;
+  documentTypeId: string;
+  documentTypeName: string;
+  expiryDate: string | null;
+  status: "expired" | "valid" | "unknown";
+  // True for the one document this person's Current Immigration Status column in bcl-registry
+  // is actually tracking — see pickCurrentImmigrationDocument below.
+  isCurrentImmigrationStatus: boolean;
+  // Label for whatever's already recorded in document_workflow_logs for this exact document,
+  // if anything — so a task creator doesn't blindly stack a second task onto a document that's
+  // already being handled. null means no workflow activity recorded yet.
+  existingWorkflowLabel: string | null;
+}
+
+// Same ranking bcl-registry's imm-status-manager uses to decide a person's single "current"
+// immigration document: prefer whichever of their Permanent/Temporary Immigration Status
+// documents expires latest (a master-class document, if any, wins outright within its own
+// category), then prefer Permanent over Temporary on a tie. Only the doc-manager's own field-
+// level extraction of issue/expiry dates is skipped — this works off the plain expiry_date
+// column instead, which is close enough for "which one should I suggest" purposes.
+function pickCurrentImmigrationDocument(docs: any[], docTypesById: Map<string, any>): string | null {
+  const withCategory = docs
+    .map((doc) => ({ doc, docType: docTypesById.get(String(doc.document_id)) }))
+    .filter((d) => d.docType);
+
+  const rank = (list: typeof withCategory) => list.reduce((best, current) => {
+    if (!best) return current;
+    if (current.docType.is_master_class_imm_status && !best.docType.is_master_class_imm_status) return current;
+    if (best.docType.is_master_class_imm_status && !current.docType.is_master_class_imm_status) return best;
+    if (!current.doc.expiry_date) return best;
+    if (!best.doc.expiry_date) return current;
+    return new Date(current.doc.expiry_date) > new Date(best.doc.expiry_date) ? current : best;
+  }, null as typeof withCategory[number] | null);
+
+  const bestPermanent = rank(withCategory.filter((d) => d.docType.sub_main_category === "Permanent Immigration Status"));
+  const bestTemporary = rank(withCategory.filter((d) => d.docType.sub_main_category === "Temporary Immigration Status"));
+
+  if (bestPermanent && bestTemporary) {
+    if (!bestPermanent.doc.expiry_date) return bestTemporary.doc.id;
+    if (!bestTemporary.doc.expiry_date) return bestPermanent.doc.id;
+    return new Date(bestTemporary.doc.expiry_date) > new Date(bestPermanent.doc.expiry_date)
+      ? bestTemporary.doc.id
+      : bestPermanent.doc.id;
+  }
+  return (bestPermanent || bestTemporary)?.doc.id ?? null;
+}
+
+// Lists a person's uploaded IMMIGRATION documents so a task creator can say "this task is
+// about that document" — deliberately independent of detectExistingWorkflowForIndividual
+// above, which only knows about documents that already HAVE a workflow log. This is the whole
+// point: most of the time a task is created for a document that has never been tracked in
+// document_workflow_logs at all (e.g. an expired permit nobody has actioned yet).
+//
+// acc_portal_directors_documents also holds non-identity paperwork generated by the task
+// workflow itself (application forms, approval invoices, stage-upload artifacts) that isn't
+// "a document this person has" in the sense this picker means — scoped to main_category =
+// 'Immigration Status' (same category bcl-registry's imm-status-manager itself reads) to
+// exclude that noise.
+export async function fetchIndividualDocumentsForLinking(individualId: number): Promise<LinkableDocument[]> {
+  const [{ data: docTypes, error: docTypesError }, { data: docs, error }, { data: workflowLogs, error: workflowError }] = await Promise.all([
+    supabase
+      .from("acc_portal_kyc")
+      .select("id, display_name, sub_main_category, is_master_class_imm_status")
+      .eq("main_category", "Immigration Status"),
+    supabase
+      .from("acc_portal_directors_documents")
+      .select("id, document_id, expiry_date")
+      .eq("director_id", individualId)
+      .order("expiry_date", { ascending: true }),
+    supabase
+      .from("document_workflow_logs")
+      .select("uploaded_doc_id, document_type_id, action_type, holds, comments, reminders, tasks, resolutions, payload")
+      .eq("individual_id", individualId)
+      .order("updated_at", { ascending: false }),
+  ]);
+
+  if (docTypesError) console.error("[fetchIndividualDocumentsForLinking] doc type lookup failed", docTypesError);
+  if (error) { console.error("[fetchIndividualDocumentsForLinking]", error); return []; }
+  if (workflowError) console.error("[fetchIndividualDocumentsForLinking] workflow lookup failed", workflowError);
+  if (!docs?.length) return [];
+
+  const docTypesById = new Map((docTypes || []).map((dt: any) => [String(dt.id), dt]));
+  // Only documents whose type is actually an Immigration Status document — drops task-stage
+  // admin artifacts that happen to share this same table.
+  const immigrationDocs = docs.filter((doc: any) => docTypesById.has(String(doc.document_id)));
+  if (!immigrationDocs.length) return [];
+
+  const currentImmDocId = pickCurrentImmigrationDocument(immigrationDocs, docTypesById);
+
+  // Fetched most-recently-updated first, so the first log seen per key here is the one that
+  // actually matters (mirrors workflowService.findWorkflowRecord's own "latest wins" pick).
+  const logByUploadedDoc = new Map<string, any>();
+  const logByDocType = new Map<string, any>();
+  (workflowLogs || []).forEach((log: any) => {
+    if (log.uploaded_doc_id && !logByUploadedDoc.has(String(log.uploaded_doc_id))) logByUploadedDoc.set(String(log.uploaded_doc_id), log);
+    if (log.document_type_id && !logByDocType.has(String(log.document_type_id))) logByDocType.set(String(log.document_type_id), log);
+  });
+
+  const now = new Date();
+  const results: LinkableDocument[] = immigrationDocs.map((doc: any) => {
+    const matchedLog = logByUploadedDoc.get(String(doc.id)) ?? logByDocType.get(String(doc.document_id)) ?? null;
+    return {
+      uploadedDocId: String(doc.id),
+      documentTypeId: String(doc.document_id),
+      documentTypeName: docTypesById.get(String(doc.document_id))?.display_name || "Document",
+      expiryDate: doc.expiry_date || null,
+      isCurrentImmigrationStatus: doc.id === currentImmDocId,
+      status: doc.expiry_date ? (new Date(doc.expiry_date) < now ? "expired" : "valid") : "unknown",
+      existingWorkflowLabel: matchedLog ? summarizeWorkflowLogForDocument(matchedLog) : null,
+    };
+  });
+
+  // Current status first (the one most tasks are actually about), then whatever's soonest to
+  // expire / most recently expired — matches the ascending expiry_date order already fetched.
+  return results.sort((a, b) => {
+    if (a.isCurrentImmigrationStatus !== b.isCurrentImmigrationStatus) return a.isCurrentImmigrationStatus ? -1 : 1;
+    return 0;
+  });
+}
+
+// Writes (or extends) the same document_workflow_logs row the Individual/Overall Document
+// Manager's own "push to task" flow would have written — so a task created here shows up
+// there with a normal "Task Created" workflow status, instead of the document sitting at
+// "no workflow" forever because nobody remembered to go flag it on the other app. Both apps
+// share one Supabase project, so this is a plain insert/update, not a cross-app API call.
+// Matching precedence mirrors workflowService.findWorkflowRecord on the bcl-registry side:
+// keyed by (individual_id, uploaded_doc_id) — the specific upload's own thread.
+export async function linkTaskToDocumentWorkflow(params: {
+  individualId: number;
+  individualName: string;
+  documentTypeId: string;
+  documentTypeName: string;
+  uploadedDocId: string;
+  taskId: string | number;
+  createdBy?: string | null;
+}): Promise<{ success: boolean; error?: any }> {
+  const { individualId, individualName, documentTypeId, documentTypeName, uploadedDocId, taskId, createdBy } = params;
+
+  const { data: existing, error: findError } = await supabase
+    .from("document_workflow_logs")
+    .select("*")
+    .eq("individual_id", individualId)
+    .eq("uploaded_doc_id", uploadedDocId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (findError) {
+    console.error("[linkTaskToDocumentWorkflow] lookup failed", findError);
+    return { success: false, error: findError };
+  }
+
+  const nowIso = new Date().toISOString();
+  const newTaskEntry = { taskIds: [taskId], createdAt: nowIso, actionType: "task_created" };
+
+  if (existing) {
+    const { error: updateError } = await supabase
+      .from("document_workflow_logs")
+      .update({
+        action_type: "task_created",
+        tasks: [...(existing.tasks || []), newTaskEntry],
+        payload: {
+          ...(existing.payload || {}),
+          _meta: {
+            ...(existing.payload?._meta || {}),
+            individualName,
+            documentName: documentTypeName,
+          },
+        },
+        updated_at: nowIso,
+      })
+      .eq("id", existing.id);
+    if (updateError) {
+      console.error("[linkTaskToDocumentWorkflow] update failed", updateError);
+      return { success: false, error: updateError };
+    }
+    return { success: true };
+  }
+
+  const { error: insertError } = await supabase.from("document_workflow_logs").insert({
+    individual_id: individualId,
+    document_type_id: documentTypeId,
+    uploaded_doc_id: uploadedDocId,
+    action_type: "task_created",
+    holds: [],
+    comments: [],
+    reminders: [],
+    resolutions: [],
+    tasks: [newTaskEntry],
+    payload: { _meta: { individualName, documentName: documentTypeName, documentStatus: "unknown" } },
+    created_by: createdBy ?? null,
+    created_at: nowIso,
+    updated_at: nowIso,
+  });
+  if (insertError) {
+    console.error("[linkTaskToDocumentWorkflow] insert failed", insertError);
+    return { success: false, error: insertError };
+  }
+  return { success: true };
 }
 
 export async function detectTaskConflictsForJobLevel(individualId: number, jobLevel: BundleJobLevel) {

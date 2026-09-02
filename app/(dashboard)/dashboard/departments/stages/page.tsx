@@ -89,6 +89,11 @@ const allocationKey = (
   subclassId: number | string | null = null,
 ) => `${subdeptId}:${classId ?? "null"}:${subclassId ?? "null"}:${stageId}`
 
+// Sentinel written to a pending/saved allocation's triggers_task_status to mean "clear the
+// override at this level, inherit from the stage's own default" — distinct from '' which is
+// an explicit "never trigger a status change here" override.
+const INHERIT_TRIGGER_STATUS = "__inherit__"
+
 export type PendingAllocation = {
   subdeptId: number
   classId: number | string | null
@@ -96,6 +101,7 @@ export type PendingAllocation = {
   stageId: string
   applicable?: boolean
   display?: boolean
+  triggers_task_status?: string
 }
 
 const ensureStageAllocation = (list: any[], stageId: string) => {
@@ -107,10 +113,23 @@ const ensureStageAllocation = (list: any[], stageId: string) => {
   return allocation
 }
 
+// triggers_task_status is a per-level override, not an aggregate flag — unlike
+// applicable/display it never bubbles up to parent levels (a class's override doesn't imply
+// anything about its subdept's own override). INHERIT_TRIGGER_STATUS clears the override at
+// exactly the target level instead of writing a value.
+const applyTriggerStatusOverride = (alloc: any, value: string | undefined) => {
+  if (value === undefined) return
+  if (value === INHERIT_TRIGGER_STATUS) {
+    delete alloc.triggers_task_status
+  } else {
+    alloc.triggers_task_status = value
+  }
+}
+
 const applyAllocationMutation = (
   working: any,
   stageId: string,
-  updates: { applicable?: boolean; display?: boolean },
+  updates: { applicable?: boolean; display?: boolean; triggers_task_status?: string },
   classId: number | string | null,
   subclassId: number | string | null,
 ) => {
@@ -122,6 +141,7 @@ const applyAllocationMutation = (
     const alloc = ensureStageAllocation(subCls.stages, stageId)
     if (updates.applicable !== undefined) alloc.applicable = updates.applicable
     if (updates.display !== undefined) alloc.display = updates.display
+    applyTriggerStatusOverride(alloc, updates.triggers_task_status)
 
     if (!cls.stages) cls.stages = []
     const classAlloc = ensureStageAllocation(cls.stages, stageId)
@@ -145,6 +165,7 @@ const applyAllocationMutation = (
     const classAlloc = ensureStageAllocation(cls.stages, stageId)
     if (updates.applicable !== undefined) classAlloc.applicable = updates.applicable
     if (updates.display !== undefined) classAlloc.display = updates.display
+    applyTriggerStatusOverride(classAlloc, updates.triggers_task_status)
 
     if (!working.stages) working.stages = []
     const subdeptAlloc = ensureStageAllocation(working.stages, stageId)
@@ -159,6 +180,7 @@ const applyAllocationMutation = (
     const alloc = ensureStageAllocation(working.stages, stageId)
     if (updates.applicable !== undefined) alloc.applicable = updates.applicable
     if (updates.display !== undefined) alloc.display = updates.display
+    applyTriggerStatusOverride(alloc, updates.triggers_task_status)
   }
 }
 
@@ -802,12 +824,12 @@ export default function Stages() {
       subdeptId: number,
       classId: number | string | null = null,
       subclassId: number | string | null = null,
-    ): { applicable: boolean; display: boolean } => {
+    ): { applicable: boolean; display: boolean; triggerStatus: string | undefined } => {
       const pending = pendingAllocations.get(allocationKey(subdeptId, stageId, classId, subclassId))
 
       const currentDept = getCurrentDepartment()
       const subdept = currentDept?.subdepartments?.find((sd: any) => sd.id === subdeptId)
-      let saved: { applicable?: boolean; display?: boolean } | undefined
+      let saved: { applicable?: boolean; display?: boolean; triggers_task_status?: string } | undefined
       if (subdept) {
         if (classId !== null && subclassId !== null) {
           const cls = subdept.classes?.find((c: any) => c.id === classId)
@@ -820,9 +842,17 @@ export default function Stages() {
         }
       }
 
+      // triggerStatus is this level's own override only (no inheritance resolved here —
+      // the grid shows each level's local setting; DepartmentTasksManager.tsx resolves the
+      // class → subdept → stage-default → hardcoded-fallback chain at task-completion time).
+      // undefined = inherit, '' = explicit "never trigger", any status = explicit override.
+      const rawTriggerStatus = pending?.triggers_task_status !== undefined ? pending.triggers_task_status : saved?.triggers_task_status
+      const triggerStatus = rawTriggerStatus === INHERIT_TRIGGER_STATUS ? undefined : rawTriggerStatus
+
       return {
         applicable: pending?.applicable ?? saved?.applicable ?? true,
         display: pending?.display ?? saved?.display ?? true,
+        triggerStatus,
       }
     },
     [departments, activeTab, pendingAllocations],
@@ -832,7 +862,7 @@ export default function Stages() {
     (
       subdeptId: number,
       stageId: string,
-      updates: { applicable?: boolean; display?: boolean },
+      updates: { applicable?: boolean; display?: boolean; triggers_task_status?: string },
       classId: number | string | null = null,
       subclassId: number | string | null = null,
     ) => {
@@ -876,7 +906,7 @@ export default function Stages() {
             applyAllocationMutation(
               working,
               change.stageId,
-              { applicable: change.applicable, display: change.display },
+              { applicable: change.applicable, display: change.display, triggers_task_status: change.triggers_task_status },
               change.classId,
               change.subclassId,
             )
@@ -1213,6 +1243,16 @@ export default function Stages() {
     stageAllocationChange(subdeptId, stageId, { display: checked }, classId, subclassId)
   }
 
+  const handleTriggerStatusChange = (
+    subdeptId: number,
+    stageId: string,
+    value: string,
+    classId: number | string | null = null,
+    subclassId: number | string | null = null,
+  ) => {
+    stageAllocationChange(subdeptId, stageId, { triggers_task_status: value }, classId, subclassId)
+  }
+
   const handleBulkDisplayToggle = (
     entity: { subdeptId: number; classId?: number | string | null; subclassId?: number | string | null },
     stageIds: string[],
@@ -1292,6 +1332,7 @@ export default function Stages() {
               timeConfigs: timeConfigs.length > 0 ? timeConfigs : undefined,
               documents: stage.documents || [],
               allocations: {},
+              triggers_task_status: stage.triggers_task_status || '',
             }
           }
 
@@ -1311,6 +1352,7 @@ export default function Stages() {
             timeConfigs: undefined,
             documents: stage.documents || [],
             allocations: {},
+            triggers_task_status: stage.triggers_task_status || '',
           }
         })
 
@@ -3027,7 +3069,7 @@ export default function Stages() {
                           </div>
                         </TableCell>
                         <TableCell className={cn("border-x border-gray-200 p-1", columnClass)}>
-                          <div className="flex justify-center items-center">
+                          <div className="flex flex-col items-center justify-center gap-1">
                             <Checkbox
                               checked={allocation.display}
                               onCheckedChange={(checked) =>
@@ -3042,6 +3084,23 @@ export default function Stages() {
                               disabled={!allocation.applicable}
                               className="h-4 w-4 text-blue-500"
                             />
+                            <Select
+                              value={allocation.triggerStatus ?? INHERIT_TRIGGER_STATUS}
+                              onValueChange={(val) =>
+                                handleTriggerStatusChange(entity.subdeptId, stage.id, val, entity.classId ?? null, entity.subclassId ?? null)
+                              }
+                            >
+                              <SelectTrigger className="h-6 border-0 shadow-none text-[10px] bg-transparent hover:bg-gray-200/50" title="Task status this stage triggers for this entity">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={INHERIT_TRIGGER_STATUS}>Inherit</SelectItem>
+                                <SelectItem value="">None</SelectItem>
+                                <SelectItem value="in_progress">In Progress</SelectItem>
+                                <SelectItem value="write_up_completed">Write Up Completed</SelectItem>
+                                <SelectItem value="endorsed">Endorsed</SelectItem>
+                              </SelectContent>
+                            </Select>
                           </div>
                         </TableCell>
                       </React.Fragment>
@@ -3583,7 +3642,7 @@ export default function Stages() {
                       ></TableCell>
                     )}
                     {filteredStages.map((stage, stageIndex) => {
-                      const { applicable: hasAllocation, display: hasDisplay } = getEffectiveAllocation(stage.id, subdept.id)
+                      const { applicable: hasAllocation, display: hasDisplay, triggerStatus } = getEffectiveAllocation(stage.id, subdept.id)
                       const columnClass = stageIndex % 2 === 0 ? "bg-slate-50" : "bg-slate-100/80"
 
                       return (
@@ -3593,7 +3652,7 @@ export default function Stages() {
                         >
                           {!hasClasses ? (
                             columnVisibility.controls && (
-                              <div className="grid grid-cols-2 gap-1 p-1">
+                              <div className="grid grid-cols-3 gap-1 p-1">
                                 <div className="flex justify-center">
                                   <div
                                     className="w-full"
@@ -3646,6 +3705,23 @@ export default function Stages() {
                                     disabled={!hasAllocation}
                                     className="h-4 w-4 text-blue-500"
                                   />
+                                </div>
+                                <div className="flex justify-center">
+                                  <Select
+                                    value={triggerStatus ?? INHERIT_TRIGGER_STATUS}
+                                    onValueChange={(value) => handleTriggerStatusChange(subdept.id, stage.id, value)}
+                                  >
+                                    <SelectTrigger className="h-7 w-full border-0 shadow-none text-[10px] bg-transparent hover:bg-slate-200/50" title="Task status this stage triggers for this entity">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value={INHERIT_TRIGGER_STATUS}>Inherit</SelectItem>
+                                      <SelectItem value="">None</SelectItem>
+                                      <SelectItem value="in_progress">In Progress</SelectItem>
+                                      <SelectItem value="write_up_completed">Write Up Completed</SelectItem>
+                                      <SelectItem value="endorsed">Endorsed</SelectItem>
+                                    </SelectContent>
+                                  </Select>
                                 </div>
                               </div>
                             )
@@ -3723,7 +3799,7 @@ export default function Stages() {
                           ></TableCell>
                         )}
                         {filteredStages.map((stage, stageIndex) => {
-                          const { applicable: hasAllocation, display: hasDisplay } = getEffectiveAllocation(stage.id, subdept.id, cls.id)
+                          const { applicable: hasAllocation, display: hasDisplay, triggerStatus } = getEffectiveAllocation(stage.id, subdept.id, cls.id)
                           const columnClass = stageIndex % 2 === 0 ? "bg-white" : "bg-gray-100/80"
 
                           return (
@@ -3733,7 +3809,7 @@ export default function Stages() {
                             >
                               {!hasSubClasses ? (
                                 columnVisibility.controls && (
-                                  <div className="grid grid-cols-2 gap-1 p-1">
+                                  <div className="grid grid-cols-3 gap-1 p-1">
                                     <div className="flex justify-center">
                                       <Select
                                         value={hasAllocation ? "applicable" : "not-applicable"}
@@ -3776,6 +3852,23 @@ export default function Stages() {
                                         disabled={!hasAllocation}
                                         className="h-4 w-4 text-blue-500"
                                       />
+                                    </div>
+                                    <div className="flex justify-center">
+                                      <Select
+                                        value={triggerStatus ?? INHERIT_TRIGGER_STATUS}
+                                        onValueChange={(value) => handleTriggerStatusChange(subdept.id, stage.id, value, cls.id)}
+                                      >
+                                        <SelectTrigger className="h-7 w-full border-0 shadow-none text-[10px] bg-transparent hover:bg-gray-200/50" title="Task status this stage triggers for this entity">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value={INHERIT_TRIGGER_STATUS}>Inherit</SelectItem>
+                                          <SelectItem value="">None</SelectItem>
+                                          <SelectItem value="in_progress">In Progress</SelectItem>
+                                          <SelectItem value="write_up_completed">Write Up Completed</SelectItem>
+                                          <SelectItem value="endorsed">Endorsed</SelectItem>
+                                        </SelectContent>
+                                      </Select>
                                     </div>
                                   </div>
                                 )
@@ -3831,7 +3924,7 @@ export default function Stages() {
                               ></TableCell>
                             )}
                             {filteredStages.map((stage, stageIndex) => {
-                              const { applicable: hasAllocation, display: hasDisplay } = getEffectiveAllocation(stage.id, subdept.id, cls.id, subCls.id)
+                              const { applicable: hasAllocation, display: hasDisplay, triggerStatus } = getEffectiveAllocation(stage.id, subdept.id, cls.id, subCls.id)
                               const columnClass = stageIndex % 2 === 0 ? "bg-white" : "bg-gray-50/80"
 
                               return (
@@ -3840,7 +3933,7 @@ export default function Stages() {
                                   className={cn("border-x border-gray-200 p-0", columnClass)}
                                 >
                                   {columnVisibility.controls && (
-                                    <div className="grid grid-cols-2 gap-1 p-1">
+                                    <div className="grid grid-cols-3 gap-1 p-1">
                                       <div className="flex justify-center">
                                         <Select
                                           value={hasAllocation ? "applicable" : "not-applicable"}
@@ -3895,6 +3988,25 @@ export default function Stages() {
                                           disabled={!hasAllocation}
                                           className="h-4 w-4 text-blue-500"
                                         />
+                                      </div>
+                                      <div className="flex justify-center">
+                                        <Select
+                                          value={triggerStatus ?? INHERIT_TRIGGER_STATUS}
+                                          onValueChange={(value) =>
+                                            handleTriggerStatusChange(subdept.id, stage.id, value, cls.id, subCls.id)
+                                          }
+                                        >
+                                          <SelectTrigger className="h-7 w-full border-0 shadow-none text-[10px] bg-transparent hover:bg-gray-200/50" title="Task status this stage triggers for this entity">
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value={INHERIT_TRIGGER_STATUS}>Inherit</SelectItem>
+                                            <SelectItem value="">None</SelectItem>
+                                            <SelectItem value="in_progress">In Progress</SelectItem>
+                                            <SelectItem value="write_up_completed">Write Up Completed</SelectItem>
+                                            <SelectItem value="endorsed">Endorsed</SelectItem>
+                                          </SelectContent>
+                                        </Select>
                                       </div>
                                     </div>
                                   )}

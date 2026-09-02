@@ -691,6 +691,24 @@ function StageForm({ stage, onUpdate, officers, allMasterFields, loadingMasterFi
                         </div>
                     )}
                 </div>
+
+                {/* Task Status Transition */}
+                <div className="space-y-4 pt-4 border-t">
+                    <div className="flex items-center gap-2 mb-2">
+                        <Zap className="h-4 w-4 text-blue-600" />
+                        <Label className="font-medium text-gray-800">Task Status Transition</Label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">When this stage is completed, automatically transition the task to the selected status. Leave as "None" for intermediate stages.</p>
+                    <Select value={stage.triggers_task_status || 'none'} onValueChange={(value) => onUpdate({ triggers_task_status: value === 'none' ? '' : value })}>
+                        <SelectTrigger className="max-w-md"><SelectValue placeholder="Select a status transition" /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="none">None (No status change)</SelectItem>
+                            <SelectItem value="in_progress">In Progress (WIP)</SelectItem>
+                            <SelectItem value="write_up_completed">Write Up Completed</SelectItem>
+                            <SelectItem value="endorsed">Endorsed</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
             </div>
         </div>
     );

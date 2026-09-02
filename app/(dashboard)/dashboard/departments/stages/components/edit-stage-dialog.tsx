@@ -953,6 +953,23 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                     <p className="text-xs text-muted-foreground italic">No conditions configured. This stage applies to every task regardless of its attributes.</p>
                   )}
                 </SectionWrapper>
+                <SectionWrapper title="Task Status Transition" icon={<Zap />}>
+                  <p className="text-sm text-muted-foreground -mt-2">
+                    When this stage is completed, automatically transition the task to the selected status. Leave as "None" for intermediate stages.
+                  </p>
+                  <Select
+                    value={formData.triggers_task_status || 'none'}
+                    onValueChange={(value) => setFormData(prev => prev ? { ...prev, triggers_task_status: value === 'none' ? '' : value } : null)}
+                  >
+                    <SelectTrigger className="max-w-md"><SelectValue placeholder="Select a status transition" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None (No status change)</SelectItem>
+                      <SelectItem value="in_progress">In Progress (WIP)</SelectItem>
+                      <SelectItem value="write_up_completed">Write Up Completed</SelectItem>
+                      <SelectItem value="endorsed">Endorsed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </SectionWrapper>
               </TabsContent>
               <TabsContent value="input-config" className="mt-6 space-y-6">
                 <SectionWrapper title="Stage Input Type" icon={<Settings />}>
