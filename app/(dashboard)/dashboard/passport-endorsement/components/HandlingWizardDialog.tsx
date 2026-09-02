@@ -26,6 +26,7 @@ import {
   Check,
   ChevronsUpDown,
   CalendarDays,
+  Clock,
   Eraser,
   Copy,
 } from "lucide-react";
@@ -69,31 +70,36 @@ function fmtDateTime(iso: string | null | undefined) {
   }
 }
 
-// Solid 2-Column Row: Left = Label (38% width), Right = Value / Full-width Input (62% width)
+// 2-Column Flex Layout (Col 1: Fixed 175px label, Col 2: 1fr full-width input)
 function FormRow({
   label,
   required,
   children,
+  alignTop = false,
 }: {
   label: string;
   required?: boolean;
   children: React.ReactNode;
+  alignTop?: boolean;
 }) {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-6 py-5 border-b border-slate-100 last:border-b-0">
-      <div className="sm:w-[38%] shrink-0">
-        <Label className="text-base font-bold text-slate-800 block">
+    <div
+      className={cn(
+        "flex flex-col sm:flex-row gap-2.5 sm:gap-6 py-4 border-b border-slate-100 last:border-b-0",
+        alignTop ? "sm:items-start pt-4" : "sm:items-center"
+      )}
+    >
+      <div className="shrink-0 sm:w-[175px] sm:flex-shrink-0">
+        <Label className="text-sm md:text-base font-bold text-slate-800 block leading-tight">
           {label} {required && <span className="text-red-500 font-bold">*</span>}
         </Label>
       </div>
-      <div className="w-full sm:w-[62%] min-w-0 flex-1">{children}</div>
+      <div className="w-full min-w-0">{children}</div>
     </div>
   );
 }
 
-// Searchable staff picker — swaps the plain <Select> the "who did this" fields used to use for
-// a filterable combobox, since bclUsers can run long enough that scrolling a plain dropdown to
-// find one name is slower than just typing it.
+// Searchable staff picker
 function StaffCombobox({ users, value, onChange, placeholder = "Select staff member..." }: any) {
   const [open, setOpen] = useState(false);
   const selected = (users || []).find((u: any) => u.id === value);
@@ -132,10 +138,6 @@ function StaffCombobox({ users, value, onChange, placeholder = "Select staff mem
   );
 }
 
-// Date and Time are each their own labeled FormRow (not one shared "Date & Time" row) — both
-// read from and write to the same "YYYY-MM-DDTHH:mm" value string (the shape every save
-// function already converts via `new Date(x.at).toISOString()`), so DateOnlyField and
-// TimeOnlyField below only ever touch their own half of it.
 function DateOnlyField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [datePart, timePart] = value ? value.split("T") : ["", ""];
 
@@ -158,9 +160,6 @@ function DateOnlyField({ value, onChange }: { value: string; onChange: (v: strin
   return (
     <div className="flex items-center gap-2 h-12 px-3.5 rounded-lg border border-slate-200 bg-white w-full">
       <CalendarDays className="h-4 w-4 text-slate-400 shrink-0" />
-      {/* PageHeader's own DateTextInput (dd/mm/yyyy, typed) rather than a native
-          <input type="date">, whose displayed format follows the browser/OS locale and can't
-          be forced to dd/mm/yyyy. */}
       <DateTextInput value={dateObj} onChange={handleDateChange} placeholder="DD/MM/YYYY" inputClassName="text-base w-full" />
     </div>
   );
@@ -174,22 +173,25 @@ function TimeOnlyField({ value, onChange }: { value: string; onChange: (v: strin
   };
 
   return (
-    <Input
-      type="time"
-      value={timePart || ""}
-      onChange={(e) => handleTimeChange(e.target.value)}
-      className="h-12 w-full border-slate-200 bg-white text-base rounded-lg px-3.5"
-    />
+    // Same bordered-box wrapper as DateOnlyField (icon + flex-1 input) rather than a bare
+    // native <input type="time"> — a native time input doesn't reliably stretch to fill its
+    // container the way a text input does, which left it visibly narrower than every other
+    // field in the column. It also draws its own native picker icon at the right edge on top
+    // of that (Chrome's built-in clock affordance) — hidden below via the WebKit
+    // calendar-picker-indicator pseudo-element so only the one custom icon on the left shows,
+    // matching the date field's single-icon look instead of looking lopsided with two.
+    <div className="flex items-center gap-2 h-12 px-3.5 rounded-lg border border-slate-200 bg-white w-full">
+      <Clock className="h-4 w-4 text-slate-400 shrink-0" />
+      <input
+        type="time"
+        value={timePart || ""}
+        onChange={(e) => handleTimeChange(e.target.value)}
+        className="flex-1 w-full min-w-0 bg-transparent text-base outline-none border-0 p-0 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+      />
+    </div>
   );
 }
 
-// The one unified 5-way "how did it move" picker, shared by the Received step ("how did it
-// arrive") and the Dispatch step ("how is it getting back") — same options, direction-specific
-// wording (HANDLING_METHOD_OPTIONS' receivedLabel/dispatchLabel), and the same conditional
-// extra fields: a plain name for "someone the client knows", or a courier/rider service pick
-// (+ rider name/phone for an on_demand one, + a tracking ref for a company one) for either
-// "sent a rider/courier" method. bcl_staff needs nothing extra — the step's own staff-by picker
-// already names which BCL staff member handled it.
 function HandlingMethodFields({ direction, state, setState, couriers, task, existingClientPhone }: any) {
   const courier = (couriers || []).find((c: any) => c.id === state.courierId) || null;
   const opt = getHandlingMethodOption(state.method);
@@ -200,10 +202,6 @@ function HandlingMethodFields({ direction, state, setState, couriers, task, exis
   const isOnDemand = courier?.courier_type === "on_demand";
   const isCompanyCourier = courier?.courier_type === "company";
 
-  // "Client brought/picked it up themselves" pre-fills from the task's own applicant name and
-  // whatever phone number is already on file for them (see the individualContact fetch in the
-  // dialog) — still just a default shown in the field, not baked into state, so typing over it
-  // works exactly like any other field and the save functions apply the same fallback.
   const effectiveName = state.personName || (isSelf ? (task?.applicant_name || "") : "");
   const effectivePhone = state.personPhone || (isSelf ? (existingClientPhone || "") : "");
 
@@ -247,7 +245,7 @@ function HandlingMethodFields({ direction, state, setState, couriers, task, exis
 
       {isRiderMethod && (
         <>
-          <FormRow label="Courier / Rider Service" required>
+          <FormRow label="Courier / Rider" required>
             <Select
               value={state.courierId}
               onValueChange={(v) => setState((p: any) => ({ ...p, courierId: v, riderName: "", riderPhone: "", trackingRef: "" }))}
@@ -403,9 +401,6 @@ export function HandlingWizardDialog({
   const [savingStep, setSavingStep] = useState<string | null>(null);
   const [activeStep, setActiveStep] = useState<string>("received");
 
-  // Local field state — received/dispatch share the same shape (method + its associated
-  // courier/rider/person details) since both sides of the chain of custody now use the same
-  // unified 5-way method.
   const [received, setReceived] = useState({ at: "", by: "", method: "", personName: "", personPhone: "", courierId: "", riderName: "", riderPhone: "", trackingRef: "" });
   const [taken, setTaken] = useState({ at: "", by: "" });
   const [returned, setReturned] = useState({ at: "", by: "" });
@@ -413,12 +408,9 @@ export function HandlingWizardDialog({
   const [dispatch, setDispatch] = useState({ at: "", handledBy: "", method: "", personName: "", personPhone: "", courierId: "", riderName: "", riderPhone: "", trackingRef: "" });
   const [clientNotes, setClientNotes] = useState("");
 
-  // The client's own phone on file (registry_individuals.contact_details), fetched fresh per
-  // task so "client brought/picked it up themselves" can pre-fill it — same nested
-  // contact_details.phone.kenyan.primary shape (and defensive array-or-plain-object handling)
-  // the birthday-tracker module's clients page already reads/writes.
   const [existingClientPhone, setExistingClientPhone] = useState<string>("");
   const [phoneSavePrompt, setPhoneSavePrompt] = useState<{ step: "received" | "dispatch"; phone: string } | null>(null);
+  const [savingPhoneToRegistry, setSavingPhoneToRegistry] = useState(false);
 
   useEffect(() => {
     if (!open || !task?.individual_id) { setExistingClientPhone(""); return; }
@@ -489,14 +481,9 @@ export function HandlingWizardDialog({
   }, [open, task?.id, record, currentUserId]);
 
   const isClientConfirmed = mode === "client" && !!record?.returned_at;
-
   const currentStepIdx = PIPELINE.findIndex((s) => s.key === activeStep);
   const currentStepMeta = PIPELINE[currentStepIdx] || PIPELINE[0];
 
-  // Client-facing message for a courier/rider dispatch — only meaningful once dispatch is
-  // actually saved (there's no send integration anywhere in this codebase; this is purely
-  // composed text for staff to copy into WhatsApp/SMS themselves, same convention
-  // SendRequirementsDialog already uses elsewhere).
   const dispatchMessage = useMemo(() => {
     if (record?.dispatch_method !== "bcl_rider" || !record?.dispatched_at) return null;
     const courier = couriers.find((c) => c.id === record.dispatch_courier_id) || null;
@@ -539,9 +526,6 @@ export function HandlingWizardDialog({
     }
   };
 
-  // Guards every save path against the "Clear" button's blank state (and any other way `at`
-  // could end up empty) — `new Date("").toISOString()` throws a raw "Invalid time value" crash
-  // rather than failing gracefully, so this turns that into a normal validation toast.
   const isValidLocalDateTime = (v: string) => !!v && !isNaN(new Date(v).getTime());
 
   const requireDateTime = (v: string, label: string) => {
@@ -696,10 +680,6 @@ export function HandlingWizardDialog({
     }
   };
 
-  // Wipes the *unsaved* local form state for whichever step is currently open, back to a blank
-  // slate — it never touches the persisted record, so a saved step's data comes right back the
-  // next time this dialog opens (the `useEffect` above reloads from `record`). Nothing to
-  // confirm: the only thing at risk is input not yet saved.
   const clearCurrentStep = () => {
     switch (activeStep) {
       case "received":
@@ -726,12 +706,6 @@ export function HandlingWizardDialog({
     toast({ title: "Copied", description: "Message copied — paste it into WhatsApp/SMS to the client." });
   };
 
-  // Offered only once, right after a "client brought/picked it up themselves" step is saved
-  // with a phone number that wasn't already on file — writes it back onto the client's own
-  // registry_individuals row using the exact nested contact_details shape (and defensive
-  // array-or-plain-object read) the birthday-tracker module's clients page already uses, so the
-  // number becomes available everywhere else that reads a client's contact details too.
-  const [savingPhoneToRegistry, setSavingPhoneToRegistry] = useState(false);
   const saveClientPhoneToRegistry = async () => {
     if (!phoneSavePrompt || !task?.individual_id) return;
     setSavingPhoneToRegistry(true);
@@ -798,10 +772,12 @@ export function HandlingWizardDialog({
 
         {/* Scrollable Body */}
         <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6 bg-slate-50">
-          {/* Mode selector card */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <p className="text-base font-bold text-slate-800 shrink-0">Handling Mode</p>
-            <div className="w-full sm:w-72">
+          {/* Mode selector card aligned with the 2-column flex layout */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs flex flex-col sm:flex-row gap-2.5 sm:gap-6 sm:items-center">
+            <div className="shrink-0 sm:w-[175px] sm:flex-shrink-0">
+              <Label className="text-sm md:text-base font-bold text-slate-800 block">Handling Mode</Label>
+            </div>
+            <div className="w-full min-w-0">
               <Select value={mode || ""} onValueChange={(v) => saveMode(v as "bcl" | "client")} disabled={savingMode}>
                 <SelectTrigger className="h-12 w-full text-base border-slate-200 bg-white rounded-lg px-3.5">
                   <SelectValue placeholder="Select handling mode..." />
@@ -822,12 +798,12 @@ export function HandlingWizardDialog({
 
           {/* Mode: Client */}
           {mode === "client" && (
-            <div className="rounded-2xl border border-violet-200 bg-white p-6 shadow-xs space-y-5">
+            <div className="rounded-2xl border border-violet-200 bg-white p-6 md:p-7 shadow-xs space-y-5">
               <div className="flex items-center gap-2.5 text-violet-800 pb-2 border-b border-slate-100">
                 <Info className="h-5 w-5" />
                 <span className="text-base font-bold">Client Self-Handling Stamping</span>
               </div>
-              <FormRow label="Handling Notes">
+              <FormRow label="Handling Notes" alignTop>
                 <Textarea
                   value={clientNotes}
                   onChange={(e) => setClientNotes(e.target.value)}

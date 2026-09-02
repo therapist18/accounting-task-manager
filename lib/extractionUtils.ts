@@ -20,9 +20,11 @@ const generationConfig = {
   maxOutputTokens: 8192,
 };
 
-// Get the model instance
-const model = genAI.getGenerativeModel({
-  model: "gemini-3-flash-preview", // Updated to a more stable model name if needed, or keep gemini-3-flash-preview
+// Models to try in order; on failure the retry loop below falls through to the next one
+const modelsToTry = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+
+const getModel = (modelName: string) => genAI.getGenerativeModel({
+  model: modelName,
   generationConfig,
 });
 
@@ -370,7 +372,7 @@ export const performExtraction = async (
   fields = normalizeFields(fields);
 
   let attempts = 0;
-  const MAX_ATTEMPTS = 3;
+  const MAX_ATTEMPTS = modelsToTry.length;
 
   onProgress?.('Preparing document for extraction...');
 
@@ -382,7 +384,8 @@ export const performExtraction = async (
         throw new DOMException('Extraction aborted', 'AbortError');
       }
 
-      const progressMessage = `Attempt ${attempts + 1}/${MAX_ATTEMPTS}: Processing document...`;
+      const modelName = modelsToTry[attempts];
+      const progressMessage = `Attempt ${attempts + 1}/${MAX_ATTEMPTS}: Processing document with ${modelName}...`;
       onProgress?.(progressMessage);
 
       const filePart = await fileToGenerativePart(fileUrl, originalFileName);
@@ -418,7 +421,8 @@ export const performExtraction = async (
         throw new DOMException('Extraction aborted', 'AbortError');
       }
 
-      // Generate content using the model
+      // Generate content using the current model
+      const model = getModel(modelName);
       const result = await model.generateContent([prompt, filePart]);
 
       // Check if extraction was aborted after API call
