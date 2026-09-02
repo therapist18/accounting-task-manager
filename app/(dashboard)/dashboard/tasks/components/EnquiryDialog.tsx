@@ -746,7 +746,8 @@ export function EnquiryDialog({
         // 4. Load individual, then re-apply company + understudy AFTER handleIndividualSelect
         // (handleIndividualSelect resets selectedCompany/selectedUnderstudy at the top of its body)
         if (taskToEdit.individual_id) {
-            const companyId = taskToEdit.company_id ? String(taskToEdit.company_id) : null;
+            const companyParticipant = taskToEdit.participants_details?.find(p => p.type === 'company');
+            const companyId = companyParticipant ? String(companyParticipant.id) : null;
             console.log('[EnquiryDialog] Step 4 - fetching individual id:', taskToEdit.individual_id, 'companyId:', companyId);
 
             supabase.from('registry_individuals').select('*').eq('id', taskToEdit.individual_id).single()
@@ -1595,7 +1596,9 @@ export function EnquiryDialog({
             });
 
             // Extract Participant Details
-            if (selectedCompany) {
+            if (selectedCompany === 'unallocated') {
+                participants.push({ id: 'unallocated', name: 'Unallocated', role: ['company'], type: "company" })
+            } else if (selectedCompany) {
                 const c = companies.find(x => x.id.toString() === selectedCompany)
                 if (c) participants.push({ id: c.id, name: c.company_name, role: ['company'], type: "company" })
             }
@@ -1665,15 +1668,9 @@ export function EnquiryDialog({
             // rather than the literal string 'none' or (for company) NaN from Number('unallocated').
             const toAssignedId = (v: string) => (v && v !== 'none') ? Number(v) : null;
 
-            const isUnallocated = selectedCompany === 'unallocated';
-            const resolvedCompanyId = isUnallocated ? 'unallocated' : (selectedCompany ? Number(selectedCompany) : null);
-            const resolvedCompanyName = isUnallocated ? 'Unallocated' : (companies.find(c => c.id.toString() === selectedCompany)?.company_name || null);
-
             const payload: any = {
                 job_description: formData.job_description,
                 individual_id: selectedIndividual.id,
-                company_id: resolvedCompanyId,
-                company_name: resolvedCompanyName,
                 passport_number: formData.passport_number,
                 duration: syncedDuration,
                 renewal_status: syncedRenewalStatus,
@@ -1719,7 +1716,7 @@ export function EnquiryDialog({
                 status: 'enquiry',
                 date_initiated: normalizedEnquiryDate.isoDateTime,
                 applied_by: "11",
-                created_by: "enquiry_dialog",
+                created_by: (await supabase.auth.getUser()).data.user?.id ?? null,
                 job_level: {
                     level: formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
                     department_id: Number(formData.department_id),

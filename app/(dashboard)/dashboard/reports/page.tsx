@@ -378,17 +378,31 @@ export default function ReportsPage() {
         // Fetch report_doc_defaults + expected_total_time_minutes for all matching job levels
         const allDefaults: any[] = [];
         const newExpectedTimeMap = new Map<string, number>();
-        for (const [key, jobLevel] of jobLevels) {
-          const { data, error } = await supabase
-            .from('tm_class_requirements')
-            .select('report_doc_defaults, expected_total_time_minutes')
-            .eq('job_level', JSON.stringify(jobLevel))
-            .maybeSingle();
-          if (!error && data?.report_doc_defaults) {
-            allDefaults.push(...data.report_doc_defaults);
-          }
-          if (!error && typeof data?.expected_total_time_minutes === 'number') {
-            newExpectedTimeMap.set(key, data.expected_total_time_minutes);
+        // Normalize ids as strings so rows whose job_level stores class_id/subclass_id
+        // as strings match tasks whose job_level stores them as numbers (and vice versa).
+        const normId = (v: any) => (v === null || v === undefined || v === '') ? null : String(v);
+        const matchesJobLevel = (rowJobLevel: any, jobLevel: any) =>
+          normId(rowJobLevel?.subdepartment_id) === normId(jobLevel.subdepartment_id) &&
+          normId(rowJobLevel?.class_id) === normId(jobLevel.class_id) &&
+          normId(rowJobLevel?.subclass_id) === normId(jobLevel.subclass_id);
+
+        // Fetch every class-requirements row for this department in a single round trip,
+        // then resolve each task job level's match client-side instead of one query per
+        // unique job level.
+        const { data: allRequirementRows, error: reqError } = await supabase
+          .from('tm_class_requirements')
+          .select('job_level, report_doc_defaults, expected_total_time_minutes')
+          .eq('job_level->>department_id', String(activeDeptId));
+
+        if (!reqError && Array.isArray(allRequirementRows)) {
+          for (const [key, jobLevel] of jobLevels) {
+            const match = allRequirementRows.find((row: any) => matchesJobLevel(row.job_level, jobLevel));
+            if (match?.report_doc_defaults) {
+              allDefaults.push(...match.report_doc_defaults);
+            }
+            if (match && typeof match.expected_total_time_minutes === 'number') {
+              newExpectedTimeMap.set(key, match.expected_total_time_minutes);
+            }
           }
         }
 

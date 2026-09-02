@@ -295,14 +295,28 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         }
 
         const allDefaults: any[] = [];
-        for (const [_, jobLevel] of jobLevels) {
-          const { data, error } = await supabase
-            .from('tm_class_requirements')
-            .select('report_doc_defaults')
-            .eq('job_level', JSON.stringify(jobLevel))
-            .maybeSingle();
-          if (!error && data?.report_doc_defaults) {
-            allDefaults.push(...data.report_doc_defaults);
+        // Normalize ids as strings so rows whose job_level stores class_id/subclass_id
+        // as strings match tasks whose job_level stores them as numbers (and vice versa).
+        const normId = (v: any) => (v === null || v === undefined || v === '') ? null : String(v);
+        const matchesJobLevel = (rowJobLevel: any, jobLevel: any) =>
+          normId(rowJobLevel?.subdepartment_id) === normId(jobLevel.subdepartment_id) &&
+          normId(rowJobLevel?.class_id) === normId(jobLevel.class_id) &&
+          normId(rowJobLevel?.subclass_id) === normId(jobLevel.subclass_id);
+
+        // Fetch every class-requirements row for this department in a single round trip,
+        // then resolve each task job level's match client-side instead of one query per
+        // unique job level.
+        const { data: allRequirementRows, error: reqError } = await supabase
+          .from('tm_class_requirements')
+          .select('job_level, report_doc_defaults')
+          .eq('job_level->>department_id', String(activeDepartmentTab));
+
+        if (!reqError && Array.isArray(allRequirementRows)) {
+          for (const [_, jobLevel] of jobLevels) {
+            const match = allRequirementRows.find((row: any) => matchesJobLevel(row.job_level, jobLevel));
+            if (match?.report_doc_defaults) {
+              allDefaults.push(...match.report_doc_defaults);
+            }
           }
         }
 
