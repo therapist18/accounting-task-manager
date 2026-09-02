@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { API_KEYS } from '@/lib/apiKeys';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithFallback } from '@/lib/gemini';
 
 export async function POST(request: Request) {
   try {
@@ -17,14 +18,11 @@ export async function POST(request: Request) {
     console.log('🔥 [API] Using API key:', API_KEYS[1]?.substring(0, 20) + '...');
 
     const genAI = new GoogleGenerativeAI(API_KEYS[1] || '');
-    const model = genAI.getGenerativeModel({ 
-      model: modelType === "gemini-3-flash-preview" ? "gemini-3-flash-preview" : "gemini-1.5-flash" 
-    });
 
     console.log('🔥 [API] Calling Gemini model...');
 
     try {
-      const response = await model.generateContent({
+      const response = await generateWithFallback(genAI, {
         contents: [
           { 
             role: "user", 

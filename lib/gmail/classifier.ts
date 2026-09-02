@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { generateWithFallback } from '@/lib/gemini'
 
 export type Priority = 'urgent' | 'high' | 'normal' | 'low'
 
@@ -31,7 +32,6 @@ export async function classifyEmail(
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
 
     const categoriesList = CATEGORIES.map((c) => `- ${c.name}: ${c.description}`).join('\n')
 
@@ -48,7 +48,7 @@ Body (first 1200 chars): ${body.slice(0, 1200)}
 Return:
 {"category":"<name>","confidence":<0.0-1.0>,"priority":"<urgent|high|normal|low>","summary":"<one sentence>"}`
 
-    const result = await model.generateContent(prompt)
+    const result = await generateWithFallback(genAI, prompt)
     const text = result.response.text().trim().replace(/```json\n?|\n?```/g, '')
     const parsed = JSON.parse(text) as ClassificationResult
     const valid = CATEGORIES.find((c) => c.name === parsed.category)

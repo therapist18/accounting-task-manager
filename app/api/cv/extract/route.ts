@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { API_KEYS } from '@/lib/apiKeys';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithFallback } from '@/lib/gemini';
 import mammoth from 'mammoth';
 
 const DOCX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -49,10 +50,7 @@ export async function POST(request: Request) {
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-3-flash-preview",
-      generationConfig: { responseMimeType: "application/json" }
-    });
+    const generationConfig = { responseMimeType: "application/json" };
 
     // ─── STAGE 1: RAW EXTRACTION ─────────────────────────────────────────────
     const extractionPrompt = `
@@ -126,10 +124,10 @@ export async function POST(request: Request) {
     }
 
     console.log('[CV Extractor] Stage 1: Extracting raw data...');
-    const extractionResult = await model.generateContent([
+    const extractionResult = await generateWithFallback(genAI, [
       extractionPrompt,
       cvContentPart
-    ]);
+    ], generationConfig);
     const extractedJson = JSON.parse(extractionResult.response.text());
     console.log('[CV Extractor] Stage 1 complete.');
 
@@ -158,11 +156,7 @@ export async function POST(request: Request) {
     `;
 
     console.log(`[CV Extractor] Stage 2: Enhancing at level "${enhancementLevel}"...`);
-    const textModel = genAI.getGenerativeModel({
-      model: "gemini-3-flash-preview",
-      generationConfig: { responseMimeType: "application/json" }
-    });
-    const enhancementResult = await textModel.generateContent(enhancementPrompt);
+    const enhancementResult = await generateWithFallback(genAI, enhancementPrompt, generationConfig);
     const enhancedJson = JSON.parse(enhancementResult.response.text());
     console.log('[CV Extractor] Stage 2 complete.');
 

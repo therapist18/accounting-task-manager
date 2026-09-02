@@ -528,11 +528,11 @@ export function HandlingWizardDialog({
 
   const isValidLocalDateTime = (v: string) => !!v && !isNaN(new Date(v).getTime());
 
-  const requireDateTime = (v: string, label: string) => {
-    if (isValidLocalDateTime(v)) return true;
-    toast({ title: "Missing date/time", description: `Please set the ${label} before saving.`, variant: "destructive" });
-    return false;
-  };
+  // A timestamp reasonably defaults to "now" — same as when a step is first opened — so a
+  // blank date/time (e.g. right after "Clear") just quietly falls back instead of blocking
+  // Save with a validation error. Never returns something invalid, so `new Date(...)
+  // .toISOString()` downstream can't hit the "Invalid time value" crash this replaced.
+  const resolveDateTime = (v: string) => (isValidLocalDateTime(v) ? v : nowLocalInputValue());
 
   const requireMethod = (method: string, description: string) => {
     if (method) return true;
@@ -548,7 +548,6 @@ export function HandlingWizardDialog({
     }, { markEndorsed: true });
 
   const saveReceived = (advance = true) => {
-    if (!requireDateTime(received.at, "received date and time")) return;
     if (!requireMethod(received.method, "Please select how the passport was received.")) return;
     const courier = couriers.find((c) => c.id === received.courierId) || null;
     const isRider = received.method === "client_rider" || received.method === "bcl_rider";
@@ -559,7 +558,7 @@ export function HandlingWizardDialog({
     return runStep(
       "received",
       {
-        received_at: new Date(received.at).toISOString(),
+        received_at: new Date(resolveDateTime(received.at)).toISOString(),
         received_by: received.by || null,
         received_method: received.method || null,
         received_person_name: (isSelf || isRepresentative) ? effectiveName || null : null,
@@ -581,11 +580,10 @@ export function HandlingWizardDialog({
   };
 
   const saveTaken = (advance = true) => {
-    if (!requireDateTime(taken.at, "submission date and time")) return;
     return runStep(
       "taken",
       {
-        taken_at: new Date(taken.at).toISOString(),
+        taken_at: new Date(resolveDateTime(taken.at)).toISOString(),
         taken_by: taken.by || null,
       },
       advance ? { nextStep: "returned" } : undefined
@@ -593,11 +591,10 @@ export function HandlingWizardDialog({
   };
 
   const saveReturned = (advance = true) => {
-    if (!requireDateTime(returned.at, "return date and time")) return;
     return runStep(
       "returned",
       {
-        returned_at: new Date(returned.at).toISOString(),
+        returned_at: new Date(resolveDateTime(returned.at)).toISOString(),
         returned_by: returned.by || null,
       },
       { markEndorsed: true, ...(advance ? { nextStep: "notified" } : {}) }
@@ -605,11 +602,10 @@ export function HandlingWizardDialog({
   };
 
   const saveNotified = (advance = true) => {
-    if (!requireDateTime(notified.at, "notification date and time")) return;
     return runStep(
       "notified",
       {
-        client_notified_at: new Date(notified.at).toISOString(),
+        client_notified_at: new Date(resolveDateTime(notified.at)).toISOString(),
         client_notified_by: notified.by || null,
       },
       advance ? { nextStep: "dispatch" } : undefined
@@ -617,7 +613,6 @@ export function HandlingWizardDialog({
   };
 
   const saveDispatch = () => {
-    if (!requireDateTime(dispatch.at, "dispatch date and time")) return;
     if (!requireMethod(dispatch.method, "Please select how the passport is getting back to the client.")) return;
     const courier = couriers.find((c) => c.id === dispatch.courierId) || null;
     const isRider = dispatch.method === "client_rider" || dispatch.method === "bcl_rider";
@@ -628,7 +623,7 @@ export function HandlingWizardDialog({
     runStep(
       "dispatch",
       {
-        dispatched_at: new Date(dispatch.at).toISOString(),
+        dispatched_at: new Date(resolveDateTime(dispatch.at)).toISOString(),
         dispatch_handled_by: dispatch.handledBy || null,
         dispatch_method: dispatch.method || null,
         dispatch_person_name: (isSelf || isRepresentative) ? effectiveName || null : null,

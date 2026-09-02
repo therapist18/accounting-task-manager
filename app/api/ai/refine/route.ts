@@ -1,5 +1,6 @@
 import { API_KEYS } from '@/lib/apiKeys';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithFallback } from '@/lib/gemini';
 
 export async function POST(request: Request) {
     try {
@@ -34,12 +35,11 @@ async function handleSingleRefine(prompt: string, fieldName: string) {
     }
 
     const genAI = new GoogleGenerativeAI(API_KEYS[2] || '');
-    const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 
     console.log('🔥 [API] Calling Gemini model...');
 
     try {
-        const response = await model.generateContent({
+        const response = await generateWithFallback(genAI, {
             contents: [
                 { 
                     role: "user", 
@@ -85,15 +85,14 @@ async function handleBatchRefine(fields: Array<{ fieldName: string; prompt: stri
     }
 
     const genAI = new GoogleGenerativeAI(API_KEYS[2] || '');
-    const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 
     // Process all fields in parallel
     const results = await Promise.all(
         fields.map(async ({ fieldName, prompt }) => {
             try {
                 console.log(`🤖 [API] Processing field: ${fieldName}`);
-                
-                const response = await model.generateContent({
+
+                const response = await generateWithFallback(genAI, {
                     contents: [
                         { 
                             role: "user", 

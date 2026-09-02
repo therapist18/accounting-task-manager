@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { API_KEYS } from '@/lib/apiKeys';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithFallback } from '@/lib/gemini';
 
 export async function POST(request: Request) {
   try {
@@ -10,10 +11,7 @@ export async function POST(request: Request) {
     if (!apiKey) return NextResponse.json({ error: 'API key not configured' }, { status: 500 });
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-3-flash-preview",
-      generationConfig: { responseMimeType: "application/json" }
-    });
+    const generationConfig = { responseMimeType: "application/json" };
 
     let prompt = "";
 
@@ -80,7 +78,7 @@ Return ONLY valid JSON in this exact shape:
       return NextResponse.json({ error: 'Invalid mode' }, { status: 400 });
     }
 
-    const result = await model.generateContent(prompt);
+    const result = await generateWithFallback(genAI, prompt, generationConfig);
     const text = result.response.text();
     const parsed = JSON.parse(text);
     return NextResponse.json(parsed);
