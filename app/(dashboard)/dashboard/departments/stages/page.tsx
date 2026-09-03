@@ -93,6 +93,14 @@ const allocationKey = (
 // override at this level, inherit from the stage's own default" — distinct from '' which is
 // an explicit "never trigger a status change here" override.
 const INHERIT_TRIGGER_STATUS = "__inherit__"
+// Radix Select forbids an empty-string SelectItem value (reserved for "clear selection"), so
+// the explicit "None" override is represented as this sentinel in the dropdown only — translated
+// to/from '' at the read/write boundary (triggerStatusToSelectValue / triggerStatusFromSelectValue).
+const NONE_TRIGGER_STATUS = "__none__"
+const triggerStatusToSelectValue = (triggerStatus: string | undefined): string =>
+  triggerStatus === undefined ? INHERIT_TRIGGER_STATUS : triggerStatus === "" ? NONE_TRIGGER_STATUS : triggerStatus
+const triggerStatusFromSelectValue = (value: string): string =>
+  value === NONE_TRIGGER_STATUS ? "" : value
 
 export type PendingAllocation = {
   subdeptId: number
@@ -1250,7 +1258,13 @@ export default function Stages() {
     classId: number | string | null = null,
     subclassId: number | string | null = null,
   ) => {
-    stageAllocationChange(subdeptId, stageId, { triggers_task_status: value }, classId, subclassId)
+    stageAllocationChange(
+      subdeptId,
+      stageId,
+      { triggers_task_status: triggerStatusFromSelectValue(value) },
+      classId,
+      subclassId,
+    )
   }
 
   const handleBulkDisplayToggle = (
@@ -3085,7 +3099,7 @@ export default function Stages() {
                               className="h-4 w-4 text-blue-500"
                             />
                             <Select
-                              value={allocation.triggerStatus ?? INHERIT_TRIGGER_STATUS}
+                              value={triggerStatusToSelectValue(allocation.triggerStatus)}
                               onValueChange={(val) =>
                                 handleTriggerStatusChange(entity.subdeptId, stage.id, val, entity.classId ?? null, entity.subclassId ?? null)
                               }
@@ -3095,7 +3109,7 @@ export default function Stages() {
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value={INHERIT_TRIGGER_STATUS}>Inherit</SelectItem>
-                                <SelectItem value="">None</SelectItem>
+                                <SelectItem value={NONE_TRIGGER_STATUS}>None</SelectItem>
                                 <SelectItem value="in_progress">In Progress</SelectItem>
                                 <SelectItem value="write_up_completed">Write Up Completed</SelectItem>
                                 <SelectItem value="endorsed">Endorsed</SelectItem>
@@ -3708,7 +3722,7 @@ export default function Stages() {
                                 </div>
                                 <div className="flex justify-center">
                                   <Select
-                                    value={triggerStatus ?? INHERIT_TRIGGER_STATUS}
+                                    value={triggerStatusToSelectValue(triggerStatus)}
                                     onValueChange={(value) => handleTriggerStatusChange(subdept.id, stage.id, value)}
                                   >
                                     <SelectTrigger className="h-7 w-full border-0 shadow-none text-[10px] bg-transparent hover:bg-slate-200/50" title="Task status this stage triggers for this entity">
@@ -3716,7 +3730,7 @@ export default function Stages() {
                                     </SelectTrigger>
                                     <SelectContent>
                                       <SelectItem value={INHERIT_TRIGGER_STATUS}>Inherit</SelectItem>
-                                      <SelectItem value="">None</SelectItem>
+                                      <SelectItem value={NONE_TRIGGER_STATUS}>None</SelectItem>
                                       <SelectItem value="in_progress">In Progress</SelectItem>
                                       <SelectItem value="write_up_completed">Write Up Completed</SelectItem>
                                       <SelectItem value="endorsed">Endorsed</SelectItem>
@@ -3855,7 +3869,7 @@ export default function Stages() {
                                     </div>
                                     <div className="flex justify-center">
                                       <Select
-                                        value={triggerStatus ?? INHERIT_TRIGGER_STATUS}
+                                        value={triggerStatusToSelectValue(triggerStatus)}
                                         onValueChange={(value) => handleTriggerStatusChange(subdept.id, stage.id, value, cls.id)}
                                       >
                                         <SelectTrigger className="h-7 w-full border-0 shadow-none text-[10px] bg-transparent hover:bg-gray-200/50" title="Task status this stage triggers for this entity">
@@ -3863,7 +3877,7 @@ export default function Stages() {
                                         </SelectTrigger>
                                         <SelectContent>
                                           <SelectItem value={INHERIT_TRIGGER_STATUS}>Inherit</SelectItem>
-                                          <SelectItem value="">None</SelectItem>
+                                          <SelectItem value={NONE_TRIGGER_STATUS}>None</SelectItem>
                                           <SelectItem value="in_progress">In Progress</SelectItem>
                                           <SelectItem value="write_up_completed">Write Up Completed</SelectItem>
                                           <SelectItem value="endorsed">Endorsed</SelectItem>
@@ -3991,7 +4005,7 @@ export default function Stages() {
                                       </div>
                                       <div className="flex justify-center">
                                         <Select
-                                          value={triggerStatus ?? INHERIT_TRIGGER_STATUS}
+                                          value={triggerStatusToSelectValue(triggerStatus)}
                                           onValueChange={(value) =>
                                             handleTriggerStatusChange(subdept.id, stage.id, value, cls.id, subCls.id)
                                           }
@@ -4001,7 +4015,7 @@ export default function Stages() {
                                           </SelectTrigger>
                                           <SelectContent>
                                             <SelectItem value={INHERIT_TRIGGER_STATUS}>Inherit</SelectItem>
-                                            <SelectItem value="">None</SelectItem>
+                                            <SelectItem value={NONE_TRIGGER_STATUS}>None</SelectItem>
                                             <SelectItem value="in_progress">In Progress</SelectItem>
                                             <SelectItem value="write_up_completed">Write Up Completed</SelectItem>
                                             <SelectItem value="endorsed">Endorsed</SelectItem>

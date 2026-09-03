@@ -160,14 +160,29 @@ function getActiveTaskIds(taskEntry: any) {
   return allTaskIds.filter((taskId: number) => !cancelledTaskIds.has(taskId) && !revertedTaskIds.has(taskId));
 }
 
+// Exact copy of bcl-registry's formatResolutionComment outcome labels
+// (app/individuals/overall-document-manager/utils/workflowStatusLogic.ts) — kept word-for-word
+// so this never tells a task creator something different from what the Document Manager
+// itself shows for the same document. Not lowercased: bcl-registry matches resolution.outcome
+// as stored, with no case normalization, so this doesn't either.
 const RESOLUTION_OUTCOME_LABELS: Record<string, string> = {
-  task_initiated: "Resolved: task initiated",
-  renewed_by_client: "Resolved: client renewed directly",
-  superseded: "Resolved: superseded",
-  updated: "Resolved: updated",
-  status_changed: "Resolved: status changed",
-  deactivated: "Resolved: deactivated",
-  no_action_required: "Resolved: no action required",
+  task_initiated: "Task Initiated",
+  renewed_by_client: "Client renewed directly",
+  bcl_renewed: "BCL renewed",
+  renewed_unknown: "Renewed (party unknown)",
+  superseded: "Superseded",
+  updated: "Updated",
+  status_changed: "Status Changed",
+  deactivated: "Deactivated",
+  no_action_required: "No Action Required",
+};
+
+// Exact copy of bcl-registry's RESP_LABEL (same file as above).
+const REMINDER_RESPONSE_LABELS: Record<string, string> = {
+  cancel: "REMINDER CANCELLED",
+  task: "Push to Task",
+  hold: "REMINDER HELD",
+  renew: "REMINDER RENEWED",
 };
 
 // document_workflow_logs.action_type is NOT a reliable "what is this row" flag — it only
@@ -176,39 +191,49 @@ const RESOLUTION_OUTCOME_LABELS: Record<string, string> = {
 // fallback type is explicitly passed on write, so plenty of real rows sit at action_type:
 // 'comment' despite actually holding resolution/hold/task data. Trusting action_type directly
 // (as an earlier version of this file did) made almost everything read as "Has a comment".
-// This instead inspects the actual holds/tasks/resolutions/reminders arrays with the same
-// priority order bcl-registry's own getWorkflowStatusInfo uses: task > resolution > hold >
-// reminder > comment.
+// This instead inspects the actual holds/tasks/resolutions/reminders arrays, with the same
+// priority order AND the same label text as bcl-registry's own getWorkflowStatusInfo: task >
+// resolution > hold > reminder > comment. Task labels are the one place action_type is still
+// trusted directly (task_created vs task_pushed) — same as bcl-registry does, since that
+// downgrade issue is specific to resolutions, not tasks.
 function summarizeWorkflowLogForDocument(log: any): string | null {
   const tasks = getWorkflowPayloadEntries(log, "tasks");
   const latestTask = tasks[tasks.length - 1];
   if (latestTask && !latestTask.dismissed) {
     const activeTaskIds = getActiveTaskIds(latestTask);
-    if (activeTaskIds.length > 0) return activeTaskIds.length === 1 ? "Task already created" : "Tasks already created";
-    if (log.action_type === "task_pushed" && (!latestTask.taskIds || latestTask.taskIds.length === 0)) return "Task already pushed";
+    if (activeTaskIds.length > 0) {
+      const isPushedOnly = log.action_type === "task_pushed";
+      if (isPushedOnly) return activeTaskIds.length === 1 ? "Task Pushed" : "Tasks Pushed";
+      return activeTaskIds.length === 1 ? "Task Created" : "Tasks Created";
+    }
+    if (log.action_type === "task_pushed" && (!latestTask.taskIds || latestTask.taskIds.length === 0)) return "Task Pushed";
   }
 
   const resolutions = getWorkflowPayloadEntries(log, "resolutions");
   const latestResolution = resolutions[resolutions.length - 1];
   if (latestResolution && !latestResolution.dismissed && !latestResolution.corrected) {
-    return RESOLUTION_OUTCOME_LABELS[String(latestResolution.outcome || "").toLowerCase()] || "Already resolved";
+    const outcome = String(latestResolution.outcome || "");
+    return RESOLUTION_OUTCOME_LABELS[outcome] || outcome || "Resolved";
   }
 
   const holds = getWorkflowPayloadEntries(log, "holds");
   const latestHold = holds[holds.length - 1];
   if (latestHold && !latestHold.dismissed && latestHold.holdUntil && new Date(latestHold.holdUntil) > new Date()) {
-    return "On hold";
+    return `On Hold until ${new Date(latestHold.holdUntil).toLocaleDateString('en-GB')}`;
   }
 
   const reminders = getWorkflowPayloadEntries(log, "reminders");
   const latestReminder = reminders[reminders.length - 1];
   if (latestReminder && !latestReminder.dismissed) {
-    return latestReminder.response ? `Reminder response: ${latestReminder.response}` : "Reminder sent, awaiting response";
+    if (latestReminder.response) {
+      return REMINDER_RESPONSE_LABELS[latestReminder.response] || `REMINDER ${String(latestReminder.response).toUpperCase()}`;
+    }
+    return `Reminder Sent${latestReminder.channel ? ` via ${latestReminder.channel}` : ''}`;
   }
 
   const comments = getWorkflowPayloadEntries(log, "comments");
   const latestComment = comments[comments.length - 1];
-  if (latestComment && !latestComment.dismissed) return "Has a comment";
+  if (latestComment && !latestComment.dismissed) return "Comment";
 
   if (log.action_type === "deactivation") return "Deactivated";
 

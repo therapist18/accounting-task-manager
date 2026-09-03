@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ' *)",
+      "Bash(mkdir -p \"/c/Users/user/AppData/Local/Temp/claude/e--GitHub-accounting-task-manager/d226c56a-c5b3-4490-9e8a-ed3603570d7b/scratchpad\")",
+      "Bash(break)",
+      "Bash(curl -s -m 30 \"http://localhost:3000/api/individuals/overall-report\" -o /e/GitHub/bcl-registry/.overall-report-response.json -w \"HTTP_STATUS:%{http_code}\\\\n\")",
+      "Bash(curl -s -m 30 -D - \"http://localhost:3000/api/individuals/overall-report\" -o /dev/null)",
+      "Bash(curl -s -m 30 -D - \"http://localhost:3000/api/individuals/document-expiry-manager\" -o /dev/null)",
+      "Bash(xargs -I{} echo {})",
+      "Bash(node \"C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\e--GitHub-accounting-task-manager\\\\d226c56a-c5b3-4490-9e8a-ed3603570d7b\\\\scratchpad\\\\verify_route.js\")"
+    ]
+  }
+}
