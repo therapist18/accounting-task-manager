@@ -5,6 +5,7 @@ export type PermissionKey =
   | "emails.view"
   | "tasks_requirements.view"
   | "tasks.view"
+  | "tasks.bypass_sequential_stages"
   | "reports.view"
   | "summary_reports.view"
   | "passport_endorsement.view"
@@ -49,6 +50,7 @@ export const PERMISSIONS: PermissionDefinition[] = [
   { key: "emails.view", label: "Email Inbox", group: "Workspace", description: "View connected email inboxes.", paths: ["/dashboard/emails"] },
   { key: "tasks_requirements.view", label: "Task Requirements", group: "Task Management", description: "View task requirement records.", paths: ["/dashboard/tasks-requirements"] },
   { key: "tasks.view", label: "Task Tracking", group: "Task Management", description: "View and work with tracked tasks.", paths: ["/dashboard/tasks"] },
+  { key: "tasks.bypass_sequential_stages", label: "Bypass Stage Order", group: "Task Management", description: "Update any stage on a task at any time, regardless of order. Without this, stages must be completed or skipped in order before later ones become editable.", parentKey: "tasks.view" },
   { key: "reports.view", label: "Reports", group: "Task Management", description: "View reports dashboards.", paths: ["/dashboard/reports"] },
   { key: "summary_reports.view", label: "Summary Reports Dashboard", group: "Task Management", description: "View the admin summary reports dashboard.", paths: ["/dashboard/summary-reports"] },
   { key: "passport_endorsement.view", label: "Passport Endorsement Tracking", group: "Task Management", description: "Track passport handling and Nyayo House endorsement for immigration tasks.", paths: ["/dashboard/passport-endorsement"] },

@@ -12,10 +12,12 @@ import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
-import { formatDuration, getTimeStatus, isDocumentApplicable, stageApplicabilityConditionsMet } from "../overall-view/tableUtils"
+import { formatDuration, getTimeStatus, isDocumentApplicable, stageApplicabilityConditionsMet, isStageOptionalForTask } from "../overall-view/tableUtils"
 import { parseDate } from "@/app/generic-functions/dateUtils"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 import { calculateStageDate } from "../utils/dateUtils"
 import { STAGE_TAB_LINKS, isStageDocumentApplicableToTask } from "../utils/taskManagerData"
 import { cn } from "@/lib/utils"
@@ -65,6 +67,13 @@ interface EditableStageCellProps {
   // shortcuts) so only the document-preview eye icon shows. For consumers like SummaryTable
   // that only want a document preview affordance, not the full DepartmentTasksManager action set.
   previewOnly?: boolean
+  // Blanket "complete or skip stages in order" rule for normal users — distinct from the
+  // per-stage opt-in StageDependency('sequential') mechanism (isDependencyMet below), which
+  // only locks a stage when an admin has explicitly wired a dependency to it. Computed once by
+  // the parent from the current user's tasks.bypass_sequential_stages permission (superadmins
+  // and anyone with that permission pass true straight through hasPermission) rather than
+  // fetched per-cell, so this is a plain prop, not a hook call in here.
+  enforceStageOrder?: boolean
 }
 
 const documentFieldsCache = new Map<string, { fields: any[], timestamp: number }>();
@@ -121,7 +130,7 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[] = [])
   }
 };
 
-export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, enhancedTaskData, renderMode = 'date', taskName, clientName, getKycFields, kycDocuments = new Map(), onFetchData, onDocumentTypeFixed, officers = [], onOfficerChange, readOnly = false, onOpenRequirements, showTime = true, previewOnly = false }: EditableStageCellProps) {
+export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, enhancedTaskData, renderMode = 'date', taskName, clientName, getKycFields, kycDocuments = new Map(), onFetchData, onDocumentTypeFixed, officers = [], onOfficerChange, readOnly = false, onOpenRequirements, showTime = true, previewOnly = false, enforceStageOrder = false }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -130,8 +139,6 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   const [previewDocuments, setPreviewDocuments] = useState<any[]>([]);
   const [currentPreviewIndex, setCurrentPreviewIndex] = useState(0);
   const [isSkipDialogOpen, setIsSkipDialogOpen] = useState(false);
-  const [skipReason, setSkipReason] = useState('');
-  const [selectedSkipReason, setSelectedSkipReason] = useState('');
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const [documentFields, setDocumentFields] = useState<any[]>([]);
@@ -423,7 +430,11 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
 
       if (isSkipped) {
         updatedExtractedDetails.status = 'skipped';
-        updatedExtractedDetails.skip_reason = skipReason || selectedSkipReason;
+        // Matches the field name enhancedHandleStageStatusSave reads
+        // (DepartmentTasksManager.tsx: stageUpdate.reason = updatedExtractedDetails.reason)
+        // and the one handleUnskip/handleClearStage reset below — was previously sent as
+        // skip_reason, which the reader never looked at, so every skip silently lost its reason.
+        updatedExtractedDetails.reason = skipReason;
       }
 
       await onSave(stage.id, task.id, finalValue, updatedExtractedDetails);
@@ -437,7 +448,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     } finally {
       setIsLoading(false);
     }
-  }, [editValue, onSave, stage?.id, task?.id, linkedDocument, selectedSkipReason, previewDocuments, currentPreviewIndex]);
+  }, [editValue, onSave, stage?.id, task?.id, linkedDocument, previewDocuments, currentPreviewIndex]);
 
   const handleCustomInputSave = useCallback(async (valueOverride?: string) => {
     if (!onSave || readOnly) return;
@@ -2022,6 +2033,34 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     return true;
   }, [stage?.dependencies, task?.stages]);
 
+  // Blanket "complete or skip stages in order" rule — see enforceStageOrder prop doc. Unlike
+  // isDependencyMet above (an admin-opted-in dependency between two specific stages, which only
+  // accepts 'completed'), this walks every stage that counts toward the task's progression —
+  // same eligibility as isStageEligibleAsCurrent in tableUtils.tsx: applicable, attribute
+  // conditions met, and not a not-yet-relevant optional stage — and accepts 'completed' OR
+  // 'skipped' as clearing a stage, since skipping-with-a-reason is an equally valid way past a
+  // mandatory stage per this feature's whole point.
+  const stagesBlockingOrder = useMemo(() => {
+    if (!enforceStageOrder || !stages?.length || !stage?.id) return [];
+    const sorted = [...stages].sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
+    const enhancedTasksData = enhancedTaskData && task?.id != null
+      ? new Map([[task.id.toString(), enhancedTaskData]])
+      : undefined;
+    const blocking: any[] = [];
+    for (const other of sorted) {
+      if (other.id === stage.id) break;
+      if (!isStageApplicableToTask(other, task, departments)) continue;
+      if (!stageApplicabilityConditionsMet(other, task, enhancedTasksData)) continue;
+      const otherData = task?.stages?.[other.id];
+      if (isStageOptionalForTask(other, task, departments)) {
+        const hasData = !!(otherData?.date || otherData?.status || otherData?.value || otherData?.completedAt);
+        if (!hasData) continue;
+      }
+      if (otherData?.status !== 'completed' && otherData?.status !== 'skipped') blocking.push(other);
+    }
+    return blocking;
+  }, [enforceStageOrder, stages, stage?.id, task, departments, enhancedTaskData]);
+
   const renderCellContent = () => {
     // The transposed table's 4-column layout ('plain-date'/'status'/'upload'/'other') calls
     // this once per sub-column for the same stage — show N/A/Locked once (in Status, since
@@ -2035,18 +2074,20 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       return null;
     }
 
-    if (!isDependencyMet) {
-      const waitingOn = (stage?.dependencies || [])
-        .filter((dep: any) => {
-          const parentStageData = task?.stages?.[dep.stageId];
-          const hasData = parentStageData?.date || parentStageData?.value || parentStageData?.status;
-          const isCompleted = parentStageData?.status === 'completed';
-          if (dep.dependencyType === 'visible_when_completed' || dep.dependencyType === 'sequential') return !isCompleted;
-          if (dep.dependencyType === 'visible_when_started') return !hasData;
-          return false;
-        })
-        .map((dep: any) => dep.stageName || 'Unknown')
-        .join(', ');
+    if (!isDependencyMet || stagesBlockingOrder.length > 0) {
+      const dependencyWaitingOn = !isDependencyMet
+        ? (stage?.dependencies || [])
+            .filter((dep: any) => {
+              const parentStageData = task?.stages?.[dep.stageId];
+              const hasData = parentStageData?.date || parentStageData?.value || parentStageData?.status;
+              const isCompleted = parentStageData?.status === 'completed';
+              if (dep.dependencyType === 'visible_when_completed' || dep.dependencyType === 'sequential') return !isCompleted;
+              if (dep.dependencyType === 'visible_when_started') return !hasData;
+              return false;
+            })
+            .map((dep: any) => dep.stageName || 'Unknown')
+        : [];
+      const waitingOn = [...dependencyWaitingOn, ...stagesBlockingOrder.map((s: any) => s.name || 'Unknown')].join(', ');
 
       if (!isLegacyMode && renderMode !== 'status') return null;
 
@@ -2090,7 +2131,16 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
 
   return (
     <div className="flex items-center min-h-[28px] py-0.5">
-      <SkipStageDialog />
+      <SkipStageDialog
+        open={isSkipDialogOpen}
+        onOpenChange={setIsSkipDialogOpen}
+        stageName={stage?.name}
+        loading={isLoading}
+        onConfirm={async (reason: string) => {
+          await handleSave(true, reason);
+          setIsSkipDialogOpen(false);
+        }}
+      />
       {renderCellContent()}
       {stageLink?.tab === 'billing' && (
         <Dialog open={billPreviewOpen} onOpenChange={setBillPreviewOpen}>
@@ -2133,4 +2183,110 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   );
 }
 
-function SkipStageDialog() { return null; }
+// Common reasons for skipping an otherwise-mandatory stage on a specific task (e.g. a trusted
+// client paying later instead of upfront) — "Other" reveals a free-text field for anything not
+// covered by a preset. Purely a convenience list; the stored reason is always the resolved text.
+const PAYS_LATER_REASON = 'Trusted client — pays later';
+const SKIP_REASON_PRESETS = [
+  PAYS_LATER_REASON,
+  'Waived by management',
+  'Not applicable for this case',
+  'Other',
+];
+
+function SkipStageDialog({
+  open,
+  onOpenChange,
+  stageName,
+  onConfirm,
+  loading = false,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  stageName?: string;
+  onConfirm: (reason: string) => void;
+  loading?: boolean;
+}) {
+  const [preset, setPreset] = useState('');
+  const [customReason, setCustomReason] = useState('');
+  const [payByDate, setPayByDate] = useState('');
+
+  const isPaysLater = preset === PAYS_LATER_REASON;
+  const formattedPayByDate = (() => {
+    if (!payByDate) return '';
+    const parsed = parse(payByDate, 'yyyy-MM-dd', new Date());
+    return isValid(parsed) ? format(parsed, 'dd/MM/yyyy') : '';
+  })();
+  const resolvedReason = preset === 'Other'
+    ? customReason.trim()
+    : isPaysLater
+      ? (formattedPayByDate ? `${preset} — due ${formattedPayByDate}` : '')
+      : preset;
+
+  useEffect(() => {
+    if (open) {
+      setPreset('');
+      setCustomReason('');
+      setPayByDate('');
+    }
+  }, [open]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[425px]" onClick={(e) => e.stopPropagation()}>
+        <DialogHeader>
+          <DialogTitle>Skip Stage{stageName ? `: ${stageName}` : ''}</DialogTitle>
+          <DialogDescription>
+            This stage is normally required. Please record why it's being skipped for this task.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="py-2 space-y-3">
+          <div>
+            <Label htmlFor="skip-reason-preset">Reason *</Label>
+            <Select value={preset} onValueChange={setPreset}>
+              <SelectTrigger id="skip-reason-preset" className="mt-2">
+                <SelectValue placeholder="Select a reason..." />
+              </SelectTrigger>
+              <SelectContent>
+                {SKIP_REASON_PRESETS.map((option) => (
+                  <SelectItem key={option} value={option}>{option}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {preset === 'Other' && (
+            <div>
+              <Label htmlFor="skip-reason-custom">Details *</Label>
+              <Textarea
+                id="skip-reason-custom"
+                placeholder="Please specify..."
+                value={customReason}
+                onChange={(e) => setCustomReason(e.target.value)}
+                className="mt-2"
+                rows={3}
+              />
+            </div>
+          )}
+          {isPaysLater && (
+            <div>
+              <Label htmlFor="skip-pay-by-date">Pay By *</Label>
+              <input
+                id="skip-pay-by-date"
+                type="date"
+                value={payByDate}
+                onChange={(e) => setPayByDate(e.target.value)}
+                className="mt-2 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+              />
+            </div>
+          )}
+        </div>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Back</Button>
+          <Button onClick={() => onConfirm(resolvedReason)} disabled={loading || !resolvedReason}>
+            {loading ? 'Skipping...' : 'Skip Stage'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

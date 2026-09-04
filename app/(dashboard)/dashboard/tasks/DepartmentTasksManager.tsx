@@ -49,6 +49,7 @@ import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, ev
 import { determineCurrentStage, getStageProgress } from './utils/stageUtils'
 import { calculateStageDate } from './utils/dateUtils'
 import { fetchUserAssignmentData, hasJobLevelAccess, getOfficerDisplayName, userService } from "@/lib/shared-user-assignment-service"
+import { useCurrentUser, hasPermission } from "@/lib/hooks/use-current-user"
 import { cn } from "@/lib/utils"
 import {
   getCanonicalCurrentStage,
@@ -67,6 +68,13 @@ import {
 const TERMINAL_STATUSES = ['write_up_completed', 'endorsed', 'completed', 'archived', 'cancel'];
 
 export default function DepartmentTasksManager({ error, onTaskAction, handleStageStatusSave, onTaskUpdate, getCurrentRequirements, initialSearchTerm, initialDeptId, initialSubDeptId }: DepartmentTasksManagerProps) {
+  // Gates the blanket "complete/skip stages in order" rule — superadmins and anyone explicitly
+  // granted tasks.bypass_sequential_stages (toggled per role in the Access Control Matrix,
+  // settings/access-controls) can update any stage at any time; everyone else must clear
+  // (complete or skip) earlier applicable stages first. See EditableStageCell.tsx's
+  // enforceStageOrder prop and enhancedHandleStageStatusSave's own save-time guard below.
+  const { user: currentUser } = useCurrentUser();
+  const enforceStageOrder = !hasPermission(currentUser, 'tasks.bypass_sequential_stages');
   const [departments, setDepartments] = useState<Department[]>([])
   const [companies, setCompanies] = useState<Map<number, { name: string; prefix: string }>>(new Map())
   const [activeDepartmentTab, setActiveDepartmentTab] = useState<string>("")
@@ -1822,6 +1830,36 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       const isSkipped = updatedExtractedDetails?.status === 'skipped';
       const isCleared = updatedExtractedDetails?.isCleared === true;
 
+      // Blanket "complete/skip stages in order" guard — the actual save-time enforcement behind
+      // EditableStageCell.tsx's stagesBlockingOrder and this file's getStageMergedState, which
+      // are UI-only locks a save triggered through any other path wouldn't otherwise respect.
+      // Clearing/undoing a stage is always allowed regardless of order since it can only move a
+      // task backward, never skip ahead. enforceStageOrder is false for superadmins and anyone
+      // granted tasks.bypass_sequential_stages (Access Control Matrix).
+      if (enforceStageOrder && !isCleared) {
+        const sortedStages = [...(stages || [])].sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
+        const enhancedTaskEntry = enhancedTasksData.get(task.id?.toString());
+        const enhancedTasksMap = enhancedTaskEntry ? new Map([[task.id.toString(), enhancedTaskEntry]]) : undefined;
+        for (const other of sortedStages) {
+          if (other.id === stageId) break;
+          if (!isStageApplicableToTask(other, task, departments)) continue;
+          if (!stageApplicabilityConditionsMet(other, task, enhancedTasksMap)) continue;
+          const otherData = task?.stages?.[other.id];
+          if (isStageOptionalForTask(other, task, departments)) {
+            const hasData = !!(otherData?.date || otherData?.status || otherData?.value || otherData?.completedAt);
+            if (!hasData) continue;
+          }
+          if (otherData?.status !== 'completed' && otherData?.status !== 'skipped') {
+            toast({
+              title: "Complete Earlier Stages First",
+              description: `"${other.name}" must be completed or skipped before this stage.`,
+              variant: "destructive"
+            });
+            return;
+          }
+        }
+      }
+
       let taskStatusUpdate = {};
       const timestamp = new Date().toISOString();
 
@@ -1934,7 +1972,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         variant: "destructive"
       });
     }
-  }, [tasks, stages, departments, determineCurrentStage, activeDepartmentTab, activeSubdepartmentTab, clearTasksCache]);
+  }, [tasks, stages, departments, enforceStageOrder, enhancedTasksData, isStageApplicableToTask, determineCurrentStage, activeDepartmentTab, activeSubdepartmentTab, clearTasksCache]);
 
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
     if (!tasks.length) return [];
@@ -2698,8 +2736,40 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         );
       }
     }
+
+    // Mirrors EditableStageCell.tsx's own stagesBlockingOrder check (same duplication
+    // rationale as the dependency block above) — the blanket "complete/skip stages in order"
+    // rule, gated by enforceStageOrder (true unless the user has tasks.bypass_sequential_stages
+    // or is a superadmin).
+    if (enforceStageOrder && stages.length > 0) {
+      const sorted = [...stages].sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
+      const enhancedTaskEntry = enhancedTasksData.get(task.id?.toString());
+      const orderWaitingOn: string[] = [];
+      for (const other of sorted) {
+        if (other.id === row.stage.id) break;
+        if (!isStageApplicableToTask(other, task, departments)) continue;
+        if (!stageApplicabilityConditionsMet(other, task, enhancedTaskEntry ? new Map([[task.id.toString(), enhancedTaskEntry]]) : undefined)) continue;
+        const otherData = task?.stages?.[other.id];
+        if (isStageOptionalForTask(other, task, departments)) {
+          const hasData = !!(otherData?.date || otherData?.status || otherData?.value || otherData?.completedAt);
+          if (!hasData) continue;
+        }
+        if (otherData?.status !== 'completed' && otherData?.status !== 'skipped') orderWaitingOn.push(other.name || 'Unknown');
+      }
+      if (orderWaitingOn.length > 0) {
+        return (
+          <div
+            className="flex items-center gap-1.5 px-1 py-0.5 rounded bg-gray-50 border border-dashed border-gray-200 cursor-default justify-center mx-auto w-fit"
+            title={`Waiting for: ${orderWaitingOn.join(', ')}`}
+          >
+            <LockIcon className="h-3 w-3 text-gray-300 shrink-0" />
+            <span className="text-[10px] text-gray-300 italic truncate">Locked</span>
+          </div>
+        );
+      }
+    }
     return null;
-  }, []);
+  }, [enforceStageOrder, stages, departments, isStageApplicableToTask, enhancedTasksData]);
 
   const renderCellContent = useCallback((row: any, task: any, columnType?: 'date' | 'actions' | 'combined' | 'status' | 'upload' | 'other') => {
     const value = row.getValue?.(task) ?? '';
@@ -2881,6 +2951,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         readOnly={isReadOnly}
         onOpenRequirements={handleOpenRequirements}
         showTime={showTime}
+        enforceStageOrder={enforceStageOrder}
       />
     );
   };
