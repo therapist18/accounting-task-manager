@@ -17,7 +17,7 @@ import { parseDate } from "@/app/generic-functions/dateUtils"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { calculateStageDate } from "../utils/dateUtils"
-import { STAGE_TAB_LINKS } from "../utils/taskManagerData"
+import { STAGE_TAB_LINKS, isStageDocumentApplicableToTask } from "../utils/taskManagerData"
 import { cn } from "@/lib/utils"
 import { getCanonicalCurrentStage } from "../../reports/utils/reportStageLogic"
 import { ReassignDocumentTypeDialog } from "./ReassignDocumentTypeDialog"
@@ -251,19 +251,21 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   // the types this stage actually offers for this task's job level. Surfaced as a warning on the
   // view icon so a mistagged document is visible right in the table, not just discoverable by
   // opening "Fix Document Type" and checking manually.
-  // Deliberately NOT job-level-filtered (unlike ReassignDocumentTypeDialog's own candidate
-  // list) — isStageDocumentApplicableToTask's class/subdepartment targeting has edge cases
-  // (e.g. dependants, or any task whose effective targeting class/subdept differs from its own
-  // flat class_id/subdepartment_id) that can wrongly exclude a document's true, correct type
-  // from the "applicable" set. A false "mismatch" here isn't just cosmetic — it could lead
-  // someone to retag a document that was never wrong. So this only flags a type that isn't
-  // configured for the stage at all (the actual "wrong tab entirely" scenario this exists to
-  // catch), and leaves anything job-level-ambiguous unflagged rather than guessing.
+  // Job-level-aware via isStageDocumentApplicableToTask (same rule ReassignDocumentTypeDialog's
+  // candidate list uses) — a doc's type is flagged if it isn't configured for the stage at all,
+  // OR if every stage.documents entry carrying that kycId is targetEntities-scoped to a
+  // different job level than this task's. This also catches same-stage tab swaps (e.g. Permit G
+  // uploaded where KDP belongs) that plain kycId-membership missed, since both can be configured
+  // on the same stage.
   const hasMismatchedDocumentType = useMemo(() => {
     if (!hasLinkedDocument || !Array.isArray(stage?.documents) || stage.documents.length < 2) return false;
-    const allStageKycIds = new Set(stage.documents.map((docConfig: any) => docConfig.kycId));
-    return (linkedDocuments || []).some((doc: any) => doc?.document_id && !allStageKycIds.has(doc.document_id));
-  }, [hasLinkedDocument, stage?.documents, linkedDocuments]);
+    return (linkedDocuments || []).some((doc: any) => {
+      if (!doc?.document_id) return false;
+      const matchingConfigs = stage.documents.filter((docConfig: any) => docConfig.kycId === doc.document_id);
+      if (matchingConfigs.length === 0) return true;
+      return !matchingConfigs.some((docConfig: any) => isStageDocumentApplicableToTask(docConfig, task));
+    });
+  }, [hasLinkedDocument, stage?.documents, linkedDocuments, task]);
 
   const stageDate = useMemo(() => {
     if (!task?.stages || !stage?.id) return null;

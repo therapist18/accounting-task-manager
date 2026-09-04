@@ -1,8 +1,8 @@
 import type React from "react"
 import { headers } from "next/headers"
 import { redirect } from "next/navigation"
-import { Navbar } from "../../components/navbar"
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
+import { NavbarWrapper } from "../../components/navbar-wrapper"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/toaster"
 import { canAccessPath } from "@/lib/auth/access-controls"
 import { getServerAppSession } from "@/lib/auth/session"
@@ -40,20 +40,12 @@ export default async function DashboardLayout({
     )
   }
 
-  const showNavbar = !pathname.startsWith("/dashboard/tasks") && !pathname.startsWith("/dashboard/employment-contracts") && !pathname.startsWith("/dashboard/consultancy-contracts") && !pathname.startsWith("/dashboard/summary-reports") && !pathname.startsWith("/dashboard/company-profiles") && !pathname.startsWith("/dashboard/letters") && !pathname.startsWith("/dashboard/passport-endorsement")
-
   return (
     <SidebarProvider>
       <div className="flex h-screen w-screen overflow-hidden dark:bg-zinc-950">
         <AppSidebar />
         <SidebarInset className="flex flex-col w-full min-w-0 bg-transparent overflow-hidden">
-          {showNavbar ? (
-            <Navbar />
-          ) : (
-            <div className="flex h-14 shrink-0 items-center gap-2 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 px-4 md:hidden">
-              <SidebarTrigger className="text-slate-600 dark:text-white/80 hover:bg-slate-100 dark:hover:bg-white/10" />
-            </div>
-          )}
+          <NavbarWrapper />
           {/* Add margin and rounded corners to create the 'card' effect */}
           <main className="flex-1 relative dark:bg-zinc-900">
             {children}

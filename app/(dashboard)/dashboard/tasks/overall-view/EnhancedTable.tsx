@@ -264,9 +264,15 @@ const MemoizedTableRow = React.memo(({
 
   if (row.type === 'section_header') {
     const Icon = row.icon;
+    // The Actions section header is pulled to the end of the table (see EnhancedTable's render)
+    // and pinned above the sticky actions row itself — bottom-11 lines up with that row's h-11
+    // so the two form one stuck-together footer instead of overlapping. When the section is
+    // collapsed there's no actions row underneath it, so it sticks to bottom-0 instead.
+    const isActionsHeader = row.id === 'actions';
+    const actionsExpanded = expandedSections.has('actions');
     return (
-      <TableRow className="bg-slate-200 border-y-2 border-slate-400 hover:bg-slate-200">
-        <TableCell colSpan={2} className="p-0 sticky left-0 z-10">
+      <TableRow className={cn("bg-slate-200 border-y-2 border-slate-400 hover:bg-slate-200", isActionsHeader && `sticky z-20 shadow-[0_-2px_4px_-1px_rgba(0,0,0,0.05)] ${actionsExpanded ? 'bottom-11' : 'bottom-0'}`)}>
+        <TableCell colSpan={2} className="p-0 sticky left-0 z-10 bg-slate-200">
           <div className="flex items-center justify-between px-3 py-2">
             <div className="flex items-center gap-3">
               <Icon className="h-5 w-5 text-slate-600" />
@@ -277,7 +283,7 @@ const MemoizedTableRow = React.memo(({
             </Button>
           </div>
         </TableCell>
-        <TableCell colSpan={paginatedHeaderStructure.length * 4 + 2}></TableCell>
+        <TableCell colSpan={paginatedHeaderStructure.length * 4 + 2} className="bg-slate-200"></TableCell>
       </TableRow>
     );
   }
@@ -398,7 +404,7 @@ const MemoizedTableRow = React.memo(({
   }
 
   return (
-    <TableRow className={`${rowBg} ${hoverBg} group border-b border-slate-200 ${row.type === 'actions' ? 'sticky bottom-0 z-10 bg-white shadow-[0_-2px_4px_-1px_rgba(0,0,0,0.05)] border-t border-slate-300' : ''}`}>
+    <TableRow className={`${rowBg} ${hoverBg} group border-b border-slate-200 ${row.type === 'actions' ? 'h-11 sticky bottom-0 z-20 bg-white shadow-[0_-2px_4px_-1px_rgba(0,0,0,0.05)] border-t border-slate-300' : ''}`}>
       {row.type !== 'actions' && (
         <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 text-center w-14 min-w-14 max-w-14`}>
           {safeRender(row.stageOrder) || (row.type !== 'stage' && row.type !== 'document' && row.type !== 'field' && row.type !== 'actions' ? (rowIndex + 1) : '')}
@@ -872,7 +878,7 @@ export const EnhancedTable = forwardRef<any, EnhancedTableProps>(({
               </TableRow>
             ) : (
               <>
-                {filteredTableRows.filter(row => row.type !== 'actions').map((row, index) => (
+                {filteredTableRows.filter(row => row.type !== 'actions' && !(row.type === 'section_header' && row.id === 'actions')).map((row, index) => (
                 <MemoizedTableRow
                   key={row.key}
                   row={row}
@@ -896,7 +902,12 @@ export const EnhancedTable = forwardRef<any, EnhancedTableProps>(({
                   allCompanyDocuments={allCompanyDocuments}
                 />
                 ))}
-                {filteredTableRows.filter(row => row.type === 'actions').map((row, index) => (
+                {/* The "Actions" section header and its button row are pulled out of normal
+                    document order and rendered last, both pinned to the bottom of the scroll
+                    container (see the sticky bottom-11 / bottom-0 pairing in MemoizedTableRow),
+                    so the buttons stay reachable without scrolling regardless of how many
+                    sections above are expanded. */}
+                {filteredTableRows.filter(row => row.type === 'actions' || (row.type === 'section_header' && row.id === 'actions')).map((row, index) => (
                 <MemoizedTableRow
                   key={row.key}
                   row={row}

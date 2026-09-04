@@ -129,7 +129,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set())
   const [isDocumentPreviewOpen, setIsDocumentPreviewOpen] = useState(false);
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages', 'report_docs', 'actions']))
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages', 'actions']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
   const [activeReport, setActiveReport] = useState<any | null>(null);
   const [areTabsVisible, setAreTabsVisible] = useState(true);

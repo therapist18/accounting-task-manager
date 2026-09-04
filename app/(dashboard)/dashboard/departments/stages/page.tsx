@@ -1307,6 +1307,28 @@ export default function Stages() {
     })
   }
 
+  const handleBulkTriggerStatusChange = (
+    entity: { subdeptId: number; classId?: number | string | null; subclassId?: number | string | null },
+    stageIds: string[],
+    value: string,
+  ) => {
+    const triggers_task_status = triggerStatusFromSelectValue(value)
+    stageIds.forEach((stageId) => {
+      stageAllocationChange(entity.subdeptId, stageId, { triggers_task_status }, entity.classId ?? null, entity.subclassId ?? null)
+    })
+  }
+
+  const handleBulkTriggerStatusChangeForStageAcrossEntities = (
+    entities: { subdeptId: number; classId?: string | number | null; subclassId?: string | number | null }[],
+    stageId: string,
+    value: string,
+  ) => {
+    const triggers_task_status = triggerStatusFromSelectValue(value)
+    entities.forEach(({ subdeptId, classId = null, subclassId = null }) => {
+      stageAllocationChange(subdeptId, stageId, { triggers_task_status }, classId, subclassId)
+    })
+  }
+
   const handleAddStages = async (stages: any[], departmentId: string) => {
     const currentDept = departments.find((d) => d.id === departmentId)
     if (!currentDept) {
@@ -2863,6 +2885,28 @@ export default function Stages() {
                             />
                           </div>
                         </TableHead>
+                        <TableHead className="border-r border-slate-300 bg-slate-500 text-center text-xs font-medium text-white w-16 p-1">
+                          <Select
+                            value=""
+                            onValueChange={(value) =>
+                              handleBulkTriggerStatusChange(entity, filteredStages.map((stage) => stage.id), value)
+                            }
+                          >
+                            <SelectTrigger
+                              className="h-6 w-full border-0 shadow-none text-[10px] bg-transparent text-white hover:bg-slate-400/50 justify-center"
+                              title={`Set Status Trigger for all ${filteredStages.length} visible stage${filteredStages.length === 1 ? "" : "s"}`}
+                            >
+                              <span>Set Trigger</span>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={INHERIT_TRIGGER_STATUS}>Inherit</SelectItem>
+                              <SelectItem value={NONE_TRIGGER_STATUS}>None</SelectItem>
+                              <SelectItem value="in_progress">In Progress</SelectItem>
+                              <SelectItem value="write_up_completed">Write Up Completed</SelectItem>
+                              <SelectItem value="endorsed">Endorsed</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </TableHead>
                       </React.Fragment>
                     )
                   })}
@@ -3548,7 +3592,7 @@ export default function Stages() {
 
                     return (
                       <TableHead key={`controls-${stage.id}`} className="border-r border-slate-300 bg-slate-500">
-                        <div className="grid grid-cols-2 gap-1 p-1">
+                        <div className="grid grid-cols-3 gap-1 p-1">
                           <div
                             className="flex items-center justify-center gap-1"
                             title={`${allApplicable ? "Deselect all" : "Select all"} (${visibleEntities.length} visible row${visibleEntities.length === 1 ? "" : "s"})`}
@@ -3585,6 +3629,30 @@ export default function Stages() {
                               className="h-3.5 w-3.5 border-white data-[state=checked]:bg-white data-[state=checked]:text-slate-700"
                             />
                           </div>
+                          <Select
+                            value=""
+                            onValueChange={(value) =>
+                              handleBulkTriggerStatusChangeForStageAcrossEntities(
+                                visibleEntities.map(({ subdeptId, classId, subclassId }) => ({ subdeptId, classId, subclassId })),
+                                stage.id,
+                                value,
+                              )
+                            }
+                          >
+                            <SelectTrigger
+                              className="h-6 w-full border-0 shadow-none text-[10px] bg-transparent text-white hover:bg-slate-400/50 justify-center"
+                              title={`Set Status Trigger for all ${visibleEntities.length} visible row${visibleEntities.length === 1 ? "" : "s"}`}
+                            >
+                              <span>Set Trigger</span>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={INHERIT_TRIGGER_STATUS}>Inherit</SelectItem>
+                              <SelectItem value={NONE_TRIGGER_STATUS}>None</SelectItem>
+                              <SelectItem value="in_progress">In Progress</SelectItem>
+                              <SelectItem value="write_up_completed">Write Up Completed</SelectItem>
+                              <SelectItem value="endorsed">Endorsed</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                       </TableHead>
                     )
