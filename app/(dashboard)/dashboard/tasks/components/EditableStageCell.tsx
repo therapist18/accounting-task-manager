@@ -622,6 +622,24 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   const handleTriggerAutomation = useCallback((e: React.MouseEvent) => { e.stopPropagation(); setAutomationDialogOpen(true); }, []);
   const handleSkipClick = async () => setIsSkipDialogOpen(true);
 
+  // Scrolls the named blocking stage's own cell (same task, different stage — found via the
+  // data-stage-cell attribute every EditableStageCell instance carries) into view and briefly
+  // flashes it, since a wide stage table usually has the actual blocker scrolled out of sight.
+  // Plain DOM lookup rather than React state/context: the target is rendered by a sibling
+  // component instance this cell has no other reference to.
+  const handleJumpToStage = useCallback((targetStageId: string) => {
+    if (typeof document === 'undefined' || !task?.id) return;
+    const el = document.querySelector(`[data-stage-cell="${task.id}::${targetStageId}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    el.classList.remove('stage-jump-highlight');
+    // Force a reflow so re-adding the class restarts the CSS animation if it's already mid-play
+    // (e.g. clicking a second blocking stage right after the first one's flash).
+    void (el as HTMLElement).offsetWidth;
+    el.classList.add('stage-jump-highlight');
+    setTimeout(() => el.classList.remove('stage-jump-highlight'), 1500);
+  }, [task?.id]);
+
   const fetchKycDocumentData = useCallback(async (kycId: string) => {
     try {
       const { data, error } = await supabase.from('acc_portal_kyc').select('id, fields, name, display_name, document_type').eq('id', kycId).single();
@@ -2042,6 +2060,12 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   // mandatory stage per this feature's whole point.
   const stagesBlockingOrder = useMemo(() => {
     if (!enforceStageOrder || !stages?.length || !stage?.id) return [];
+    // A stage that already has data — completed, skipped, or partially filled from before this
+    // rule existed, or entered out of sequence for any other reason — must always render that
+    // data. The lock only exists to stop a NEW, still-empty stage from being entered before its
+    // predecessors; it must never hide data that's already there.
+    const ownData = task?.stages?.[stage.id];
+    if (ownData?.date || ownData?.status || ownData?.value || ownData?.completedAt) return [];
     const sorted = [...stages].sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
     const enhancedTasksData = enhancedTaskData && task?.id != null
       ? new Map([[task.id.toString(), enhancedTaskData]])
@@ -2061,6 +2085,34 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     return blocking;
   }, [enforceStageOrder, stages, stage?.id, task, departments, enhancedTaskData]);
 
+  // Marks a genuine gap — the earliest applicable stage with no data, but ONLY when some LATER
+  // stage already has data despite it (proof the task moved on and left this one behind). A
+  // plain "next stage to do" with nothing done after it is normal, expected pending work, not an
+  // anomaly, so it gets no indicator — this only fires for the stage actually causing later
+  // Locked cells (stagesBlockingOrder), never for an ordinary current/next stage.
+  const isFirstEmptyStage = useMemo(() => {
+    if (!enforceStageOrder || !stages?.length || !stage?.id) return false;
+    const ownData = task?.stages?.[stage.id];
+    if (ownData?.date || ownData?.status || ownData?.value || ownData?.completedAt) return false;
+    const sorted = [...stages].sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
+    const enhancedTasksData = enhancedTaskData && task?.id != null
+      ? new Map([[task.id.toString(), enhancedTaskData]])
+      : undefined;
+    const hasStageData = (s: any) => {
+      const d = task?.stages?.[s.id];
+      return !!(d?.date || d?.status || d?.value || d?.completedAt);
+    };
+    const eligible = sorted.filter((s: any) => {
+      if (!isStageApplicableToTask(s, task, departments)) return false;
+      if (!stageApplicabilityConditionsMet(s, task, enhancedTasksData)) return false;
+      if (isStageOptionalForTask(s, task, departments) && !hasStageData(s)) return false;
+      return true;
+    });
+    const firstEmptyIndex = eligible.findIndex((s: any) => !hasStageData(s));
+    if (firstEmptyIndex === -1 || eligible[firstEmptyIndex].id !== stage.id) return false;
+    return eligible.slice(firstEmptyIndex + 1).some(hasStageData);
+  }, [enforceStageOrder, stages, stage?.id, task, departments, enhancedTaskData]);
+
   const renderCellContent = () => {
     // The transposed table's 4-column layout ('plain-date'/'status'/'upload'/'other') calls
     // this once per sub-column for the same stage — show N/A/Locked once (in Status, since
@@ -2075,7 +2127,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     }
 
     if (!isDependencyMet || stagesBlockingOrder.length > 0) {
-      const dependencyWaitingOn = !isDependencyMet
+      const dependencyWaitingOn: { id: string; name: string }[] = !isDependencyMet
         ? (stage?.dependencies || [])
             .filter((dep: any) => {
               const parentStageData = task?.stages?.[dep.stageId];
@@ -2085,9 +2137,9 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
               if (dep.dependencyType === 'visible_when_started') return !hasData;
               return false;
             })
-            .map((dep: any) => dep.stageName || 'Unknown')
+            .map((dep: any) => ({ id: dep.stageId, name: dep.stageName || 'Unknown' }))
         : [];
-      const waitingOn = [...dependencyWaitingOn, ...stagesBlockingOrder.map((s: any) => s.name || 'Unknown')].join(', ');
+      const waitingOnStages = [...dependencyWaitingOn, ...stagesBlockingOrder.map((s: any) => ({ id: s.id, name: s.name || 'Unknown' }))];
 
       if (!isLegacyMode && renderMode !== 'status') return null;
 
@@ -2099,8 +2151,21 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
               <span className="text-[10px] text-gray-300 italic truncate">Locked</span>
             </div>
           </HoverCardTrigger>
-          <HoverCardContent>
-            <p className="text-xs">Waiting for: {waitingOn}</p>
+          <HoverCardContent className="w-auto max-w-xs">
+            <p className="text-xs text-slate-500 mb-1.5">Waiting for:</p>
+            <div className="flex flex-col items-start gap-1">
+              {waitingOnStages.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className="text-xs text-blue-600 hover:underline text-left"
+                  title="Jump to this stage"
+                  onClick={(e) => { e.stopPropagation(); handleJumpToStage(s.id); }}
+                >
+                  {s.name}
+                </button>
+              ))}
+            </div>
           </HoverCardContent>
         </HoverCard>
       );
@@ -2129,8 +2194,23 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     return <span className="text-xs text-gray-500 italic">-</span>;
   };
 
+  // The transposed table's 4-column layout ('plain-date'/'status'/'upload'/'other') renders this
+  // component 4 times for the same stage — once per sub-column — so without gating, the overlay
+  // would repeat 4x per row. Show it only where the "Locked"/N/A merged state already shows
+  // (renderCellContent's isLegacyMode consumers, or 'status' in the split layout).
+  const showFirstEmptyIndicator = isFirstEmptyStage &&
+    (renderMode === 'date' || renderMode === 'actions' || renderMode === 'combined' || renderMode === 'status');
+
   return (
-    <div className="flex items-center min-h-[28px] py-0.5">
+    <div className="relative flex items-center min-h-[28px] py-0.5" data-stage-cell={`${task?.id}::${stage?.id}`}>
+      {showFirstEmptyIndicator && (
+        <AlertTriangle
+          className="absolute -top-2 -left-2 h-5 w-5 text-amber-500 fill-amber-100 animate-bounce drop-shadow pointer-events-none z-10"
+          aria-label="This stage needs attention"
+        >
+          <title>This stage is empty but a later stage already has data — fill in or skip this one first.</title>
+        </AlertTriangle>
+      )}
       <SkipStageDialog
         open={isSkipDialogOpen}
         onOpenChange={setIsSkipDialogOpen}

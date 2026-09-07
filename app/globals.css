@@ -27,6 +27,22 @@ body {
   }
 }
 
+/* "Jump to stage" flash — briefly draws the eye to a specific stage cell after the user clicks
+   a blocking-stage name in a Locked tooltip (EditableStageCell.tsx's stagesBlockingOrder /
+   isDependencyMet), since the target column is often scrolled out of view in a wide stage
+   table. Applied/removed via a plain classList toggle (data-stage-cell lookup), not React
+   state, since the click needs to reach a sibling cell rendered by a different component
+   instance entirely. */
+@keyframes stage-jump-flash {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); background-color: transparent; }
+  20%, 60% { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.55); background-color: rgba(37, 99, 235, 0.12); }
+}
+
+.stage-jump-highlight {
+  animation: stage-jump-flash 1.4s ease-in-out;
+  border-radius: 0.375rem;
+}
+
 @layer base {
   :root {
     --radius: 0.75rem;

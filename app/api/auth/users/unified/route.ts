@@ -75,7 +75,11 @@ export async function GET(req: NextRequest) {
     if (authResponse) return authResponse;
     console.error('Unified API Error:', error);
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : "Failed to fetch users" },
+      // Supabase's PostgrestError (what listManagedScannerUsers' `throw error` actually throws
+      // on a query failure) doesn't extend the native Error class, so `instanceof Error` was
+      // always false for it and silently swallowed the real DB error behind this generic
+      // string — (error as any)?.message reads the message off either shape.
+      { success: false, error: (error as any)?.message || "Failed to fetch users" },
       { status: 500 }
     );
   }
@@ -108,7 +112,7 @@ export async function POST(req: NextRequest) {
     if (authResponse) return authResponse;
     console.error('Unified API POST Error:', error);
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : "Failed to create user" },
+      { success: false, error: (error as any)?.message || "Failed to create user" },
       { status: 500 }
     );
   }
@@ -147,7 +151,7 @@ export async function PUT(req: NextRequest) {
     if (authResponse) return authResponse;
     console.error('Update user error:', error);
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : "Failed to update user" },
+      { success: false, error: (error as any)?.message || "Failed to update user" },
       { status: 500 }
     );
   }
@@ -176,7 +180,7 @@ export async function DELETE(req: NextRequest) {
     if (authResponse) return authResponse;
     console.error('Unified API DELETE Error:', error);
     return NextResponse.json(
-      { success: false, error: "Failed to delete user" },
+      { success: false, error: (error as any)?.message || "Failed to delete user" },
       { status: 500 }
     );
   }

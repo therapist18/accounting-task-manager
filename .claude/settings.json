@@ -15,7 +15,10 @@
       "Bash(curl -s http://localhost:3001/companies/overall-document-manager -o /dev/null -w \"%{http_code} %{url_effective}\\\\n\")",
       "Bash(curl -s http://localhost:3000/companies/overall-document-manager -o /dev/null -w \"%{http_code} %{url_effective}\\\\n\" -L)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/dashboard/tasks --max-time 5)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3002/dashboard/tasks --max-time 20)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3002/dashboard/tasks --max-time 20)",
+      "Bash(echo \"E1:$?\")",
+      "Bash(echo \"E2:$?\")",
+      "Bash(echo \"E3:$?\")"
     ]
   }
 }

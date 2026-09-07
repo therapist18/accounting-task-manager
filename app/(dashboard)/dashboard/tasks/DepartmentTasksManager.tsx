@@ -10,7 +10,8 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { unstable_batchedUpdates } from 'react-dom'
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Settings, Search, X, TableProperties, RotateCcw, Edit, AlertCircle, Plus, Minus, Download, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2, LinkIcon, RefreshCw, UserPlus, LayoutGrid, Settings2, Clock, GitCompare, Lock as LockIcon } from "lucide-react"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { Settings, Search, X, TableProperties, RotateCcw, Edit, AlertCircle, Plus, Minus, Download, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2, LinkIcon, RefreshCw, UserPlus, LayoutGrid, Settings2, Clock, GitCompare, Lock as LockIcon, AlertTriangle } from "lucide-react"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { CancelConfirmationDialog } from "./components/CancelConfirmationDialog"
 import { EnquiryDialog } from "./components/EnquiryDialog"
@@ -1836,7 +1837,12 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       // Clearing/undoing a stage is always allowed regardless of order since it can only move a
       // task backward, never skip ahead. enforceStageOrder is false for superadmins and anyone
       // granted tasks.bypass_sequential_stages (Access Control Matrix).
-      if (enforceStageOrder && !isCleared) {
+      // A stage that already has its own data was already rendered as editable (see the "already
+      // has data" exemption in EditableStageCell.tsx/getStageMergedState) — never retroactively
+      // block updating/re-saving it just because an earlier stage is still open.
+      const currentStageOwnData = task?.stages?.[stageId];
+      const currentStageHasData = !!(currentStageOwnData?.date || currentStageOwnData?.status || currentStageOwnData?.value || currentStageOwnData?.completedAt);
+      if (enforceStageOrder && !isCleared && !currentStageHasData) {
         const sortedStages = [...(stages || [])].sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
         const enhancedTaskEntry = enhancedTasksData.get(task.id?.toString());
         const enhancedTasksMap = enhancedTaskEntry ? new Map([[task.id.toString(), enhancedTaskEntry]]) : undefined;
@@ -2702,6 +2708,22 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   // regardless of sub-column, so showing it 4 times just repeats identical text across 4 boxes.
   // This tells EnhancedTable when that's the case so it can render ONE merged cell instead —
   // returns null for the normal case (still render the 4-way split).
+  // Mirrors EditableStageCell.tsx's own handleJumpToStage — scrolls the named blocking stage's
+  // cell (same task, different stage, found via the data-stage-cell attribute every stage cell
+  // carries, whether rendered by EditableStageCell itself or by this transposed merged-state
+  // path below) into view and briefly flashes it. Plain DOM lookup since the target is rendered
+  // by a sibling cell this callback has no other reference to.
+  const handleJumpToStage = useCallback((taskId: any, targetStageId: string) => {
+    if (typeof document === 'undefined' || taskId == null) return;
+    const el = document.querySelector(`[data-stage-cell="${taskId}::${targetStageId}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    el.classList.remove('stage-jump-highlight');
+    void (el as HTMLElement).offsetWidth;
+    el.classList.add('stage-jump-highlight');
+    setTimeout(() => el.classList.remove('stage-jump-highlight'), 1500);
+  }, []);
+
   const getStageMergedState = useCallback((row: any, task: any): React.ReactNode | null => {
     if (row.type !== 'stage' || !row.stage) return null;
     const value = row.getValue?.(task) ?? '';
@@ -2714,7 +2736,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     // from its own stage/task props and there's no exported helper for it yet.
     const deps = row.stage?.dependencies || [];
     if (deps.length > 0) {
-      const waitingOn: string[] = [];
+      const waitingOn: { id: string; name: string }[] = [];
       for (const dep of deps) {
         const parentStageData = task?.stages?.[dep.stageId];
         const hasData = parentStageData?.date || parentStageData?.value || parentStageData?.status;
@@ -2722,16 +2744,35 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         const unmet = (dep.dependencyType === 'visible_when_completed' || dep.dependencyType === 'sequential')
           ? !isCompleted
           : dep.dependencyType === 'visible_when_started' ? !hasData : false;
-        if (unmet) waitingOn.push(dep.stageName || 'Unknown');
+        if (unmet) waitingOn.push({ id: dep.stageId, name: dep.stageName || 'Unknown' });
       }
       if (waitingOn.length > 0) {
         return (
-          <div
-            className="flex items-center gap-1.5 px-1 py-0.5 rounded bg-gray-50 border border-dashed border-gray-200 cursor-default justify-center mx-auto w-fit"
-            title={`Waiting for: ${waitingOn.join(', ')}`}
-          >
-            <LockIcon className="h-3 w-3 text-gray-300 shrink-0" />
-            <span className="text-[10px] text-gray-300 italic truncate">Locked</span>
+          <div data-stage-cell={`${task?.id}::${row.stage.id}`} className="mx-auto w-fit">
+            <HoverCard openDelay={100} closeDelay={200}>
+              <HoverCardTrigger asChild>
+                <div className="flex items-center gap-1.5 px-1 py-0.5 rounded bg-gray-50 border border-dashed border-gray-200 cursor-help">
+                  <LockIcon className="h-3 w-3 text-gray-300 shrink-0" />
+                  <span className="text-[10px] text-gray-300 italic truncate">Locked</span>
+                </div>
+              </HoverCardTrigger>
+              <HoverCardContent className="w-auto max-w-xs">
+                <p className="text-xs text-slate-500 mb-1.5">Waiting for:</p>
+                <div className="flex flex-col items-start gap-1">
+                  {waitingOn.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className="text-xs text-blue-600 hover:underline text-left"
+                      title="Jump to this stage"
+                      onClick={(e) => { e.stopPropagation(); handleJumpToStage(task?.id, s.id); }}
+                    >
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+              </HoverCardContent>
+            </HoverCard>
           </div>
         );
       }
@@ -2741,10 +2782,14 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     // rationale as the dependency block above) — the blanket "complete/skip stages in order"
     // rule, gated by enforceStageOrder (true unless the user has tasks.bypass_sequential_stages
     // or is a superadmin).
-    if (enforceStageOrder && stages.length > 0) {
+    // A stage that already has its own data must always render it — the lock only stops a
+    // still-empty stage being entered before its predecessors, never hides existing data.
+    const ownStageData = task?.stages?.[row.stage.id];
+    const rowStageHasData = !!(ownStageData?.date || ownStageData?.status || ownStageData?.value || ownStageData?.completedAt);
+    if (enforceStageOrder && stages.length > 0 && !rowStageHasData) {
       const sorted = [...stages].sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
       const enhancedTaskEntry = enhancedTasksData.get(task.id?.toString());
-      const orderWaitingOn: string[] = [];
+      const orderWaitingOn: { id: string; name: string }[] = [];
       for (const other of sorted) {
         if (other.id === row.stage.id) break;
         if (!isStageApplicableToTask(other, task, departments)) continue;
@@ -2754,22 +2799,41 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
           const hasData = !!(otherData?.date || otherData?.status || otherData?.value || otherData?.completedAt);
           if (!hasData) continue;
         }
-        if (otherData?.status !== 'completed' && otherData?.status !== 'skipped') orderWaitingOn.push(other.name || 'Unknown');
+        if (otherData?.status !== 'completed' && otherData?.status !== 'skipped') orderWaitingOn.push({ id: other.id, name: other.name || 'Unknown' });
       }
       if (orderWaitingOn.length > 0) {
         return (
-          <div
-            className="flex items-center gap-1.5 px-1 py-0.5 rounded bg-gray-50 border border-dashed border-gray-200 cursor-default justify-center mx-auto w-fit"
-            title={`Waiting for: ${orderWaitingOn.join(', ')}`}
-          >
-            <LockIcon className="h-3 w-3 text-gray-300 shrink-0" />
-            <span className="text-[10px] text-gray-300 italic truncate">Locked</span>
+          <div data-stage-cell={`${task?.id}::${row.stage.id}`} className="mx-auto w-fit">
+            <HoverCard openDelay={100} closeDelay={200}>
+              <HoverCardTrigger asChild>
+                <div className="flex items-center gap-1.5 px-1 py-0.5 rounded bg-gray-50 border border-dashed border-gray-200 cursor-help">
+                  <LockIcon className="h-3 w-3 text-gray-300 shrink-0" />
+                  <span className="text-[10px] text-gray-300 italic truncate">Locked</span>
+                </div>
+              </HoverCardTrigger>
+              <HoverCardContent className="w-auto max-w-xs">
+                <p className="text-xs text-slate-500 mb-1.5">Waiting for:</p>
+                <div className="flex flex-col items-start gap-1">
+                  {orderWaitingOn.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className="text-xs text-blue-600 hover:underline text-left"
+                      title="Jump to this stage"
+                      onClick={(e) => { e.stopPropagation(); handleJumpToStage(task?.id, s.id); }}
+                    >
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+              </HoverCardContent>
+            </HoverCard>
           </div>
         );
       }
     }
     return null;
-  }, [enforceStageOrder, stages, departments, isStageApplicableToTask, enhancedTasksData]);
+  }, [enforceStageOrder, stages, departments, isStageApplicableToTask, enhancedTasksData, handleJumpToStage]);
 
   const renderCellContent = useCallback((row: any, task: any, columnType?: 'date' | 'actions' | 'combined' | 'status' | 'upload' | 'other') => {
     const value = row.getValue?.(task) ?? '';

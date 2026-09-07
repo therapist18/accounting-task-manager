@@ -98,6 +98,31 @@ export function ReassignDocumentTypeDialog({
     return kycDoc?.display_name || kycDoc?.name || fallbackName || kycId;
   }, [kycDocuments]);
 
+  // Explains WHY the selected document was flagged, mirroring the same two cases
+  // EditableStageCell.tsx's hasMismatchedDocumentType checks: no config on this stage carries
+  // this kycId at all, or a config exists but is scoped (via isSpecial + targetEntities) to
+  // other job levels than this task's — the far more common case, and one where the uploaded
+  // document type is often actually correct, just missing from that config's target list.
+  const mismatchReason = useMemo(() => {
+    if (!selectedDoc?.document_id) return null;
+    const configs = Array.isArray(stage?.documents) ? stage.documents : [];
+    const matchingConfigs = configs.filter((docConfig: any) => docConfig.kycId === selectedDoc.document_id);
+    const typeLabel = getTypeLabel(selectedDoc.document_id);
+
+    if (matchingConfigs.length === 0) {
+      return `"${typeLabel}" isn't configured on the "${stage?.name}" stage at all — it may belong on a different stage entirely.`;
+    }
+    if (matchingConfigs.some((docConfig: any) => isStageDocumentApplicableToTask(docConfig, task))) {
+      return null;
+    }
+    const scopedTo = matchingConfigs
+      .flatMap((docConfig: any) => (docConfig.targetEntities || []).map((te: any) => te.entityName))
+      .filter(Boolean);
+    return scopedTo.length > 0
+      ? `"${typeLabel}" is configured on this stage, but only for: ${scopedTo.join(', ')} — not this task's job level. The document may well be the right type; an admin can add this task's job level to it in Stages settings, or pick a different type below if one actually applies.`
+      : `"${typeLabel}" is configured on this stage but isn't set up for this task's specific job level.`;
+  }, [selectedDoc, stage, task, getTypeLabel]);
+
   const handlePreviewClick = useCallback(async (doc: any) => {
     setLoadingPreviewId(doc.id);
     try {
@@ -253,6 +278,11 @@ export function ReassignDocumentTypeDialog({
 
             {selectedDoc && (
               <div>
+                {mismatchReason && (
+                  <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    {mismatchReason}
+                  </div>
+                )}
                 <Label className="text-sm font-medium">Correct document type</Label>
                 <div className="flex items-center gap-2 mt-2">
                   <Badge variant="outline" className="shrink-0">{getTypeLabel(selectedDoc.document_id)}</Badge>

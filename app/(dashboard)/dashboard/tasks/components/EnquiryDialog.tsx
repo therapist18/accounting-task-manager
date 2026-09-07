@@ -1554,7 +1554,12 @@ export function EnquiryDialog({
 
     const handleSubmit = async () => {
         setSubmitAttempted(true);
-        if (Object.keys(clientIdentificationErrors).length > 0) {
+        // Client Identification completeness is only enforced when creating a new task — an
+        // existing task being edited may predate one of these fields becoming required (e.g. an
+        // old record with no Company/Understudy/Sponsor set), and that shouldn't block fixing an
+        // unrelated field elsewhere in the dialog. The errors still compute and show inline (the
+        // red asterisk/error text) so the gap stays visible — they just don't hard-block saving.
+        if (!taskToEdit && Object.keys(clientIdentificationErrors).length > 0) {
             toast({
                 title: "Missing required fields",
                 description: "Complete every required field in Client Identification before saving.",
@@ -1563,6 +1568,10 @@ export function EnquiryDialog({
             return;
         }
 
+        // Unlike the Client Identification fields above, individual/department are dereferenced
+        // unguarded further down (selectedIndividual.id, Number(formData.department_id)) when
+        // building the save payload — always required, in both create and edit mode, to avoid
+        // corrupting the record rather than genuinely gating a valid edit.
         if (!selectedIndividual || !formData.department_id) return
 
         if (!taskToEdit && duplicateTaskConflicts.length > 0) {
@@ -2054,7 +2063,6 @@ export function EnquiryDialog({
                                                         onValueChange={handleCompanyChange}
                                                         options={[{ value: 'unallocated', label: 'Unallocated' }, ...companyOptions]}
                                                         placeholder="Select Company..."
-                                                        disabled={companyOptions.length === 0}
                                                         emptyMessage="No companies found."
                                                         searchPlaceholder="Search company..."
                                                         buttonClassName="h-11 border-slate-200 bg-white w-full"
