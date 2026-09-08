@@ -60,6 +60,7 @@ import {
   isTaskWithClient,
   computeStageDeltaDays,
 } from "../reports/utils/reportStageLogic"
+import { auditActor } from "./utils/audit"
 
 // Same terminal-status list summary-reports/page.tsx uses to scope its Department/Sub-department
 // tab counts to the "live pipeline" — tasks that are still enquiry/WIP, not already wrapped up.
@@ -1546,13 +1547,15 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
 
       const existingStages = currentTask.stages || {};
       const timestamp = new Date().toISOString();
+      const actor = auditActor(currentUser);
 
       const updatedStages = {
         ...existingStages,
         [stageId]: {
           ...existingStages[stageId],
           officer_ids: officerIds,
-          updatedAt: timestamp
+          updatedAt: timestamp,
+          officers_updated_by_id: actor.by_id,
         }
       };
 
@@ -1560,7 +1563,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         .from('tm_tasks')
         .update({
           stages: updatedStages,
-          updated_at: timestamp
+          updated_at: timestamp,
+          updated_by_id: actor.by_id,
         })
         .eq('id', taskId);
 
@@ -1586,7 +1590,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         variant: "destructive"
       });
     }
-  }, [activeDepartmentTab, activeSubdepartmentTab, clearTasksCache]);
+  }, [activeDepartmentTab, activeSubdepartmentTab, clearTasksCache, currentUser]);
 
   const updateAllTaskStageOfficers = useCallback(async (taskId: string, stageAssignments: Record<string, string[]>) => {
     if (!taskId) {
@@ -1609,6 +1613,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
 
       const existingStages = currentTask.stages || {};
       const timestamp = new Date().toISOString();
+      const actor = auditActor(currentUser);
 
       const updatedStages = { ...existingStages };
 
@@ -1618,7 +1623,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
           updatedStages[stageId] = {
             ...existingStages[stageId],
             officer_ids: officerIds,
-            updatedAt: timestamp
+            updatedAt: timestamp,
+            officers_updated_by_id: actor.by_id,
           };
         }
       });
@@ -1627,7 +1633,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         .from('tm_tasks')
         .update({
           stages: updatedStages,
-          updated_at: timestamp
+          updated_at: timestamp,
+          updated_by_id: actor.by_id,
         })
         .eq('id', taskId);
 
@@ -1653,7 +1660,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         variant: "destructive"
       });
     }
-  }, [activeDepartmentTab, activeSubdepartmentTab, clearTasksCache]);
+  }, [activeDepartmentTab, activeSubdepartmentTab, clearTasksCache, currentUser]);
 
   const updateTaskOfficer = useCallback(async (taskId: string, officerId: string | null, stageId: string) => {
     if (!taskId || !stageId) {
@@ -1678,6 +1685,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
 
       const existingStages = currentTask.stages || {};
       const timestamp = new Date().toISOString();
+      const actor = auditActor(currentUser);
 
       const updatedStages = { ...existingStages };
 
@@ -1689,14 +1697,16 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         updatedStages[stageId] = {
           ...existingStages[stageId],
           officer_ids: [officerId],
-          updatedAt: timestamp
+          updatedAt: timestamp,
+          officers_updated_by_id: actor.by_id,
         };
       } else {
         // Remove officer assignment
         updatedStages[stageId] = {
           ...existingStages[stageId],
           officer_ids: [],
-          updatedAt: timestamp
+          updatedAt: timestamp,
+          officers_updated_by_id: actor.by_id,
         };
       }
 
@@ -1706,7 +1716,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         .from('tm_tasks')
         .update({
           stages: updatedStages,
-          updated_at: timestamp
+          updated_at: timestamp,
+          updated_by_id: actor.by_id,
         })
         .eq('id', taskId);
 
@@ -1732,7 +1743,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         variant: "destructive"
       });
     }
-  }, [activeDepartmentTab, activeSubdepartmentTab, clearTasksCache]);
+  }, [activeDepartmentTab, activeSubdepartmentTab, clearTasksCache, currentUser]);
 
   const enhancedHandleStageStatusSave = useCallback(async (
     stageId: string,
@@ -1870,8 +1881,11 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       const timestamp = new Date().toISOString();
 
 
-      // 4. Determine if Status Should Update (only for completed stages, not skipped/cleared)
-      if (potentialNewStatus && !isSkipped && !isCleared) {
+      // 4. Determine if Status Should Update (completed or skipped stages both advance the
+      // task status — skipping a stage that triggers a status change should be treated the same
+      // as completing it, since the task is moving past that stage. Cleared/undo stages never
+      // advance status as they move the task backward.)
+      if (potentialNewStatus && !isCleared) {
         const currentPriority = STATUS_PRIORITY[currentStatusKey] ?? 0;
         const newPriority = STATUS_PRIORITY[potentialNewStatus] ?? 0;
 
@@ -1884,6 +1898,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         ...task.stages?.[stageId],
         date: statusValue, // Use statusValue instead of value
         updatedAt: timestamp,
+        updated_by_id: auditActor(currentUser).by_id,
         officer_ids: task.stages?.[stageId]?.officer_ids || stages?.find((s: any) => s.id === stageId)?.officer_ids || []
       };
 
@@ -1908,11 +1923,19 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       if (isSkipped) {
         stageUpdate.status = 'skipped';
         stageUpdate.skippedAt = updatedExtractedDetails.skippedAt || timestamp;
-        stageUpdate.skippedBy = updatedExtractedDetails.skippedBy || 'system';
+        // Audit who skipped the stage — prefer the explicit actor passed through the save
+        // payload (e.g. from SkipStageDialog), falling back to the authenticated session user,
+        // and only as a last resort to a 'system' marker so the field is never empty.
+        stageUpdate.skippedBy =
+          updatedExtractedDetails.skippedBy ||
+          auditActor(currentUser).by_id ||
+          'system';
+        stageUpdate.skipped_by_id = auditActor(currentUser).by_id;
         stageUpdate.reason = updatedExtractedDetails.reason || 'Not specified';
       } else {
         stageUpdate.status = 'completed';
         stageUpdate.completedAt = timestamp;
+        stageUpdate.completed_by_id = auditActor(currentUser).by_id;
       }
 
       // Clearing removes the stage's entry entirely rather than leaving a stub with
@@ -1933,7 +1956,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       const updateData: any = {
         ...taskStatusUpdate,
         stages: updatedStages,
-        updated_at: timestamp
+        updated_at: timestamp,
+        updated_by_id: auditActor(currentUser).by_id,
       };
 
       // 7. Execute Update
@@ -1948,7 +1972,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
       if (!isSkipped && !isCleared) {
         const normalizedStageId = stageId.toLowerCase();
         if (normalizedStageId === REQUIREMENTS_LOCK_STAGE_IDS.PROCESSING || normalizedStageId === REQUIREMENTS_LOCK_STAGE_IDS.ISSUANCE) {
-          await captureRequirementsDocumentsSnapshot({ ...task, stages: updatedStages }, normalizedStageId);
+          await captureRequirementsDocumentsSnapshot({ ...task, stages: updatedStages }, normalizedStageId, auditActor(currentUser));
         }
       }
 
@@ -1978,7 +2002,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         variant: "destructive"
       });
     }
-  }, [tasks, stages, departments, enforceStageOrder, enhancedTasksData, isStageApplicableToTask, determineCurrentStage, activeDepartmentTab, activeSubdepartmentTab, clearTasksCache]);
+  }, [tasks, stages, departments, enforceStageOrder, enhancedTasksData, isStageApplicableToTask, determineCurrentStage, activeDepartmentTab, activeSubdepartmentTab, clearTasksCache, currentUser]);
 
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
     if (!tasks.length) return [];
@@ -2502,6 +2526,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
 
   const handleCancelTask = async (task: any, reason: string) => {
     try {
+      const cancelledBy = auditActor(currentUser);
       const { error } = await supabase
         .from('tm_tasks')
         .update({
@@ -2509,10 +2534,11 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
           cancellation_details: {
             reason: reason,
             cancelled_at: new Date().toISOString(),
-            cancelled_by: userData?.user?.id || null,
+            cancelled_by: cancelledBy.by_id,
             previous_status: task.status || 'pending'
           },
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          updated_by_id: cancelledBy.by_id,
         })
         .eq('id', task.id);
 
@@ -2528,10 +2554,11 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
               cancellation_details: {
                 reason: reason,
                 cancelled_at: new Date().toISOString(),
-                cancelled_by: userData?.user?.id || null,
+                cancelled_by: cancelledBy.by_id,
                 previous_status: task.status || 'pending'
               },
-              updated_at: new Date().toISOString()
+              updated_at: new Date().toISOString(),
+              updated_by_id: cancelledBy.by_id,
             }
             : t
         )
@@ -2560,13 +2587,15 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   const handleUncancelTask = async (task: any) => {
     try {
       const previousStatus = task.cancellation_details?.previous_status || 'pending';
+      const uncancelledBy = auditActor(currentUser);
 
       const { error } = await supabase
         .from('tm_tasks')
         .update({
           status: previousStatus,
           cancellation_details: null,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          updated_by_id: uncancelledBy.by_id,
         })
         .eq('id', task.id);
 
@@ -2580,7 +2609,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
               ...t,
               status: previousStatus,
               cancellation_details: null,
-              updated_at: new Date().toISOString()
+              updated_at: new Date().toISOString(),
+              updated_by_id: uncancelledBy.by_id,
             }
             : t
         )

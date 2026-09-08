@@ -23,6 +23,8 @@ import { STAGE_TAB_LINKS, isStageDocumentApplicableToTask } from "../utils/taskM
 import { cn } from "@/lib/utils"
 import { getCanonicalCurrentStage } from "../../reports/utils/reportStageLogic"
 import { ReassignDocumentTypeDialog } from "./ReassignDocumentTypeDialog"
+import { useCurrentUser } from "@/lib/hooks/use-current-user"
+import { auditActor } from "../utils/audit"
 
 interface EditableStageCellProps { 
   stage: any
@@ -131,6 +133,8 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[] = [])
 };
 
 export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, enhancedTaskData, renderMode = 'date', taskName, clientName, getKycFields, kycDocuments = new Map(), onFetchData, onDocumentTypeFixed, officers = [], onOfficerChange, readOnly = false, onOpenRequirements, showTime = true, previewOnly = false, enforceStageOrder = false }: EditableStageCellProps) {
+  const { user: currentUser } = useCurrentUser();
+  const actor = auditActor(currentUser);
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -588,7 +592,8 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       await supabase.from('tm_tasks').update({
         stages: updatedStages,
         source_document_id: updatedSourceDocIds,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        updated_by_id: actor.by_id,
       }).eq('id', task.id);
 
       const updatedPreviewDocs = previewDocuments.filter(doc => doc.documentId !== docIdentifier);
@@ -606,7 +611,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     } finally {
       setIsLoading(false);
     }
-  }, [stage.id, task.id, onSave, previewDocuments, currentPreviewIndex, onFetchData]);
+  }, [stage.id, task.id, onSave, previewDocuments, currentPreviewIndex, onFetchData, currentUser]);
 
   const handleCancel = useCallback(() => {
     setIsEditing(false);
@@ -2290,6 +2295,7 @@ function SkipStageDialog({
   const [preset, setPreset] = useState('');
   const [customReason, setCustomReason] = useState('');
   const [payByDate, setPayByDate] = useState('');
+  const [notSure, setNotSure] = useState(false);
 
   const isPaysLater = preset === PAYS_LATER_REASON;
   const formattedPayByDate = (() => {
@@ -2300,7 +2306,9 @@ function SkipStageDialog({
   const resolvedReason = preset === 'Other'
     ? customReason.trim()
     : isPaysLater
-      ? (formattedPayByDate ? `${preset} — due ${formattedPayByDate}` : '')
+      ? (notSure
+        ? `${preset} — due not sure`
+        : (formattedPayByDate ? `${preset} — due ${formattedPayByDate}` : ''))
       : preset;
 
   useEffect(() => {
@@ -2308,6 +2316,7 @@ function SkipStageDialog({
       setPreset('');
       setCustomReason('');
       setPayByDate('');
+      setNotSure(false);
     }
   }, [open]);
 
@@ -2348,15 +2357,32 @@ function SkipStageDialog({
             </div>
           )}
           {isPaysLater && (
-            <div>
-              <Label htmlFor="skip-pay-by-date">Pay By *</Label>
-              <input
-                id="skip-pay-by-date"
-                type="date"
-                value={payByDate}
-                onChange={(e) => setPayByDate(e.target.value)}
-                className="mt-2 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
-              />
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  id="skip-not-sure"
+                  type="checkbox"
+                  checked={notSure}
+                  onChange={(e) => {
+                    setNotSure(e.target.checked);
+                    if (e.target.checked) setPayByDate('');
+                  }}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                <Label htmlFor="skip-not-sure" className="text-sm font-normal cursor-pointer">Not Sure</Label>
+              </div>
+              {!notSure && (
+                <div>
+                  <Label htmlFor="skip-pay-by-date">Pay By *</Label>
+                  <input
+                    id="skip-pay-by-date"
+                    type="date"
+                    value={payByDate}
+                    onChange={(e) => setPayByDate(e.target.value)}
+                    className="mt-2 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

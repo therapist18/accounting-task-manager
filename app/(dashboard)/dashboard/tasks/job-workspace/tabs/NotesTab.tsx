@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "sonner"
+import { useCurrentUser } from "@/lib/hooks/use-current-user"
+import { auditActor } from "../../utils/audit"
 
 interface NotesTabProps {
   task: any
@@ -15,6 +17,8 @@ interface NotesTabProps {
 }
 
 export function NotesTab({ task, onRefresh }: NotesTabProps) {
+  const { user: currentUser } = useCurrentUser();
+  const actor = auditActor(currentUser);
   const [noteText, setNoteText] = useState("")
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -35,7 +39,7 @@ export function NotesTab({ task, onRefresh }: NotesTabProps) {
       const newNote = {
         id: Math.random().toString(36).substr(2, 9),
         text: noteText,
-        author: "Officer", // Default user role
+        author_id: actor.by_id,
         created_at: new Date().toISOString()
       }
 
@@ -48,7 +52,8 @@ export function NotesTab({ task, onRefresh }: NotesTabProps) {
         .from('tm_tasks')
         .update({
           registry_metadata: updatedMetadata,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          updated_by_id: actor.by_id,
         })
         .eq('id', task.id)
 
@@ -82,7 +87,8 @@ export function NotesTab({ task, onRefresh }: NotesTabProps) {
         .from('tm_tasks')
         .update({
           registry_metadata: updatedMetadata,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          updated_by_id: actor.by_id,
         })
         .eq('id', task.id)
 
@@ -160,7 +166,7 @@ export function NotesTab({ task, onRefresh }: NotesTabProps) {
                       <User className="h-3.5 w-3.5 text-slate-655" />
                     </div>
                     <div>
-                      <span className="text-xs font-bold text-slate-800">{note.author}</span>
+                      <span className="text-xs font-bold text-slate-800">{note.author || note.author_id || "Officer"}</span>
                       <span className="text-[10px] text-slate-400 font-medium block">
                         {new Date(note.created_at).toLocaleString("en-GB", {
                           day: "numeric", month: "short", year: "numeric",

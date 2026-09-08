@@ -27,6 +27,8 @@ import {
 import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format } from "date-fns"
+import { useCurrentUser } from "@/lib/hooks/use-current-user"
+import { auditActor } from "../utils/audit"
 
 interface DocumentPreviewDialogProps {
   open: boolean
@@ -45,6 +47,8 @@ export function DocumentPreviewDialog({
   onReviewComplete,
   onExtractedDataUpdate
 }: DocumentPreviewDialogProps) {
+  const { user: currentUser } = useCurrentUser();
+  const reviewer = auditActor(currentUser);
   const [activeTab, setActiveTab] = useState('preview')
   const [reviewStatus, setReviewStatus] = useState<'pending' | 'approved' | 'rejected'>(document?.status || 'pending')
   const [reviewComments, setReviewComments] = useState('')
@@ -179,8 +183,9 @@ export function DocumentPreviewDialog({
           extracted_details: extractedData,
           review_comments: reviewComments,
           reviewed_at: new Date().toISOString(),
-          reviewed_by: (await supabase.auth.getUser()).data.user?.id,
-          updated_at: new Date().toISOString()
+          reviewed_by: reviewer.by_id,
+          updated_at: new Date().toISOString(),
+          updated_by_id: reviewer.by_id,
         })
         .eq('id', document.id)
 
@@ -192,7 +197,7 @@ export function DocumentPreviewDialog({
         .insert({
           document_id: document.id,
           task_id: task?.id,
-          reviewer_id: (await supabase.auth.getUser()).data.user?.id,
+          reviewer_id: reviewer.by_id,
           status: status,
           comments: reviewComments,
           extracted_data_snapshot: extractedData,
@@ -236,7 +241,8 @@ export function DocumentPreviewDialog({
         .from('acc_portal_directors_documents')
         .update({
           extracted_details: extractedData,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          updated_by_id: reviewer.by_id,
         })
         .eq('id', document.id)
 

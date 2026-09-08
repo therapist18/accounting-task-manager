@@ -22,6 +22,8 @@ import { Eye, Loader2, ArrowRight, Check, ChevronsUpDown } from "lucide-react";
 import { ExtractionPreview } from "@/components/ExtractionPreview";
 import { isStageDocumentApplicableToTask } from "../utils/taskManagerData";
 import { cn } from "@/lib/utils";
+import { useCurrentUser } from "@/lib/hooks/use-current-user";
+import { auditActor } from "../utils/audit";
 
 // Same resolution order StageUploadDialog.tsx's resolveCompanyIdForTask uses.
 const resolveCompanyIdForTask = (task: any): number | string | null => {
@@ -51,6 +53,8 @@ export function ReassignDocumentTypeDialog({
   kycDocuments,
   onSuccess,
 }: ReassignDocumentTypeDialogProps) {
+  const { user: currentUser } = useCurrentUser();
+  const actor = auditActor(currentUser);
   const [selectedDocId, setSelectedDocId] = useState<string>('');
   const [newTypeId, setNewTypeId] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
@@ -169,7 +173,7 @@ export function ReassignDocumentTypeDialog({
 
       const { error: docError } = await supabase
         .from(table)
-        .update({ document_id: newTypeId, updated_at: currentDate })
+        .update({ document_id: newTypeId, updated_at: currentDate, updated_by_id: actor.by_id })
         .eq('id', selectedDoc.id);
       if (docError) throw docError;
 
@@ -207,7 +211,7 @@ export function ReassignDocumentTypeDialog({
 
       const { error: taskUpdateError } = await supabase
         .from('tm_tasks')
-        .update({ stages: updatedStages, source_document_id: updatedSourceDocs, updated_at: currentDate })
+        .update({ stages: updatedStages, source_document_id: updatedSourceDocs, updated_at: currentDate, updated_by_id: actor.by_id })
         .eq('id', task.id);
       if (taskUpdateError) throw taskUpdateError;
 
@@ -227,7 +231,7 @@ export function ReassignDocumentTypeDialog({
     } finally {
       setIsSaving(false);
     }
-  }, [selectedDoc, newTypeId, task, stage, getTypeLabel, onSuccess, onOpenChange]);
+  }, [selectedDoc, newTypeId, task, stage, getTypeLabel, onSuccess, onOpenChange, currentUser]);
 
   return (
     <>

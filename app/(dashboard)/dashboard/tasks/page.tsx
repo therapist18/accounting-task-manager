@@ -10,12 +10,16 @@ import { Department } from "../departments/departments/database";
 import { Task } from "@/lib/types";
 import supabase from "@/lib/supabase/client";
 import { toast } from "@/lib/hooks/use-toast";
+import { useCurrentUser } from "@/lib/hooks/use-current-user";
+import { auditActor } from "./utils/audit";
 
 export default function Page() {
   const searchParams = useSearchParams();
   const initialTaskId = searchParams.get("taskId") || "";
   const initialDeptId = searchParams.get("deptId") || "";
   const initialSubDeptId = searchParams.get("subDeptId") || "";
+  const { user: currentUser } = useCurrentUser();
+  const actor = auditActor(currentUser);
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -63,6 +67,8 @@ export default function Page() {
           status: newStatus,
           completedAt: timestamp,
           updatedAt: timestamp,
+          completed_by_id: actor.by_id,
+          updated_by_id: actor.by_id,
           officer_ids: existingStages[stageId]?.officer_ids || stageOfficerIds
         }
       }
@@ -73,7 +79,8 @@ export default function Page() {
         .update({
           ...taskStatusUpdate,
           stages: updatedStages,
-          updated_at: timestamp
+          updated_at: timestamp,
+          updated_by_id: actor.by_id,
         })
         .eq('id', taskId)
 
@@ -96,7 +103,7 @@ export default function Page() {
 
       throw error
     }
-  }, [])
+  }, [currentUser])
 
   return (
     <>

@@ -28,6 +28,8 @@ import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
 import { MobileReportView } from "./components/MobileReportView";
 import { ReportsSidebar, ReportsHeader, PersonFilterStrip, StatusFilterBar } from "./components/ReportsHeader";
+import { useCurrentUser } from "@/lib/hooks/use-current-user";
+import { auditActor } from "../tasks/utils/audit";
 import { formatEstimatedMins } from "./components/reportCellRenderers";
 import {
   parseDateSafe,
@@ -85,6 +87,8 @@ const safeRender = (content: any) => {
 };
 
 export default function ReportsPage() {
+  const { user: currentUser } = useCurrentUser();
+  const actor = auditActor(currentUser);
   const [activeReport, setActiveReport] = useState<any | null>(null);
   const [availableReports, setAvailableReports] = useState<any[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -1161,12 +1165,14 @@ export default function ReportsPage() {
           status: 'completed',
           completedAt: timestamp,
           updatedAt: timestamp,
+          completed_by_id: actor.by_id,
+          updated_by_id: actor.by_id,
         },
       };
 
       const { error: updateError } = await supabase
         .from('tm_tasks')
-        .update({ stages: updatedStages, updated_at: timestamp })
+        .update({ stages: updatedStages, updated_at: timestamp, updated_by_id: actor.by_id })
         .eq('id', taskId);
       if (updateError) throw updateError;
 
@@ -1176,7 +1182,7 @@ export default function ReportsPage() {
       console.error('Failed to save stage date:', err);
       toast({ title: 'Error', description: 'Failed to save stage date.', variant: 'destructive' });
     }
-  }, []);
+  }, [currentUser]);
 
   const getExportCellValue = useCallback((task: any, col: any, exportOpts: { showTime?: boolean } = {}): string => {
     if (col.type === 'export_delta') {

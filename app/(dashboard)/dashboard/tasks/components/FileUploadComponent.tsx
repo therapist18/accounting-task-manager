@@ -10,6 +10,8 @@ import { Loader2, Upload } from "lucide-react"
 import { toast } from "@/lib/hooks/use-toast"
 import { performExtraction } from "@/lib/extractionUtils"
 import { supabase } from "@/lib/supabase/client"
+import { useCurrentUser } from "@/lib/hooks/use-current-user"
+import { auditActor } from "../utils/audit"
 import dynamic from 'next/dynamic'
 
 const ExtractionPreview = dynamic(
@@ -38,6 +40,8 @@ export function FileUploadComponent({
   individualNames,
   onUploadComplete
 }: FileUploadComponentProps) {
+  const { user: currentUser } = useCurrentUser();
+  const uploader = auditActor(currentUser);
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [extractedData, setExtractedData] = useState<any>({})
   const [uploading, setUploading] = useState(false)
@@ -312,7 +316,11 @@ export function FileUploadComponent({
           status: 'active',
           document_type: 'upload',
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          uploaded_by: {
+            user_id: uploader.by_id,
+            uploaded_at: new Date().toISOString()
+          }
         }
 
         const { data: insertedDoc, error } = await supabase
@@ -338,7 +346,11 @@ export function FileUploadComponent({
           extracted_details: extractedData,
           status: 'uploaded',
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          uploaded_by: {
+            user_id: uploader.by_id,
+            uploaded_at: new Date().toISOString()
+          }
         }
 
         const { data: insertedDoc, error } = await supabase

@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button"
 import { Plus, FileText } from "lucide-react"
 import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
+import { useCurrentUser } from "@/lib/hooks/use-current-user"
+import { auditActor } from "./../tasks/utils/audit"
 
 // Import everything from the shared utility file
 import {
@@ -43,6 +45,8 @@ import { cn } from "@/lib/utils"
 
 
 export default function TasksPage() {
+  const { user: currentUser } = useCurrentUser();
+  const actor = auditActor(currentUser);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const sidebarPanelRef = useRef(null)
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -320,8 +324,8 @@ export default function TasksPage() {
     const task = tasks.find(t => t.id.toString() === taskId);
     if (!task) return;
 
-    const updatedStages = { ...task.stages, [stageId]: { date, status: 'completed', completedAt: new Date().toISOString() } };
-    const { error } = await supabase.from('tm_tasks').update({ stages: updatedStages }).eq('id', taskId);
+    const updatedStages = { ...task.stages, [stageId]: { date, status: 'completed', completedAt: new Date().toISOString(), completed_by_id: actor.by_id, updated_by_id: actor.by_id } };
+    const { error } = await supabase.from('tm_tasks').update({ stages: updatedStages, updated_at: new Date().toISOString(), updated_by_id: actor.by_id }).eq('id', taskId);
 
     if (error) {
       toast({ title: "Error saving stage", variant: "destructive" });
@@ -330,7 +334,7 @@ export default function TasksPage() {
 
     const normalizedStageId = stageId.toLowerCase();
     if (normalizedStageId === REQUIREMENTS_LOCK_STAGE_IDS.PROCESSING || normalizedStageId === REQUIREMENTS_LOCK_STAGE_IDS.ISSUANCE) {
-      await captureRequirementsDocumentsSnapshot({ ...task, stages: updatedStages }, normalizedStageId);
+      await captureRequirementsDocumentsSnapshot({ ...task, stages: updatedStages }, normalizedStageId, actor);
     }
 
     setTasks(prev => prev.map(t => t.id.toString() === taskId ? { ...t, stages: updatedStages } : t));

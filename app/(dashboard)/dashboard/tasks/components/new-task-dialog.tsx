@@ -2,6 +2,8 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
+import { useCurrentUser } from "@/lib/hooks/use-current-user"
+import { auditActor } from "../utils/audit"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -140,6 +142,8 @@ interface NewTaskDialogProps {
 }
 
 export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogProps) {
+  const { user: currentUser } = useCurrentUser();
+  const actor = auditActor(currentUser);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [subdepartments, setSubdepartments] = useState<Array<Subdepartment & {
     taskManager?: {
@@ -648,7 +652,9 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
         applied_by: formData.applied_by || null,
         batch: formData.batch || null,
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        created_by: actor.by_id,
+        updated_at: new Date().toISOString(),
+        updated_by_id: actor.by_id,
       };
 
       // Call the API to create the task

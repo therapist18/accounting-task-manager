@@ -12,6 +12,8 @@ import { fetchDepartments } from "../departments/departments/database";
 import { fetchTasks, fetchStages, fetchCompanies, fetchClassRequirements } from "../tasks/utils/taskManagerData";
 import { enhanceTasksWithIndividualData, getEnhancedImmigrationStatus } from "../tasks/overall-view/tableUtils";
 import { userService } from "@/lib/shared-user-assignment-service";
+import { useCurrentUser } from "@/lib/hooks/use-current-user";
+import { auditActor } from "../tasks/utils/audit";
 import { EnquiryDialog } from "../tasks/components/EnquiryDialog";
 import { CancelConfirmationDialog } from "../tasks/components/CancelConfirmationDialog";
 import { DeleteConfirmationDialog } from "../tasks/components/DeleteConfirmationDialog";
@@ -66,6 +68,8 @@ let summaryReportsCache: {
 } | null = null;
 
 export default function SummaryReportsPage() {
+  const { user: currentUser } = useCurrentUser();
+  const actor = auditActor(currentUser);
   const [loading, setLoading] = useState(!summaryReportsCache);
   // Gates the table body specifically (vs `loading`, which now only gates the page shell —
   // header/tabs, renderable off just departments+companies). Splitting them lets the shell paint
@@ -362,12 +366,12 @@ export default function SummaryReportsPage() {
       const cancellation_details = {
         reason,
         cancelled_at: new Date().toISOString(),
-        cancelled_by: unifiedUserData?.user?.id || null,
+        cancelled_by: actor.by_id || unifiedUserData?.user?.id || null,
         previous_status: taskToCancel.status || 'pending',
       };
       const { error } = await supabase
         .from('tm_tasks')
-        .update({ status: 'cancel', cancellation_details, updated_at: new Date().toISOString() })
+        .update({ status: 'cancel', cancellation_details, updated_at: new Date().toISOString(), updated_by_id: actor.by_id })
         .eq('id', taskToCancel.id);
       if (error) throw error;
       setAllTasks(prev => prev.map(t => t.id === taskToCancel.id ? { ...t, status: 'cancel', cancellation_details } : t));
@@ -380,7 +384,7 @@ export default function SummaryReportsPage() {
       setCancelDialogOpen(false);
       setTaskToCancel(null);
     }
-  }, [taskToCancel, unifiedUserData]);
+  }, [taskToCancel, unifiedUserData, currentUser]);
 
   const handleConfirmUncancel = useCallback(async () => {
     if (!taskToUncancel) return;
@@ -389,7 +393,7 @@ export default function SummaryReportsPage() {
       const previousStatus = taskToUncancel.cancellation_details?.previous_status || 'pending';
       const { error } = await supabase
         .from('tm_tasks')
-        .update({ status: previousStatus, cancellation_details: null, updated_at: new Date().toISOString() })
+        .update({ status: previousStatus, cancellation_details: null, updated_at: new Date().toISOString(), updated_by_id: actor.by_id })
         .eq('id', taskToUncancel.id);
       if (error) throw error;
       setAllTasks(prev => prev.map(t => t.id === taskToUncancel.id ? { ...t, status: previousStatus, cancellation_details: null } : t));
@@ -402,7 +406,7 @@ export default function SummaryReportsPage() {
       setUncancelDialogOpen(false);
       setTaskToUncancel(null);
     }
-  }, [taskToUncancel]);
+  }, [taskToUncancel, currentUser]);
 
   const handleConfirmDelete = useCallback(async () => {
     if (!taskToDelete) return;

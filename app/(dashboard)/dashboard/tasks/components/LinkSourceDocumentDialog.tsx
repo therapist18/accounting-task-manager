@@ -7,6 +7,8 @@ import { Eye, Loader2, FileText, Trash2, RotateCcw } from "lucide-react";
 import { toast } from "@/lib/hooks/use-toast";
 import { format, parseISO } from "date-fns";
 import { supabase } from "@/lib/supabase/client";
+import { useCurrentUser } from "@/lib/hooks/use-current-user";
+import { auditActor } from "../utils/audit";
 import { Button } from "@/components/ui/button";
 import {
   getWorkflowLogsForIndividual
@@ -270,6 +272,8 @@ export function LinkSourceDocumentDialog({
   onLinkSuccess,
   departments = [],
 }: LinkSourceDocumentDialogProps) {
+  const { user: currentUser } = useCurrentUser();
+  const actor = auditActor(currentUser);
   const [selectedDocs, setSelectedDocs] = useState<Record<string, SelectedDoc[]>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -349,7 +353,8 @@ export function LinkSourceDocumentDialog({
           resolutions: updatedResolutions,
           tasks: updatedTasks,
           action_type: 'resolution',
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          updated_by_id: actor.by_id,
         })
         .eq('id', logToResolve.id);
 
@@ -443,6 +448,7 @@ export function LinkSourceDocumentDialog({
             status: newStatus,
             documentsUploaded: remainingDocs,
             lastUpdated: new Date().toISOString(),
+            updated_by_id: actor.by_id,
             // Clear completion-specific fields if reverting from completed
             ...(newStatus !== 'completed' && {
               completedAt: null,
@@ -458,7 +464,8 @@ export function LinkSourceDocumentDialog({
           .update({
             source_document_id: updatedSourceDocs,
             stages: updatedStages,
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
+            updated_by_id: actor.by_id,
           })
           .eq('id', task.id);
 
@@ -653,6 +660,7 @@ export function LinkSourceDocumentDialog({
             completedAt: currentDate,
             documentsUploaded: docs.length,
             lastUpdated: currentDate,
+            updated_by_id: actor.by_id,
             documents: stageDocuments
           };
         }
@@ -665,6 +673,7 @@ export function LinkSourceDocumentDialog({
           source_document_id: selectedDocs,
           stages: updatedStages,
           updated_at: currentDate,
+          updated_by_id: actor.by_id,
         })
         .eq("id", task.id);
 

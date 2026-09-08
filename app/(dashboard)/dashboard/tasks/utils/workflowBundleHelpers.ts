@@ -576,6 +576,7 @@ export async function linkTaskToDocumentWorkflow(params: {
           },
         },
         updated_at: nowIso,
+        updated_by: createdBy ?? null,
       })
       .eq("id", existing.id);
     if (updateError) {

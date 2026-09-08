@@ -18,7 +18,11 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3002/dashboard/tasks --max-time 20)",
       "Bash(echo \"E1:$?\")",
       "Bash(echo \"E2:$?\")",
-      "Bash(echo \"E3:$?\")"
+      "Bash(echo \"E3:$?\")",
+      "Bash(npx tsc *)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
     ]
   }
 }

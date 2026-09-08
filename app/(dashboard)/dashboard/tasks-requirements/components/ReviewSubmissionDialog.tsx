@@ -14,6 +14,8 @@ import { resolveTargetEntityIdImpl, resolveVariableValueImpl } from "../../tasks
 import { updateJsonValue } from "../../tasks/utils/AutomationMappingDialog"
 import type { FieldResolutionContext } from "../../tasks/utils/fieldResolution"
 import { cn } from "@/lib/utils"
+import { useCurrentUser } from "@/lib/hooks/use-current-user"
+import { auditActor } from "../../tasks/utils/audit"
 
 function humanizeVariableName(name: string): string {
   if (!name) return "Field"
@@ -81,6 +83,8 @@ export function ReviewSubmissionDialog({
   jobFieldsRecord = {},
   onRefresh
 }: ReviewSubmissionDialogProps) {
+  const { user: currentUser } = useCurrentUser();
+  const actor = auditActor(currentUser);
   const [isApplying, setIsApplying] = useState(false)
   const [activeTab, setActiveTab] = useState("documents")
 
@@ -311,7 +315,8 @@ export function ReviewSubmissionDialog({
         const { error } = await supabase.from('tm_tasks')
           .update({
             job_specific_answers: updatedAnswers,
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
+            updated_by_id: actor.by_id,
           })
           .eq('id', task.id)
         if (error) throw error
@@ -386,7 +391,7 @@ export function ReviewSubmissionDialog({
               existing.director_id || existing.company_id || existing.id
 
             const { error } = await supabase.from(source.table)
-              .update({ ...updateData, updated_at: new Date().toISOString() })
+              .update({ ...updateData, updated_at: new Date().toISOString(), updated_by_id: actor.by_id })
               .eq(queryField, recordPK)
             if (error) console.error('Error updating field:', error)
           }
@@ -411,7 +416,8 @@ export function ReviewSubmissionDialog({
               applied_at: new Date().toISOString()
             }
           },
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          updated_by_id: actor.by_id,
         })
         .eq('id', task.id)
       if (error) throw error
@@ -451,7 +457,8 @@ export function ReviewSubmissionDialog({
               rejected_at: new Date().toISOString()
             }
           },
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          updated_by_id: actor.by_id,
         })
         .eq('id', task.id)
       if (error) throw error

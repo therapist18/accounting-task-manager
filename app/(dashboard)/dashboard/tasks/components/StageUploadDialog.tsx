@@ -16,6 +16,8 @@ import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { UploadModal } from "@/app/generic-components/UploadModal"
 import { performExtraction } from "@/lib/extractionUtils"
 import supabase from "@/lib/supabase/client";
+import { useCurrentUser } from "@/lib/hooks/use-current-user";
+import { auditActor } from "../utils/audit";
 import {
   updateDocumentWorkflow,
   shouldTriggerWorkflowUpdate,
@@ -786,6 +788,9 @@ export function StageUploadDialog({
 
   const [tabMessageStates, setTabMessageStates] = useState<Record<string, string>>({});
 
+  const { user: currentUser } = useCurrentUser();
+  const uploader = auditActor(currentUser);
+
   const { task, stage } = selectedStageTask || {};
 
   // A task whose applicant is a company (no individual_id) reads/writes
@@ -1307,7 +1312,8 @@ export function StageUploadDialog({
             tasks: updatedTasks,
             payload: updatedPayload,
             action_type: 'resolution',
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
+            updated_by_id: uploader.by_id,
           })
           .eq('id', logToResolve.id);
       });
@@ -1368,7 +1374,8 @@ export function StageUploadDialog({
         await supabase.from('document_workflow_logs').update({
           resolutions: updatedResolutions,
           action_type: nextActionType,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          reverted_by_id: uploader.by_id,
         }).eq('id', logId);
       }
 
@@ -1504,7 +1511,11 @@ export function StageUploadDialog({
                 status: 'active',
                 file_path: filePath,
                 created_at: currentDate,
-                updated_at: currentDate
+                updated_at: currentDate,
+                uploaded_by: {
+                  user_id: uploader.by_id,
+                  uploaded_at: currentDate
+                }
               }])
               .select()
               .single();
@@ -1610,6 +1621,7 @@ export function StageUploadDialog({
           completedAt: currentDate,
           documentsUploaded: Object.keys(updatedLinkedDocs).length,
           lastUpdated: currentDate,
+          uploaded_by_id: uploader.by_id,
           documents: {
             ...(task.stages?.[stage.id]?.documents || {}),
             ...Object.fromEntries(
@@ -1621,7 +1633,8 @@ export function StageUploadDialog({
                   document_id: docConfig?.kycId,
                   name: docConfig?.name || 'document',
                   linked_at: currentDate,
-                  status: 'linked'
+                  status: 'linked',
+                  uploaded_by_id: uploader.by_id,
                 }];
               })
             )
@@ -1633,7 +1646,8 @@ export function StageUploadDialog({
         ...taskStatusUpdate,
         stages: updatedStages,
         source_document_id: updatedSourceDocs,
-        updated_at: currentDate
+        updated_at: currentDate,
+        updated_by_id: uploader.by_id,
       };
 
       const { error: updateError } = await supabase

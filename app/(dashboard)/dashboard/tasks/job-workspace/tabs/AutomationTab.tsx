@@ -21,6 +21,8 @@ import type { JobWorkspaceData } from "../fetchJobWorkspaceData"
 import supabase from "@/lib/supabase/client"
 import { toast } from '@/lib/hooks/use-toast'
 import { ExtractionPreview } from "@/components/ExtractionPreview"
+import { useCurrentUser } from "@/lib/hooks/use-current-user"
+import { auditActor } from "../../utils/audit"
 
 interface AutomationTabProps {
   data: JobWorkspaceData
@@ -173,6 +175,8 @@ function isFieldApplicable(field: any, col: ColDef): boolean {
 
 export function AutomationTab({ data, onRefresh, highlightAutomationId, onNavigateToRequirement, onNavigateToTemplate, automationJobs }: AutomationTabProps) {
   const { task, automations, automationLinkSources = {}, kycDocsMap } = data
+  const { user: currentUser } = useCurrentUser();
+  const actor = auditActor(currentUser);
   const [expandedAutomations, setExpandedAutomations] = useState<Set<number>>(new Set(automations?.map(a => a.id) || []))
   const [highlightedRowId, setHighlightedRowId] = useState<string | number | null>(null)
   const automationRowRefs = React.useRef<Record<string, HTMLTableRowElement | null>>({})
@@ -584,6 +588,10 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
           },
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
+          uploaded_by: {
+            user_id: actor.by_id,
+            uploaded_at: new Date().toISOString(),
+          },
         })
         .select()
         .single();
@@ -711,6 +719,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       error: 'Cancelled by user',
       completed_at: completedAt,
       updated_at: completedAt,
+      cancelled_by_id: actor.by_id,
     }).eq('id', automationJobId).select().single();
     const autoId = stoppedJob?.context?.automation_id ?? runningAutomationId;
     if (autoId != null) {
@@ -897,7 +906,11 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       const updated = updateJsonValue(record, path, valueToSave);
       const { data: updatedRecord, error: updateError } = await supabase
         .from(table)
-        .update({ ...updated, updated_at: new Date().toISOString() })
+        .update({
+          ...updated,
+          updated_at: new Date().toISOString(),
+          updated_by_id: actor.by_id,
+        })
         .eq(queryField, recordPK)
         .select()
         .single();
@@ -1129,7 +1142,6 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
             task_id: String(task?.id || ''),
             automation_id: String(automationId),
             ran_by_user_id: currentUser.id,
-            ran_by_name: currentUser.name,
             ran_by_email: currentUser.email,
           },
           retry_count_max: 3,
@@ -1239,7 +1251,11 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       const updated = updateJsonValue(record, path, valueToSave);
       const { data: updatedRecord, error: updateError } = await supabase
         .from(table)
-        .update({ ...updated, updated_at: new Date().toISOString() })
+        .update({
+          ...updated,
+          updated_at: new Date().toISOString(),
+          updated_by_id: actor.by_id,
+        })
         .eq(queryField, recordPK)
         .select()
         .single();

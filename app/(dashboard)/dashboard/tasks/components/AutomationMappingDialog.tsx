@@ -23,6 +23,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { isValidValue, ETA_SCREENSHOT_DOCUMENT_ID, cleanFieldValue, updateJsonValue } from '../utils/AutomationMappingDialog';
 import { resolveTargetEntityIdImpl, resolveVariableValueImpl, getFieldValueImpl, getArrayFieldDataImpl, fetchSourceDataImpl, type FieldResolutionContext } from '../utils/fieldResolution';
 import { AutomationMappingDialogUI } from './AutomationMappingDialogUI';
+import { useCurrentUser } from "@/lib/hooks/use-current-user";
+import { auditActor } from "../utils/audit";
 
 interface AutomationMappingDialogProps {
   isOpen: boolean;
@@ -96,6 +98,8 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
   const [automationJobId, setAutomationJobId] = useState<string | null>(null);
   const [automationProgress, setAutomationProgress] = useState<any>(null);
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
+  const { user: currentUser } = useCurrentUser();
+  const actor = auditActor(currentUser);
 
   const saveScreenshotToSupabase = async (base64Screenshot: string, directorId: string): Promise<any> => {
     setIsSavingScreenshot(true);
@@ -130,6 +134,10 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
           },
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
+          uploaded_by: {
+            user_id: actor.by_id,
+            uploaded_at: new Date().toISOString(),
+          },
         })
         .select()
         .single();
@@ -310,11 +318,12 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
       error: 'Cancelled by user',
       completed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      cancelled_by_id: actor.by_id,
     }).eq('id', automationJobId);
     clearPolling();
     setIsAutomationRunning(false);
     setAutomationProgress(prev => prev ? { ...prev, isRunning: false, message: 'Stopped by user' } : prev);
-  }, [automationJobId, clearPolling]);
+  }, [automationJobId, clearPolling, currentUser]);
 
   useEffect(() => {
     return () => {
@@ -384,7 +393,9 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
         .from('acc_portal_directors_documents')
         .update({
           edited_details: editedData,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          updated_by_id: actor.by_id,
+          edited_by: actor.by_id,
         })
         .eq('id', doc.id);
       if (error) throw error;
@@ -753,6 +764,7 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
           retry_count_max: 3,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
+          created_by_id: actor.by_id,
         })
         .select()
         .single();
@@ -867,7 +879,8 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
         .from(table)
         .update({
           ...updated,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          updated_by_id: actor.by_id,
         })
         .eq(queryField, recordPK)
         .select()

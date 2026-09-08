@@ -22,6 +22,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { fetchUserAssignmentData, fetchOfficers, hasJobLevelAccess, getOfficerDisplayName, FilteredUserData, userService } from "@/lib/shared-user-assignment-service"
 import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "../utils/workflowBundleHelpers"
+import { useCurrentUser } from "@/lib/hooks/use-current-user"
+import { auditActor } from "../utils/audit"
 
 // Photo document IDs
 const COMPANY_LOGO_ID = 'f7a75607-bff9-4995-8bde-0256e86da435';
@@ -66,6 +68,8 @@ export function NewCompanyInquiryDialog({
     initialData = null
 }: NewCompanyInquiryDialogProps) {
     const isEditMode = !!initialData;
+    const { user: currentUser } = useCurrentUser();
+    const actor = auditActor(currentUser);
     const [companies, setCompanies] = useState<Company[]>([])
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
     const [officials, setOfficials] = useState<Official[]>([])
@@ -876,9 +880,10 @@ export function NewCompanyInquiryDialog({
             const taskPayload = {
                 status: 'enquiry',
                 date_initiated: new Date(formData.enquiry_date).toISOString(),
-                created_by: null,
+                created_by: actor.by_id,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
+                updated_by_id: actor.by_id,
                 account_used: null,
                 batch: null,
                 applied_by: "11", // This might need to be dynamic
@@ -886,7 +891,11 @@ export function NewCompanyInquiryDialog({
                     "1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa": {
                         date: format(new Date(formData.enquiry_date), 'dd/MM/yyyy'),
                         status: "completed",
-                        completedAt: new Date(formData.enquiry_date).toISOString()
+                        completedAt: new Date(formData.enquiry_date).toISOString(),
+                        created_by_id: actor.by_id,
+                        created_at: new Date().toISOString(),
+                        updated_by_id: actor.by_id,
+                        updated_at: new Date().toISOString(),
                     }
                 },
                 job_description: formData.job_description,

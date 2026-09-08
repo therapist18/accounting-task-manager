@@ -28,6 +28,8 @@ import { fetchOfficers, fetchTaskManagers, fetchTaskAssistants, fetchAllUsers, h
 import { parseDateWithMonthName } from "@/app/generic-functions/dateUtils"
 import { fetchAllKycFields } from "../utils/taskManagerData"
 import { UploadModal } from "@/app/generic-components/UploadModal"
+import { useCurrentUser } from "@/lib/hooks/use-current-user"
+import { auditActor } from "../utils/audit"
 
 const CLASS_D_ID = '1750687058159';
 const SPONSOR_SUBDEPT_ID = '26';
@@ -196,6 +198,8 @@ export function EnquiryDialog({
     userData,
     taskToEdit = null
 }: any) {
+    const { user: currentUser } = useCurrentUser();
+    const actor = auditActor(currentUser);
     const [loading, setLoading] = useState(false)
     const [searchLoading, setSearchLoading] = useState(false)
     const [loadingRelations, setLoadingRelations] = useState(false)
@@ -1732,8 +1736,12 @@ export function EnquiryDialog({
                         ...taskToEdit.stages?.[ENQUIRY_STAGE_ID],
                         status: "completed",
                         date: normalizedEnquiryDate.displayDate,
+                        updated_by_id: actor.by_id,
                     },
                 };
+                // Audit trail for edits — never clobber the original creator.
+                payload.updated_by_id = actor.by_id;
+                payload.updated_at = new Date().toISOString();
             }
 
             const insertPayload = !taskToEdit ? {
@@ -1741,7 +1749,10 @@ export function EnquiryDialog({
                 status: 'enquiry',
                 date_initiated: normalizedEnquiryDate.isoDateTime,
                 applied_by: "11",
-                created_by: (await supabase.auth.getUser()).data.user?.id ?? null,
+                created_by: actor.by_id,
+                created_at: new Date().toISOString(),
+                updated_by_id: actor.by_id,
+                updated_at: new Date().toISOString(),
                 job_level: {
                     level: formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
                     department_id: Number(formData.department_id),
@@ -1755,7 +1766,16 @@ export function EnquiryDialog({
                     existing_workflow_detected: !!workflowRestrictionSummary?.matchedDocumentTypes?.length,
                     workflow_blocking_reasons: workflowRestrictionSummary?.blockingReasons || []
                 },
-                stages: { [ENQUIRY_STAGE_ID]: { status: "completed", date: normalizedEnquiryDate.displayDate } }
+                stages: {
+                    [ENQUIRY_STAGE_ID]: {
+                        status: "completed",
+                        date: normalizedEnquiryDate.displayDate,
+                        created_by_id: actor.by_id,
+                        created_at: new Date().toISOString(),
+                        updated_by_id: actor.by_id,
+                        updated_at: new Date().toISOString(),
+                    }
+                }
             } : null;
 
             const taskPromise = taskToEdit

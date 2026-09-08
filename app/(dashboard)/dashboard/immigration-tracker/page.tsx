@@ -17,6 +17,8 @@ import {
 import { fetchDepartments } from "../departments/departments/database";
 import { getOfficerDisplayName } from "@/lib/shared-user-assignment-service";
 import { userService } from "@/lib/shared-user-assignment-service";
+import { useCurrentUser } from "@/lib/hooks/use-current-user";
+import { auditActor } from "../tasks/utils/audit";
 import {
   getCurrentStageStatus,
   enhanceTasksWithIndividualData,
@@ -46,6 +48,8 @@ const STAGE_COLUMNS = [
 ];
 
 export default function ImmigrationTrackerPage() {
+  const { user: currentUser } = useCurrentUser();
+  const actor = auditActor(currentUser);
   const [loading, setLoading] = useState(true);
   const [tasks, setTasks] = useState<any[]>([]);
   const [stages, setStages] = useState<any[]>([]);
@@ -292,13 +296,15 @@ export default function ImmigrationTrackerPage() {
             status: "completed",
             completedAt: timestamp,
             updatedAt: timestamp,
+            completed_by_id: actor.by_id,
+            updated_by_id: actor.by_id,
             ...(bclUserId ? { entered_by: bclUserId, entered_by_name: bclUserName || "" } : {}),
           },
         };
 
         const { error: updateError } = await supabase
           .from("tm_tasks")
-          .update({ ...taskStatusUpdate, stages: updatedStages, updated_at: timestamp })
+          .update({ ...taskStatusUpdate, stages: updatedStages, updated_at: timestamp, updated_by_id: actor.by_id })
           .eq("id", taskId);
 
         if (updateError) throw updateError;
@@ -315,7 +321,7 @@ export default function ImmigrationTrackerPage() {
         toast({ title: "Error", description: "Failed to update stage date.", variant: "destructive" });
       }
     },
-    []
+    [currentUser]
   );
 
   // Filtered tasks

@@ -16,6 +16,8 @@ import { Loader2, FileText, Eye, AlertTriangle, CheckCircle } from "lucide-react
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/lib/hooks/use-toast"
 import { format } from 'date-fns'
+import { useCurrentUser } from "@/lib/hooks/use-current-user"
+import { auditActor } from "../utils/audit"
 
 interface DocumentSelectionDialogProps {
   open: boolean
@@ -49,6 +51,8 @@ export function DocumentSelectionDialog({
   isDocumentApplicableToTask,
   onDocumentLinked
 }: DocumentSelectionDialogProps) {
+  const { user: currentUser } = useCurrentUser();
+  const actor = auditActor(currentUser);
   const [loading, setLoading] = useState(false)
   const [directorDocuments, setDirectorDocuments] = useState<DirectorDocument[]>([])
   const [stageDocumentMap, setStageDocumentMap] = useState<Map<string, DirectorDocument[]>>(new Map())
@@ -155,7 +159,8 @@ export function DocumentSelectionDialog({
         .from('tm_tasks')
         .update({
           source_document_id: selectionsObject,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          updated_by_id: actor.by_id,
         })
         .eq('id', task.id)
 
