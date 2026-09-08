@@ -49,9 +49,11 @@ export default function ClientCategoryFilter({
   const onOpenChange = propOnOpenChange || setInternalOpen;
 
   const categories = ['All Categories', 'ACC', 'IMM', 'Audit', 'Sheria'];
-  const clientStatuses = ['All', 'Active', 'Inactive (terminated)'];
+  // 'N/A' = never became a client under this category at all — distinct from
+  // 'Inactive (terminated)', which implies they once were and the contract ended.
+  const clientStatuses = ['All', 'Active', 'Inactive (terminated)', 'N/A'];
   const sectionStatuses = ['All', 'Active', 'Inactive', 'Missing'];
-  const operationalStatuses = ['All', 'Operational', 'Ceased'];
+  const operationalStatuses = ['All', 'Operational', 'Ceased', 'Terminated', 'N/A'];
 
   // Maintain filter state between dialog openings
   const [filters, setFilters] = useState({
@@ -79,13 +81,14 @@ export default function ClientCategoryFilter({
             clientStatus: {
               All: false,
               Active: true,
-              'Inactive (terminated)': false
+              'Inactive (terminated)': false,
+              'N/A': false
             },
             ...(showSectionStatus && {
               sectionStatus: { All: false, Active: true, Inactive: false, Missing: false }
             }),
             ...(showOperationalStatus && {
-              operationalStatus: { All: false, Operational: true, Ceased: false }
+              operationalStatus: { All: false, Operational: true, Ceased: false, Terminated: false, 'N/A': false }
             })
           }
         }
@@ -108,12 +111,12 @@ export default function ClientCategoryFilter({
           newCategories[cat] = isNowSelected;
           if (isNowSelected && !newCategorySettings[cat]) {
             newCategorySettings[cat] = {
-              clientStatus: { All: true, Active: true, 'Inactive (terminated)': true },
+              clientStatus: { All: true, Active: true, 'Inactive (terminated)': true, 'N/A': true },
               ...(showSectionStatus && {
                 sectionStatus: { All: true, Active: true, Inactive: true, Missing: true }
               }),
               ...(showOperationalStatus && {
-                operationalStatus: { All: true, Operational: true, Ceased: true }
+                operationalStatus: { All: true, Operational: true, Ceased: true, Terminated: true, 'N/A': true }
               })
             };
           }
@@ -128,12 +131,12 @@ export default function ClientCategoryFilter({
       // Initialize settings for newly selected category
       if (isSelected && !newCategorySettings[category]) {
         newCategorySettings[category] = {
-          clientStatus: { All: false, Active: true, 'Inactive (terminated)': false },
+          clientStatus: { All: false, Active: true, 'Inactive (terminated)': false, 'N/A': false },
           ...(showSectionStatus && {
             sectionStatus: { All: false, Active: true, Inactive: false, Missing: false }
           }),
           ...(showOperationalStatus && {
-            operationalStatus: { All: false, Operational: true, Ceased: false }
+            operationalStatus: { All: false, Operational: true, Ceased: false, Terminated: false, 'N/A': false }
           })
         };
       }
@@ -273,12 +276,12 @@ export default function ClientCategoryFilter({
           <TableHeader>
             <TableRow>
               <TableHead className="bg-blue-500 text-white p-2 border text-sm">Client Category</TableHead>
-              <TableHead className="bg-blue-500 text-white p-2 border text-sm text-center" colSpan={3}>Client Status</TableHead>
+              <TableHead className="bg-blue-500 text-white p-2 border text-sm text-center" colSpan={4}>Client Status</TableHead>
               {showSectionStatus && (
                 <TableHead className="bg-blue-500 text-white p-2 border text-sm text-center" colSpan={4}>{showSectionName} (Section)</TableHead>
               )}
               {showOperationalStatus && (
-                <TableHead className="bg-blue-500 text-white p-2 border text-sm text-center" colSpan={4}>Operational Status</TableHead>
+                <TableHead className="bg-blue-500 text-white p-2 border text-sm text-center" colSpan={5}>Operational Status</TableHead>
               )}
             </TableRow>
             <TableRow>

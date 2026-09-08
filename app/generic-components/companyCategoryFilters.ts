@@ -28,8 +28,8 @@ export const DEFAULT_CATEGORY_FILTERS: FilterState = {
   categories: { 'All Categories': false, ACC: true, IMM: false, Audit: false, Sheria: false },
   categorySettings: {
     ACC: {
-      clientStatus: { All: false, Active: true, 'Inactive (terminated)': false },
-      operationalStatus: { All: false, Operational: true, Ceased: false },
+      clientStatus: { All: false, Active: true, 'Inactive (terminated)': false, 'N/A': false },
+      operationalStatus: { All: false, Operational: true, Ceased: false, Terminated: false, 'N/A': false },
     },
   },
 }
@@ -104,7 +104,10 @@ export const companyMatchesCategoryFilters = (company: any, filters: FilterState
 
     const currentStatus = calculateStatus(company[`${cat.value}_client_effective_from`], company[`${cat.value}_client_effective_to`]);
     const clientFilters = filters.categorySettings[label]?.clientStatus;
-    const matchesClientStatus = !clientFilters || clientFilters.All || !!clientFilters[currentStatus];
+    // The checkbox for a lapsed relationship is labeled 'Inactive (terminated)', not
+    // 'Inactive' — map calculateStatus's plain 'Inactive' onto that key before lookup.
+    const clientStatusKey = currentStatus === 'Inactive' ? 'Inactive (terminated)' : currentStatus;
+    const matchesClientStatus = !clientFilters || clientFilters.All || !!clientFilters[clientStatusKey];
     if (!matchesClientStatus) return false;
 
     const ceaseData = getCeaseDetailsForCategory(company.cease_details, cat.value);
