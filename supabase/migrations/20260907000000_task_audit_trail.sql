@@ -5,6 +5,15 @@
 -- at read time instead). Stage-level audit (completed_by_id, skipped_by, officers_updated_by_id,
 -- updated_by_id, created_by_id) lives inside tm_tasks.stages (jsonb) and needs no schema change.
 --
+-- uploaded_by is a bare scanner_users.id (never a nested object) on both document tables,
+-- matching the bcl-registry app's document-manager pages, which already read/write this same
+-- shared column that way and derive "Uploaded At" from the row's own created_at rather than a
+-- separate field. acc_portal_directors_documents.uploaded_by already exists in production as
+-- jsonb (a jsonb column holding a bare string works fine and decodes to a plain string via the
+-- Supabase client, so it's left as-is rather than risking an ALTER COLUMN TYPE on live data);
+-- acc_portal_kyc_uploads.uploaded_by is new here, so it gets the type that actually matches the
+-- data instead of copying the older column's type.
+--
 -- All ADD COLUMN statements are idempotent.
 
 -- === tm_tasks: task-level who created / last updated ===
@@ -20,7 +29,7 @@ ALTER TABLE acc_portal_directors_documents
 
 -- === acc_portal_kyc_uploads: uploader + last editor (company-side docs) ===
 ALTER TABLE acc_portal_kyc_uploads
-  ADD COLUMN IF NOT EXISTS uploaded_by     jsonb,
+  ADD COLUMN IF NOT EXISTS uploaded_by     TEXT,
   ADD COLUMN IF NOT EXISTS updated_by_id   TEXT;
 
 -- === document_review_history: reviewer id on each review row ===
