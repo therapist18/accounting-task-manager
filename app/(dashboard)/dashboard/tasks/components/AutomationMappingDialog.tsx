@@ -134,10 +134,10 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
           },
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          uploaded_by: {
-            user_id: actor.by_id,
-            uploaded_at: new Date().toISOString(),
-          },
+          // Plain scanner_users.id, matching bcl-registry's document-manager pages (the other
+          // app reading/writing this same table) — "uploaded at" is just this row's created_at,
+          // not a separate field, and uploaded_by is never a nested object there.
+          uploaded_by: actor.by_id,
         })
         .select()
         .single();

@@ -1512,10 +1512,10 @@ export function StageUploadDialog({
                 file_path: filePath,
                 created_at: currentDate,
                 updated_at: currentDate,
-                uploaded_by: {
-                  user_id: uploader.by_id,
-                  uploaded_at: currentDate
-                }
+                // Plain scanner_users.id — matches bcl-registry's document-manager pages, which
+                // read this same table and treat uploaded_by as a bare id + "uploaded at" as
+                // created_at, not a nested object.
+                uploaded_by: uploader.by_id
               }])
               .select()
               .single();

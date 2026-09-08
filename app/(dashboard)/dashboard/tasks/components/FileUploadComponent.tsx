@@ -317,10 +317,9 @@ export function FileUploadComponent({
           document_type: 'upload',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          uploaded_by: {
-            user_id: uploader.by_id,
-            uploaded_at: new Date().toISOString()
-          }
+          // Plain scanner_users.id — matches bcl-registry's document-manager pages, which read
+          // this same table and treat uploaded_by as a bare id + "uploaded at" as created_at.
+          uploaded_by: uploader.by_id
         }
 
         const { data: insertedDoc, error } = await supabase
@@ -347,10 +346,9 @@ export function FileUploadComponent({
           status: 'uploaded',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          uploaded_by: {
-            user_id: uploader.by_id,
-            uploaded_at: new Date().toISOString()
-          }
+          // Plain scanner_users.id — matches bcl-registry's document-manager pages, which read
+          // this same table and treat uploaded_by as a bare id + "uploaded at" as created_at.
+          uploaded_by: uploader.by_id
         }
 
         const { data: insertedDoc, error } = await supabase
