@@ -11,6 +11,7 @@ export type PermissionKey =
   | "passport_endorsement.view"
   | "passport_endorsement.couriers.manage"
   | "company_profiles.view"
+  | "task_basket.view"
   | "users.view"
   | "users.manage"
   | "settings.departments.view"
@@ -56,6 +57,7 @@ export const PERMISSIONS: PermissionDefinition[] = [
   { key: "passport_endorsement.view", label: "Passport Endorsement Tracking", group: "Task Management", description: "Track passport handling and Nyayo House endorsement for immigration tasks.", paths: ["/dashboard/passport-endorsement"] },
   { key: "passport_endorsement.couriers.manage", label: "Manage Couriers", group: "Task Management", description: "Add and edit courier/rider service records used for passport receipt and dispatch.", parentKey: "passport_endorsement.view" },
   { key: "company_profiles.view", label: "Company Profiles", group: "Task Management", description: "View company profiles: their people and tasks.", paths: ["/dashboard/company-profiles"] },
+  { key: "task_basket.view", label: "Task Basket", group: "Task Management", description: "View and resolve companies that missed a compliance deadline (bank statements, file management, payment receipts).", paths: ["/dashboard/task-basket"] },
   { key: "users.view", label: "View Users", group: "Administration", description: "Open user management screens.", paths: ["/dashboard/users-management"] },
   { key: "users.manage", label: "Manage Users", group: "Administration", description: "Create, update, and delete user accounts.", parentKey: "users.view" },
   { key: "settings.departments.view", label: "Departments", group: "Settings", description: "Manage department structures.", paths: ["/dashboard/departments/departments", "/dashboard/departments"] },
@@ -90,6 +92,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<ScannerUserRole, PermissionKey[]> 
     "tasks.view",
     "reports.view",
     "passport_endorsement.view",
+    "task_basket.view",
     "templates.view",
     "letters.view",
     "diary.view",
@@ -102,6 +105,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<ScannerUserRole, PermissionKey[]> 
     "tasks.view",
     "reports.view",
     "passport_endorsement.view",
+    "task_basket.view",
     "templates.view",
     "letters.view",
     "diary.view",

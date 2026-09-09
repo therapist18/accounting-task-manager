@@ -1,19 +1,38 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { CheckCircle, Clock, FileText, Users, Sparkles, LayoutDashboard, ArrowRight, UserPlus, FileUp, ClipboardList, Building2 } from "lucide-react"
+import { CheckCircle, FileText, Users, Sparkles, LayoutDashboard, ArrowRight, UserPlus, FileUp, ClipboardList, Building2, Inbox } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
+import { createServerSupabaseClient } from "@/lib/supabase"
 
 const quickLinks = [
   { label: "CV Generator", href: "/dashboard/cv-generator", icon: FileText, desc: "Generate professional CVs" },
   { label: "Employment Contracts", href: "/dashboard/employment-contracts", icon: FileText, desc: "Generate contracts" },
   { label: "New Individual", href: "/dashboard/individuals", icon: UserPlus, desc: "Add a new registry entry" },
   { label: "Create Task", href: "/dashboard/tasks", icon: ClipboardList, desc: "Assign a new task" },
+  { label: "Task Basket", href: "/dashboard/task-basket", icon: Inbox, desc: "Companies past a deadline" },
   { label: "Upload File", href: "/dashboard/letters", icon: FileUp, desc: "Import documents" },
   { label: "Departments", href: "/dashboard/departments", icon: Building2, desc: "Manage departments" },
 ]
 
-export default function DashboardPage() {
+async function getOpenTaskBasketCount(): Promise<number> {
+  try {
+    const supabase = createServerSupabaseClient()
+    const { count, error } = await supabase
+      .from("task_basket_items")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "open")
+    if (error) throw error
+    return count || 0
+  } catch (error) {
+    console.error("Failed to load open task basket count:", error)
+    return 0
+  }
+}
+
+export default async function DashboardPage() {
+  const openTaskBasketCount = await getOpenTaskBasketCount()
+
   return (
     <div className="p-6 h-full overflow-y-auto bg-[#FAFAFC]">
       {/* Header */}
@@ -36,7 +55,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Quick Links */}
-      <div className="grid grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-6 gap-3 mb-6">
         {quickLinks.map((link) => {
           const Icon = link.icon
           return (
@@ -87,16 +106,18 @@ export default function DashboardPage() {
                 <p className="text-[11px] text-emerald-600 font-medium mt-0.5">+2 from yesterday</p>
               </CardContent>
             </Card>
-            <Card className="border border-slate-200 shadow-sm rounded-lg bg-white">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">
-                <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Pending</CardTitle>
-                <Clock className="h-4 w-4 text-slate-400" />
-              </CardHeader>
-              <CardContent className="px-4 pb-4">
-                <div className="text-3xl font-black text-slate-900">34</div>
-                <p className="text-[11px] text-amber-600 font-medium mt-0.5">-2 from yesterday</p>
-              </CardContent>
-            </Card>
+            <Link href="/dashboard/task-basket">
+              <Card className="border border-slate-200 shadow-sm rounded-lg bg-white hover:border-custom-blue/30 hover:shadow-md transition-all cursor-pointer">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">
+                  <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Task Basket (Open)</CardTitle>
+                  <Inbox className="h-4 w-4 text-slate-400" />
+                </CardHeader>
+                <CardContent className="px-4 pb-4">
+                  <div className="text-3xl font-black text-slate-900">{openTaskBasketCount}</div>
+                  <p className="text-[11px] text-amber-600 font-medium mt-0.5">Companies past a deadline</p>
+                </CardContent>
+              </Card>
+            </Link>
             <Card className="border border-slate-200 shadow-sm rounded-lg bg-white">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">
                 <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Active Users</CardTitle>
