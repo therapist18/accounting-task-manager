@@ -137,6 +137,30 @@ async function createNewApplicantRecord(cvData: CvData): Promise<{ applicantId: 
   return { applicantId, individualId: matchedIndividual?.id || null };
 }
 
+// job_applicant_cvs.applicant_id has no unique/exclusion constraint (only id, the
+// serial primary key, and email/phone_number are actually unique) — a real
+// `.upsert(..., { onConflict: 'applicant_id' })` is therefore not possible; Postgres
+// rejects it outright with 42P10. This does the same insert-or-update by hand: check
+// for an existing row first, then update or insert accordingly.
+async function upsertJobApplicantCvByApplicantId(applicantId: string, fields: Record<string, any>): Promise<void> {
+  const { data: existing } = await supabase
+    .from('job_applicant_cvs')
+    .select('id')
+    .eq('applicant_id', applicantId)
+    .maybeSingle();
+
+  if (existing) {
+    const { error } = await supabase.from('job_applicant_cvs').update(fields).eq('applicant_id', applicantId);
+    if (error) throw error;
+    return;
+  }
+
+  const insertFields: Record<string, any> = { applicant_id: applicantId, raw_cv_file_path: '', ...fields };
+  if (!insertFields.full_name) insertFields.full_name = 'Unknown Applicant';
+  const { error } = await supabase.from('job_applicant_cvs').insert([insertFields]);
+  if (error) throw error;
+}
+
 export default function CVGeneratorPage() {
   const [cvData, setCvData] = useState<CvData>(initialCVData);
   const [mobileView, setMobileView] = useState<'edit' | 'preview'>('edit');
@@ -1064,17 +1088,14 @@ export default function CVGeneratorPage() {
         };
         const actor = currentUser ? { id: currentUser.id, displayName: currentUser.displayName, email: currentUser.email } : null;
         const auditLog = buildJobApplicantAuditLog(draftUpdatePayload, originalRecordRef.current, actor, 'cv-generator');
-        const { error: snapshotError } = await supabase
-          .from('job_applicant_cvs')
-          .upsert({ applicant_id: currentApplicantId, ...draftUpdatePayload, ...auditLog }, { onConflict: 'applicant_id' });
-
-        if (snapshotError) {
-          console.error('[CV Builder] Failed to save bcl_cv_snapshot:', snapshotError);
-          toast.error('Failed to save to database');
-        } else {
+        try {
+          await upsertJobApplicantCvByApplicantId(currentApplicantId, { ...draftUpdatePayload, ...auditLog });
           console.log('[CV Builder] Successfully saved bcl_cv_snapshot to job_applicant_cvs');
           dbSaveSucceeded = true;
           originalRecordRef.current = { ...(originalRecordRef.current || {}), applicant_id: currentApplicantId, ...draftUpdatePayload, ...auditLog };
+        } catch (snapshotError) {
+          console.error('[CV Builder] Failed to save bcl_cv_snapshot:', snapshotError);
+          toast.error('Failed to save to database');
         }
       }
 
@@ -1453,12 +1474,11 @@ export default function CVGeneratorPage() {
       try {
         const currentApplicantId = applicantId || crypto.randomUUID();
         if (!applicantId) setApplicantId(currentApplicantId);
-        await supabase.from('job_applicant_cvs').upsert({
-          applicant_id: currentApplicantId,
+        await upsertJobApplicantCvByApplicantId(currentApplicantId, {
           individual_id: individual.id,
           full_name: individual.full_name || '',
           updated_at: new Date().toISOString(),
-        }, { onConflict: 'applicant_id' });
+        });
       } catch (err) {
         console.warn('[CV Builder] Failed to persist Registry link:', err);
       }
@@ -1519,12 +1539,11 @@ export default function CVGeneratorPage() {
     try {
       const currentApplicantId = applicantId || crypto.randomUUID();
       if (!applicantId) setApplicantId(currentApplicantId);
-      await supabase.from('job_applicant_cvs').upsert({
-        applicant_id: currentApplicantId,
+      await upsertJobApplicantCvByApplicantId(currentApplicantId, {
         individual_id: selectedIndividual.id,
         full_name: selectedIndividual.full_name || '',
         updated_at: new Date().toISOString(),
-      }, { onConflict: 'applicant_id' });
+      });
     } catch (err) {
       console.warn('[CV Builder] Failed to persist Registry link:', err);
     }

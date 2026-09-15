@@ -29,6 +29,7 @@ import { DeleteConfirmationDialog } from "@/app/(dashboard)/dashboard/tasks/comp
 import { COMPUTED_FUNCTIONS } from "@/lib/constants/computed-functions"
 import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { getGroupedFields } from "@/app/(dashboard)/dashboard/departments/documents+fields/components/formFields"
 
 const HighlightText = ({ text, highlight }: { text?: string | null, highlight?: string }) => {
   if (!text) return null;
@@ -198,6 +199,13 @@ export default function UploadRequirements({ departments: initialDepartments, au
   const [pendingRequirementClientReqs, setPendingRequirementClientReqs] = useState<Record<string, boolean>>({});
   const [pendingWebdataClientReqs, setPendingWebdataClientReqs] = useState<Record<string, Record<number, { value: boolean; arrayItems?: Record<number, boolean> }>>>({});
   const [reportDocDefaults, setReportDocDefaults] = useState<ReportDocDefault[]>([]);
+  const [activeMainTab, setActiveMainTab] = useState("logic")
+  const [logicTab, setLogicTab] = useState("")
+  const [checklistDocuments, setChecklistDocuments] = useState<any[]>([])
+  const [checklistDocAllocations, setChecklistDocAllocations] = useState<Record<string, any>>({})
+  const [checklistClientAllocations, setChecklistClientAllocations] = useState<Record<string, any>>({})
+  const [expandedChecklistCategories, setExpandedChecklistCategories] = useState<Set<string>>(new Set())
+  const [checklistDocumentTab, setChecklistDocumentTab] = useState<"company" | "individual" | "application">("company")
   const sidebarPanelRef = useRef(null);
   const handleSidebarToggle = useCallback(() => {
     const panel = sidebarPanelRef.current;
@@ -319,6 +327,15 @@ export default function UploadRequirements({ departments: initialDepartments, au
       }
     }
   }, [departments, activeDept])
+
+  useEffect(() => {
+    if (!activeDept) { setLogicTab(""); return }
+    const isDept1 = String(activeDept) === "1"
+    const validTabs = isDept1
+      ? ['general', 'processing', 'issuance', 'reference', 'questions', 'webdata', 'reportdocs']
+      : ['requirements', 'questions', 'webdata', 'reportdocs']
+    setLogicTab(prev => (validTabs.includes(prev) ? prev : (isDept1 ? 'general' : 'requirements')))
+  }, [activeDept])
 
   const refreshDepartments = async () => {
     try {
@@ -463,6 +480,87 @@ export default function UploadRequirements({ departments: initialDepartments, au
     fetchReportDocDefaults();
   }, [currentDept, currentSubdept, currentClass, currentSubclass]);
 
+  // Fetch checklist data (KYC documents + document/field allocations for current job level)
+  useEffect(() => {
+    const fetchChecklistData = async () => {
+      try {
+        const [docsRes, reqRes] = await Promise.all([
+          supabase.from('acc_portal_kyc').select('id, name, display_name, category, main_category, main_category_number, custom_order, document_number, fields').order('main_category_number', { ascending: true }),
+          currentDept && currentSubdept ? supabase
+            .from('tm_class_requirements')
+            .select('documents_and_fields, client_fields, job_level')
+            .eq('job_level', JSON.stringify({
+              department_id: Number(currentDept.id),
+              subdepartment_id: Number(currentSubdept.id),
+              class_id: currentClass ? Number(currentClass.id) : null,
+              subclass_id: currentSubclass ? Number(currentSubclass.id) : null,
+              level: currentSubclass ? 4 : currentClass ? 3 : 2
+            }))
+            .maybeSingle()
+            : { data: null, error: null }
+        ])
+
+        if (docsRes.error) throw docsRes.error
+        if (reqRes.error) throw reqRes.error
+
+        const processedDocs = (docsRes.data || []).map(doc => ({
+          ...doc,
+          fields: Array.isArray(doc.fields) ? doc.fields : [],
+          display_name: doc.display_name || doc.name
+        }))
+        setChecklistDocuments(processedDocs)
+
+        // Build document allocations map: key = `${docId}::${columnKey}`, value = { entity_type: true }
+        const docAllocs: Record<string, any> = {}
+        const clientAllocs: Record<string, any> = {}
+        if (reqRes.data) {
+          const colKey = [
+            reqRes.data.job_level?.subdepartment_id,
+            reqRes.data.job_level?.class_id,
+            reqRes.data.job_level?.subclass_id
+          ].filter(id => id != null).join('_')
+
+          ;(reqRes.data.documents_and_fields || []).forEach((doc: any) => {
+            const docId = String(doc.id)
+            Object.keys(doc).forEach(key => {
+              if (!['id', 'fields', 'updated_at'].includes(key) && doc[key] === true) {
+                docAllocs[`${docId}::${colKey}`] = { ...(docAllocs[`${docId}::${colKey}`] || {}), [key]: true }
+              }
+            })
+            ;(doc.fields || []).forEach((f: any) => {
+              const fieldId = String(f.id)
+              Object.keys(f).forEach(key => {
+                if (!['id', 'updated_at'].includes(key) && f[key] === true) {
+                  docAllocs[`${docId}|${fieldId}::${colKey}`] = { ...(docAllocs[`${docId}|${fieldId}::${colKey}`] || {}), [key]: true }
+                }
+              })
+            })
+          })
+
+          ;(reqRes.data.client_fields || []).forEach((item: any) => {
+            const fieldId = String(item.id)
+            const flags: any = {}
+            if (item.ap === true || item.display === true) flags.ap = true
+            if (item.dp === true) flags.dp = true
+            if (item.understudy === true) flags.understudy = true
+            if (item.references === true) flags.references = true
+            if (fieldId && Object.keys(flags).length > 0) {
+              clientAllocs[`${fieldId}::${colKey}`] = { ...(clientAllocs[`${fieldId}::${colKey}`] || {}), ...flags }
+            }
+          })
+        }
+        setChecklistDocAllocations(docAllocs)
+        setChecklistClientAllocations(clientAllocs)
+      } catch (err) {
+        console.error('Error fetching checklist data:', err)
+        setChecklistDocuments([])
+        setChecklistDocAllocations({})
+        setChecklistClientAllocations({})
+      }
+    }
+    fetchChecklistData()
+  }, [currentDept, currentSubdept, currentClass, currentSubclass]);
+
   const handleDeptClick = (deptId: string) => setActiveDept(String(deptId))
   const handleSubdeptClick = (deptId: string, subdeptId: string) => {
     setActiveSubdept(prev => ({ ...prev, [String(deptId)]: String(subdeptId) }))
@@ -482,6 +580,283 @@ export default function UploadRequirements({ departments: initialDepartments, au
     setActiveClass(prev => ({ ...prev, [activeClassKey]: String(classId) }))
     setActiveSubdept(prev => ({ ...prev, [String(deptId)]: String(subdeptId) }))
     setActiveDept(String(deptId))
+  }
+
+  const toggleChecklistCategory = (key: string) => {
+    setExpandedChecklistCategories(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
+  }
+
+  const CHECKLIST_ENTITY_TYPES = ['company', 'principal', 'director', 'shareholder', 'dependant', 'employee', 'understudy', 'sponsor'] as const
+
+  const CATEGORY_MAPPING: Record<string, string> = { company: 'company-docs', individual: 'directors-docs', application: 'application-docs' }
+
+  const renderChecklist = () => {
+    if (!currentDept || !currentSubdept) {
+      return <div className="p-10 text-center text-muted-foreground italic">Select a job level to view its requirement checklist.</div>
+    }
+
+    const colKey = [
+      currentSubdept.id,
+      currentClass?.id || null,
+      currentSubclass?.id || null
+    ].filter(id => id != null).join('_')
+
+    const checkDocAlloc = (docId: string, entityType: string) => {
+      const entry = checklistDocAllocations[`${docId}::${colKey}`]
+      return !!entry?.[entityType]
+    }
+
+    const isDocAllocated = (docId: string) => CHECKLIST_ENTITY_TYPES.some(et => checkDocAlloc(docId, et))
+
+    const checkClientFieldAlloc = (allocationKey: string) => {
+      const entry = checklistClientAllocations[`${allocationKey}::${colKey}`]
+      if (!entry) return false
+      return !!(entry.ap || entry.dp || entry.understudy || entry.references)
+    }
+
+    const getCategoryBadge = (allocated: boolean) =>
+      allocated
+        ? <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">✓</span>
+        : <span className="text-slate-300">—</span>
+
+    const docTabs = [
+      { value: 'company' as const, label: 'Company Documents', category: 'company-docs' },
+      { value: 'individual' as const, label: 'Individual Documents', category: 'directors-docs' },
+      { value: 'application' as const, label: 'Application Documents', category: 'application-docs' },
+    ]
+
+    const currentDocTab = docTabs.find(t => t.value === checklistDocumentTab) || docTabs[0]
+    const filteredDocs = checklistDocuments
+      .filter(d => d.category === currentDocTab.category)
+      .filter(d => isDocAllocated(d.id))
+      .sort((a, b) => (a.main_category_number || 0) - (b.main_category_number || 0) || (a.custom_order || 0) - (b.custom_order || 0))
+
+    const docsByCategory: Record<string, any[]> = {}
+    filteredDocs.forEach(doc => {
+      const cat = doc.main_category || 'Uncategorized'
+      if (!docsByCategory[cat]) docsByCategory[cat] = []
+      docsByCategory[cat].push(doc)
+    })
+
+    const formType = checklistDocumentTab === 'individual' ? 'individual' : 'company'
+    const groupedClientFields = getGroupedFields(formType)
+
+    const jobLevelLabel = [
+      currentDept.name,
+      currentSubdept.name,
+      currentClass?.name,
+      currentSubclass?.name
+    ].filter(Boolean).join(' › ')
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-3 text-sm text-muted-foreground bg-slate-50 rounded-lg px-4 py-2">
+          <FileText className="h-4 w-4 text-blue-500" />
+          <span>Viewing checklist for: <strong className="text-foreground">{jobLevelLabel}</strong></span>
+        </div>
+
+        {/* Documents Section */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <FileText className="h-5 w-5 text-blue-600" />
+              Documents
+            </CardTitle>
+            <CardDescription>KYC document allocations for this job level</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="border-t">
+              <div className="flex border-b bg-slate-50/60">
+                {docTabs.map(tab => (
+                  <button
+                    key={tab.value}
+                    onClick={() => setChecklistDocumentTab(tab.value)}
+                    className={cn(
+                      "px-4 py-2.5 text-sm font-medium border-b-2 transition-colors",
+                      checklistDocumentTab === tab.value
+                        ? "border-blue-600 text-blue-700 bg-white"
+                        : "border-transparent text-muted-foreground hover:text-foreground hover:bg-slate-100/50"
+                    )}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="overflow-auto max-h-[500px]">
+                <Table>
+                  <TableHeader className="bg-slate-50 sticky top-0 z-10">
+                    <TableRow>
+                      <TableHead className="w-12 text-center border-r">#</TableHead>
+                      <TableHead className="min-w-[240px] border-r">Document</TableHead>
+                      {CHECKLIST_ENTITY_TYPES.map(et => (
+                        <TableHead key={et} className="border-r text-center text-[10px] uppercase tracking-wider min-w-[80px]">
+                          {et}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {Object.keys(docsByCategory).length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={2 + CHECKLIST_ENTITY_TYPES.length} className="text-center py-8 text-muted-foreground italic">
+                          No documents configured for this tab.
+                        </TableCell>
+                      </TableRow>
+                    ) : Object.entries(docsByCategory).map(([category, docs]) => {
+                      const catKey = `doc-cat-${checklistDocumentTab}-${category}`
+                      const isExpanded = expandedChecklistCategories.has(catKey)
+                      return (
+                        <React.Fragment key={catKey}>
+                          <TableRow
+                            className="bg-slate-50/80 cursor-pointer hover:bg-slate-100/80 border-y"
+                            onClick={() => toggleChecklistCategory(catKey)}
+                          >
+                            <TableCell colSpan={2 + CHECKLIST_ENTITY_TYPES.length} className="py-2 px-4">
+                              <div className="flex items-center gap-2">
+                                {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
+                                <span className="font-semibold text-xs uppercase text-slate-600">{category}</span>
+                                <Badge variant="secondary" className="text-[10px] ml-1">{docs.length}</Badge>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                          {isExpanded && docs.map((doc, idx) => (
+                            <TableRow key={doc.id} className="hover:bg-blue-50/20">
+                              <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">{idx + 1}</TableCell>
+                              <TableCell className="border-r font-medium text-sm">
+                                {doc.display_name || doc.name || 'Unknown Document'}
+                              </TableCell>
+                              {CHECKLIST_ENTITY_TYPES.map(et => (
+                                <TableCell key={et} className="border-r text-center">
+                                  {getCategoryBadge(checkDocAlloc(doc.id, et))}
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                          ))}
+                        </React.Fragment>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Client Fields Section */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Database className="h-5 w-5 text-purple-600" />
+              Client Fields
+            </CardTitle>
+            <CardDescription>Form sections and platform credentials allocated to this job level</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-auto max-h-[600px]">
+              <Table>
+                <TableHeader className="bg-slate-50 sticky top-0 z-10">
+                  <TableRow>
+                    <TableHead className="w-12 text-center border-r">#</TableHead>
+                    <TableHead className="min-w-[240px] border-r">Field</TableHead>
+                    <TableHead className="border-r text-center min-w-[100px]">Allocated</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {/* Form Sections */}
+                  {Object.entries(groupedClientFields.formSections).map(([key, section]) => {
+                    const allocatedFields = (section.fields || [])
+                      .filter(f => f.showInTable !== false)
+                      .filter(f => checkClientFieldAlloc(`form-field-${f.name}`))
+                    if (!allocatedFields.length) return null
+                    const secKey = `client-sec-${formType}-${key}`
+                    const isExpanded = expandedChecklistCategories.has(secKey)
+                    return (
+                      <React.Fragment key={secKey}>
+                        <TableRow
+                          className="bg-blue-50/60 cursor-pointer hover:bg-blue-100/60 border-y"
+                          onClick={() => toggleChecklistCategory(secKey)}
+                        >
+                          <TableCell colSpan={3} className="py-2 px-4">
+                            <div className="flex items-center gap-2">
+                              {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
+                              <span className="font-semibold text-xs uppercase text-blue-700">{section.title}</span>
+                              <Badge variant="secondary" className="text-[10px] bg-blue-100 text-blue-600">{allocatedFields.length} field{allocatedFields.length !== 1 ? 's' : ''} allocated</Badge>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {isExpanded && allocatedFields.map((field, idx) => {
+                          return (
+                            <TableRow key={`${secKey}-${field.name}`} className="hover:bg-blue-50/20">
+                              <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">{idx + 1}</TableCell>
+                              <TableCell className="border-r text-sm">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
+                                  {field.tableHeader || field.label || field.name}
+                                </div>
+                              </TableCell>
+                              <TableCell className="border-r text-center">
+                                {getCategoryBadge(true)}
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </React.Fragment>
+                    )
+                  })}
+
+                  {/* Platform Credentials */}
+                  {Object.entries(groupedClientFields.platformCredentials).map(([platformKey, platform]) => {
+                    const allocatedFields = (platform.fields || [])
+                      .filter(f => f.showInTable !== false)
+                      .filter(f => checkClientFieldAlloc(`platform-${platformKey}-${f.name}`))
+                    if (!allocatedFields.length) return null
+                    const platKey = `client-plat-${formType}-${platformKey}`
+                    const isExpanded = expandedChecklistCategories.has(platKey)
+                    return (
+                      <React.Fragment key={platKey}>
+                        <TableRow
+                          className="bg-purple-50/60 cursor-pointer hover:bg-purple-100/60 border-y"
+                          onClick={() => toggleChecklistCategory(platKey)}
+                        >
+                          <TableCell colSpan={3} className="py-2 px-4">
+                            <div className="flex items-center gap-2">
+                              {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
+                              <span className="font-semibold text-xs uppercase text-purple-700">{platform.title}</span>
+                              <Badge variant="secondary" className="text-[10px] bg-purple-100 text-purple-600">{allocatedFields.length} field{allocatedFields.length !== 1 ? 's' : ''} allocated</Badge>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {isExpanded && allocatedFields.map((field, idx) => {
+                          return (
+                            <TableRow key={`${platKey}-${field.name}`} className="hover:bg-purple-50/20">
+                              <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">{idx + 1}</TableCell>
+                              <TableCell className="border-r text-sm">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+                                  {field.tableHeader || field.label || field.name}
+                                </div>
+                              </TableCell>
+                              <TableCell className="border-r text-center">
+                                {getCategoryBadge(true)}
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </React.Fragment>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   const renderMainContent = () => {
@@ -531,6 +906,66 @@ export default function UploadRequirements({ departments: initialDepartments, au
         )
       );
     })
+
+    const isDept1 = String(activeDept) === "1"
+
+    const logicTabDefs = isDept1
+      ? [
+          {
+            value: 'general', label: 'General Requirements',
+            content: filteredReqs.filter(r => r.category === 'general').length > 0
+              ? renderRequirements(filteredReqs.filter(r => r.category === 'general'), targetContext)
+              : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
+          },
+          {
+            value: 'processing', label: 'Processing Requirements',
+            content: filteredReqs.filter(r => r.category === 'processing' || !r.category).length > 0
+              ? renderRequirements(filteredReqs.filter(r => r.category === 'processing' || !r.category), targetContext)
+              : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
+          },
+          {
+            value: 'issuance', label: 'Issuance Requirements',
+            content: filteredReqs.filter(r => r.category === 'issuance').length > 0
+              ? renderRequirements(filteredReqs.filter(r => r.category === 'issuance'), targetContext)
+              : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
+          },
+          {
+            value: 'reference', label: 'Reference Requirements',
+            content: filteredReqs.filter(r => r.category === 'reference').length > 0
+              ? renderRequirements(filteredReqs.filter(r => r.category === 'reference'), targetContext)
+              : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
+          },
+          {
+            value: 'questions', label: 'Job Specific Questions',
+            content: renderQuestions(filteredQuestions, targetContext)
+          },
+          {
+            value: 'webdata', label: 'Web Data Configuration',
+            content: renderWebDataConfigurationSection(filteredAutomations)
+          },
+          {
+            value: 'reportdocs', label: 'Report Doc Default',
+            content: renderReportDocDefaults(targetContext)
+          },
+        ]
+      : [
+          {
+            value: 'requirements', label: 'Requirements',
+            content: renderRequirements(filteredReqs, targetContext)
+          },
+          {
+            value: 'questions', label: 'Job Specific Questions',
+            content: renderQuestions(filteredQuestions, targetContext)
+          },
+          {
+            value: 'webdata', label: 'Web Data Configuration',
+            content: renderWebDataConfigurationSection(filteredAutomations)
+          },
+          {
+            value: 'reportdocs', label: 'Report Doc Default',
+            content: renderReportDocDefaults(targetContext)
+          },
+        ]
 
     return (
       <div className="space-y-8">
@@ -639,59 +1074,23 @@ export default function UploadRequirements({ departments: initialDepartments, au
           </Button>
         </div>
 
-       <div className="max-h-[calc(100vh-200px)] overflow-y-auto">
-         {String(activeDept) === "1" ? (
-          <div className="space-y-12">
-            <section>
-              <div className="flex items-center gap-2 mb-4 font-semibold">General Requirements</div>
-              {filteredReqs.filter(r => r.category === 'general').length > 0
-                ? renderRequirements(filteredReqs.filter(r => r.category === 'general'), targetContext)
-                : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
-              }
-            </section>
-            <section>
-              <div className="flex items-center gap-2 mb-4 font-semibold">Processing Requirements</div>
-              {filteredReqs.filter(r => r.category === 'processing' || !r.category).length > 0
-                ? renderRequirements(filteredReqs.filter(r => r.category === 'processing' || !r.category), targetContext)
-                : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
-              }
-            </section>
-            <section>
-              <div className="flex items-center gap-2 mb-4 font-semibold">Issuance Requirements</div>
-              {filteredReqs.filter(r => r.category === 'issuance').length > 0
-                ? renderRequirements(filteredReqs.filter(r => r.category === 'issuance'), targetContext)
-                : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
-              }
-            </section>
-            <section>
-              <div className="flex items-center gap-2 mb-4 font-semibold">Reference Requirements</div>
-              {filteredReqs.filter(r => r.category === 'reference').length > 0
-                ? renderRequirements(filteredReqs.filter(r => r.category === 'reference'), targetContext)
-                : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
-              }
-            </section>
-          </div>
-        ) : renderRequirements(filteredReqs, targetContext)}
+       <Tabs value={logicTab || (isDept1 ? 'general' : 'requirements')} onValueChange={setLogicTab}>
+         <TabsList className="w-full justify-start h-auto bg-slate-50 border rounded-lg p-1 gap-1 overflow-x-auto">
+           {logicTabDefs.map(tab => (
+             <TabsTrigger key={tab.value} value={tab.value} className="rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-foreground whitespace-nowrap">
+               {tab.label}
+             </TabsTrigger>
+           ))}
+         </TabsList>
 
-        <section className="pt-8 border-t">
-          <div className="flex items-center gap-2 mb-4 font-semibold">Job Specific Questions</div>
-          {renderQuestions(filteredQuestions, targetContext)}
-        </section>
-
-        <section className="pt-8 border-t">
-          <div className="flex items-center gap-2 mb-4 font-semibold">
-            <Database className="h-4 w-4 text-blue-600" /> Web Data Configuration
-          </div>
-          {renderWebDataConfigurationSection(filteredAutomations)}
-        </section>
-
-        <section className="pt-8 border-t">
-          <div className="flex items-center gap-2 mb-4 font-semibold">
-            <FileText className="h-4 w-4 text-emerald-600" /> Report Doc Default
-          </div>
-          {renderReportDocDefaults(targetContext)}
-        </section>
-       </div>
+         {logicTabDefs.map(tab => (
+           <TabsContent key={tab.value} value={tab.value} className="mt-0">
+             <div className="max-h-[calc(100vh-320px)] overflow-y-auto pt-3">
+               {tab.content}
+             </div>
+           </TabsContent>
+         ))}
+       </Tabs>
       </div>
     )
   }
@@ -2234,7 +2633,37 @@ export default function UploadRequirements({ departments: initialDepartments, au
                   </div>
                 )}
               </header>
-              {!activeDept ? <Card className="p-20 text-center"><FileText className="mx-auto h-12 w-12 text-slate-300 mb-4" /><p>Select a department to manage logic.</p></Card> : renderMainContent()}
+              {!activeDept ? (
+                <Card className="p-20 text-center">
+                  <FileText className="mx-auto h-12 w-12 text-slate-300 mb-4" />
+                  <p>Select a department to manage logic.</p>
+                </Card>
+              ) : (
+                <Tabs value={activeMainTab} onValueChange={setActiveMainTab} className="w-full">
+                  <TabsList className="w-full justify-start h-auto bg-transparent border-b p-0 gap-0 mb-4">
+                    <TabsTrigger
+                      value="logic"
+                      className="rounded-t-lg rounded-b-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:bg-white data-[state=active]:shadow-none px-5 py-2.5 text-sm font-medium"
+                    >
+                      <Layers className="h-4 w-4 mr-2" />
+                      Requirement Logic
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="checklist"
+                      className="rounded-t-lg rounded-b-none border-b-2 border-transparent data-[state=active]:border-emerald-600 data-[state=active]:bg-white data-[state=active]:shadow-none px-5 py-2.5 text-sm font-medium"
+                    >
+                      <FileText className="h-4 w-4 mr-2" />
+                      Requirement Checklist
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="logic" className="mt-0">
+                    {renderMainContent()}
+                  </TabsContent>
+                  <TabsContent value="checklist" className="mt-0">
+                    {renderChecklist()}
+                  </TabsContent>
+                </Tabs>
+              )}
 
               {/* Floating Submit Bar for Client Requirement Changes */}
               {hasPendingClientReqs && (
